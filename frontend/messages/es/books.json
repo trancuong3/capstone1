@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "Ver bloques de texto OCR de la página {page}",
     "closePageOcrBlocksAria": "Cerrar bloques de texto OCR de la página {page}",
     "openPageOcrBlocksAction": "Bloques OCR",
-    "closePageOcrBlocksAction": "Cerrar bloques OCR"
+    "closePageOcrBlocksAction": "Cerrar bloques OCR",
+    "retryAllFailedAction": "Reintentar todas las páginas con error ({count})",
+    "retryingAllFailedButton": "Poniendo en cola las páginas con error…",
+    "retryAllSuccessNotice": "Se pusieron en cola {count} página(s) con error para reintentar (se conservan los pasos ya completados).",
+    "retryAllQueuedOfflineNotice": "Se guardaron las solicitudes de reintento para {count} página(s) en la cola de OCR. Se procesarán automáticamente cuando el OCR vuelva a estar disponible.",
+    "retryAllPartialQueueFullNotice": "Se pusieron en cola {retried} página(s) con error; {skipped} página(s) restantes quedaron en pausa porque la cola de OCR está llena. Inténtalo de nuevo en {seconds} segundos.",
+    "retryAllPartialFailedNotice": "Se pusieron en cola {retried} página(s) con error; {failed} página(s) no se pudieron poner en cola ahora.",
+    "retryAllNoneNotice": "No hay páginas con error para reintentar en este momento.",
+    "queueFullNotice": "La cola de OCR está llena en este momento. Inténtalo de nuevo en unos {seconds} segundos."
   },
   "ocrContribution": {
     "cardAria": "Contribuir con muestras para mejorar el reconocimiento de {title}",

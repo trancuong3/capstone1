@@ -651,6 +651,173 @@ class TestOcrWorkerLifecycleAndDetection(unittest.TestCase):
 
         asyncio.run(_scenario())
 
+    def test_fail_job_honors_retry_delay_seconds_and_preserves_degraded_or_offline_worker_status(self) -> None:
+        from fastapi.testclient import TestClient
+
+        import app.sever as sever_mod
+        from app.api.deps import get_db
+        from app.repositories.ocr_inference_job_repository import reset_ocr_queue_repo_state_for_tests
+        from app.services.ocr_inference_job_service import (
+            JOB_KIND_LOCAL_SCAN,
+            PRIORITY_LOCAL_SCAN,
+        )
+
+        async def _scenario() -> None:
+            reset_ocr_queue_repo_state_for_tests()
+            now = datetime.now(timezone.utc)
+            hb = OcrWorkerHeartbeat(
+                WorkerId="win-gpu-1",
+                Hostname="win-gpu",
+                Status="IDLE",
+                Engines={
+                    "paddleocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                    "vietocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                },
+                LastHeartbeatAt=now,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            self.state.tables[OcrWorkerHeartbeat].append(hb)
+
+            job1 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/cuda-oom.png",
+                image_sha256="a" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+                max_attempts=3,
+            )
+            await self.db.commit()
+
+            claim1 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim1 is not None
+
+            # 1. CUDA_OOM with retry_delay_seconds=30 honors 30s delay AND marks worker DEGRADED (not IDLE!)
+            fail_res = await self.svc.fail_job(
+                job_id=job1.Id,
+                worker_id="win-gpu-1",
+                fencing_token=int(claim1["fencing_token"]),
+                error_code="CUDA_OOM",
+                error_message="CUDA out of memory",
+                retryable=True,
+                retry_delay_seconds=30,
+            )
+            self.assertEqual(fail_res["status"], "FAILED_RETRYABLE")
+            self.assertEqual(job1.RetryDelaySeconds, 30)
+            self.assertEqual(hb.Status, "DEGRADED")
+
+            # 2. Existing DEGRADED / OFFLINE status is NEVER overwritten back to IDLE by complete_job or fail_job
+            job2 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/preserve-degraded.png",
+                image_sha256="b" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            # Claim while IDLE, then simulate background heartbeat marking worker DEGRADED mid-job
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim2 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim2 is not None
+            hb.Status = "DEGRADED"
+            await self.db.commit()
+
+            with patch("app.services.ocr_inference_job_service.storage_service.delete_object"):
+                done2 = await self.svc.complete_job(
+                    job_id=job2.Id,
+                    worker_id="win-gpu-1",
+                    fencing_token=int(claim2["fencing_token"]),
+                    source_sha256="b" * 64,
+                    full_text="Xin chào",
+                    words=[{"word_index": 0, "line_index": 0, "text": "Xin", "bbox": [0.1, 0.1, 0.1, 0.05]}],
+                    ocr_meta={},
+                    no_text_detected=False,
+                    model_profile="ORIGINAL",
+                    model_sha256="380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59",
+                    engine_diagnostics={},
+                    duration_ms=50,
+                    schedule_post_ocr=False,
+                )
+            self.assertEqual(done2["status"], "SUCCEEDED")
+            self.assertEqual(hb.Status, "DEGRADED")
+
+            # 3. OFFLINE status is also preserved on normal fail_job
+            job3 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/preserve-offline.png",
+                image_sha256="c" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim3 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim3 is not None
+            hb.Status = "OFFLINE"
+            await self.db.commit()
+
+            await self.svc.fail_job(
+                job_id=job3.Id,
+                worker_id="win-gpu-1",
+                fencing_token=int(claim3["fencing_token"]),
+                error_code="SOURCE_DOWNLOAD_TIMEOUT",
+                retryable=True,
+                retry_delay_seconds=45,
+            )
+            self.assertEqual(job3.RetryDelaySeconds, 45)
+            self.assertEqual(hb.Status, "OFFLINE")
+
+            # 4. Verify POST /internal/ocr-jobs/{job_id}/fail forwards retry_delay_seconds through Pydantic
+            job4 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/route-delay.png",
+                image_sha256="d" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim4 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim4 is not None
+
+            async def _fake_get_db():
+                yield FakeAsyncSession(self.state)
+
+            sever_mod.app.dependency_overrides[get_db] = _fake_get_db
+            try:
+                client = TestClient(sever_mod.app)
+                worker_tok = "ocr-worker-staging-test-token-0123456789abcdef"
+                with patch.dict(os.environ, {"VIREAD_OCR_WORKER_TOKEN": worker_tok}, clear=False):
+                    resp = client.post(
+                        f"/internal/ocr-jobs/{job4.Id}/fail",
+                        json={
+                            "worker_id": "win-gpu-1",
+                            "fencing_token": int(claim4["fencing_token"]),
+                            "error_code": "CUDA_OOM",
+                            "error_message": "OOM during inference",
+                            "retryable": True,
+                            "retry_delay_seconds": 35,
+                        },
+                        headers={"X-ViRead-Ocr-Worker-Token": worker_tok},
+                    )
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(job4.RetryDelaySeconds, 35)
+                self.assertEqual(hb.Status, "DEGRADED")
+            finally:
+                sever_mod.app.dependency_overrides.clear()
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

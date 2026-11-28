@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "{page}ページのOCRテキストブロックを表示",
     "closePageOcrBlocksAria": "{page}ページのOCRテキストブロックを閉じる",
     "openPageOcrBlocksAction": "OCRテキスト枠",
-    "closePageOcrBlocksAction": "OCR枠を閉じる"
+    "closePageOcrBlocksAction": "OCR枠を閉じる",
+    "retryAllFailedAction": "失敗したページをすべて再試行 ({count})",
+    "retryingAllFailedButton": "失敗したページを再試行キューに追加中…",
+    "retryAllSuccessNotice": "失敗した {count} ページを再試行キューに追加しました（完了済みの手順は保持されます）。",
+    "retryAllQueuedOfflineNotice": "失敗した {count} ページの再試行リクエストをOCRキューに保存しました。OCRサービスが再開され次第、自動的に処理されます。",
+    "retryAllPartialQueueFullNotice": "{retried} ページを再試行キューに追加しました。OCRキューが満杯のため残り {skipped} ページは一時停止しています。約 {seconds} 秒後に再試行してください。",
+    "retryAllPartialFailedNotice": "{retried} ページを再試行キューに追加しました。{failed} ページは現在キューに追加できませんでした。",
+    "retryAllNoneNotice": "現在再試行できる失敗ページはありません。",
+    "queueFullNotice": "現在OCRキューが満杯です。約 {seconds} 秒後にもう一度お試しください。"
   },
   "ocrContribution": {
     "cardAria": "「{title}」の文字読み取り精度向上への協力",

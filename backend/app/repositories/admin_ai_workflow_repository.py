@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AdminAiWorkflow
 
 
-MAX_WORKFLOW_ATTEMPTS = 3
+MAX_WORKFLOW_ATTEMPTS = 6
 
 
 class AdminAiWorkflowRepository:

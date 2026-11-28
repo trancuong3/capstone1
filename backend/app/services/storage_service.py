@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 SIGNED_URL_TTL_SECONDS = 3600
 SIGNED_URL_CACHE_TTL_SECONDS = 1200.0  # 20 minutes (< 60m signed TTL)
 SIGNED_URL_CACHE_MAX_ENTRIES = 2048
+STORAGE_RETRY_MAX_ATTEMPTS = 3
+STORAGE_RETRY_BASE_DELAY_SECONDS = 0.5
+STORAGE_RETRY_MAX_DELAY_SECONDS = 4.0
+STORAGE_UPLOAD_TIMEOUT_SECONDS = 30.0
+STORAGE_DOWNLOAD_TIMEOUT_SECONDS = 20.0
 
 _signed_url_cache_lock = threading.Lock()
 _signed_url_cache: "OrderedDict[tuple[str, str, int], tuple[float, str]]" = OrderedDict()
@@ -274,6 +279,75 @@ def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Pat
     return target
 
 
+def _resolve_retry_base_delay(retry_base_delay: float | None) -> float:
+    if retry_base_delay is not None:
+        return max(0.0, float(retry_base_delay))
+    return 0.0 if APP_ENVIRONMENT == "test" else STORAGE_RETRY_BASE_DELAY_SECONDS
+
+
+def _storage_retry_delay(attempt: int, base_delay: float) -> float:
+    if base_delay <= 0.0:
+        return 0.0
+    return min(STORAGE_RETRY_MAX_DELAY_SECONDS, base_delay * (2 ** max(0, attempt - 1)))
+
+
+def _is_retryable_storage_error(exc: Exception) -> bool:
+    """Retry 5xx (incl. Cloudflare 520-530), timeouts, and connection resets; never retry 4xx."""
+    http_status = _safe_numeric_status(exc)
+    if http_status is not None:
+        return 500 <= http_status <= 599
+    if isinstance(
+        exc,
+        (
+            TimeoutError,
+            ConnectionError,
+            httpx.TimeoutException,
+            httpx.TransportError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ),
+    ):
+        return True
+    if isinstance(exc, OSError) and not isinstance(
+        exc, (FileNotFoundError, PermissionError, IsADirectoryError)
+    ):
+        return True
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "timed out",
+            "timeout",
+            "connection reset",
+            "broken pipe",
+            "remote protocol",
+            "server disconnected",
+            "connection aborted",
+        )
+    )
+
+
+def _apply_bucket_timeout(bucket: object, timeout_seconds: float) -> None:
+    """Apply an explicit httpx timeout on the underlying Supabase storage client when supported."""
+    resolved = max(1.0, float(timeout_seconds))
+    client = getattr(bucket, "_client", None)
+    if client is None:
+        return
+    if isinstance(client, httpx.Client) or isinstance(
+        getattr(client, "timeout", None), (httpx.Timeout, float, int)
+    ):
+        try:
+            client.timeout = httpx.Timeout(
+                resolved,
+                connect=min(5.0, resolved),
+                read=resolved,
+                write=resolved,
+                pool=min(5.0, resolved),
+            )
+        except Exception:
+            pass
+
+
 def upload_object(
     object_path: str,
     data: bytes,
@@ -281,6 +355,9 @@ def upload_object(
     *,
     bucket_name: str | None = None,
     upsert: bool = False,
+    timeout: float = STORAGE_UPLOAD_TIMEOUT_SECONDS,
+    max_attempts: int = STORAGE_RETRY_MAX_ATTEMPTS,
+    retry_base_delay: float | None = None,
 ) -> None:
     object_path = _validate_object_path(object_path)
     local_target = _local_storage_path(object_path, bucket_name)
@@ -296,37 +373,63 @@ def upload_object(
     # Separate config/client initialization from the actual remote write. If this
     # fails, Storage was never asked to create an object and cleanup is pointless.
     bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
-    try:
-        bucket.upload(
-            object_path,
-            data,
-            file_options={"content-type": content_type, "upsert": "true" if upsert else "false"},
-        )
-        invalidate_signed_url_cache(object_path, bucket_name=bucket_name)
-    except Exception as exc:
-        http_status = _safe_numeric_status(exc)
-        error_code = _safe_error_code(exc)
-        # Definite 4xx rejection means the object was not accepted. Network
-        # failures and 5xx may be ambiguous: the server may have stored the object
-        # before the client observed a failure, so the caller should try cleanup.
-        cleanup_may_be_needed = http_status is None or http_status >= 500 or http_status in {408, 425, 429}
-        detail = _upload_failure_detail(http_status, error_code)
-        log_diagnostic(
-            logger,
-            logging.ERROR,
-            event="storage_upload_failed",
-            stage="storage_upload",
-            exception=exc,
-            error_code=error_code,
-            upstream_http_status=http_status,
-            cleanup_may_be_needed=cleanup_may_be_needed,
-            include_traceback=cleanup_may_be_needed,
-            **runtime_configuration_diagnostics(include_ocr=False),
-        )
-        raise StorageUploadFailure(
-            detail,
-            cleanup_may_be_needed=cleanup_may_be_needed,
-        ) from exc
+    _apply_bucket_timeout(bucket, timeout)
+    attempts = max(1, int(max_attempts))
+    base_delay = _resolve_retry_base_delay(retry_base_delay)
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            bucket.upload(
+                object_path,
+                data,
+                file_options={"content-type": content_type, "upsert": "true" if upsert else "false"},
+            )
+            invalidate_signed_url_cache(object_path, bucket_name=bucket_name)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts and _is_retryable_storage_error(exc):
+                delay = _storage_retry_delay(attempt, base_delay)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="storage_upload_retry",
+                    stage="storage_upload",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_delay_seconds=round(delay, 3),
+                    upstream_http_status=_safe_numeric_status(exc),
+                    exception=exc,
+                )
+                if delay > 0.0:
+                    time.sleep(delay)
+                continue
+            break
+
+    assert last_exc is not None
+    http_status = _safe_numeric_status(last_exc)
+    error_code = _safe_error_code(last_exc)
+    # Definite 4xx rejection means the object was not accepted. Network
+    # failures and 5xx may be ambiguous: the server may have stored the object
+    # before the client observed a failure, so the caller should try cleanup.
+    cleanup_may_be_needed = http_status is None or http_status >= 500 or http_status in {408, 425, 429}
+    detail = _upload_failure_detail(http_status, error_code)
+    log_diagnostic(
+        logger,
+        logging.ERROR,
+        event="storage_upload_failed",
+        stage="storage_upload",
+        exception=last_exc,
+        error_code=error_code,
+        upstream_http_status=http_status,
+        cleanup_may_be_needed=cleanup_may_be_needed,
+        include_traceback=cleanup_may_be_needed,
+        **runtime_configuration_diagnostics(include_ocr=False),
+    )
+    raise StorageUploadFailure(
+        detail,
+        cleanup_may_be_needed=cleanup_may_be_needed,
+    ) from last_exc
 
 
 def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
@@ -358,7 +461,14 @@ def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
         return
 
 
-def download_object(object_path: str, *, bucket_name: str | None = None) -> bytes:
+def download_object(
+    object_path: str,
+    *,
+    bucket_name: str | None = None,
+    timeout: float = STORAGE_DOWNLOAD_TIMEOUT_SECONDS,
+    max_attempts: int = STORAGE_RETRY_MAX_ATTEMPTS,
+    retry_base_delay: float | None = None,
+) -> bytes:
     object_path = _validate_object_path(object_path)
     local_target = _local_storage_path(object_path, bucket_name)
     if local_target is not None:
@@ -374,38 +484,75 @@ def download_object(object_path: str, *, bucket_name: str | None = None) -> byte
                 detail="Could not read the image from Supabase Storage",
             )
         return data
-    try:
-        bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
-        result = bucket.download(object_path)
-        if not isinstance(result, (bytes, bytearray)) or not result:
-            raise ValueError("empty Storage object")
-        return bytes(result)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log_diagnostic(
-            logger,
-            logging.ERROR,
-            event="storage_download_failed",
-            stage="storage_download",
-            exception=exc,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Could not read the image from Supabase Storage",
-        ) from exc
+
+    bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
+    _apply_bucket_timeout(bucket, timeout)
+    attempts = max(1, int(max_attempts))
+    base_delay = _resolve_retry_base_delay(retry_base_delay)
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            result = bucket.download(object_path)
+            if not isinstance(result, (bytes, bytearray)) or not result:
+                raise ValueError("empty Storage object")
+            return bytes(result)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts and _is_retryable_storage_error(exc):
+                delay = _storage_retry_delay(attempt, base_delay)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="storage_download_retry",
+                    stage="storage_download",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_delay_seconds=round(delay, 3),
+                    upstream_http_status=_safe_numeric_status(exc),
+                    exception=exc,
+                )
+                if delay > 0.0:
+                    time.sleep(delay)
+                continue
+            break
+
+    assert last_exc is not None
+    log_diagnostic(
+        logger,
+        logging.ERROR,
+        event="storage_download_failed",
+        stage="storage_download",
+        upstream_http_status=_safe_numeric_status(last_exc),
+        exception=last_exc,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Could not read the image from Supabase Storage",
+    ) from last_exc
 
 
 async def download_object_async(
     object_path: str,
     *,
     bucket_name: str | None = None,
+    timeout: float = STORAGE_DOWNLOAD_TIMEOUT_SECONDS,
+    max_attempts: int = STORAGE_RETRY_MAX_ATTEMPTS,
+    retry_base_delay: float | None = None,
 ) -> bytes:
     """Download a Storage object asynchronously using a pooled HTTP/2 keepalive client."""
     object_path = _validate_object_path(object_path)
     local_target = _local_storage_path(object_path, bucket_name)
     if local_target is not None:
-        return await asyncio.to_thread(download_object, object_path, bucket_name=bucket_name)
+        return await asyncio.to_thread(
+            download_object,
+            object_path,
+            bucket_name=bucket_name,
+            timeout=timeout,
+            max_attempts=max_attempts,
+            retry_base_delay=retry_base_delay,
+        )
 
     resolved_bucket = _bucket_name(bucket_name)
     if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
@@ -418,40 +565,74 @@ async def download_object_async(
         f"{quote(resolved_bucket, safe='')}/{quote(object_path, safe='/')}"
     )
     headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
-    try:
-        client = _get_storage_async_client()
-        response = await client.get(url, headers=headers)
-        if response.status_code == 404:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Could not read the image from Supabase Storage",
-            ) from FileNotFoundError(object_path)
-        if response.status_code == 400:
-            body_preview = (response.text or "")[:256].lower()
-            if "not_found" in body_preview or "object not found" in body_preview or "nosuchkey" in body_preview:
+    resolved_timeout = max(1.0, float(timeout))
+    request_timeout = httpx.Timeout(
+        resolved_timeout,
+        connect=min(4.0, resolved_timeout),
+        read=resolved_timeout,
+        write=min(10.0, resolved_timeout),
+        pool=min(4.0, resolved_timeout),
+    )
+    attempts = max(1, int(max_attempts))
+    base_delay = _resolve_retry_base_delay(retry_base_delay)
+    last_exc: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            client = _get_storage_async_client()
+            response = await client.get(url, headers=headers, timeout=request_timeout)
+            if response.status_code == 404:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Could not read the image from Supabase Storage",
                 ) from FileNotFoundError(object_path)
-        response.raise_for_status()
-        data = response.content
-        if not data:
-            raise ValueError("empty Storage object")
-        return bytes(data)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log_diagnostic(
-            logger,
-            logging.ERROR,
-            event="storage_download_failed",
-            stage="storage_download",
-            exception=exc,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Could not read the image from Supabase Storage",
-        ) from exc
+            if response.status_code == 400:
+                body_preview = (response.text or "")[:256].lower()
+                if "not_found" in body_preview or "object not found" in body_preview or "nosuchkey" in body_preview:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Could not read the image from Supabase Storage",
+                    ) from FileNotFoundError(object_path)
+            response.raise_for_status()
+            data = response.content
+            if not data:
+                raise ValueError("empty Storage object")
+            return bytes(data)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts and _is_retryable_storage_error(exc):
+                delay = _storage_retry_delay(attempt, base_delay)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="storage_download_retry",
+                    stage="storage_download",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_delay_seconds=round(delay, 3),
+                    upstream_http_status=_safe_numeric_status(exc),
+                    exception=exc,
+                )
+                if delay > 0.0:
+                    await asyncio.sleep(delay)
+                continue
+            break
+
+    assert last_exc is not None
+    log_diagnostic(
+        logger,
+        logging.ERROR,
+        event="storage_download_failed",
+        stage="storage_download",
+        upstream_http_status=_safe_numeric_status(last_exc),
+        exception=last_exc,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Could not read the image from Supabase Storage",
+    ) from last_exc
 
 
 def hash_storage_object(object_path: str, aggregate_digest: object | None = None) -> tuple[str, int]:

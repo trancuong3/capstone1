@@ -127,6 +127,21 @@ export interface ParentPrivateBookListPageQuery {
   readonly search?: string;
 }
 
+export interface ParentPrivateBookGetOptions {
+  readonly summaryOnly?: boolean;
+}
+
+export const parentRetryFailedSubmissionsResponseSchema = z.object({
+  retried_count: z.number().int().nonnegative(),
+  skipped_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  queue_full_retry_after_seconds: z.number().int().positive().nullable(),
+});
+
+export type ParentRetryFailedSubmissionsResponseDTO = z.infer<
+  typeof parentRetryFailedSubmissionsResponseSchema
+>;
+
 export interface ParentPrivateBookService {
   list(
     readyOnly?: boolean,
@@ -139,6 +154,7 @@ export interface ParentPrivateBookService {
   get(
     bookId: string,
     signal?: AbortSignal,
+    options?: ParentPrivateBookGetOptions,
   ): Promise<ParentPrivateBookDetailDTO>;
   create(
     input: CreateParentPrivateBookInput,
@@ -195,6 +211,9 @@ export interface ParentPrivateBookService {
     submissionId: string,
     stage?: "AUTO" | "OCR" | "PROOFREADING" | "TOOL_CHECK",
   ): Promise<ParentPageSubmissionDTO>;
+  retryAllFailedSubmissions?(
+    bookId: string,
+  ): Promise<ParentRetryFailedSubmissionsResponseDTO>;
   cancelSubmission(bookId: string, submissionId: string): Promise<void>;
   requestAdminReview(
     bookId: string,
@@ -258,9 +277,11 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         parentPrivateBookPageSchema,
         signal,
       ),
-    get: (bookId, signal) =>
+    get: (bookId, signal, options) =>
       requestApi(
-        `/books/my-books/${encodeURIComponent(bookId)}`,
+        `/books/my-books/${encodeURIComponent(bookId)}${apiQuery({
+          summary_only: options?.summaryOnly ? "true" : undefined,
+        })}`,
         parentPrivateBookDetailSchema,
         signal,
         { method: "GET", bypassCache: true },
@@ -426,6 +447,13 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         parentPageSubmissionSchema,
         undefined,
         { method: "POST", body: { stage } },
+      ),
+    retryAllFailedSubmissions: (bookId) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/submissions/retry-failed`,
+        parentRetryFailedSubmissionsResponseSchema,
+        undefined,
+        { method: "POST" },
       ),
     cancelSubmission: async (bookId, submissionId) => {
       await requestApi(

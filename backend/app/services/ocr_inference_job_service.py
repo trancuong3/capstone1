@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import string
 import unicodedata
@@ -16,6 +17,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
+import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +67,12 @@ PRIORITY_RETRY = 60
 
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_MAX_POST_OCR_ATTEMPTS = 6
+DEFAULT_POST_OCR_LEASE_SECONDS = 180
 DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 75
+DEFAULT_MAX_ACTIVE_QUEUE_JOBS = 250
+DEFAULT_MAX_ACTIVE_JOBS_PER_USER = 60
+DEFAULT_INTERACTIVE_RESERVED_SLOTS = 20
 ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 OCR_PIPELINE_VERSION = "hybrid_ocr_v2"
 ADMIN_JOB_KINDS = (
@@ -84,6 +91,34 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 _POST_OCR_TASKS: set[asyncio.Task[Any]] = set()
 _POST_OCR_SEMAPHORE: asyncio.Semaphore | None = None
+_POST_OCR_WAKEUP_TASK: asyncio.Task[Any] | None = None
+_POST_OCR_WAKEUP_DEADLINE: float = 0.0
+
+
+def max_post_ocr_attempts() -> int:
+    raw = (os.getenv("VIREAD_POST_OCR_MAX_ATTEMPTS") or "").strip()
+    if raw:
+        try:
+            return max(1, min(20, int(raw)))
+        except ValueError:
+            pass
+    return DEFAULT_MAX_POST_OCR_ATTEMPTS
+
+
+def _queue_admission_limits() -> tuple[int, int, int]:
+    def _parse_int(name: str, default: int, *, minimum: int = 0, maximum: int = 10000) -> int:
+        raw = (os.getenv(name) or "").strip()
+        if raw:
+            try:
+                return max(minimum, min(maximum, int(raw)))
+            except ValueError:
+                pass
+        return default
+
+    max_global = _parse_int("VIREAD_OCR_MAX_ACTIVE_QUEUE_JOBS", DEFAULT_MAX_ACTIVE_QUEUE_JOBS, minimum=1)
+    max_per_user = _parse_int("VIREAD_OCR_MAX_ACTIVE_JOBS_PER_USER", DEFAULT_MAX_ACTIVE_JOBS_PER_USER, minimum=1)
+    reserved_slots = _parse_int("VIREAD_OCR_INTERACTIVE_RESERVED_SLOTS", DEFAULT_INTERACTIVE_RESERVED_SLOTS, minimum=0)
+    return max_global, max_per_user, min(reserved_slots, max_global)
 
 
 def get_ocr_mode() -> str:
@@ -415,6 +450,8 @@ async def _run_post_ocr_guarded(submission_id: UUID) -> None:
 
 def schedule_parent_submission_post_ocr(submission_id: UUID) -> asyncio.Task[Any] | None:
     """Schedule Stage 2+3 post-OCR check cleanly without importing heavy ML modules."""
+    if _has_live_post_ocr_task(submission_id):
+        return None
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -428,14 +465,63 @@ def schedule_parent_submission_post_ocr(submission_id: UUID) -> asyncio.Task[Any
     return task
 
 
+async def _run_delayed_post_ocr_wakeup(delay_seconds: float) -> None:
+    global _POST_OCR_WAKEUP_TASK, _POST_OCR_WAKEUP_DEADLINE
+    try:
+        await asyncio.sleep(max(0.01, float(delay_seconds)))
+        await reconcile_orphaned_parent_submissions(
+            stale_after_seconds=0,
+            max_attempts=max_post_ocr_attempts(),
+            reschedule=True,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Delayed post-OCR wakeup reconciler failed: %s",
+            type(exc).__name__,
+        )
+    finally:
+        current = asyncio.current_task()
+        if _POST_OCR_WAKEUP_TASK is current:
+            _POST_OCR_WAKEUP_TASK = None
+            _POST_OCR_WAKEUP_DEADLINE = 0.0
+
+
+def _schedule_delayed_post_ocr_wakeup(delay_seconds: float) -> asyncio.Task[Any] | None:
+    """Coalesce delayed wake-up timers so deferred submissions auto-resume once RetryAfter matures."""
+    global _POST_OCR_WAKEUP_TASK, _POST_OCR_WAKEUP_DEADLINE
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    wait_for = max(0.01, float(delay_seconds))
+    target_deadline = loop.time() + wait_for
+    if _POST_OCR_WAKEUP_TASK is not None and not _POST_OCR_WAKEUP_TASK.done():
+        if _POST_OCR_WAKEUP_DEADLINE <= target_deadline + 0.5:
+            return _POST_OCR_WAKEUP_TASK
+        _POST_OCR_WAKEUP_TASK.cancel()
+    _POST_OCR_WAKEUP_DEADLINE = target_deadline
+    task = loop.create_task(
+        _run_delayed_post_ocr_wakeup(wait_for),
+        name="parent_submission_post_ocr_delayed_wakeup",
+    )
+    _POST_OCR_WAKEUP_TASK = task
+    return task
+
+
 async def shutdown_post_ocr_tasks(*, timeout_seconds: float = 5.0) -> None:
-    if not _POST_OCR_TASKS:
-        return
+    global _POST_OCR_WAKEUP_TASK, _POST_OCR_WAKEUP_DEADLINE
     pending = [task for task in list(_POST_OCR_TASKS) if not task.done()]
+    if _POST_OCR_WAKEUP_TASK is not None and not _POST_OCR_WAKEUP_TASK.done():
+        pending.append(_POST_OCR_WAKEUP_TASK)
+    _POST_OCR_WAKEUP_TASK = None
+    _POST_OCR_WAKEUP_DEADLINE = 0.0
+    if not pending:
+        return
     for task in pending:
         task.cancel()
-    if pending:
-        await asyncio.wait(pending, timeout=timeout_seconds)
+    await asyncio.wait(pending, timeout=timeout_seconds)
 
 
 _TRANSIENT_POST_OCR_ERROR_CODES = {
@@ -447,6 +533,20 @@ _TRANSIENT_POST_OCR_ERROR_CODES = {
     "CHILD_SAFETY_TIMEOUT",
     "DOCUMENT_TIMEOUT",
     "INCOMPLETE_CHUNK_COVERAGE",
+    "BUDGET_EXHAUSTED",
+}
+
+_NON_DEFERRABLE_POST_OCR_ERROR_CODES = {
+    "NO_AI_PROVIDER_CONFIGURED",
+    "PROVIDER_AUTHENTICATION",
+    "MODEL_UNAVAILABLE",
+    "INVALID_AI_CONFIGURATION",
+    "INVALID_CHUNK_PLAN",
+    "WORD_BOX_MISMATCH",
+    "EMPTY_PROOFREAD_OUTPUT",
+    "INVALID_SAFETY_RESPONSE",
+    "INVALID_SAFETY_FINDINGS",
+    "SOURCE_IMAGE_HASH_MISMATCH",
 }
 
 
@@ -467,10 +567,153 @@ def _is_transient_post_ocr_error(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     if code in _TRANSIENT_POST_OCR_ERROR_CODES:
         return True
-    if status_code in (429, 502, 503, 504):
+    if isinstance(status_code, int) and (status_code == 429 or 500 <= status_code < 600):
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError, httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
         return True
     msg = str(exc).lower()
-    return "timeout" in msg or "429" in msg or "503" in msg
+    return (
+        "timeout" in msg
+        or "429" in msg
+        or "503" in msg
+        or "502" in msg
+        or "504" in msg
+        or "connection reset" in msg
+        or "temporarily unavailable" in msg
+    )
+
+
+def _inspect_shared_circuit_breaker_for_post_ocr() -> tuple[float, bool, bool]:
+    """Return (transient_cooldown_s, has_open_transient, all_open_are_auth_or_config)."""
+    try:
+        from app.services.ai_capability_router import get_shared_ai_circuit_breaker
+
+        cb = get_shared_ai_circuit_breaker()
+        snap = cb.snapshot() if hasattr(cb, "snapshot") else {}
+    except Exception:
+        return 0.0, False, False
+
+    if not isinstance(snap, dict) or not snap:
+        return 0.0, False, False
+
+    open_entries = [
+        entry
+        for entry in snap.values()
+        if isinstance(entry, dict) and str(entry.get("state") or "").upper() == "OPEN"
+    ]
+    if not open_entries:
+        return 0.0, False, False
+
+    auth_or_config_kinds = {"AUTH_FAILURE", "PERMISSION_FAILURE", "UNSUPPORTED_CAPABILITY"}
+    transient_cooldowns: list[float] = []
+    all_auth_or_config = True
+    for entry in open_entries:
+        kind = str(entry.get("last_error_kind") or "").upper()
+        http_status = entry.get("last_http_status")
+        is_auth_or_config = kind in auth_or_config_kinds or http_status in {401, 403, 404}
+        if not is_auth_or_config:
+            all_auth_or_config = False
+            rem = float(entry.get("cooldown_remaining_seconds") or 0.0)
+            if rem > 0.0:
+                transient_cooldowns.append(rem)
+
+    short_cooldowns = [c for c in transient_cooldowns if c <= 600.0]
+    if short_cooldowns:
+        cooldown = max(short_cooldowns)
+    elif transient_cooldowns:
+        cooldown = min(300.0, min(transient_cooldowns))
+    else:
+        cooldown = 0.0
+    return cooldown, bool(transient_cooldowns or not all_auth_or_config), all_auth_or_config
+
+
+def _events_indicate_auth_error(events: list[dict[str, Any]] | None) -> tuple[bool, bool]:
+    """Return (any_auth_error, all_failed_are_auth_error)."""
+    if not events:
+        return False, False
+    any_auth = False
+    failed_count = 0
+    auth_failed_count = 0
+    for evt in events:
+        if not isinstance(evt, dict):
+            continue
+        code = str(evt.get("error_code") or "").upper()
+        http_status = evt.get("http_status")
+        is_auth = code == "PROVIDER_AUTHENTICATION" or http_status in (401, 403)
+        if is_auth:
+            any_auth = True
+        if evt.get("availability") is False or code:
+            failed_count += 1
+            if is_auth:
+                auth_failed_count += 1
+    return any_auth, (failed_count > 0 and failed_count == auth_failed_count)
+
+
+def _should_defer_post_ocr_error(
+    exc: Exception,
+    events: list[dict[str, Any]] | None = None,
+) -> tuple[bool, float]:
+    """Decide whether a Stage 2/3 failure should defer with RetryAfter instead of failing closed."""
+    from app.services.ocr_ai.exceptions import OcrConfigurationError
+
+    if isinstance(exc, OcrConfigurationError):
+        return False, 0.0
+    code = str(getattr(exc, "code", "") or "").upper()
+    if code in _NON_DEFERRABLE_POST_OCR_ERROR_CODES or "HASH_MISMATCH" in str(exc):
+        return False, 0.0
+
+    any_auth_evt, all_failed_auth = _events_indicate_auth_error(events)
+    if all_failed_auth:
+        return False, 0.0
+
+    cb_cooldown, _has_open_transient, all_open_auth_or_config = (
+        _inspect_shared_circuit_breaker_for_post_ocr()
+    )
+
+    if _is_transient_post_ocr_error(exc):
+        return True, cb_cooldown
+
+    if code == "ALL_PROVIDERS_SKIPPED":
+        if any_auth_evt or all_open_auth_or_config:
+            return False, 0.0
+        return True, cb_cooldown
+
+    return False, 0.0
+
+
+def _compute_post_ocr_defer_delay_seconds(attempts: int, cb_cooldown: float = 0.0) -> float:
+    raw_override = (os.getenv("VIREAD_POST_OCR_TEST_DEFER_SECONDS") or "").strip()
+    if APP_ENVIRONMENT == "test" and raw_override:
+        try:
+            return max(0.01, min(300.0, float(raw_override)))
+        except ValueError:
+            pass
+    jitter = random.uniform(2.0, 8.0)
+    backoff = 20.0 * (2 ** min(max(0, int(attempts)), 4))
+    delay = max(float(cb_cooldown) + jitter, backoff)
+    return max(20.0, min(300.0, delay))
+
+
+async def _release_parent_post_ocr_lease(submission_id: UUID, worker_id: str) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            locked = await db.scalar(
+                select(ParentBookPageSubmission)
+                .where(ParentBookPageSubmission.Id == submission_id)
+                .with_for_update()
+            )
+            if locked is not None and locked.WorkerId == worker_id:
+                locked.WorkerId = None
+                locked.LeaseExpiresAt = None
+                locked.UpdatedAt = datetime.now(timezone.utc)
+                await db.commit()
+            else:
+                await db.rollback()
+    except Exception:
+        logger.warning(
+            "Best-effort post-OCR lease release failed for submission %s",
+            submission_id,
+        )
 
 
 async def _run_with_transient_retry(
@@ -518,15 +761,37 @@ async def run_parent_submission_post_ocr(
     from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator, OcrOrchestrationError
 
     local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
+    lease_worker_id = f"web-post-ocr-{os.getpid()}"
+    lease_acquired = False
+    lease_cleared = False
 
     async with AsyncSessionLocal() as db:
         row = await db.scalar(
-            select(ParentBookPageSubmission).where(ParentBookPageSubmission.Id == submission_id)
+            select(ParentBookPageSubmission)
+            .where(ParentBookPageSubmission.Id == submission_id)
+            .with_for_update(skip_locked=True)
         )
         if row is None or row.WorkflowStatus != "CHECKING":
             return {"status": "SKIPPED_NOT_CHECKING", "submission_id": str(submission_id)}
         if row.OcrStatus not in ("COMPLETED", "NO_TEXT_DETECTED"):
             return {"status": "WAITING_FOR_OCR", "submission_id": str(submission_id)}
+
+        lease_now = datetime.now(timezone.utc)
+        existing_lease_exp = row.LeaseExpiresAt
+        if existing_lease_exp is not None and existing_lease_exp.tzinfo is None:
+            existing_lease_exp = existing_lease_exp.replace(tzinfo=timezone.utc)
+        existing_worker = str(row.WorkerId or "")
+        if (
+            existing_worker.startswith("web-post-ocr-")
+            and existing_lease_exp is not None
+            and existing_lease_exp > lease_now
+        ):
+            await db.rollback()
+            return {"status": "SKIPPED_LEASED", "submission_id": str(submission_id)}
+
+        row.WorkerId = lease_worker_id
+        row.LeaseExpiresAt = lease_now + timedelta(seconds=DEFAULT_POST_OCR_LEASE_SECONDS)
+        row.UpdatedAt = lease_now
 
         snapshot_book_id = row.BookId
         snapshot_version = int(row.SubmissionVersion)
@@ -546,6 +811,7 @@ async def run_parent_submission_post_ocr(
         snapshot_owner_parent_id = getattr(row, "OwnerParentId", None)
         snapshot_source_type = str(getattr(row, "SourceType", "") or "")
         snapshot_source_note = str(row.SourceNote or "")
+        snapshot_attempts = int(row.Attempts or 0)
         snapshot_page_num = int(
             getattr(row, "TargetPageNumber", None)
             or getattr(row, "SourcePageNumber", None)
@@ -559,390 +825,509 @@ async def run_parent_submission_post_ocr(
                 )
             except Exception:
                 committed_texts = []
+        await db.commit()
+        lease_acquired = True
 
-    # Lightweight CPU-only V2 content extraction (0 ML imports, <1s) when not yet recorded
-    computed_smart_extraction_meta: dict[str, Any] | None = None
-    computed_smart_extraction_obj: Any | None = None
-    computed_smart_source_words: list[Any] = []
-    proofread_input_text = snapshot_candidate_text or snapshot_ocr_text
-    proofread_input_words = snapshot_candidate_words or snapshot_ocr_words
-    if (
-        not snapshot_is_image_only
-        and snapshot_ocr_words
-        and not isinstance(snapshot_ocr_meta.get("smart_ocr_extraction"), dict)
-    ):
-        try:
-            from app.services.ocr_content_extraction import (
-                build_extraction_provenance_meta,
-                extract_ocr_content,
-                filter_word_dicts_by_extraction,
-                ocr_words_from_dicts,
-            )
-            from app.services.smart_studio_flags import SmartStudioFlags
-
-            computed_smart_source_words = ocr_words_from_dicts(snapshot_ocr_words)
-            if computed_smart_source_words:
-                computed_smart_extraction_obj = extract_ocr_content(
-                    computed_smart_source_words,
-                    page_number=max(1, snapshot_page_num),
-                    flags=SmartStudioFlags.from_environment(),
-                    book_id=snapshot_book_id,
-                    book_page_id=snapshot_committed_page_id,
-                    page_revision_id=snapshot_committed_revision_id,
-                )
-                computed_smart_extraction_meta = build_extraction_provenance_meta(
-                    computed_smart_extraction_obj,
-                    computed_smart_source_words,
-                    allow_cloud_ai=not local_ai_enforced,
-                )
-                if (
-                    computed_smart_extraction_obj.filter_mode == "active"
-                    and computed_smart_extraction_obj.stats.exclude_blocks > 0
-                    and computed_smart_extraction_obj.canonical_text.strip()
-                    and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
-                ):
-                    filtered_post_words = filter_word_dicts_by_extraction(
-                        snapshot_ocr_words, computed_smart_extraction_obj
-                    )
-                    if filtered_post_words:
-                        proofread_input_text = normalize_private_book_text(
-                            computed_smart_extraction_obj.canonical_text
-                        )
-                        proofread_input_words = filtered_post_words
-        except Exception as exc:
-            logger.warning(
-                "Non-fatal post-OCR CPU extraction skipped for submission %s: %s",
-                submission_id,
-                type(exc).__name__,
-            )
-
-    # Stage 2: AI proofreading (privacy-safe local default; respects PRIVATE_BOOK_ALLOW_CLOUD_AI)
-    if (
-        not snapshot_is_image_only
-        and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
-    ):
-        events: list[dict[str, object]] = []
-        try:
-            downloader = download_bytes or (
-                lambda path: storage_service.download_object(
-                    path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
-                )
-            )
-            image_bytes = await asyncio.to_thread(downloader, snapshot_storage_path)
-            if hashlib.sha256(image_bytes).hexdigest() != snapshot_source_sha256:
-                raise RuntimeError("SOURCE_IMAGE_HASH_MISMATCH")
-
-            # Filter standalone punctuation (e.g. Vietnamese dialogue dash '–'/'—')
-            # identically to chunk_ocr_text(..., word_normalizer=normalize_word) so
-            # word_boxes always match len(plan.tokens) 1-to-1 with zero WORD_BOX_MISMATCH.
-            tokens = [
-                t
-                for t in _WHITESPACE_RE.split(normalize_private_book_text(proofread_input_text))
-                if t and normalize_word(t)
-            ]
-            filtered_ocr_words = [
-                w
-                for w in proofread_input_words
-                if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
-            ]
-            word_boxes: list[tuple[float, float, float, float]] = []
-            for idx in range(len(tokens)):
-                box = None
-                if idx < len(filtered_ocr_words):
-                    box = _extract_word_bbox_list(filtered_ocr_words[idx])
-                if box is None:
-                    box = [0.0, 0.0, 1.0, 1.0]
-                word_boxes.append((box[0], box[1], box[2], box[3]))
-
-            orchestrator = proofread_orchestrator or OcrCorrectionOrchestrator(
-                OcrCorrectionConfig.from_environment_for_private_book()
-            )
-            uncertain_set: set[int] = set()
-
-            def _on_event(evt: dict[str, object]) -> None:
-                if evt.get("status") == "started":
-                    return
-                if len(events) < 30:
-                    events.append(
-                        {
-                            "provider": str(evt.get("provider") or "unknown"),
-                            "model": evt.get("model"),
-                            "stage": "PROOFREADING",
-                            "chunk_id": evt.get("chunk_id"),
-                            "availability": evt.get("availability"),
-                            "error_code": evt.get("error_code"),
-                            "duration_ms": evt.get("duration_ms"),
-                        }
-                    )
-
-            def _on_uncertain(_chunk_id: int, indices: tuple[int, ...]) -> None:
-                uncertain_set.update(int(i) for i in indices)
-
-            async def _invoke_proofread() -> str:
-                uncertain_set.clear()
-                return await orchestrator.correct(
-                    proofread_input_text,
-                    image_bytes,
-                    word_boxes,
-                    on_provider_event=_on_event,
-                    on_uncertain_tokens=_on_uncertain,
-                    word_normalizer=normalize_word,
-                )
-
-            proofread_text = await _run_with_transient_retry(_invoke_proofread, max_attempts=3)
-            proofread_text = normalize_private_book_text(proofread_text)
-            if not proofread_text:
-                raise OcrOrchestrationError("EMPTY_PROOFREAD_OUTPUT")
-            proofread_hash = safety_content_hash(proofread_text)
-            suggestions = build_proofread_suggestions(
-                proofread_input_words or proofread_input_text,
-                proofread_text,
-                uncertain_set,
-            )
-            aligned_words = align_edited_text_to_words(proofread_text, proofread_input_words)
-            new_candidate_hash = compute_candidate_hash(
-                proofread_text,
-                source_sha256=snapshot_source_sha256,
-                is_image_only=False,
-            )
-        except Exception as exc:
-            error_code = (
-                getattr(exc, "code", None)
-                if isinstance(exc, (OcrOrchestrationError, OcrConfigurationError))
-                else ("SOURCE_IMAGE_HASH_MISMATCH" if "HASH_MISMATCH" in str(exc) else "PROOFREAD_FAILED")
-            ) or "PROOFREAD_FAILED"
-            await _persist_parent_post_ocr_failure(
-                submission_id=submission_id,
-                expected_version=snapshot_version,
-                expected_candidate_hash=snapshot_candidate_hash,
-                stage="PROOFREADING",
-                error_code=str(error_code)[:72],
-                provider_events=events,
-            )
-            return {"status": "CHECK_FAILED", "stage": "PROOFREADING", "error_code": error_code}
-
-        async with AsyncSessionLocal() as db:
-            locked = await db.scalar(
-                select(ParentBookPageSubmission)
-                .where(ParentBookPageSubmission.Id == submission_id)
-                .with_for_update()
-            )
-            if (
-                locked is None
-                or locked.WorkflowStatus != "CHECKING"
-                or int(locked.SubmissionVersion) != snapshot_version
-                or locked.CandidateHash != snapshot_candidate_hash
-                or locked.SourceSha256 != snapshot_source_sha256
-            ):
-                await db.rollback()
-                return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
-
-            now = datetime.now(timezone.utc)
-            if computed_smart_extraction_meta is not None:
-                updated_ocr_meta = dict(locked.OcrMetaJson or {}) if isinstance(locked.OcrMetaJson, dict) else {}
-                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
-                locked.OcrMetaJson = updated_ocr_meta
-            locked.ProofreadStatus = "COMPLETED"
-            locked.ProofreadText = proofread_text
-            locked.ProofreadHash = proofread_hash
-            locked.ProofreadSuggestionsJson = suggestions
-            locked.UncertainWordIndicesJson = sorted(uncertain_set)
-            locked.ProofreadProviderEventsJson = events
-            locked.ProofreadErrorCode = None
-            locked.CandidateText = proofread_text
-            locked.CandidateWordsJson = aligned_words
-            locked.CandidateHash = new_candidate_hash
-            locked.SpellingAcceptedAt = (
-                now if should_auto_accept_spelling(suggestions, uncertain_set) else None
-            )
-            locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
-            locked.UpdatedAt = now
-            if (
-                computed_smart_extraction_obj is not None
-                and snapshot_book_id is not None
-                and snapshot_committed_page_id is not None
-            ):
-                from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
-
-                await persist_extraction_savepoint_safe(
-                    db,
-                    book_id=snapshot_book_id,
-                    page_id=snapshot_committed_page_id,
-                    page_revision_id=snapshot_committed_revision_id,
-                    owner_id=snapshot_owner_parent_id,
-                    extraction=computed_smart_extraction_obj,
-                    source_words=computed_smart_source_words,
-                )
-            await db.commit()
-
-            snapshot_candidate_text = proofread_text
-            snapshot_candidate_hash = new_candidate_hash
-            snapshot_proofread_status = "COMPLETED"
-            snapshot_tool_status = str(locked.ToolCheckStatus)
-
-    # Stage 3: Deterministic rules + Duplicate detection + Child Safety + Rights check (fail-closed!)
-    if snapshot_tool_status in ("PENDING", "RUNNING", "FAILED"):
-        workflow_id = uuid4()
-        text_to_check = normalize_private_book_text(snapshot_candidate_text)
-        safety_events: list[dict[str, Any]] = []
-
-        if snapshot_is_image_only:
-            findings_payload = build_image_only_findings(snapshot_source_sha256)
-            scope = build_tool_check_scope(
-                chunks_checked=0,
-                total_chunks=0,
-                requires_admin_visual_review=True,
-                local_ai_enforced=local_ai_enforced,
-            )
-            suitability = "REVIEW_REQUIRED"
-            policy_blocked = False
-            tool_check_status = "NEEDS_MANUAL_REVIEW"
-            is_clean = False
-        elif not text_to_check:
-            findings_payload = build_empty_text_findings(snapshot_source_sha256)
-            scope = build_tool_check_scope(
-                chunks_checked=0,
-                total_chunks=0,
-                requires_admin_visual_review=True,
-                local_ai_enforced=local_ai_enforced,
-            )
-            suitability = "REVIEW_REQUIRED"
-            policy_blocked = False
-            tool_check_status = "NEEDS_MANUAL_REVIEW"
-            is_clean = False
-        else:
-            findings_payload = build_rule_and_duplicate_findings(
-                text_to_check,
-                candidate_page_num=snapshot_page_num,
-                committed_texts=committed_texts,
-            )
+    try:
+        # Lightweight CPU-only V2 content extraction (0 ML imports, <1s) when not yet recorded
+        computed_smart_extraction_meta: dict[str, Any] | None = None
+        computed_smart_extraction_obj: Any | None = None
+        computed_smart_source_words: list[Any] = []
+        proofread_input_text = snapshot_candidate_text or snapshot_ocr_text
+        proofread_input_words = snapshot_candidate_words or snapshot_ocr_words
+        if (
+            not snapshot_is_image_only
+            and snapshot_ocr_words
+            and not isinstance(snapshot_ocr_meta.get("smart_ocr_extraction"), dict)
+        ):
             try:
-                safety_runner = safety_orchestrator or build_private_book_child_safety_orchestrator()
-                safety_result = await _run_with_transient_retry(
-                    lambda: safety_runner.analyze(text_to_check),
+                from app.services.ocr_content_extraction import (
+                    build_extraction_provenance_meta,
+                    extract_ocr_content,
+                    filter_word_dicts_by_extraction,
+                    ocr_words_from_dicts,
+                )
+                from app.services.smart_studio_flags import SmartStudioFlags
+
+                computed_smart_source_words = ocr_words_from_dicts(snapshot_ocr_words)
+                if computed_smart_source_words:
+                    computed_smart_extraction_obj = extract_ocr_content(
+                        computed_smart_source_words,
+                        page_number=max(1, snapshot_page_num),
+                        flags=SmartStudioFlags.from_environment(),
+                        book_id=snapshot_book_id,
+                        book_page_id=snapshot_committed_page_id,
+                        page_revision_id=snapshot_committed_revision_id,
+                    )
+                    computed_smart_extraction_meta = build_extraction_provenance_meta(
+                        computed_smart_extraction_obj,
+                        computed_smart_source_words,
+                        allow_cloud_ai=not local_ai_enforced,
+                    )
+                    if (
+                        computed_smart_extraction_obj.filter_mode == "active"
+                        and computed_smart_extraction_obj.stats.exclude_blocks > 0
+                        and computed_smart_extraction_obj.canonical_text.strip()
+                        and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
+                    ):
+                        filtered_post_words = filter_word_dicts_by_extraction(
+                            snapshot_ocr_words, computed_smart_extraction_obj
+                        )
+                        if filtered_post_words:
+                            proofread_input_text = normalize_private_book_text(
+                                computed_smart_extraction_obj.canonical_text
+                            )
+                            proofread_input_words = filtered_post_words
+            except Exception as exc:
+                logger.warning(
+                    "Non-fatal post-OCR CPU extraction skipped for submission %s: %s",
+                    submission_id,
+                    type(exc).__name__,
+                )
+
+        # Stage 2: AI proofreading (privacy-safe local default; respects PRIVATE_BOOK_ALLOW_CLOUD_AI)
+        if (
+            not snapshot_is_image_only
+            and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
+        ):
+            events: list[dict[str, object]] = []
+            try:
+                downloader = download_bytes or (
+                    lambda path: storage_service.download_object(
+                        path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+                    )
+                )
+                image_bytes = await _run_with_transient_retry(
+                    lambda: asyncio.to_thread(downloader, snapshot_storage_path),
                     max_attempts=3,
                 )
-                if not isinstance(safety_result, dict) or not safety_result.get("suitability"):
-                    raise ChildSafetyError("INVALID_SAFETY_RESPONSE")
-                suitability = str(safety_result.get("suitability") or "REVIEW_REQUIRED")
-                raw_findings = safety_result.get("findings")
-                if not isinstance(raw_findings, list):
-                    raise ChildSafetyError("INVALID_SAFETY_FINDINGS")
-                raw_events = safety_result.get("provider_events")
-                if isinstance(raw_events, list):
-                    safety_events = compact_provider_events(list(raw_events)[:20])
-                successful_chunks = sorted(
-                    {
-                        int(evt.get("chunk_id", 0))
-                        for evt in safety_events
-                        if evt.get("availability") is True
-                    }
+                if hashlib.sha256(image_bytes).hexdigest() != snapshot_source_sha256:
+                    raise RuntimeError("SOURCE_IMAGE_HASH_MISMATCH")
+
+                # Filter standalone punctuation (e.g. Vietnamese dialogue dash '–'/'—')
+                # identically to chunk_ocr_text(..., word_normalizer=normalize_word) so
+                # word_boxes always match len(plan.tokens) 1-to-1 with zero WORD_BOX_MISMATCH.
+                tokens = [
+                    t
+                    for t in _WHITESPACE_RE.split(normalize_private_book_text(proofread_input_text))
+                    if t and normalize_word(t)
+                ]
+                filtered_ocr_words = [
+                    w
+                    for w in proofread_input_words
+                    if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
+                ]
+                word_boxes: list[tuple[float, float, float, float]] = []
+                for idx in range(len(tokens)):
+                    box = None
+                    if idx < len(filtered_ocr_words):
+                        box = _extract_word_bbox_list(filtered_ocr_words[idx])
+                    if box is None:
+                        box = [0.0, 0.0, 1.0, 1.0]
+                    word_boxes.append((box[0], box[1], box[2], box[3]))
+
+                orchestrator = proofread_orchestrator or OcrCorrectionOrchestrator(
+                    OcrCorrectionConfig.from_environment_for_private_book()
                 )
-                if safety_events and not successful_chunks:
-                    raise ChildSafetyError("INCOMPLETE_CHUNK_COVERAGE")
-                chunks_checked = len(successful_chunks) if successful_chunks else 1
-                total_chunks = max(1, chunks_checked)
-                formatted_safety, has_high_safety = format_safety_findings(
-                    raw_findings, suitability=suitability
+                uncertain_set: set[int] = set()
+
+                def _on_event(evt: dict[str, object]) -> None:
+                    if evt.get("status") == "started":
+                        return
+                    if len(events) < 30:
+                        events.append(
+                            {
+                                "provider": str(evt.get("provider") or "unknown"),
+                                "model": evt.get("model"),
+                                "stage": "PROOFREADING",
+                                "chunk_id": evt.get("chunk_id"),
+                                "availability": evt.get("availability"),
+                                "error_code": evt.get("error_code"),
+                                "http_status": evt.get("http_status"),
+                                "duration_ms": evt.get("duration_ms"),
+                            }
+                        )
+
+                def _on_uncertain(_chunk_id: int, indices: tuple[int, ...]) -> None:
+                    uncertain_set.update(int(i) for i in indices)
+
+                async def _invoke_proofread() -> str:
+                    uncertain_set.clear()
+                    return await orchestrator.correct(
+                        proofread_input_text,
+                        image_bytes,
+                        word_boxes,
+                        on_provider_event=_on_event,
+                        on_uncertain_tokens=_on_uncertain,
+                        word_normalizer=normalize_word,
+                    )
+
+                proofread_text = await _run_with_transient_retry(_invoke_proofread, max_attempts=3)
+                proofread_text = normalize_private_book_text(proofread_text)
+                if not proofread_text:
+                    raise OcrOrchestrationError("EMPTY_PROOFREAD_OUTPUT")
+                proofread_hash = safety_content_hash(proofread_text)
+                suggestions = build_proofread_suggestions(
+                    proofread_input_words or proofread_input_text,
+                    proofread_text,
+                    uncertain_set,
                 )
-                findings_payload.extend(formatted_safety)
+                aligned_words = align_edited_text_to_words(proofread_text, proofread_input_words)
+                new_candidate_hash = compute_candidate_hash(
+                    proofread_text,
+                    source_sha256=snapshot_source_sha256,
+                    is_image_only=False,
+                )
             except Exception as exc:
                 error_code = (
                     getattr(exc, "code", None)
-                    or ("CHILD_SAFETY_TIMEOUT" if "timeout" in str(exc).lower() else "CHILD_SAFETY_CHECK_FAILED")
-                )
-                err_events = (
-                    compact_provider_events(getattr(exc, "provider_events", None) or [])
-                    if isinstance(exc, ChildSafetyError)
-                    else safety_events
-                )
+                    if isinstance(exc, (OcrOrchestrationError, OcrConfigurationError))
+                    else ("SOURCE_IMAGE_HASH_MISMATCH" if "HASH_MISMATCH" in str(exc) else "PROOFREAD_FAILED")
+                ) or "PROOFREAD_FAILED"
+                should_defer, cb_cooldown = _should_defer_post_ocr_error(exc, events)
+                if should_defer and snapshot_attempts < max_post_ocr_attempts():
+                    delay_seconds = _compute_post_ocr_defer_delay_seconds(
+                        snapshot_attempts, cb_cooldown
+                    )
+                    retry_after = await _persist_parent_post_ocr_deferral(
+                        submission_id=submission_id,
+                        expected_version=snapshot_version,
+                        expected_candidate_hash=snapshot_candidate_hash,
+                        stage="PROOFREADING",
+                        error_code=str(error_code)[:72],
+                        delay_seconds=delay_seconds,
+                        provider_events=events,
+                    )
+                    lease_cleared = True
+                    if retry_after is not None:
+                        _schedule_delayed_post_ocr_wakeup(delay_seconds)
+                    return {
+                        "status": "DEFERRED",
+                        "stage": "PROOFREADING",
+                        "error_code": error_code,
+                        "retry_after": retry_after.isoformat() if retry_after else None,
+                        "retry_after_seconds": round(delay_seconds, 2),
+                    }
                 await _persist_parent_post_ocr_failure(
                     submission_id=submission_id,
                     expected_version=snapshot_version,
                     expected_candidate_hash=snapshot_candidate_hash,
-                    stage="TOOL_CHECK",
+                    stage="PROOFREADING",
                     error_code=str(error_code)[:72],
-                    provider_events=err_events,
-                    workflow_id=workflow_id,
+                    provider_events=events,
                 )
-                return {"status": "CHECK_FAILED", "stage": "TOOL_CHECK", "error_code": error_code}
+                lease_cleared = True
+                return {"status": "CHECK_FAILED", "stage": "PROOFREADING", "error_code": error_code}
 
-            rights_finding = build_rights_declaration_finding(
-                source_type=snapshot_source_type,
-                source_note=snapshot_source_note,
-                source_sha256=snapshot_source_sha256,
-            )
-            if rights_finding is not None:
-                findings_payload.append(rights_finding)
+            async with AsyncSessionLocal() as db:
+                locked = await db.scalar(
+                    select(ParentBookPageSubmission)
+                    .where(ParentBookPageSubmission.Id == submission_id)
+                    .with_for_update()
+                )
+                if (
+                    locked is None
+                    or locked.WorkflowStatus != "CHECKING"
+                    or int(locked.SubmissionVersion) != snapshot_version
+                    or locked.CandidateHash != snapshot_candidate_hash
+                    or locked.SourceSha256 != snapshot_source_sha256
+                ):
+                    await db.rollback()
+                    return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
 
-            scope = build_tool_check_scope(
-                chunks_checked=chunks_checked,
-                total_chunks=total_chunks,
-                requires_admin_visual_review=False,
-                local_ai_enforced=local_ai_enforced,
-            )
-            policy_blocked = bool(has_high_safety)
-            is_clean = (
-                suitability == "SUITABLE"
-                and len(findings_payload) == 0
-                and not policy_blocked
-                and not bool(scope.get("requires_admin_visual_review"))
-            )
-            tool_check_status = (
-                "PASSED"
-                if is_clean
-                else ("FLAGGED" if (findings_payload or suitability != "SUITABLE") else "NEEDS_MANUAL_REVIEW")
-            )
+                now = datetime.now(timezone.utc)
+                if computed_smart_extraction_meta is not None:
+                    updated_ocr_meta = dict(locked.OcrMetaJson or {}) if isinstance(locked.OcrMetaJson, dict) else {}
+                    updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                    locked.OcrMetaJson = updated_ocr_meta
+                locked.ProofreadStatus = "COMPLETED"
+                locked.ProofreadText = proofread_text
+                locked.ProofreadHash = proofread_hash
+                locked.ProofreadSuggestionsJson = suggestions
+                locked.UncertainWordIndicesJson = sorted(uncertain_set)
+                locked.ProofreadProviderEventsJson = events
+                locked.ProofreadErrorCode = None
+                locked.CandidateText = proofread_text
+                locked.CandidateWordsJson = aligned_words
+                locked.CandidateHash = new_candidate_hash
+                locked.RetryAfter = None
+                locked.SpellingAcceptedAt = (
+                    now if should_auto_accept_spelling(suggestions, uncertain_set) else None
+                )
+                locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
+                locked.UpdatedAt = now
+                if (
+                    computed_smart_extraction_obj is not None
+                    and snapshot_book_id is not None
+                    and snapshot_committed_page_id is not None
+                ):
+                    from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
 
-        async with AsyncSessionLocal() as db:
-            locked = await db.scalar(
-                select(ParentBookPageSubmission)
-                .where(ParentBookPageSubmission.Id == submission_id)
-                .with_for_update()
-            )
-            if (
-                locked is None
-                or locked.WorkflowStatus != "CHECKING"
-                or int(locked.SubmissionVersion) != snapshot_version
-                or locked.CandidateHash != snapshot_candidate_hash
-                or locked.SourceSha256 != snapshot_source_sha256
-            ):
-                await db.rollback()
-                return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
+                    await persist_extraction_savepoint_safe(
+                        db,
+                        book_id=snapshot_book_id,
+                        page_id=snapshot_committed_page_id,
+                        page_revision_id=snapshot_committed_revision_id,
+                        owner_id=snapshot_owner_parent_id,
+                        extraction=computed_smart_extraction_obj,
+                        source_words=computed_smart_source_words,
+                    )
+                await db.commit()
 
-            now = datetime.now(timezone.utc)
-            if computed_smart_extraction_meta is not None and not isinstance(
-                (locked.OcrMetaJson or {}).get("smart_ocr_extraction")
-                if isinstance(locked.OcrMetaJson, dict)
-                else None,
-                dict,
-            ):
-                updated_ocr_meta = (
-                    dict(locked.OcrMetaJson or {})
+                snapshot_candidate_text = proofread_text
+                snapshot_candidate_hash = new_candidate_hash
+                snapshot_proofread_status = "COMPLETED"
+                snapshot_tool_status = str(locked.ToolCheckStatus)
+
+        # Stage 3: Deterministic rules + Duplicate detection + Child Safety + Rights check (fail-closed!)
+        if snapshot_tool_status in ("PENDING", "RUNNING", "FAILED"):
+            workflow_id = uuid4()
+            text_to_check = normalize_private_book_text(snapshot_candidate_text)
+            safety_events: list[dict[str, Any]] = []
+
+            if snapshot_is_image_only:
+                findings_payload = build_image_only_findings(snapshot_source_sha256)
+                scope = build_tool_check_scope(
+                    chunks_checked=0,
+                    total_chunks=0,
+                    requires_admin_visual_review=True,
+                    local_ai_enforced=local_ai_enforced,
+                )
+                suitability = "REVIEW_REQUIRED"
+                policy_blocked = False
+                tool_check_status = "NEEDS_MANUAL_REVIEW"
+                is_clean = False
+            elif not text_to_check:
+                findings_payload = build_empty_text_findings(snapshot_source_sha256)
+                scope = build_tool_check_scope(
+                    chunks_checked=0,
+                    total_chunks=0,
+                    requires_admin_visual_review=True,
+                    local_ai_enforced=local_ai_enforced,
+                )
+                suitability = "REVIEW_REQUIRED"
+                policy_blocked = False
+                tool_check_status = "NEEDS_MANUAL_REVIEW"
+                is_clean = False
+            else:
+                findings_payload = build_rule_and_duplicate_findings(
+                    text_to_check,
+                    candidate_page_num=snapshot_page_num,
+                    committed_texts=committed_texts,
+                )
+                try:
+                    safety_runner = safety_orchestrator or build_private_book_child_safety_orchestrator()
+                    safety_result = await _run_with_transient_retry(
+                        lambda: safety_runner.analyze(text_to_check),
+                        max_attempts=3,
+                    )
+                    if not isinstance(safety_result, dict) or not safety_result.get("suitability"):
+                        raise ChildSafetyError("INVALID_SAFETY_RESPONSE", [])
+                    suitability = str(safety_result.get("suitability") or "REVIEW_REQUIRED")
+                    raw_findings = safety_result.get("findings")
+                    if not isinstance(raw_findings, list):
+                        raise ChildSafetyError("INVALID_SAFETY_FINDINGS", [])
+                    raw_events = safety_result.get("provider_events")
+                    if isinstance(raw_events, list):
+                        safety_events = compact_provider_events(list(raw_events)[:20])
+                    successful_chunks = sorted(
+                        {
+                            int(evt.get("chunk_id", 0))
+                            for evt in safety_events
+                            if evt.get("availability") is True
+                        }
+                    )
+                    if safety_events and not successful_chunks:
+                        raise ChildSafetyError("INCOMPLETE_CHUNK_COVERAGE", safety_events)
+                    chunks_checked = len(successful_chunks) if successful_chunks else 1
+                    total_chunks = max(1, chunks_checked)
+                    formatted_safety, has_high_safety = format_safety_findings(
+                        raw_findings, suitability=suitability
+                    )
+                    findings_payload.extend(formatted_safety)
+                except Exception as exc:
+                    error_code = (
+                        getattr(exc, "code", None)
+                        or ("CHILD_SAFETY_TIMEOUT" if "timeout" in str(exc).lower() else "CHILD_SAFETY_CHECK_FAILED")
+                    )
+                    err_events = (
+                        compact_provider_events(getattr(exc, "provider_events", None) or [])
+                        if isinstance(exc, ChildSafetyError)
+                        else safety_events
+                    )
+                    should_defer, cb_cooldown = _should_defer_post_ocr_error(exc, err_events)
+                    if should_defer and snapshot_attempts < max_post_ocr_attempts():
+                        delay_seconds = _compute_post_ocr_defer_delay_seconds(
+                            snapshot_attempts, cb_cooldown
+                        )
+                        retry_after = await _persist_parent_post_ocr_deferral(
+                            submission_id=submission_id,
+                            expected_version=snapshot_version,
+                            expected_candidate_hash=snapshot_candidate_hash,
+                            stage="TOOL_CHECK",
+                            error_code=str(error_code)[:72],
+                            delay_seconds=delay_seconds,
+                            provider_events=err_events,
+                            workflow_id=workflow_id,
+                        )
+                        lease_cleared = True
+                        if retry_after is not None:
+                            _schedule_delayed_post_ocr_wakeup(delay_seconds)
+                        return {
+                            "status": "DEFERRED",
+                            "stage": "TOOL_CHECK",
+                            "error_code": error_code,
+                            "retry_after": retry_after.isoformat() if retry_after else None,
+                            "retry_after_seconds": round(delay_seconds, 2),
+                        }
+                    await _persist_parent_post_ocr_failure(
+                        submission_id=submission_id,
+                        expected_version=snapshot_version,
+                        expected_candidate_hash=snapshot_candidate_hash,
+                        stage="TOOL_CHECK",
+                        error_code=str(error_code)[:72],
+                        provider_events=err_events,
+                        workflow_id=workflow_id,
+                    )
+                    lease_cleared = True
+                    return {"status": "CHECK_FAILED", "stage": "TOOL_CHECK", "error_code": error_code}
+
+                rights_finding = build_rights_declaration_finding(
+                    source_type=snapshot_source_type,
+                    source_note=snapshot_source_note,
+                    source_sha256=snapshot_source_sha256,
+                )
+                if rights_finding is not None:
+                    findings_payload.append(rights_finding)
+
+                scope = build_tool_check_scope(
+                    chunks_checked=chunks_checked,
+                    total_chunks=total_chunks,
+                    requires_admin_visual_review=False,
+                    local_ai_enforced=local_ai_enforced,
+                )
+                policy_blocked = bool(has_high_safety)
+                is_clean = (
+                    suitability == "SUITABLE"
+                    and len(findings_payload) == 0
+                    and not policy_blocked
+                    and not bool(scope.get("requires_admin_visual_review"))
+                )
+                tool_check_status = (
+                    "PASSED"
+                    if is_clean
+                    else ("FLAGGED" if (findings_payload or suitability != "SUITABLE") else "NEEDS_MANUAL_REVIEW")
+                )
+
+            async with AsyncSessionLocal() as db:
+                locked = await db.scalar(
+                    select(ParentBookPageSubmission)
+                    .where(ParentBookPageSubmission.Id == submission_id)
+                    .with_for_update()
+                )
+                if (
+                    locked is None
+                    or locked.WorkflowStatus != "CHECKING"
+                    or int(locked.SubmissionVersion) != snapshot_version
+                    or locked.CandidateHash != snapshot_candidate_hash
+                    or locked.SourceSha256 != snapshot_source_sha256
+                ):
+                    await db.rollback()
+                    return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
+
+                now = datetime.now(timezone.utc)
+                if computed_smart_extraction_meta is not None and not isinstance(
+                    (locked.OcrMetaJson or {}).get("smart_ocr_extraction")
                     if isinstance(locked.OcrMetaJson, dict)
-                    else {}
-                )
-                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
-                locked.OcrMetaJson = updated_ocr_meta
-            locked.ToolCheckStatus = tool_check_status
-            locked.ToolCheckInputHash = snapshot_candidate_hash
-            locked.ToolCheckSuitability = suitability
-            locked.ToolCheckScopeJson = scope
-            locked.ToolCheckFindingsJson = findings_payload
-            locked.ToolCheckProviderEventsJson = safety_events
-            locked.ToolCheckErrorCode = None
-            locked.ToolCheckPolicyBlocked = policy_blocked
-            locked.ToolCheckWorkflowId = workflow_id
-            locked.ToolCheckCompletedAt = now
-            locked.WorkflowStatus = "PASSED_READY_TO_ADD" if is_clean else "NEEDS_ADMIN_REVIEW"
-            locked.WorkerId = None
-            locked.LeaseExpiresAt = None
-            locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
-            locked.UpdatedAt = now
-            await db.commit()
-            return {"status": locked.WorkflowStatus, "submission_id": str(submission_id)}
+                    else None,
+                    dict,
+                ):
+                    updated_ocr_meta = (
+                        dict(locked.OcrMetaJson or {})
+                        if isinstance(locked.OcrMetaJson, dict)
+                        else {}
+                    )
+                    updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                    locked.OcrMetaJson = updated_ocr_meta
+                locked.ToolCheckStatus = tool_check_status
+                locked.ToolCheckInputHash = snapshot_candidate_hash
+                locked.ToolCheckSuitability = suitability
+                locked.ToolCheckScopeJson = scope
+                locked.ToolCheckFindingsJson = findings_payload
+                locked.ToolCheckProviderEventsJson = safety_events
+                locked.ToolCheckErrorCode = None
+                locked.ToolCheckPolicyBlocked = policy_blocked
+                locked.ToolCheckWorkflowId = workflow_id
+                locked.ToolCheckCompletedAt = now
+                locked.WorkflowStatus = "PASSED_READY_TO_ADD" if is_clean else "NEEDS_ADMIN_REVIEW"
+                locked.WorkerId = None
+                locked.LeaseExpiresAt = None
+                locked.RetryAfter = None
+                locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
+                locked.UpdatedAt = now
+                await db.commit()
+                lease_cleared = True
+                return {"status": locked.WorkflowStatus, "submission_id": str(submission_id)}
 
-    return {"status": "COMPLETED", "submission_id": str(submission_id)}
+        return {"status": "COMPLETED", "submission_id": str(submission_id)}
+    finally:
+        if lease_acquired and not lease_cleared:
+            try:
+                await asyncio.shield(
+                    _release_parent_post_ocr_lease(submission_id, lease_worker_id)
+                )
+            except BaseException:
+                pass
+
+
+async def _persist_parent_post_ocr_deferral(
+    *,
+    submission_id: UUID,
+    expected_version: int,
+    expected_candidate_hash: str | None,
+    stage: str,
+    error_code: str,
+    delay_seconds: float,
+    provider_events: list[dict[str, Any]] | None = None,
+    workflow_id: UUID | None = None,
+) -> datetime | None:
+    async with AsyncSessionLocal() as db:
+        locked = await db.scalar(
+            select(ParentBookPageSubmission)
+            .where(ParentBookPageSubmission.Id == submission_id)
+            .with_for_update()
+        )
+        if (
+            locked is None
+            or locked.WorkflowStatus != "CHECKING"
+            or int(locked.SubmissionVersion) != expected_version
+            or locked.CandidateHash != expected_candidate_hash
+        ):
+            await db.rollback()
+            return None
+        now = datetime.now(timezone.utc)
+        retry_after = now + timedelta(seconds=max(0.01, float(delay_seconds)))
+        if stage == "PROOFREADING":
+            locked.ProofreadStatus = "PENDING"
+            locked.ProofreadErrorCode = error_code
+            if provider_events:
+                locked.ProofreadProviderEventsJson = provider_events
+        else:
+            locked.ToolCheckStatus = "PENDING"
+            locked.ToolCheckErrorCode = error_code
+            if provider_events:
+                locked.ToolCheckProviderEventsJson = provider_events
+            if workflow_id is not None:
+                locked.ToolCheckWorkflowId = workflow_id
+        locked.WorkflowStatus = "CHECKING"
+        locked.Attempts = int(locked.Attempts or 0) + 1
+        locked.RetryAfter = retry_after
+        locked.WorkerId = None
+        locked.LeaseExpiresAt = None
+        locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
+        locked.UpdatedAt = now
+        await db.commit()
+        return retry_after
 
 
 async def _persist_parent_post_ocr_failure(
@@ -986,6 +1371,7 @@ async def _persist_parent_post_ocr_failure(
         locked.WorkflowStatus = "CHECK_FAILED"
         locked.WorkerId = None
         locked.LeaseExpiresAt = None
+        locked.RetryAfter = None
         locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
         locked.UpdatedAt = now
         await db.commit()
@@ -1003,20 +1389,24 @@ async def reconcile_orphaned_parent_submissions(
     db: AsyncSession | None = None,
     *,
     stale_after_seconds: int = 90,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    max_attempts: int | None = None,
     limit: int = 50,
     reschedule: bool = True,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Reclaim `CHECKING` parent submissions orphaned after a Render web restart.
+    """Reclaim `CHECKING` parent submissions orphaned after a Render web restart or due after RetryAfter.
 
     In `remote_worker` mode, Stage 2+3 post-OCR runs on the web tier without ML
     weights. If the web dyno restarts mid-stage, rows stay in `CHECKING` with
     `OcrStatus IN ('COMPLETED', 'NO_TEXT_DETECTED')` and pending proofread/tool
-    check. This reconciler cleanly re-schedules them (up to `max_attempts`) or
-    fails them closed so no submission remains stuck forever.
+    check. This reconciler respects active `LeaseExpiresAt` and future `RetryAfter`
+    windows, re-scheduling due rows (up to `max_attempts`) or failing them closed
+    so no submission remains stuck forever.
     """
     current_time = now or datetime.now(timezone.utc)
+    effective_max_attempts = (
+        max_post_ocr_attempts() if max_attempts is None else max(1, int(max_attempts))
+    )
     cutoff = current_time - timedelta(seconds=max(0, stale_after_seconds))
     reclaimed_ids: list[UUID] = []
     failed_ids: list[UUID] = []
@@ -1031,6 +1421,14 @@ async def reconcile_orphaned_parent_submissions(
                     ParentBookPageSubmission.ProofreadStatus.in_(("PENDING", "RUNNING")),
                     ParentBookPageSubmission.ToolCheckStatus.in_(("PENDING", "RUNNING")),
                 ),
+                or_(
+                    ParentBookPageSubmission.RetryAfter.is_(None),
+                    ParentBookPageSubmission.RetryAfter <= current_time,
+                ),
+                or_(
+                    ParentBookPageSubmission.LeaseExpiresAt.is_(None),
+                    ParentBookPageSubmission.LeaseExpiresAt <= current_time,
+                ),
             )
             .order_by(ParentBookPageSubmission.UpdatedAt.asc())
             .limit(max(1, min(limit, 200)))
@@ -1040,12 +1438,33 @@ async def reconcile_orphaned_parent_submissions(
         for row in rows:
             if _has_live_post_ocr_task(row.Id):
                 continue
+            retry_after = row.RetryAfter
+            if retry_after is not None:
+                if retry_after.tzinfo is None:
+                    retry_after = retry_after.replace(tzinfo=timezone.utc)
+                if retry_after > current_time:
+                    continue
+            lease_expires = row.LeaseExpiresAt
+            if lease_expires is not None:
+                if lease_expires.tzinfo is None:
+                    lease_expires = lease_expires.replace(tzinfo=timezone.utc)
+                if lease_expires > current_time:
+                    continue
+
+            is_due_deferred_retry = retry_after is not None and retry_after <= current_time
             updated_at = row.UpdatedAt
-            if stale_after_seconds > 0 and updated_at is not None and updated_at > cutoff:
+            if updated_at is not None and updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            if (
+                not is_due_deferred_retry
+                and stale_after_seconds > 0
+                and updated_at is not None
+                and updated_at > cutoff
+            ):
                 continue
 
             attempts = int(row.Attempts or 0)
-            if attempts >= max_attempts:
+            if attempts >= effective_max_attempts:
                 if row.ProofreadStatus in ("PENDING", "RUNNING") and not bool(row.IsImageOnly):
                     row.ProofreadStatus = "FAILED"
                     row.ProofreadErrorCode = "POST_OCR_ORPHANED_MAX_ATTEMPTS"
@@ -1056,6 +1475,7 @@ async def reconcile_orphaned_parent_submissions(
                 row.WorkflowStatus = "CHECK_FAILED"
                 row.WorkerId = None
                 row.LeaseExpiresAt = None
+                row.RetryAfter = None
                 row.OptimisticLockVersion = int(row.OptimisticLockVersion or 1) + 1
                 row.UpdatedAt = current_time
                 failed_ids.append(row.Id)
@@ -1064,9 +1484,11 @@ async def reconcile_orphaned_parent_submissions(
                     row.ProofreadStatus = "PENDING"
                 if row.ToolCheckStatus == "RUNNING":
                     row.ToolCheckStatus = "PENDING"
-                row.Attempts = attempts + 1
+                if not is_due_deferred_retry:
+                    row.Attempts = attempts + 1
                 row.WorkerId = None
                 row.LeaseExpiresAt = None
+                row.RetryAfter = None
                 row.OptimisticLockVersion = int(row.OptimisticLockVersion or 1) + 1
                 row.UpdatedAt = current_time
                 reclaimed_ids.append(row.Id)
@@ -1518,6 +1940,31 @@ class OcrInferenceJobService:
             else:
                 setattr(job, "should_schedule_post_ocr", False)
             return job
+
+        # Queue admission control / backpressure (runs AFTER idempotency, active dedupe, and cache hits)
+        count_active_fn = getattr(self.repo, "count_active_jobs", None)
+        if callable(count_active_fn):
+            max_global, max_per_user, reserved_slots = _queue_admission_limits()
+            active_global, active_owner = await count_active_fn(
+                owner_user_id=owner_user_id
+            )
+            if job_kind == JOB_KIND_LOCAL_SCAN:
+                queue_full = active_global >= max_global
+            else:
+                non_interactive_cap = max(0, max_global - reserved_slots)
+                queue_full = active_global >= non_interactive_cap or (
+                    owner_user_id is not None and active_owner >= max_per_user
+                )
+            if queue_full:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "code": "OCR_QUEUE_FULL",
+                        "message": "Hàng chờ OCR đang đầy, vui lòng thử lại sau ít giây.",
+                        "retry_after_seconds": 30,
+                        "queue_depth": active_global,
+                    },
+                )
 
         job = OcrInferenceJob(
             Id=uuid4(),
@@ -2426,6 +2873,7 @@ class OcrInferenceJobService:
             active_job_id=None,
             active_job_count=0,
             now=now,
+            preserve_unhealthy_status=True,
         )
         await self.db.commit()
 
@@ -2491,6 +2939,10 @@ class OcrInferenceJobService:
                 meta = dict(page.ProcessingMeta or {})
                 meta["last_ocr_job_id"] = str(job.Id)
                 meta["last_ocr_error_code"] = error_code[:72]
+                if job.JobKind == JOB_KIND_ADMIN_UPLOAD:
+                    # Preserve PostgreSQL CHECK (lifecyclestatus IN ('PROCESSING', 'ACTIVE', 'RETIRED')).
+                    meta["ocr_failed"] = True
+                    meta["ocr_dead_lettered_at"] = now.isoformat()
                 page.ProcessingMeta = meta
 
     async def fail_job(
@@ -2503,6 +2955,7 @@ class OcrInferenceJobService:
         error_message: str | None = None,
         retryable: bool = True,
         engine_diagnostics: dict[str, Any] | None = None,
+        retry_delay_seconds: int | None = None,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         job = await self.repo.get(job_id, lock=True)
@@ -2536,7 +2989,19 @@ class OcrInferenceJobService:
         job.UpdatedAt = now
 
         if retryable and int(job.AttemptCount or 0) < int(job.MaxAttempts or DEFAULT_MAX_ATTEMPTS):
-            delay_seconds = min(300, 5 * (2 ** max(0, int(job.AttemptCount or 1) - 1)))
+            default_delay = min(300, 5 * (2 ** max(0, int(job.AttemptCount or 1) - 1)))
+            raw_delay = retry_delay_seconds
+            if raw_delay is None and isinstance(engine_diagnostics, dict):
+                raw_delay = engine_diagnostics.get("retry_delay_seconds")
+            if raw_delay is not None:
+                try:
+                    delay_seconds = max(5, min(300, int(raw_delay)))
+                except (TypeError, ValueError):
+                    delay_seconds = default_delay
+            elif clean_code.upper().startswith("CUDA_"):
+                delay_seconds = max(30, default_delay)
+            else:
+                delay_seconds = default_delay
             job.Status = "FAILED_RETRYABLE"
             job.RetryDelaySeconds = delay_seconds
             job.NextRetryAt = now + timedelta(seconds=delay_seconds)
@@ -2560,12 +3025,16 @@ class OcrInferenceJobService:
             job.CompletedAt = now
             await self._propagate_dead_letter_to_target(job, error_code=clean_code, now=now)
 
+        is_engine_or_cuda_error = clean_code.upper().startswith(
+            ("CUDA_", "ENGINE_", "OCR_ENGINE_")
+        )
         await self.repo.touch_worker_heartbeat(
             worker_id=worker_id.strip()[:120],
-            status="IDLE",
+            status="DEGRADED" if is_engine_or_cuda_error else "IDLE",
             active_job_id=None,
             active_job_count=0,
             now=now,
+            preserve_unhealthy_status=True,
         )
         await self.db.commit()
         if job.Status == "DEAD_LETTER" and job.JobKind == JOB_KIND_LOCAL_SCAN:
@@ -3110,6 +3579,24 @@ class OcrInferenceJobService:
             )
             meta["temp_image_cleaned"] = True
             job.ProcessingMeta = meta
+            try:
+                job_id = getattr(job, "Id", None)
+                if isinstance(self.db, AsyncSession) and job_id is not None:
+                    persisted = await self.repo.get(job_id, lock=True)
+                    if persisted is not None:
+                        persisted_meta = dict(persisted.ProcessingMeta or {})
+                        persisted_meta["temp_image_cleaned"] = True
+                        persisted.ProcessingMeta = persisted_meta
+                        persisted.UpdatedAt = datetime.now(timezone.utc)
+                    await self.db.commit()
+                elif hasattr(self.db, "commit"):
+                    await self.db.commit()
+            except Exception:
+                try:
+                    if hasattr(self.db, "rollback"):
+                        await self.db.rollback()
+                except Exception:
+                    pass
         except Exception:
             pass
 

@@ -26,6 +26,7 @@ param(
     [int]$HealthProbeTimeoutSeconds = 15,
     [int]$UnhealthyThreshold = 3,
     [int]$UnreachableThreshold = 6,
+    [int]$MaxStartingChecks = 10,
     [switch]$RespectStopSentinel
 )
 
@@ -62,6 +63,24 @@ function Write-SupervisorLog {
         Add-Content -LiteralPath $SupervisorLog -Value "$ts [$Level] [pid=$PID] $Message" -Encoding UTF8
     } catch {
         # Best-effort logging only
+    }
+}
+
+function Invoke-RotateLogIfOversized {
+    param(
+        [string]$LogPath,
+        [long]$MaxBytes = 10485760
+    )
+    try {
+        if (Test-Path -LiteralPath $LogPath) {
+            $item = Get-Item -LiteralPath $LogPath -ErrorAction SilentlyContinue
+            if ($null -ne $item -and $item.Length -gt $MaxBytes) {
+                $backup = "$LogPath.1"
+                Move-Item -LiteralPath $LogPath -Destination $backup -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        # Best-effort log rotation only
     }
 }
 
@@ -565,7 +584,7 @@ try {
     $initialBackendUrl = Resolve-BackendUrlFromEnvMap -EnvMap $initialEnv
     $initialBackendHost = Get-BackendHostFromUrl -Url $initialBackendUrl
 
-    Write-SupervisorLog "Supervisor started (host=$BindHost port=$BindPort cpuThreads=$CpuThreads priority=$initialPriority healthTimeout=${HealthProbeTimeoutSeconds}s degradedThreshold=$UnhealthyThreshold unreachableThreshold=$UnreachableThreshold python='$initialPythonExe' repoRoot='$initialRepoRoot')."
+    Write-SupervisorLog "Supervisor started (host=$BindHost port=$BindPort cpuThreads=$CpuThreads priority=$initialPriority healthTimeout=${HealthProbeTimeoutSeconds}s degradedThreshold=$UnhealthyThreshold unreachableThreshold=$UnreachableThreshold maxStartingChecks=$MaxStartingChecks python='$initialPythonExe' repoRoot='$initialRepoRoot')."
 
     $state = @{
         supervisorPid       = $PID
@@ -682,9 +701,11 @@ try {
         }
 
         # Apply required worker environment variables.
+        # Pin OMP_NUM_THREADS and OPENBLAS_NUM_THREADS to 1 for PaddlePaddle CPU OpenBLAS safety
+        # while keeping VIREAD_OCR_CPU_THREADS=$CpuThreads for PyTorch.
         $env:LMDB_FORCE_CPYTHON = "1"
-        $env:OMP_NUM_THREADS = "$CpuThreads"
-        $env:OPENBLAS_NUM_THREADS = "$CpuThreads"
+        $env:OMP_NUM_THREADS = "1"
+        $env:OPENBLAS_NUM_THREADS = "1"
         $env:MKL_NUM_THREADS = "$CpuThreads"
         $env:NUMEXPR_NUM_THREADS = "$CpuThreads"
         $env:VIREAD_OCR_CPU_THREADS = "$CpuThreads"
@@ -709,6 +730,8 @@ try {
         $launchStart = Get-Date
         $proc = $null
         try {
+            Invoke-RotateLogIfOversized -LogPath $StdoutLog -MaxBytes 10485760
+            Invoke-RotateLogIfOversized -LogPath $StderrLog -MaxBytes 10485760
             $argList = @("-m", "ocr_worker.worker", "--host", $BindHost, "--port", "$BindPort")
             Write-SupervisorLog "Starting OCR worker (repoRoot='$repoRoot', python='$effectivePythonExe', backendHost='$backendHost', priority=$effectivePriority, heartbeatSeconds=$heartbeatVal, quietStandby=$quietStandbyRaw, restartCount=$restartCount)."
             $proc = Start-Process `
@@ -742,6 +765,7 @@ try {
             $priorityAppliedOnceBound = $false
             $consecutiveDegradedChecks = 0
             $consecutiveUnreachableChecks = 0
+            $consecutiveStartingChecks = 0
             $nextHealthProbeAt = $launchStart.AddSeconds($StartupGraceSeconds)
 
             while (-not $proc.HasExited) {
@@ -782,20 +806,30 @@ try {
                     $pLastError = [string]$probe["lastError"]
 
                     if ($pReady) {
-                        if ($consecutiveDegradedChecks -gt 0 -or $consecutiveUnreachableChecks -gt 0) {
-                            Write-SupervisorLog "OCR worker PID=$($proc.Id) recovered health (ready=true, prevDegraded=$consecutiveDegradedChecks, prevUnreachable=$consecutiveUnreachableChecks)."
+                        if ($consecutiveDegradedChecks -gt 0 -or $consecutiveUnreachableChecks -gt 0 -or $consecutiveStartingChecks -gt 0) {
+                            Write-SupervisorLog "OCR worker PID=$($proc.Id) recovered health (ready=true, prevDegraded=$consecutiveDegradedChecks, prevUnreachable=$consecutiveUnreachableChecks, prevStarting=$consecutiveStartingChecks)."
                         }
                         $consecutiveDegradedChecks = 0
                         $consecutiveUnreachableChecks = 0
+                        $consecutiveStartingChecks = 0
                         if (-not $priorityAppliedOnceBound) {
                             Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass $effectivePriority
                             $priorityAppliedOnceBound = $true
                         }
                     } elseif ($pReachable -and $pWorkerStatus -eq "STARTING") {
                         $consecutiveUnreachableChecks = 0
-                        Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is actively warming up (status='$pStatus', worker_status='$pWorkerStatus'); skipping degraded increment (degraded=$consecutiveDegradedChecks/$UnhealthyThreshold, unreachable=0/$UnreachableThreshold)." "INFO"
+                        $consecutiveStartingChecks++
+                        if ($consecutiveStartingChecks -ge $MaxStartingChecks) {
+                            Write-SupervisorLog "Health watchdog triggered (reason=starting_timeout) after $consecutiveStartingChecks/$MaxStartingChecks consecutive STARTING checks past ${StartupGraceSeconds}s grace (${HealthProbeIntervalSeconds}s interval) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating deadlocked worker process tree for restart." "ERROR"
+                            Stop-ProcessTreeSafe -TargetPid $proc.Id
+                            [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
+                            break
+                        } else {
+                            Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is actively warming up ($consecutiveStartingChecks/$MaxStartingChecks, status='$pStatus', worker_status='$pWorkerStatus'); skipping degraded increment (degraded=$consecutiveDegradedChecks/$UnhealthyThreshold, unreachable=0/$UnreachableThreshold)." "INFO"
+                        }
                     } elseif ($pReachable) {
                         $consecutiveUnreachableChecks = 0
+                        $consecutiveStartingChecks = 0
                         $consecutiveDegradedChecks++
                         if ($consecutiveDegradedChecks -ge $UnhealthyThreshold) {
                             Write-SupervisorLog "Health watchdog triggered (reason=degraded) after $consecutiveDegradedChecks/$UnhealthyThreshold consecutive degraded checks (${HealthProbeIntervalSeconds}s interval, ${HealthProbeTimeoutSeconds}s timeout) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating worker process tree for restart." "ERROR"

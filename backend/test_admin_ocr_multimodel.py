@@ -1538,6 +1538,272 @@ class OcrAiRuntimeAndCircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_limit_zero_isolates_provider_without_tripping_quota_group(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry, CircuitState
+
+        now = [6000.0]
+        cb = CircuitBreakerRegistry(clock=lambda: now[0], base_cooldown_seconds=30.0)
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            local_enabled=False,
+            local=LocalOcrConfig(
+                chunking=ChunkingConfig(
+                    max_bytes=100,
+                    max_words=10,
+                    max_chunks=10,
+                    context_bytes=20,
+                    max_document_bytes=1000,
+                )
+            ),
+        )
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if cfg.gemini_primary_model in url:
+                calls.append("gemini_primary")
+                return httpx.Response(
+                    429,
+                    json={"error": {"message": "Quota exceeded for free_tier_requests, limit: 0"}},
+                )
+            if cfg.gemini_fallback_model in url:
+                calls.append("gemini_fallback")
+                payload = json.dumps(
+                    {
+                        "chunk_id": 0,
+                        "corrected_words": ["Mèo", "con"],
+                        "uncertain_word_indices": [],
+                    }
+                )
+                return httpx.Response(
+                    200,
+                    json={"candidates": [{"content": {"parts": [{"text": payload}]}}]},
+                )
+            calls.append("unexpected")
+            return httpx.Response(500)
+
+        transport = httpx.MockTransport(handler)
+        providers = [
+            GeminiOcrProvider(
+                name="gemini_3_5",
+                model=cfg.gemini_primary_model,
+                api_key="g-key",
+                timeout_seconds=5,
+                transport=transport,
+            ),
+            GeminiOcrProvider(
+                name="gemini_3_1",
+                model=cfg.gemini_fallback_model,
+                api_key="g-key",
+                timeout_seconds=5,
+                transport=transport,
+            ),
+            GroqOcrProvider(
+                model=cfg.groq_model,
+                api_key="q-key",
+                timeout_seconds=5,
+                transport=transport,
+            ),
+        ]
+        result = await OcrCorrectionOrchestrator(
+            cfg, providers=providers, circuit_breaker=cb
+        ).correct("Meo con", _image(), _boxes(2))
+        self.assertEqual(result, "Mèo con")
+        self.assertEqual(calls, ["gemini_primary", "gemini_fallback"])
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.OPEN)
+        self.assertGreater(cb.remaining_cooldown_seconds("provider:gemini_primary"), 20000.0)
+        self.assertEqual(cb.get_state("quota_group:gemini_free_shared"), CircuitState.CLOSED)
+
+    async def test_budget_exhausted_does_not_trip_circuit_breaker(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry, CircuitState
+
+        now = [7000.0]
+        cb = CircuitBreakerRegistry(
+            clock=lambda: now[0],
+            base_cooldown_seconds=30.0,
+            transient_failure_threshold=1,
+        )
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key=None,
+            local_enabled=True,
+            cloud_timeout_seconds=5,
+            total_timeout_seconds=10,
+            local=LocalOcrConfig(
+                timeout_seconds=10,
+                total_timeout_seconds=10,
+                chunking=ChunkingConfig(
+                    max_bytes=100,
+                    max_words=10,
+                    max_chunks=10,
+                    context_bytes=20,
+                    max_document_bytes=1000,
+                ),
+            ),
+        )
+        events: list[dict[str, object]] = []
+        calls: list[str] = []
+
+        class _NeverCalledCloud:
+            name = "gemini_3_5"
+            family = "google"
+            model = "gemini-test"
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append(self.name)
+                raise AssertionError("Provider must not be invoked when cloud_timeout <= 0")
+
+        class _LocalOk:
+            name = "ollama_qwen3_vl"
+            family = "ollama"
+            model = "qwen3-vl:4b-instruct-q4_K_M"
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append(self.name)
+                return ChunkCorrectionResult(chunk.chunk_id, ("Mèo", "con"), ())
+
+        orch = OcrCorrectionOrchestrator(
+            cfg, providers=[_NeverCalledCloud(), _LocalOk()], circuit_breaker=cb
+        )
+        with patch.object(
+            orch,
+            "_cloud_attempt_timeout",
+            side_effect=lambda *, provider, **_kw: None if orch._is_local_provider(provider) else 0.0,
+        ):
+            result = await orch.correct(
+                "Meo con",
+                _image(),
+                _boxes(2),
+                on_provider_event=events.append,
+            )
+        self.assertEqual(result, "Mèo con")
+        self.assertEqual(calls, ["ollama_qwen3_vl"])
+        self.assertTrue(
+            any(e["provider"] == "gemini_3_5" and e["error_code"] == "BUDGET_EXHAUSTED" for e in events)
+        )
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.CLOSED)
+        self.assertEqual(cb.remaining_cooldown_seconds("provider:gemini_primary"), 0.0)
+
+    async def test_chunk0_primary_503_still_tries_sibling_fallback(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry
+
+        cb = CircuitBreakerRegistry(base_cooldown_seconds=30.0)
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            local_enabled=False,
+            local=LocalOcrConfig(
+                chunking=ChunkingConfig(
+                    max_bytes=100,
+                    max_words=2,
+                    max_chunks=10,
+                    context_bytes=20,
+                    max_document_bytes=1000,
+                )
+            ),
+        )
+        calls: list[tuple[str, int]] = []
+
+        class _Chunk0FailPrimary:
+            def __init__(self, name: str, family: str):
+                self.name = name
+                self.family = family
+                self.model = name
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append((self.name, chunk.chunk_id))
+                if self.name == "gemini_3_5":
+                    raise OcrProviderError(
+                        provider=self.name,
+                        code="PROVIDER_UNAVAILABLE",
+                        status_code=503,
+                        upstream_status_code=503,
+                        disables_family=True,
+                    )
+                return ChunkCorrectionResult(
+                    chunk.chunk_id, tuple(t.text for t in chunk.tokens), ()
+                )
+
+        providers = [
+            _Chunk0FailPrimary("gemini_3_5", "google"),
+            _Chunk0FailPrimary("gemini_3_1", "google"),
+            _Chunk0FailPrimary("groq_qwen", "groq"),
+        ]
+        result = await OcrCorrectionOrchestrator(
+            cfg, providers=providers, circuit_breaker=cb
+        ).correct("một hai ba bốn", _image(), _boxes(4))
+        self.assertEqual(result, "một hai ba bốn")
+        self.assertEqual(
+            calls,
+            [
+                ("gemini_3_5", 0),
+                ("gemini_3_1", 0),
+                ("gemini_3_1", 1),
+            ],
+        )
+
+    def test_two_strike_transient_circuit_breaker_and_cooldown_helpers(self):
+        from app.services.ai_capability_router import (
+            AiErrorKind,
+            CircuitBreakerRegistry,
+            CircuitState,
+        )
+
+        now = [8000.0]
+        cb = CircuitBreakerRegistry(
+            clock=lambda: now[0],
+            base_cooldown_seconds=30.0,
+            max_cooldown_seconds=300.0,
+        )
+
+        # 1st transient 503/NETWORK_ERROR stays CLOSED (2-strike threshold)
+        c1 = cb.record_failure(
+            "provider:gemini_primary",
+            kind=AiErrorKind.NETWORK_ERROR,
+            http_status=503,
+        )
+        self.assertEqual(c1, 0.0)
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.CLOSED)
+        self.assertEqual(cb.remaining_cooldown_seconds("provider:gemini_primary"), 0.0)
+
+        # 2nd consecutive transient failure opens circuit for 30s
+        c2 = cb.record_failure(
+            "provider:gemini_primary",
+            kind=AiErrorKind.TIMEOUT,
+            http_status=504,
+        )
+        self.assertEqual(c2, 30.0)
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.OPEN)
+        self.assertAlmostEqual(cb.remaining_cooldown_seconds("provider:gemini_primary"), 30.0)
+        self.assertAlmostEqual(cb.max_cloud_cooldown_seconds(), 30.0)
+
+        # Local provider cooldown and 6h limit:0 cooldown do not inflate max_cloud_cooldown_seconds
+        cb.record_failure("provider:ollama_local", kind=AiErrorKind.RATE_LIMIT, retry_after_seconds=120.0)
+        cb.record_failure("provider:gemini_alias", kind=AiErrorKind.QUOTA_EXHAUSTED, limit_zero=True)
+        self.assertAlmostEqual(cb.max_cloud_cooldown_seconds(), 30.0)
+
+        # 1-strike immediate open for AUTH_FAILURE, PERMISSION_FAILURE, QUOTA_EXHAUSTED, RATE_LIMIT, UNSUPPORTED_CAPABILITY
+        for key, kind in (
+            ("provider:auth_test", AiErrorKind.AUTH_FAILURE),
+            ("provider:perm_test", AiErrorKind.PERMISSION_FAILURE),
+            ("provider:quota_test", AiErrorKind.QUOTA_EXHAUSTED),
+            ("provider:rate_test", AiErrorKind.RATE_LIMIT),
+            ("provider:unsup_test", AiErrorKind.UNSUPPORTED_CAPABILITY),
+        ):
+            cooldown = cb.record_failure(key, kind=kind)
+            self.assertGreater(cooldown, 0.0)
+            self.assertEqual(cb.get_state(key), CircuitState.OPEN)
+
+        now[0] += 10.0
+        self.assertAlmostEqual(cb.remaining_cooldown_seconds("provider:gemini_primary"), 20.0)
+        now[0] += 25.0
+        self.assertEqual(cb.remaining_cooldown_seconds("provider:gemini_primary"), 0.0)
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.HALF_OPEN)
+
 
 if __name__ == "__main__":
     unittest.main()

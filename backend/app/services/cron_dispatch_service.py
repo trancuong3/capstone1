@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.database.session import AsyncSessionLocal
 from app.jobs import (
@@ -66,6 +68,242 @@ DEFAULT_LOCAL_SCAN_MAX_AGE_HOURS = 24
 DEFAULT_TTS_CACHE_PRUNE_AGE_DAYS = 14
 DEFAULT_TTS_DAILY_USAGE_RETAIN_DAYS = 90
 DEFAULT_OCR_TERMINAL_JOB_PRUNE_AGE_DAYS = 30
+DEFAULT_ABANDONED_OCR_PAGE_MAX_AGE_HOURS = 24
+DEFAULT_PARENT_POST_OCR_BACKGROUND_MAX_ITEMS = 25
+
+_CRON_POST_OCR_DRAIN_TASKS: set[asyncio.Task[Any]] = set()
+
+
+async def shutdown_cron_post_ocr_drain_tasks(*, timeout_seconds: float = 5.0) -> None:
+    if not _CRON_POST_OCR_DRAIN_TASKS:
+        return
+    pending = [task for task in list(_CRON_POST_OCR_DRAIN_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)
+
+
+async def _count_pending_parent_post_ocr(now: datetime) -> int:
+    from app.models import ParentBookPageSubmission
+
+    try:
+        async with AsyncSessionLocal() as session:
+            if not inspect.iscoroutinefunction(getattr(session, "scalar", None)):
+                return 0
+            count = await session.scalar(
+                select(func.count(ParentBookPageSubmission.Id)).where(
+                    ParentBookPageSubmission.WorkflowStatus == "CHECKING",
+                    ParentBookPageSubmission.OcrStatus.in_(("COMPLETED", "NO_TEXT_DETECTED")),
+                    or_(
+                        ParentBookPageSubmission.ProofreadStatus.in_(("PENDING", "RUNNING")),
+                        ParentBookPageSubmission.ToolCheckStatus.in_(("PENDING", "RUNNING")),
+                    ),
+                    or_(
+                        ParentBookPageSubmission.RetryAfter.is_(None),
+                        ParentBookPageSubmission.RetryAfter <= now,
+                    ),
+                    or_(
+                        ParentBookPageSubmission.LeaseExpiresAt.is_(None),
+                        ParentBookPageSubmission.LeaseExpiresAt <= now,
+                    ),
+                )
+            )
+            return max(0, int(count or 0))
+    except (OperationalError, ProgrammingError):
+        return 0
+
+
+async def _drain_cron_parent_post_ocr(
+    *,
+    max_items: int,
+    runner: Callable[..., Awaitable[bool]],
+) -> None:
+    """Drain due parent post-OCR submissions sequentially outside the 6s cron HTTP cap."""
+    from app.services.ocr_inference_job_service import _post_ocr_semaphore
+
+    await asyncio.sleep(0)
+    processed = 0
+    had_error: str | None = None
+    sem = _post_ocr_semaphore()
+    try:
+        for _ in range(max(1, int(max_items))):
+            async with sem:
+                did_work = await runner(worker_id="cron-post-ocr-sweeper")
+            if not did_work:
+                break
+            processed += 1
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        had_error = type(exc).__name__
+        record_worker_error("parent_book_submission", exc)
+        logger.warning("cron_post_ocr_background_drain_failed error=%s", had_error)
+    else:
+        record_worker_success("parent_book_submission")
+    await _persist_cron_heartbeat(
+        "parent_book_submission",
+        ok=had_error is None,
+        items_processed=processed,
+        error_code=had_error,
+        execution_mode="on_demand",
+        source="cron",
+    )
+
+
+def _schedule_parent_post_ocr_background_drain(
+    *,
+    max_items: int,
+    runner: Callable[..., Awaitable[bool]],
+) -> asyncio.Task[Any] | None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    active = [task for task in list(_CRON_POST_OCR_DRAIN_TASKS) if not task.done()]
+    if len(active) >= 2:
+        return active[-1]
+    task = loop.create_task(
+        _drain_cron_parent_post_ocr(max_items=max_items, runner=runner),
+        name="cron_parent_post_ocr_drain",
+    )
+    _CRON_POST_OCR_DRAIN_TASKS.add(task)
+    task.add_done_callback(_CRON_POST_OCR_DRAIN_TASKS.discard)
+    return task
+
+
+async def _sweep_parent_post_ocr(
+    *,
+    max_items: int,
+    deadline: float,
+    now: datetime,
+    parent_post_ocr_runner: Callable[..., Awaitable[bool]] | None = None,
+) -> tuple[int, bool]:
+    """Kick non-cancelling background drain in hosted mode, or run bounded inline sweep."""
+    effective_post_ocr = (
+        parent_post_ocr_runner or parent_book_submission_worker.run_once
+    )
+    if parent_post_ocr_runner is None and _should_kick_background_drain():
+        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if budget <= 0.25:
+            return 0, False
+        pending = await asyncio.wait_for(
+            _count_pending_parent_post_ocr(now),
+            timeout=min(budget, 3.0),
+        )
+        if pending <= 0:
+            return 0, True
+        _schedule_parent_post_ocr_background_drain(
+            max_items=max(max_items, DEFAULT_PARENT_POST_OCR_BACKGROUND_MAX_ITEMS),
+            runner=effective_post_ocr,
+        )
+        return min(pending, max_items), True
+
+    swept = 0
+    executed = False
+    for _ in range(max_items):
+        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if budget <= 0.25:
+            break
+        executed = True
+        did_work = await asyncio.wait_for(
+            effective_post_ocr(worker_id="cron-post-ocr-sweeper"),
+            timeout=budget,
+        )
+        if not did_work:
+            break
+        swept += 1
+    return swept, executed
+
+
+def _is_ocr_failed_meta(raw_meta: object) -> bool:
+    meta = raw_meta
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            return False
+    if not isinstance(meta, dict):
+        return False
+    flag = meta.get("ocr_failed")
+    if isinstance(flag, bool):
+        return flag
+    return str(flag or "").strip().lower() == "true"
+
+
+async def _sweep_abandoned_dead_letter_ocr_pages(
+    *,
+    now: datetime,
+    deadline: float,
+    max_age_hours: int = DEFAULT_ABANDONED_OCR_PAGE_MAX_AGE_HOURS,
+    limit: int = 50,
+) -> int:
+    """Retire abandoned DEAD_LETTER Admin BookPage placeholders older than 24h safely."""
+    from app.models import BookPage, OcrInferenceJob
+    from app.repositories.ocr_inference_job_repository import ACTIVE_JOB_STATUSES
+
+    budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+    if budget <= 0.25:
+        return 0
+    cutoff = now - timedelta(hours=max(1, int(max_age_hours)))
+
+    async def _run_cleanup() -> int:
+        try:
+            async with AsyncSessionLocal() as db:
+                if not (
+                    inspect.iscoroutinefunction(getattr(db, "execute", None))
+                    and inspect.iscoroutinefunction(getattr(db, "scalars", None))
+                ):
+                    return 0
+                active_job_exists = exists(
+                    select(OcrInferenceJob.Id).where(
+                        OcrInferenceJob.PageId == BookPage.Id,
+                        OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES),
+                    )
+                )
+                query = (
+                    select(BookPage)
+                    .where(
+                        BookPage.LifecycleStatus == "PROCESSING",
+                        BookPage.CurrentVerifiedRevisionId.is_(None),
+                        BookPage.CreatedAt < cutoff,
+                        ~active_job_exists,
+                    )
+                    .order_by(BookPage.CreatedAt.asc(), BookPage.Id.asc())
+                    .limit(max(1, min(int(limit), 200)))
+                    .with_for_update(skip_locked=True)
+                )
+                candidates = list((await db.scalars(query)).all())
+                retired = 0
+                for page in candidates:
+                    if not _is_ocr_failed_meta(page.ProcessingMeta):
+                        continue
+                    raw_meta = page.ProcessingMeta
+                    if isinstance(raw_meta, str):
+                        try:
+                            meta_dict = json.loads(raw_meta)
+                        except Exception:
+                            meta_dict = {}
+                    elif isinstance(raw_meta, dict):
+                        meta_dict = dict(raw_meta)
+                    else:
+                        meta_dict = {}
+                    meta_dict["retired_by"] = "cron_dead_letter_cleanup"
+                    meta_dict["retired_at"] = now.isoformat()
+                    # PostgreSQL CHECK constraint allows only ('PROCESSING', 'ACTIVE', 'RETIRED').
+                    page.LifecycleStatus = "RETIRED"
+                    page.ProcessingMeta = meta_dict
+                    retired += 1
+                if retired > 0:
+                    await db.commit()
+                else:
+                    await db.rollback()
+                return retired
+        except (OperationalError, ProgrammingError):
+            # Degrade safely if schema/tables are unavailable during rollouts or slim tests.
+            return 0
+
+    return await asyncio.wait_for(_run_cleanup(), timeout=budget)
 
 
 def _remaining_budget(deadline: float, cap_seconds: float) -> float:
@@ -603,6 +841,7 @@ async def run_scheduled_cron_dispatch(
     tts_cache_entries_pruned = 0
     tts_daily_usage_pruned = 0
     ocr_jobs_pruned = 0
+    abandoned_ocr_pages_retired = 0
     hf_space_keepwarm_pinged = False
     ocr_training_maintenance_ran = False
     sweep_errors: list[str] = []
@@ -632,9 +871,6 @@ async def run_scheduled_cron_dispatch(
         effective_temp_cleanup = (
             temp_cleanup_runner
             or parent_book_submission_worker.cleanup_expired_temp_submissions
-        )
-        effective_post_ocr = (
-            parent_post_ocr_runner or parent_book_submission_worker.run_once
         )
 
         # 1. Reap expired OCR leases & prune stale worker heartbeats
@@ -701,20 +937,17 @@ async def run_scheduled_cron_dispatch(
                 sweep_errors.append("temp_submissions")
                 logger.warning("cron_temp_cleanup_skipped error=%s", type(exc).__name__)
 
-        # 4. Parent private book Stage 2/3 post-OCR sweeper (up to 5)
+        # 4. Parent private book Stage 2/3 post-OCR sweeper (non-cancelling background kick in hosted mode)
         try:
-            for _ in range(max_items_per_sweep):
-                budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
-                if budget <= 0.25:
-                    break
+            swept_count, step4_executed = await _sweep_parent_post_ocr(
+                max_items=max_items_per_sweep,
+                deadline=deadline,
+                now=current,
+                parent_post_ocr_runner=parent_post_ocr_runner,
+            )
+            if step4_executed:
                 parent_sweep_executed = True
-                did_work = await asyncio.wait_for(
-                    effective_post_ocr(worker_id="cron-post-ocr-sweeper"),
-                    timeout=budget,
-                )
-                if not did_work:
-                    break
-                post_ocr_swept += 1
+            post_ocr_swept += swept_count
         except Exception as exc:
             parent_sweep_error = parent_sweep_error or type(exc).__name__
             sweep_errors.append("parent_post_ocr")
@@ -890,6 +1123,22 @@ async def run_scheduled_cron_dispatch(
                 type(exc).__name__,
             )
 
+        # 9c. Retire abandoned >24h DEAD_LETTER Admin BookPage placeholders cleanly
+        try:
+            abandoned_ocr_pages_retired = int(
+                await _sweep_abandoned_dead_letter_ocr_pages(
+                    now=current,
+                    deadline=deadline,
+                    max_age_hours=DEFAULT_ABANDONED_OCR_PAGE_MAX_AGE_HOURS,
+                )
+            )
+        except Exception as exc:
+            sweep_errors.append("abandoned_ocr_pages")
+            logger.warning(
+                "cron_abandoned_ocr_pages_cleanup_skipped error=%s",
+                type(exc).__name__,
+            )
+
     # ── Phase 2: Outbound HTTP / email delivery sweeps ────────────────────────
     # 10. Isolated reading reminders runner (15.0s cap)
     rem_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
@@ -1047,6 +1296,7 @@ async def run_scheduled_cron_dispatch(
         "tts_cache_entries_pruned": tts_cache_entries_pruned,
         "tts_daily_usage_pruned": tts_daily_usage_pruned,
         "ocr_jobs_pruned": ocr_jobs_pruned,
+        "abandoned_ocr_pages_retired": abandoned_ocr_pages_retired,
         "hf_space_keepwarm_pinged": hf_space_keepwarm_pinged,
         "ocr_training_maintenance_ran": ocr_training_maintenance_ran,
         "sweep_errors": sweep_errors,
