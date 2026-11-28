@@ -322,7 +322,8 @@
     "listenPhonics": "Escuchar fonética",
     "listeningRetry": "Escuchando a tu hijo…",
     "readAgain": "Leer de nuevo",
-    "stepsAria": "Pasos de fonética"
+    "stepsAria": "Pasos de fonética",
+    "autoHideHint": "Deletreo listo · Ocultando para ver mejor el texto…"
   },
   "companion": {
     "teacherFemaleTitle": "Profesora IA",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "Ejemplo de fonética · Leer frase conectada",
     "quickFixTitle": "Elogio · ¡Autocorrección muy rápida!",
     "phonicsWinTitle": "Elogio · ¡Excelente fonética!",
-    "overcameWordTitle": "¡Hurra! ¡Has dominado una palabra difícil!"
+    "overcameWordTitle": "¡Hurra! ¡Has dominado una palabra difícil!",
+    "dismissAria": "Ocultar mensaje del maestro"
   },
   "tutor": {
     "title": "¿Cómo leemos esta palabra?",

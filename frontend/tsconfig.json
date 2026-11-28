@@ -29,7 +29,13 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
-    ".next-e2e/dev/types/**/*.ts"
+    ".next-e2e/dev/types/**/*.ts",
+    ".next-gate/types/**/*.ts",
+    ".next-gate/dev/types/**/*.ts",
+    ".next-browser-verify/types/**/*.ts",
+    ".next-browser-verify/dev/types/**/*.ts",
+    ".next-e2e-tts/types/**/*.ts",
+    ".next-e2e-tts/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

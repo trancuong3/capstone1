@@ -10,6 +10,7 @@ class DatabaseConcurrencyDefaultsTests(unittest.IsolatedAsyncioTestCase):
     def test_database_concurrency_defaults_allow_mobile_burst(self) -> None:
         import app.database.config as db_config
 
+        saved_attrs = dict(db_config.__dict__)
         saved_limit = os.environ.pop("DATABASE_CONCURRENCY_LIMIT", None)
         saved_wait = os.environ.pop("DATABASE_CONCURRENCY_WAIT_TIMEOUT", None)
         try:
@@ -22,7 +23,11 @@ class DatabaseConcurrencyDefaultsTests(unittest.IsolatedAsyncioTestCase):
                 os.environ["DATABASE_CONCURRENCY_LIMIT"] = saved_limit
             if saved_wait is not None:
                 os.environ["DATABASE_CONCURRENCY_WAIT_TIMEOUT"] = saved_wait
-            importlib.reload(db_config)
+            for key in list(db_config.__dict__.keys()):
+                if key not in saved_attrs:
+                    delattr(db_config, key)
+            for key, value in saved_attrs.items():
+                setattr(db_config, key, value)
 
     async def test_database_concurrency_limiter_acquire_release_and_timeout(self) -> None:
         from app.database.session import (

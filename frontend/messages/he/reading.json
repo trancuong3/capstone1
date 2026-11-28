@@ -322,7 +322,8 @@
     "listenPhonics": "האזנה לפוניקה",
     "listeningRetry": "מאזין לילד שלך...",
     "readAgain": "קרא שוב",
-    "stepsAria": "שלבי פוניקה"
+    "stepsAria": "שלבי פוניקה",
+    "autoHideHint": "האיות הסתיים · מסתיר כדי לקרוא בנוחות…"
   },
   "companion": {
     "teacherFemaleTitle": "מורה AI",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "דוגמת פוניקה · קריאת הביטוי",
     "quickFixTitle": "כל הכבוד · תיקון עצמי מהיר!",
     "phonicsWinTitle": "כל הכבוד · שליטה מצוינת בפוניקה!",
-    "overcameWordTitle": "הידד · צלחת מילה קשה!"
+    "overcameWordTitle": "הידד · צלחת מילה קשה!",
+    "dismissAria": "הסתר הודעת הדרכה"
   },
   "tutor": {
     "title": "איך קוראים את המילה הזו?",

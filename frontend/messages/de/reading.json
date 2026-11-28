@@ -322,7 +322,8 @@
     "listenPhonics": "Phonetik anhören",
     "listeningRetry": "Ich höre deinem Kind zu…",
     "readAgain": "Noch einmal lesen",
-    "stepsAria": "Phonetik-Schritte"
+    "stepsAria": "Phonetik-Schritte",
+    "autoHideHint": "Buchstabieren fertig · Wird ausgeblendet für freie Sicht…"
   },
   "companion": {
     "teacherFemaleTitle": "KI-Lehrkraft",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "Phonetik-Beispiel · Lies die Wortgruppe",
     "quickFixTitle": "Lob · Schnelle Selbstkorrektur!",
     "phonicsWinTitle": "Lob · Großartige Phonetik!",
-    "overcameWordTitle": "Hurra · Du hast ein schwieriges Wort gemeistert!"
+    "overcameWordTitle": "Hurra · Du hast ein schwieriges Wort gemeistert!",
+    "dismissAria": "Nachricht ausblenden"
   },
   "tutor": {
     "title": "Wie lesen wir dieses Wort?",

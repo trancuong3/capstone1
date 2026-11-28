@@ -322,7 +322,8 @@
     "listenPhonics": "استماع إلى الصوتيات والتهجئة",
     "listeningRetry": "جارٍ الاستماع إلى طفلك...",
     "readAgain": "إعادة القراءة",
-    "stepsAria": "خطوات التهجئة"
+    "stepsAria": "خطوات التهجئة",
+    "autoHideHint": "انتهى التهجئة · جارٍ الإخفاء لتقرأ بوضوح…"
   },
   "companion": {
     "teacherFemaleTitle": "معلمة الذكاء الاصطناعي",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "نموذج التهجئة · قراءة العبارة متصلة",
     "quickFixTitle": "الثناء · تصحيح ذاتي سريع جداً!",
     "phonicsWinTitle": "الثناء · تهجئة رائعة جداً!",
-    "overcameWordTitle": "يا هلا · لقد تجاوز طفلك الكلمة الصعبة!"
+    "overcameWordTitle": "يا هلا · لقد تجاوز طفلك الكلمة الصعبة!",
+    "dismissAria": "إخفاء رسالة المعلم"
   },
   "tutor": {
     "title": "كيف نقرأ هذه الكلمة برأيك؟",

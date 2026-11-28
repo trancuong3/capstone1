@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  BookHeart,
   Brain,
   CheckCircle2,
   Clock,
@@ -28,6 +29,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -43,15 +45,27 @@ import {
   createMemoryGameService,
   type MemoryGameService,
 } from "@/lib/api/memory-game-service";
+import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   createSpeechService,
   type SpeechService,
 } from "@/lib/api/speech-service";
 import {
+  createVocabularyNotebookService,
+  type VocabularyNotebookListDTO,
+  type VocabularyNotebookService,
+} from "@/lib/api/vocabulary-notebook-service";
+import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
+import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
 } from "@/lib/reading/browser-wasm-stt";
+import {
+  isConfirmedSilentVoiceCapture,
+  isServerSttConfirmedUnavailable,
+  refreshVoiceHealthQuietlyAfterSttFailure,
+} from "@/lib/reading/voice-capture-guard";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
@@ -199,11 +213,20 @@ function renderStars(count: number, ariaLabel: string) {
 
 export interface MemoryGameScreenProps {
   readonly service?: MemoryGameService;
+  readonly vocabularyService?: VocabularyNotebookService;
 }
 
-export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
+export function MemoryGameScreen({
+  service,
+  vocabularyService,
+}: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
   const tCommon = useTranslations("common");
+  const tGlossary = useWordGlossaryTranslations();
+  const resolvedVocabService = useMemo(
+    () => vocabularyService ?? createVocabularyNotebookService(),
+    [vocabularyService],
+  );
   const defaultErrorMessage = t("memoryGame.defaultError");
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
@@ -246,6 +269,88 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       return [];
     }
   });
+  const [notebookData, setNotebookData] =
+    useState<VocabularyNotebookListDTO | null>(null);
+  const [notebookDrawerOpen, setNotebookDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!childId) return;
+    const controller = new AbortController();
+    void resolvedVocabService
+      .listNotebook(childId, 12, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setNotebookData(data);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, resolvedVocabService]);
+
+  const activeNotebook =
+    notebookData && notebookData.child_id === childId ? notebookData : null;
+  const [fetchedDueFocusWords, setFetchedDueFocusWords] = useState<string[]>(
+    [],
+  );
+  const [ephemeralCreativeCleared, setEphemeralCreativeCleared] =
+    useState(false);
+
+  useEffect(() => {
+    if (!childId || urlFocusWords.length > 0) return;
+    const controller = new AbortController();
+    void createAdaptiveLearningService()
+      .getRecommendations(childId, teacherPersona.gender, {
+        signal: controller.signal,
+      })
+      .then((recs) => {
+        if (!controller.signal.aborted) {
+          setFetchedDueFocusWords(
+            (recs.focus_difficult_words ?? []).slice(0, 5),
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, teacherPersona.gender, urlFocusWords.length]);
+
+  const effectiveDueFocusWords = useMemo(
+    () =>
+      (urlFocusWords.length > 0 ? urlFocusWords : fetchedDueFocusWords).slice(
+        0,
+        5,
+      ),
+    [fetchedDueFocusWords, urlFocusWords],
+  );
+  const notebookBonusWords = useMemo(() => {
+    if (!activeNotebook) return [];
+    const raw = activeNotebook.storytelling_words?.length
+      ? activeNotebook.storytelling_words
+      : activeNotebook.items.map((item) => item.word);
+    return raw.filter(Boolean).slice(0, 3);
+  }, [activeNotebook]);
+  const combinedFocusWords = useMemo(
+    () =>
+      Array.from(
+        new Set([...effectiveDueFocusWords, ...notebookBonusWords]),
+      ).slice(0, 6),
+    [effectiveDueFocusWords, notebookBonusWords],
+  );
+
+  const speakEphemeralChallengeWord = useCallback(
+    (word: string) => {
+      if (!calmSound || !word.trim()) return;
+      speechPlayer.stop();
+      void speechPlayer
+        .play(word, {
+          ephemeral: true,
+          wordSample: true,
+          bypassSessionLock: true,
+          utteranceKind: "word_sample",
+        })
+        .catch(() => undefined);
+    },
+    [calmSound, speechPlayer],
+  );
 
   // Catalog & history
   const [catalog, setCatalog] = useState<MemoryThemesCatalogDTO | null>(null);
@@ -344,6 +449,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const [autoSubmitStage, setAutoSubmitStage] = useState<
     "RECALL" | "CREATIVE" | null
   >(null);
+  const [revealAutopilotCountdown, setRevealAutopilotCountdown] = useState<
+    number | null
+  >(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const recorderActiveRef = useRef(false);
   const recorderTargetRef = useRef<"RECALL" | "CREATIVE" | null>(null);
@@ -360,6 +468,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const micCountdownTimerRef = useRef<number | null>(null);
   const silenceStopTimerRef = useRef<number | null>(null);
   const autoSubmitTimerRef = useRef<number | null>(null);
+  const revealAutopilotTimerRef = useRef<number | null>(null);
+  const recallTextRef = useRef(recallText);
+  const creativeTextRef = useRef(creativeText);
   const startVoiceCaptureRef = useRef<
     (
       target: "RECALL" | "CREATIVE",
@@ -376,7 +487,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   useEffect(() => {
     speechPlayerRef.current = speechPlayer;
     recorderCancelRef.current = recorder.cancel;
-  }, [recorder.cancel, speechPlayer]);
+    recallTextRef.current = recallText;
+    creativeTextRef.current = creativeText;
+  }, [creativeText, recallText, recorder.cancel, speechPlayer]);
 
   const clearSilenceStopTimer = useCallback(() => {
     if (silenceStopTimerRef.current !== null) {
@@ -399,6 +512,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       autoSubmitTimerRef.current = null;
     }
     setAutoSubmitStage(null);
+  }, []);
+
+  const cancelRevealAutopilot = useCallback(() => {
+    if (revealAutopilotTimerRef.current !== null) {
+      window.clearTimeout(revealAutopilotTimerRef.current);
+      revealAutopilotTimerRef.current = null;
+    }
+    setRevealAutopilotCountdown(null);
   }, []);
 
   const startMicCountdown = useCallback(
@@ -591,12 +712,25 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         if (controller.signal.aborted || !audioBlob || audioBlob.size === 0) {
           return;
         }
+        const captureQuality = recorder.getQuality?.();
+        if (isConfirmedSilentVoiceCapture(captureQuality)) {
+          if (!options?.fromAutopilot) {
+            setVoiceNotice(
+              t(
+                "memoryGame.quietVoicePrompt",
+                undefined,
+                "Cô chưa nghe thấy tiếng bé nói. Bé hãy đưa micro gần hơn và nói to rõ hơn nhé!",
+              ),
+            );
+          }
+          return;
+        }
         const keyterms = session
           ? Array.from(
               new Set([
                 ...session.scene_spec.matched_focus_words,
                 ...(session.scene_spec.creative_focus_words ?? []),
-                ...urlFocusWords,
+                ...combinedFocusWords,
                 ...session.scene_spec.objects.flatMap((obj) => [
                   obj.name_vi,
                   obj.color_vi,
@@ -605,32 +739,68 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             )
               .filter(Boolean)
               .slice(0, 18)
-          : urlFocusWords;
-        const sttRes = await speechService.transcribe(audioBlob, {
-          languageCode: "vi",
-          keyterms,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        const transcript = sttRes.text?.trim() ?? "";
-        if (!transcript) return;
+          : combinedFocusWords;
+        let transcript = "";
+        if (!isServerSttConfirmedUnavailable()) {
+          try {
+            const sttRes = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            transcript = sttRes.text?.trim() ?? "";
+          } catch (sttError: unknown) {
+            if (controller.signal.aborted) return;
+            if (isServiceError(sttError) && sttError.status === 503) {
+              refreshVoiceHealthQuietlyAfterSttFailure();
+            }
+          }
+        }
+        if (!transcript && detectBrowserWasmSttSupport().supported) {
+          try {
+            const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+              audioBlob,
+              { timeoutMs: 12_000 },
+            );
+            if (controller.signal.aborted) return;
+            transcript = wasmRes.text.normalize("NFC").trim();
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+        if (!transcript) {
+          if (!options?.fromAutopilot) {
+            setVoiceNotice(
+              t(
+                "memoryGame.quietVoicePrompt",
+                undefined,
+                "Cô chưa nghe rõ tiếng bé nói. Bé hãy đưa micro gần hơn hoặc gõ chữ nhé!",
+              ),
+            );
+          }
+          return;
+        }
         setVoiceNotice(null);
+        const priorDraft =
+          target === "RECALL"
+            ? recallTextRef.current.trim()
+            : creativeTextRef.current.trim();
+        const combinedText = priorDraft
+          ? `${priorDraft} ${transcript}`
+          : transcript;
         if (target === "RECALL") {
-          setRecallText((prev) =>
-            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
-          );
+          setRecallText(combinedText);
           setRecallInputMode("VOICE");
         } else {
-          setCreativeText((prev) =>
-            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
-          );
+          setCreativeText(combinedText);
           setCreativeInputMode("VOICE");
         }
         if (
           options?.fromAutopilot &&
           getEntertainmentPreferences().autopilotEnabled
         ) {
-          const words = transcript.match(/\p{L}+/gu) ?? [];
+          const words = combinedText.match(/\p{L}+/gu) ?? [];
           if (words.length >= 2) {
             cancelAutoSubmit();
             setAutoSubmitStage(target);
@@ -638,9 +808,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               autoSubmitTimerRef.current = null;
               setAutoSubmitStage(null);
               if (target === "RECALL") {
-                void handleSubmitRecallRef.current(transcript, "VOICE");
+                void handleSubmitRecallRef.current(undefined, "VOICE");
               } else {
-                void handleSubmitCreativeRef.current(transcript, "VOICE");
+                void handleSubmitCreativeRef.current(undefined, "VOICE");
               }
             }, 1500);
           }
@@ -658,11 +828,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     [
       cancelAutoSubmit,
       clearSilenceStopTimer,
+      combinedFocusWords,
       recorder,
       session,
       speechService,
       t,
-      urlFocusWords,
     ],
   );
 
@@ -816,6 +986,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         void recorder
           .start()
           .then(() => {
+            if (
+              !mountedRef.current ||
+              micGenerationRef.current !== captureGen ||
+              isSpeakingPromptRef.current
+            ) {
+              recorderCancelRef.current();
+              return;
+            }
             recorderActiveRef.current = true;
             recorderTargetRef.current = target;
             setIsListeningVoice(true);
@@ -919,12 +1097,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
+        cancelRevealAutopilot();
         cancelAutoSubmit();
         stopMicCapture();
         stopAllTts();
       }
     };
     const handleAndroidBg = () => {
+      cancelRevealAutopilot();
       cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
@@ -937,12 +1117,13 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         "viread:android-background",
         handleAndroidBg,
       );
+      cancelRevealAutopilot();
       cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
       if (peekIntervalRef.current) clearInterval(peekIntervalRef.current);
     };
-  }, [cancelAutoSubmit, stopAllTts, stopMicCapture]);
+  }, [cancelAutoSubmit, cancelRevealAutopilot, stopAllTts, stopMicCapture]);
 
   // Load theme catalog & child history
   useEffect(() => {
@@ -1031,6 +1212,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     stopMicCapture();
     stopAllTts();
     setIsStarting(true);
+    setEphemeralCreativeCleared(false);
     setActionError(null);
     setActiveHint(null);
     setPeekNotice(null);
@@ -1049,7 +1231,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         theme_key: selectedTheme,
         timer_mode: timerMode,
         recall_mode: recallMode,
-        ...(urlFocusWords.length > 0 ? { focus_words: urlFocusWords } : {}),
+        ...(combinedFocusWords.length > 0
+          ? { focus_words: combinedFocusWords }
+          : {}),
       });
       setSession(created);
       setRemainingSeconds(created.timer_seconds);
@@ -1157,11 +1341,39 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       setStage("REVEAL");
       if (
         effectiveMode === "VOICE" &&
-        getEntertainmentPreferences().autopilotEnabled &&
-        getEntertainmentPreferences().calmSound &&
-        result.attempt.evaluation.praise_message_vi
+        getEntertainmentPreferences().autopilotEnabled
       ) {
-        speakVietnamesePrompt(result.attempt.evaluation.praise_message_vi);
+        if (
+          getEntertainmentPreferences().calmSound &&
+          result.attempt.evaluation.praise_message_vi
+        ) {
+          speakVietnamesePrompt(result.attempt.evaluation.praise_message_vi);
+        }
+        cancelRevealAutopilot();
+        const stepRevealToCreative = (remaining: number) => {
+          if (
+            !mountedRef.current ||
+            !getEntertainmentPreferences().autopilotEnabled
+          ) {
+            setRevealAutopilotCountdown(null);
+            return;
+          }
+          if (remaining <= 0) {
+            revealAutopilotTimerRef.current = null;
+            setRevealAutopilotCountdown(null);
+            setFocusedObjectId(null);
+            setStage("CREATIVE");
+            void recorder.prepare?.().catch(() => undefined);
+            startMicCountdown("CREATIVE", 3);
+            return;
+          }
+          setRevealAutopilotCountdown(remaining);
+          revealAutopilotTimerRef.current = window.setTimeout(
+            () => stepRevealToCreative(remaining - 1),
+            1000,
+          );
+        };
+        stepRevealToCreative(6);
       }
     } catch (err: unknown) {
       // Preserve child's recall draft cleanly on transient error!
@@ -1200,6 +1412,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       });
       setSession(result.session);
       setCreativeEvaluation(result.attempt.evaluation);
+      setEphemeralCreativeCleared(true);
       setStage("SUMMARY");
       if (
         effectiveMode === "VOICE" &&
@@ -1233,6 +1446,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   });
 
   const resetToSetup = () => {
+    cancelRevealAutopilot();
     cancelAutoSubmit();
     stopMicCapture();
     stopAllTts();
@@ -1247,6 +1461,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     setActiveHint(null);
     setRecallEvaluation(null);
     setCreativeEvaluation(null);
+    setEphemeralCreativeCleared(true);
     setFocusedObjectId(null);
     setActionError(null);
   };
@@ -1359,9 +1574,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         new Set([
           ...(session.scene_spec.creative_focus_words ?? []),
           ...session.scene_spec.matched_focus_words,
+          ...notebookBonusWords,
         ]),
       )
-    : [];
+    : notebookBonusWords;
 
   return (
     <section
@@ -1398,11 +1614,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <ReadingVoiceSettings
             disabled={isListeningVoice}
             fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
+            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
             onPreview={(sample) => {
               stopMicCapture();
               stopAllTts();
-              return speechPlayer.play(sample, { bypassSessionLock: true });
+              return speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+              });
             }}
             onStopPreview={stopAllTts}
           />
@@ -1413,6 +1635,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             fullWidth={false}
             onClick={() => {
               if (autopilotEnabled) {
+                cancelRevealAutopilot();
                 cancelMicCountdown();
                 cancelAutoSubmit();
               }
@@ -1447,8 +1670,60 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             )}
             {calmSound ? t("memoryGame.calmSound") : t("memoryGame.soundMuted")}
           </Button>
+          <Button
+            className="min-h-11"
+            data-testid="memory-open-notebook-btn"
+            fullWidth={false}
+            onClick={() => setNotebookDrawerOpen(true)}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+            {activeNotebook && activeNotebook.total > 0
+              ? tGlossary("hubNotebookButton", { count: activeNotebook.total })
+              : tGlossary("hubNotebookButtonEmpty")}
+          </Button>
         </div>
       </div>
+
+      {notebookBonusWords.length > 0 ? (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-card border border-amber-200 bg-amber-50/75 px-4 py-2.5"
+          data-testid="memory-notebook-bonus-words"
+        >
+          <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-950">
+            <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+            {tGlossary("bonusStoryWordsLabel")}
+          </span>
+          {notebookBonusWords.map((word) => (
+            <button
+              className="viread-learning-content inline-flex min-h-8 items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-0.5 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+              data-testid={`memory-notebook-word-${word}`}
+              dir="ltr"
+              key={word}
+              lang="vi"
+              onClick={() => speakVietnamesePrompt(word, { wordSample: true })}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" className="size-3 text-amber-600" />
+              {word}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <VocabularyNotebookDrawer
+        childAlias={child.alias}
+        childId={child.id}
+        initialNotebook={activeNotebook}
+        onClose={() => setNotebookDrawerOpen(false)}
+        onNotebookChange={setNotebookData}
+        open={notebookDrawerOpen}
+        service={resolvedVocabService}
+        showGameLinks={false}
+        speechPlayer={speechPlayer}
+      />
 
       {/* Stage progress pills */}
       <nav
@@ -2307,10 +2582,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   )}
                 </p>
               </div>
-              <div className="mt-4">
+              <div className="mt-4 flex flex-col gap-2.5">
                 <Button
                   data-testid="go-creative-stage-btn"
                   onClick={() => {
+                    cancelRevealAutopilot();
                     setFocusedObjectId(null);
                     setStage("CREATIVE");
                     if (getEntertainmentPreferences().autopilotEnabled) {
@@ -2322,6 +2598,30 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   <Sparkles aria-hidden="true" className="size-5" />
                   {t("memoryGame.goCreativeButton")}
                 </Button>
+                {revealAutopilotCountdown !== null ? (
+                  <div
+                    aria-live="polite"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-950"
+                    data-testid="memory-autopilot-reveal-coach"
+                    role="status"
+                  >
+                    <span>
+                      🤖 Tự động sang Vòng 2 sau{" "}
+                      <span data-testid="memory-reveal-autopilot-countdown">
+                        {revealAutopilotCountdown}
+                      </span>
+                      s…
+                    </span>
+                    <button
+                      className="cursor-pointer rounded-full bg-white px-2.5 py-1 font-extrabold text-primary underline hover:bg-cream"
+                      data-testid="memory-cancel-reveal-autopilot"
+                      onClick={cancelRevealAutopilot}
+                      type="button"
+                    >
+                      Dừng tự động
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2342,9 +2642,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             matchedObjectIds={matchedObjectIds}
             missedObjectIds={missedObjectIds}
             mode="reveal"
-            onSelectObject={(id) =>
-              setFocusedObjectId((prev) => (prev === id ? null : id))
-            }
+            onSelectObject={(id) => {
+              cancelRevealAutopilot();
+              setFocusedObjectId((prev) => (prev === id ? null : id));
+            }}
             reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
@@ -2402,7 +2703,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       data-testid={`matched-fact-${fact.object_id}`}
                       dir="ltr"
                       lang="vi"
-                      onClick={() => setFocusedObjectId(fact.object_id)}
+                      onClick={() => {
+                        cancelRevealAutopilot();
+                        setFocusedObjectId(fact.object_id);
+                      }}
                       type="button"
                     >
                       ✓ {fact.detail_vi}
@@ -2435,7 +2739,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       data-testid={`missed-fact-${fact.object_id}`}
                       dir="ltr"
                       lang="vi"
-                      onClick={() => setFocusedObjectId(fact.object_id)}
+                      onClick={() => {
+                        cancelRevealAutopilot();
+                        setFocusedObjectId(fact.object_id);
+                      }}
                       type="button"
                     >
                       ★ {fact.detail_vi}
@@ -2537,6 +2844,41 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 )}
               </Button>
             </div>
+
+            {effectiveDueFocusWords.length > 0 && !ephemeralCreativeCleared ? (
+              <div
+                className="flex flex-col gap-2 rounded-control border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-purple/40 px-4 py-3"
+                data-testid="memory-ephemeral-focus-bar"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-amber-950">
+                    {t("memoryGame.ephemeralFocusBarTitle")}
+                  </span>
+                  <span className="text-xs font-semibold text-muted">
+                    {t("memoryGame.ephemeralFocusBarHint")}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {effectiveDueFocusWords.map((word) => (
+                    <button
+                      className="viread-learning-content inline-flex min-h-9 items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+                      data-testid={`memory-ephemeral-word-${word}`}
+                      dir="ltr"
+                      key={word}
+                      lang="vi"
+                      onClick={() => speakEphemeralChallengeWord(word)}
+                      type="button"
+                    >
+                      <Volume2
+                        aria-hidden="true"
+                        className="size-3.5 text-amber-700"
+                      />
+                      ⭐ {word}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {creativeMagicWords.length > 0 ? (
               <div

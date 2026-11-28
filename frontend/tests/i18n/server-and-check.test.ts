@@ -194,7 +194,7 @@ describe("check-i18n audit script", () => {
   it("never duplicates the root layout brand suffix inside books.myBooks page titles", () => {
     const localeDirs = fs
       .readdirSync(frontendMessagesDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.isDirectory() && entry.name !== "features")
       .map((entry) => entry.name);
 
     expect(localeDirs.length).toBeGreaterThanOrEqual(11);

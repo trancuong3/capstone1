@@ -17,6 +17,8 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { TaiThinhEarTrainerModal } from "@/components/entertainment/tai-thinh-ear-trainer-modal";
+import { RegionalPhoneticProfileCard } from "@/components/profiles/regional-phonetic-profile-card";
 import { useChildService } from "@/hooks/use-child-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { ServiceError } from "@/lib/api/service-error";
@@ -80,6 +82,7 @@ export function ChildProfileScreen({
   const [isAvatarRemoved, setIsAvatarRemoved] = useState(false);
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isEarTrainerOpen, setIsEarTrainerOpen] = useState(false);
 
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -439,12 +442,30 @@ export function ChildProfileScreen({
             </>
           ) : null}
         </Card>
+
+        {mode === "edit" && child ? (
+          <RegionalPhoneticProfileCard
+            childAlias={child.alias}
+            childId={child.id}
+            onOpenEarTrainer={() => setIsEarTrainerOpen(true)}
+          />
+        ) : null}
+
         {!fromRegistration ? (
           <ButtonLink className="min-h-16" href="/children" variant="quiet">
             {t("common.actions.back")}
           </ButtonLink>
         ) : null}
       </section>
+
+      {child ? (
+        <TaiThinhEarTrainerModal
+          childAlias={child.alias}
+          childId={child.id}
+          isOpen={isEarTrainerOpen}
+          onClose={() => setIsEarTrainerOpen(false)}
+        />
+      ) : null}
 
       {child ? (
         <Modal

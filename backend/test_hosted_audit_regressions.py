@@ -324,12 +324,18 @@ class HostedAuditBackendRegressionTests(unittest.TestCase):
             def decode_stream(self, _stream):
                 return None
 
-        short_clip = np.full(int(16000 * 0.6), 0.05, dtype=np.float32)
-        long_clip = np.full(int(16000 * 1.5), 0.05, dtype=np.float32)
+        short_t = np.linspace(0.0, 0.6, int(16000 * 0.6), dtype=np.float32)
+        long_t = np.linspace(0.0, 1.5, int(16000 * 1.5), dtype=np.float32)
+        short_clip = (0.15 * np.sin(2 * np.pi * 300 * short_t)).astype(np.float32)
+        long_clip = (0.15 * np.sin(2 * np.pi * 300 * long_t)).astype(np.float32)
 
         with (
             patch.object(vw.runtime, "stt_recognizer", _FakeRecognizer()),
-            patch.object(vw, "preprocess_audio_for_stt", side_effect=lambda x: x),
+            patch.object(
+                vw,
+                "_preprocess_audio_for_stt_with_stats",
+                side_effect=lambda x: (x, 0.0, (float(len(x)) / 16000.0, 0.0, 0.0)),
+            ),
         ):
             vw.decode_stt_window_sync(short_clip, lead_pad_s=0.1, trail_pad_s=0.35)
             vw.decode_stt_window_sync(long_clip, lead_pad_s=0.1, trail_pad_s=0.35)

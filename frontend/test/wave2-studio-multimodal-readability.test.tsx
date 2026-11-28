@@ -17,6 +17,13 @@ import {
 import type { ReadingPageDTO } from "@/types/reading";
 
 const createStoryweaverMock = vi.fn();
+const listChildrenMock = vi.fn().mockResolvedValue([]);
+
+vi.mock("@/lib/api/child-service", () => ({
+  createChildService: () => ({
+    list: listChildrenMock,
+  }),
+}));
 
 vi.mock("@/lib/api/parent-private-book-service", async (importOriginal) => {
   const actual =
@@ -42,6 +49,8 @@ vi.mock("@/hooks/use-auth-runtime", () => ({
 describe("Wave 2 — Studio V2 Multimodal Bridge, Duet Reading, Readability & Storyweaver", () => {
   beforeEach(() => {
     createStoryweaverMock.mockReset();
+    listChildrenMock.mockReset();
+    listChildrenMock.mockResolvedValue([]);
   });
 
   it("builds alternating Parent/Child duet turns and advances parent turn in RealtimeAlignmentEngine", () => {
@@ -274,6 +283,80 @@ describe("Wave 2 — Studio V2 Multimodal Bridge, Duet Reading, Readability & St
     await waitFor(() => {
       expect(screen.getByTestId("storyweaver-created-card")).toHaveTextContent(
         "Chuyến khám phá khu vườn nắng sớm",
+      );
+    });
+  });
+
+  it("loads child profiles when user cache is cold inside FamilyStoryweaverModal", async () => {
+    listChildrenMock.mockResolvedValueOnce([
+      {
+        id: "709c0abd-1304-4492-ac96-39872fe1e8b2",
+        parent_id: "10000000-0000-4000-8000-000000000001",
+        alias: "Bé Test",
+        grade: 2,
+        settings: {},
+        created_at: "2026-11-28T00:00:00Z",
+      },
+    ]);
+    createStoryweaverMock.mockResolvedValueOnce({
+      book_detail: {
+        book: {
+          id: "60000000-0000-4000-8000-000000000012",
+          title: "Truyện của Bé Test",
+          author: "Gia đình",
+          min_grade: 2,
+          max_grade: 2,
+          lifecycle_status: "ACTIVE",
+          visibility_scope: "PARENT_PRIVATE",
+          moderation_status: "ACTIVE",
+          suspended_reason: null,
+          source_declaration: "[SELF_AUTHORED]",
+          committed_page_count: 3,
+          pending_submission_count: 0,
+          flagged_submission_count: 0,
+          failed_submission_count: 0,
+          ready_to_add_count: 0,
+          readable_for_children: true,
+          has_held_multipage_batch: false,
+          privacy_notice: "Riêng tư",
+          created_at: "2026-11-28T00:00:00Z",
+        },
+        pages: [],
+        submissions: [],
+      },
+      target_words_used: [],
+      generation_source: "DETERMINISTIC_TEMPLATE",
+      readability: {
+        syllable_count: 30,
+        sentence_count: 5,
+        avg_syllables_per_sentence: 6,
+        complex_phonics_ratio: 0.1,
+        multisyllable_ratio: 0.05,
+        decodable_syllable_ratio: 0.98,
+        estimated_grade_band: "GRADE_2",
+        estimated_min_grade: 2,
+        estimated_max_grade: 2,
+        grade_match_status: "MATCHED",
+        phonics_readiness_score: 96,
+      },
+    });
+
+    render(<FamilyStoryweaverModal isOpen onClose={vi.fn()} />);
+
+    expect(
+      await screen.findByRole("option", { name: /Bé Test \(Lớp 2\)/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Tạo sách mỏng ngay/i }),
+    );
+
+    await waitFor(() => {
+      expect(createStoryweaverMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          child_id: "709c0abd-1304-4492-ac96-39872fe1e8b2",
+          target_grade: 2,
+        }),
       );
     });
   });

@@ -322,7 +322,8 @@
     "listenPhonics": "聽拼讀",
     "listeningRetry": "正在聆聽孩子…",
     "readAgain": "再讀一次",
-    "stepsAria": "拼讀步驟"
+    "stepsAria": "拼讀步驟",
+    "autoHideHint": "拼讀完成 · 即將收起以方便看清文字…"
   },
   "companion": {
     "teacherFemaleTitle": "AI 老師",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "拼讀範例 · 連貫讀出詞組",
     "quickFixTitle": "稱讚 · 自我修正很快！",
     "phonicsWinTitle": "稱讚 · 拼讀得很棒！",
-    "overcameWordTitle": "太好了 · 你克服了難詞！"
+    "overcameWordTitle": "太好了 · 你克服了難詞！",
+    "dismissAria": "隱藏老師提示"
   },
   "tutor": {
     "title": "這個詞該怎麼讀呢？",

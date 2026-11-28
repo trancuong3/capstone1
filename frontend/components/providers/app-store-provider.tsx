@@ -53,6 +53,34 @@ interface SelectionState {
   child: ChildProfileDTO | null;
 }
 
+function stableSettingsKey(
+  settings: Record<string, unknown> | null | undefined,
+): string {
+  if (!settings || typeof settings !== "object") return "{}";
+  try {
+    return JSON.stringify(settings);
+  } catch {
+    return "{}";
+  }
+}
+
+export function areEquivalentChildProfiles(
+  left: ChildProfileDTO | null | undefined,
+  right: ChildProfileDTO | null | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.parent_id === right.parent_id &&
+    left.alias === right.alias &&
+    left.grade === right.grade &&
+    (left.avatar_url ?? null) === (right.avatar_url ?? null) &&
+    left.created_at === right.created_at &&
+    stableSettingsKey(left.settings) === stableSettingsKey(right.settings)
+  );
+}
+
 export function AppStoreProvider({
   children,
   initialChildId = null,
@@ -284,6 +312,13 @@ export function AppStoreProvider({
             ? (current.childId ?? readSessionSelectedChildId(activeUserId))
             : current.childId;
         if (effectiveUserId !== activeUserId || effectiveChildId !== child.id) {
+          return current;
+        }
+        if (
+          current.userId === activeUserId &&
+          current.childId === effectiveChildId &&
+          areEquivalentChildProfiles(current.child, child)
+        ) {
           return current;
         }
         return {

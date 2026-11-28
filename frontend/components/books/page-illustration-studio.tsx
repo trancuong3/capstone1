@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
@@ -112,6 +113,7 @@ export function PageIllustrationStudio({
 }: PageIllustrationStudioProps) {
   const defaultService = useMemo(() => createBookAssetsService(), []);
   const service = injectedService ?? defaultService;
+  const taskCenter = useOptionalAiTaskCenter();
   const tCommon = useTranslations("common");
 
   const [summary, setSummary] = useState<BookAssetsSummaryDTO | null>(null);
@@ -207,6 +209,24 @@ export function PageIllustrationStudio({
         canonical_text: canonicalText,
         apply_clahe_restore: true,
       });
+      if (
+        typeof document === "undefined" ||
+        document.visibilityState !== "hidden"
+      ) {
+        if (res.asset?.job_id) {
+          taskCenter?.markTaskAlertSeen(res.asset.job_id, {
+            includeNextSync: true,
+          });
+        }
+        taskCenter?.markTargetAlertsSeen(
+          {
+            bookId,
+            bookPageId: pageId,
+            jobTypes: ["ILLUSTRATION_EXTRACT", "ILLUSTRATION_GENERATE"],
+          },
+          { includeNextSync: true },
+        );
+      }
       emitStudioTasksChanged({ portal: actorRole });
       if (res.asset) {
         setAsset(res.asset);
@@ -252,6 +272,25 @@ export function PageIllustrationStudio({
       const res = await service.generatePageIllustration(bookId, pageId, {
         prompt_hint: promptHint.trim() || null,
       });
+      const includeNextSync =
+        res.status !== "QUEUED" &&
+        res.status !== "WAITING_FOR_QUOTA" &&
+        (typeof document === "undefined" ||
+          document.visibilityState !== "hidden");
+      if (res.job_id) {
+        taskCenter?.markTaskAlertSeen(
+          res.job_id,
+          includeNextSync ? { includeNextSync: true } : undefined,
+        );
+      }
+      taskCenter?.markTargetAlertsSeen(
+        {
+          bookId,
+          bookPageId: pageId,
+          jobTypes: ["ILLUSTRATION_EXTRACT", "ILLUSTRATION_GENERATE"],
+        },
+        includeNextSync ? { includeNextSync: true } : undefined,
+      );
       emitStudioTasksChanged({ portal: actorRole });
       if (res.asset) {
         setAsset(res.asset);
@@ -317,6 +356,19 @@ export function PageIllustrationStudio({
       );
       setAsset(updated);
       onAssetChanged?.(updated);
+      if (updated.job_id) {
+        taskCenter?.markTaskAlertSeen(updated.job_id, {
+          includeNextSync: true,
+        });
+      }
+      taskCenter?.markTargetAlertsSeen(
+        {
+          bookId,
+          bookPageId: pageId,
+          jobTypes: ["ILLUSTRATION_EXTRACT", "ILLUSTRATION_GENERATE"],
+        },
+        { includeNextSync: true },
+      );
       emitStudioTasksChanged({ portal: actorRole });
       setNotice({
         tone: action === "REJECT" ? "warning" : "success",

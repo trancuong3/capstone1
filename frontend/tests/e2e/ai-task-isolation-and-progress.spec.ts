@@ -1055,11 +1055,26 @@ test.describe("AI Task Center portal isolation & percentage progress bars", () =
       tasks: parentTasks,
     });
 
+    let stallNextParentTaskSync = false;
+    const stalledSync: { release: (() => void) | null } = { release: null };
+
     await context.route(`${API_BASE}/**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
       const method = route.request().method();
 
       if (pathname === "/studio/parent/tasks") {
+        if (stallNextParentTaskSync) {
+          stallNextParentTaskSync = false;
+          await new Promise<void>((resolve) => {
+            stalledSync.release = resolve;
+          });
+          try {
+            await route.abort("aborted");
+          } catch {
+            // Request already cancelled by page.reload().
+          }
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -1285,13 +1300,21 @@ test.describe("AI Task Center portal isolation & percentage progress bars", () =
     ).toBeVisible();
     await expect(page.getByTestId("avatar-notification-dot")).toBeVisible();
 
-    // 2) Directly commit page 1 (addPage) without opening the task drawer:
-    // page 1 stays suppressed even after ADDED_TO_BOOK bumps updated_at, while failed page 2 still alerts.
+    // 2) Directly commit page 1 (addPage) without opening the task drawer,
+    // and immediately reload BEFORE the follow-up /studio/parent/tasks sync returns!
+    // Optimistic post-action signature in localStorage must keep page 1 suppressed
+    // even after ADDED_TO_BOOK bumps updated_at, while failed page 2 still alerts.
+    stallNextParentTaskSync = true;
     await page
       .locator(`[data-submission-id="${subReadyId}"]`)
       .getByRole("button", { name: "Thêm trang vào sách" })
       .click();
     await expect(page.getByText(/Đã thêm vào sách đọc/)).toBeVisible();
+    await page.reload();
+    stalledSync.release?.();
+    await expect(
+      page.getByRole("heading", { name: "Nhật Ký Mèo Con Gia Đình A" }),
+    ).toBeVisible();
     await expect(page.getByTestId("avatar-notification-dot")).toBeVisible();
 
     // 3) Directly retry failed page 2 without opening the task drawer ->

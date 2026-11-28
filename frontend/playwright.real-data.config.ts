@@ -45,7 +45,7 @@ export default defineConfig({
       PLAYWRIGHT_AUTH_FIXTURES: "1",
       PLAYWRIGHT_AUTH_FIXTURE_TOKEN: fixtureToken,
       PLAYWRIGHT_PORT: playwrightPort,
-      NEXT_DIST_DIR: ".next-e2e",
+      NEXT_DIST_DIR: process.env.NEXT_DIST_DIR ?? ".next-e2e",
     },
   },
   projects: [

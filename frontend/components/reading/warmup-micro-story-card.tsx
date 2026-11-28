@@ -60,7 +60,12 @@ export function WarmupMicroStoryCard({
       const result = await service.getWarmupStory(childId, { refresh: true });
       setLoadedState({ childId, story: result, failed: false });
       if (result.full_text) {
-        void speechPlayer.prefetch?.(result.full_text)?.catch(() => undefined);
+        void speechPlayer
+          .prefetch?.(result.full_text, {
+            bypassSessionLock: true,
+            cacheScope: "PRIVATE",
+          })
+          ?.catch(() => undefined);
       }
     } catch {
       setLoadedState((prev) =>
@@ -83,7 +88,10 @@ export function WarmupMicroStoryCard({
         setLoadedState({ childId, story: result, failed: false });
         if (result.full_text) {
           void speechPlayer
-            .prefetch?.(result.full_text)
+            .prefetch?.(result.full_text, {
+              bypassSessionLock: true,
+              cacheScope: "PRIVATE",
+            })
             ?.catch(() => undefined);
         }
       })

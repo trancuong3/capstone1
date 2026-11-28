@@ -66,13 +66,24 @@ export function isAlertableTaskStatus(status: GlobalTaskStatus): boolean {
   );
 }
 
+export type TaskAlertSignatureInput = Pick<
+  GlobalTaskItem,
+  | "id"
+  | "source"
+  | "status"
+  | "updated_at"
+  | "completed_at"
+  | "created_at"
+  | "attempt_count"
+>;
+
 /**
  * Produces a stable alert state signature for a task so that:
  * - Already-read/handled alerts remain dismissed across navigations and reloads.
  * - Any status change, retry attempt, or newer server update re-triggers the alert
  *   even under client/server clock skew.
  */
-export function buildTaskAlertSignature(task: GlobalTaskItem): string {
+export function buildTaskAlertSignature(task: TaskAlertSignatureInput): string {
   const timestamp =
     task.updated_at || task.completed_at || task.created_at || "";
   return `${task.status}|${timestamp}|${task.attempt_count}`;
@@ -245,7 +256,7 @@ export function subscribeTaskAlertAck(
  */
 export function acknowledgeTaskAlerts(
   scopeKey: string | null | undefined,
-  tasks: readonly GlobalTaskItem[],
+  tasks: readonly TaskAlertSignatureInput[],
   actorId?: string | null,
   actorRole?: GlobalTaskActorRole | null,
 ): boolean {
@@ -338,7 +349,7 @@ export function acknowledgeTaskAlerts(
 }
 
 export function isTaskAlertAcknowledged(
-  task: GlobalTaskItem,
+  task: TaskAlertSignatureInput,
   ackState: TaskAlertAckState,
 ): boolean {
   if (!isAlertableTaskStatus(task.status)) {

@@ -10,6 +10,7 @@ import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ChildSelector } from "@/components/reports/child-selector";
+import { ChildPhonemeGardenSection } from "@/components/achievements/achievements-screen";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
 import { MinimalPairSandbox } from "@/components/reading/minimal-pair-sandbox";
@@ -711,6 +712,11 @@ export function DifficultWordsScreen({
               ) : null}
             </div>
           ) : null}
+
+          <ChildPhonemeGardenSection
+            childId={state.child.id}
+            fullGardenHref={`/achievements?childId=${encodeURIComponent(state.child.id)}`}
+          />
 
           {state.words.length === 0 ? (
             <EmptyState

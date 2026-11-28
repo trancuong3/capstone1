@@ -8,6 +8,7 @@ storage calls strictly outside PostgreSQL transactions.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -36,6 +37,11 @@ from app.schemas.parent_private_book import (
 from app.services.book_quality_analyzer import analyse_verified_text
 from app.services.book_style_bible import analyze_book_style_deterministic
 from app.services.ocr_ai.config import OcrCorrectionConfig
+from app.services.ocr_inference_job_service import (
+    align_edited_text_to_words,
+    compute_candidate_hash,
+    normalize_word,
+)
 from app.services.parent_private_book_service import (
     MODERATION_ACTIVE,
     VISIBILITY_PARENT_PRIVATE,
@@ -47,6 +53,7 @@ from app.services.vietnamese_readability import analyse_vietnamese_readability
 from app.services.warmup_micro_story_service import WarmupMicroStoryService
 
 logger = logging.getLogger(__name__)
+HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
 
 StoryStyleMode = Literal["PROSE", "DUET_DIALOGUE", "POEM"]
 
@@ -275,14 +282,14 @@ class FamilyStoryweaverService:
         if _contains_unsafe_terms(payload.theme) or _contains_unsafe_terms(payload.title or ""):
             await self.db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=HTTP_422,
                 detail="UNSAFE_STORY_PROMPT",
             )
         for word in payload.custom_words:
             if _contains_unsafe_terms(word):
                 await self.db.rollback()
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=HTTP_422,
                     detail="UNSAFE_STORY_PROMPT",
                 )
 
@@ -351,26 +358,41 @@ class FamilyStoryweaverService:
         )[:180]
 
         book_id = uuid4()
-        page_specs: list[tuple[UUID, int, str, str]] = []
+        page_specs: list[tuple[UUID, int, str, str, str]] = []
         uploaded_paths: list[str] = []
 
+        async def _render_and_upload_page(
+            idx: int, page_text: str
+        ) -> tuple[UUID, int, str, str, str]:
+            page_id = uuid4()
+            permanent_path = f"private-books/{actor_id}/{book_id}/pages/{page_id}/rev-1.webp"
+            img_bytes = await asyncio.to_thread(
+                _render_storyweaver_page_webp, idx, len(story_pages)
+            )
+            img_sha = hashlib.sha256(img_bytes).hexdigest()
+            await asyncio.to_thread(
+                self._upload_fn,
+                permanent_path,
+                img_bytes,
+                "image/webp",
+                bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                upsert=False,
+            )
+            uploaded_paths.append(permanent_path)
+            return (page_id, idx, page_text, permanent_path, img_sha)
+
         try:
-            for idx, page_text in enumerate(story_pages, start=1):
-                page_id = uuid4()
-                permanent_path = f"private-books/{actor_id}/{book_id}/pages/{page_id}/rev-1.webp"
-                img_bytes = await asyncio.to_thread(
-                    _render_storyweaver_page_webp, idx, len(story_pages)
-                )
-                await asyncio.to_thread(
-                    self._upload_fn,
-                    permanent_path,
-                    img_bytes,
-                    "image/webp",
-                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
-                    upsert=False,
-                )
-                uploaded_paths.append(permanent_path)
-                page_specs.append((page_id, idx, page_text, permanent_path))
+            upload_results = await asyncio.gather(
+                *(
+                    _render_and_upload_page(idx, page_text)
+                    for idx, page_text in enumerate(story_pages, start=1)
+                ),
+                return_exceptions=True,
+            )
+            for res in upload_results:
+                if isinstance(res, BaseException):
+                    raise res
+                page_specs.append(res)
 
             # ------------------------------------------------------------------
             # Phase 3: Atomic PostgreSQL commit (Book + BookPage + PageRevision + Words)
@@ -395,16 +417,12 @@ class FamilyStoryweaverService:
             )
             await repo.create_private_book(book)
 
-            from app.services.ocr_inference_job_service import (
-                align_edited_text_to_words,
-                normalize_word,
-            )
-            from app.services.parent_private_book_pipeline import compute_candidate_hash
-
-            committed_revisions: list[tuple[UUID, UUID, int, str, list[dict[str, Any]]]] = []
-            for page_id, page_num, page_text, permanent_path in page_specs:
+            committed_revisions: list[tuple[UUID, UUID, int, str, list[dict[str, Any]], str]] = []
+            for page_id, page_num, page_text, permanent_path, img_sha in page_specs:
                 raw_words = align_edited_text_to_words(page_text, [])
-                cand_hash = compute_candidate_hash(page_text)
+                cand_hash = compute_candidate_hash(
+                    page_text, source_sha256=img_sha, is_image_only=False
+                )
                 page_row = BookPage(
                     Id=page_id,
                     BookId=book_id,
@@ -464,7 +482,9 @@ class FamilyStoryweaverService:
                     revision=revision_row,
                     words=word_rows,
                 )
-                committed_revisions.append((page_id, revision_id, page_num, page_text, raw_words))
+                committed_revisions.append(
+                    (page_id, revision_id, page_num, page_text, raw_words, img_sha)
+                )
 
             await repo.add_audit_log(
                 actor_id=actor_id,
@@ -528,7 +548,7 @@ class FamilyStoryweaverService:
         title: str,
         grade: int,
         style_mode: StoryStyleMode,
-        committed_revisions: list[tuple[UUID, UUID, int, str, list[dict[str, Any]]]],
+        committed_revisions: list[tuple[UUID, UUID, int, str, list[dict[str, Any]], str]],
     ) -> None:
         if not callable(getattr(self.db, "begin_nested", None)):
             return
@@ -543,6 +563,8 @@ class FamilyStoryweaverService:
                 else "TEXT_ONLY"
             )
             sample_texts = [p[3] for p in committed_revisions]
+            combined_sample_text = "\n".join(sample_texts)
+            combined_sha = hashlib.sha256(combined_sample_text.encode("utf-8")).hexdigest()
             bible = analyze_book_style_deterministic(
                 title=title,
                 author="Gia đình & Trạm Sáng Tạo ViRead",
@@ -556,14 +578,18 @@ class FamilyStoryweaverService:
                     BookStyleBible(
                         BookId=book_id,
                         OwnerId=actor_id,
-                        ContextHash=compute_candidate_hash("\n".join(sample_texts))[:64],
+                        ContextHash=compute_candidate_hash(
+                            combined_sample_text,
+                            source_sha256=combined_sha,
+                            is_image_only=False,
+                        )[:64],
                         BibleJson=bible.model_dump(mode="json"),
                         ProviderName="deterministic",
                         ModelId="storyweaver-v1",
                         UpdatedAt=now,
                     )
                 )
-                for page_id, revision_id, _, page_text, raw_words in committed_revisions:
+                for page_id, revision_id, _, page_text, raw_words, img_sha in committed_revisions:
                     lines_by_idx: dict[int, list[int]] = {}
                     for w_idx, item in enumerate(raw_words):
                         li = max(0, int(item.get("line_index", 0) or 0))
@@ -601,7 +627,11 @@ class FamilyStoryweaverService:
                             BookPageId=page_id,
                             PageRevisionId=revision_id,
                             OwnerId=actor_id,
-                            SourceHash=compute_candidate_hash(page_text)[:64],
+                            SourceHash=compute_candidate_hash(
+                                page_text,
+                                source_sha256=img_sha,
+                                is_image_only=False,
+                            )[:64],
                             AlgorithmVersion="storyweaver-v1",
                             FilterMode="active",
                             PageKind=page_kind,

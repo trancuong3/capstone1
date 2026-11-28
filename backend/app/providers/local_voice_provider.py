@@ -36,6 +36,12 @@ DEFAULT_LOCAL_TTS_PRECISION = "hybrid"
 DEFAULT_LOCAL_STT_MODE = "ws"
 LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
 CONNECT_TIMEOUT_SECONDS = 5.0
+LOOPBACK_CONNECT_TIMEOUT_SECONDS = 0.5
+LOOPBACK_CIRCUIT_COOLDOWN_SECONDS = 10.0
+REMOTE_CIRCUIT_COOLDOWN_SECONDS = 15.0
+AUTOSTART_INLINE_WAIT_SECONDS = 1.5
+DEFAULT_LOOPBACK_STT_TIMEOUT_SECONDS = 5.0
+DEFAULT_REMOTE_STT_TIMEOUT_SECONDS = 9.0
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 # Shared per-(event_loop, base_url) AsyncClient pool so persistent TLS connections
@@ -425,10 +431,21 @@ class LocalVoiceProvider:
         self._inflight_client_counts: dict[int, int] = {}
         self._deferred_close_clients: dict[int, Any] = {}
 
-    def _trip_remote_circuit(self, client: Any, error_code: str = "LOCAL_VOICE_UNAVAILABLE") -> None:
-        if self.is_loopback:
+    def _trip_remote_circuit(
+        self,
+        client: Any,
+        error_code: str = "LOCAL_VOICE_UNAVAILABLE",
+        *,
+        allow_loopback: bool = False,
+    ) -> None:
+        if self.is_loopback and not allow_loopback:
             return
-        self._remote_unavailable_until = time.monotonic() + 15.0
+        ttl = (
+            LOOPBACK_CIRCUIT_COOLDOWN_SECONDS
+            if self.is_loopback
+            else REMOTE_CIRCUIT_COOLDOWN_SECONDS
+        )
+        self._remote_unavailable_until = time.monotonic() + ttl
         self._remote_unavailable_error_code = error_code
         # In production `_get_client` is unbound on the instance; if a unit test patches
         # `provider._get_client` to swap fake clients mid-test, scope the breaker to that mock.
@@ -444,7 +461,7 @@ class LocalVoiceProvider:
         self._remote_unavailable_override = None
 
     def _is_remote_circuit_open(self, client: Any | None = None) -> bool:
-        if self.is_loopback or time.monotonic() >= self._remote_unavailable_until:
+        if time.monotonic() >= self._remote_unavailable_until:
             return False
         recorded_override = getattr(self, "_remote_unavailable_override", None)
         current_override = self.__dict__.get("_get_client")
@@ -458,17 +475,31 @@ class LocalVoiceProvider:
             return False
         return True
 
-    def _schedule_background_recovery(self) -> None:
+    def is_circuit_open(self) -> bool:
+        """Return True when the loopback or remote worker circuit breaker is currently tripped."""
+        probe_client = self._get_client() if "_get_client" in self.__dict__ else None
+        return self._is_remote_circuit_open(probe_client)
+
+    def circuit_error_code(self) -> str:
+        """Return the last error code that tripped the circuit breaker."""
+        return self._remote_unavailable_error_code
+
+    def trip_connect_circuit(self, error_code: str = "LOCAL_VOICE_UNAVAILABLE") -> None:
+        """Trip the circuit breaker after a confirmed transport/WebSocket dial failure."""
+        probe_client = self._get_client() if "_get_client" in self.__dict__ else None
+        self._trip_remote_circuit(probe_client, error_code, allow_loopback=True)
+
+    def _start_or_get_recovery_task(self) -> asyncio.Task[bool] | None:
         if not self.is_loopback or not is_local_voice_worker_autostart_armed():
-            return
+            return None
         if self._recovery_task is not None and not self._recovery_task.done():
-            return
+            return self._recovery_task
         try:
             task = asyncio.create_task(
                 ensure_local_voice_worker_running(base_url=self.base_url)
             )
         except RuntimeError:
-            return
+            return None
         self._recovery_task = task
 
         def _on_done(done_task: asyncio.Task[bool]) -> None:
@@ -476,11 +507,41 @@ class LocalVoiceProvider:
                 self._recovery_task = None
             if not done_task.cancelled():
                 try:
-                    done_task.exception()
+                    if done_task.result():
+                        self._clear_remote_circuit()
                 except Exception:
                     pass
 
         task.add_done_callback(_on_done)
+        return task
+
+    def _schedule_background_recovery(self) -> None:
+        self._start_or_get_recovery_task()
+
+    async def _await_bounded_recovery(
+        self, *, timeout: float | None = None
+    ) -> bool:
+        """Wait briefly for loopback worker autostart, letting slow startups finish in background."""
+        task = self._start_or_get_recovery_task()
+        if task is None:
+            return False
+        wait_timeout = (
+            AUTOSTART_INLINE_WAIT_SECONDS if timeout is None else max(0.01, float(timeout))
+        )
+        try:
+            recovered = await asyncio.wait_for(asyncio.shield(task), timeout=wait_timeout)
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning(
+                "local_voice_autostart_backgrounded timeout_s=%.2f base_url=%s",
+                wait_timeout,
+                self.base_url,
+            )
+            return False
+        except Exception:
+            return False
+        if recovered:
+            self._clear_remote_circuit()
+        return bool(recovered)
 
     async def _is_incompatible_auth_worker(self) -> bool:
         if not self.base_url or not self.is_loopback or self._get_token():
@@ -539,9 +600,18 @@ class LocalVoiceProvider:
                 headers["X-ViRead-Voice-Token"] = token
         return headers
 
-    @staticmethod
-    def _make_timeout(read_timeout: float, connect_timeout: float = CONNECT_TIMEOUT_SECONDS) -> httpx.Timeout:
-        connect = min(CONNECT_TIMEOUT_SECONDS, max(0.5, float(connect_timeout)))
+    def _make_timeout(
+        self,
+        read_timeout: float,
+        connect_timeout: float | None = None,
+    ) -> httpx.Timeout:
+        default_connect = (
+            LOOPBACK_CONNECT_TIMEOUT_SECONDS
+            if self.is_loopback
+            else CONNECT_TIMEOUT_SECONDS
+        )
+        raw_connect = default_connect if connect_timeout is None else float(connect_timeout)
+        connect = min(CONNECT_TIMEOUT_SECONDS, max(0.5, raw_connect))
         read = max(0.5, float(read_timeout))
         return httpx.Timeout(read, connect=connect, write=min(15.0, read), pool=5.0)
 
@@ -634,6 +704,14 @@ class LocalVoiceProvider:
             await self._close_single_client(client)
 
     async def aclose(self) -> None:
+        task = self._recovery_task
+        self._recovery_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
         await self._reset_client(force_close=True)
 
     async def _post_with_retry(
@@ -663,12 +741,12 @@ class LocalVoiceProvider:
             headers.update(extra_headers)
         http_timeout = self._make_timeout(timeout)
         retry_limit = max(0, int(max_retries))
-        busy_retry_limit = max(3, retry_limit)
+        busy_retry_limit = 1
         retries_used = 0
         busy_retries_used = 0
         protocol_resets_used = 0
         backoffs = (0.25, 0.6)
-        busy_backoffs = (0.35, 0.75, 1.25)
+        busy_backoffs = (0.20,)
         busy_codes = {
             "VOICE_WORKER_BUSY",
             "LOCAL_VOICE_BUSY",
@@ -690,25 +768,29 @@ class LocalVoiceProvider:
                 )
             except httpx.ConnectTimeout as exc:
                 await self._release_client(client)
-                self._trip_remote_circuit(client, "LOCAL_VOICE_TIMEOUT")
-                # Fail fast within the 5s connect budget instead of hanging on a dead tunnel.
+                self._trip_remote_circuit(
+                    client, "LOCAL_VOICE_TIMEOUT", allow_loopback=True
+                )
+                # Fail fast within the connect budget instead of hanging on a dead worker/tunnel.
                 raise exc
             except httpx.ConnectError as exc:
                 await self._release_client(client)
                 last_exc = exc
                 await self._reset_client()
                 if not self.is_loopback or retries_used >= retry_limit:
-                    self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
+                    self._trip_remote_circuit(
+                        client, "LOCAL_VOICE_UNAVAILABLE", allow_loopback=True
+                    )
                     raise
                 retries_used += 1
                 if is_local_voice_worker_autostart_armed():
-                    recovered = await ensure_local_voice_worker_running(
-                        base_url=self.base_url
-                    )
+                    recovered = await self._await_bounded_recovery()
                     if recovered:
                         continue
-                await asyncio.sleep(backoff_s)
-                continue
+                self._trip_remote_circuit(
+                    client, "LOCAL_VOICE_UNAVAILABLE", allow_loopback=True
+                )
+                raise
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
                 await self._release_client(client)
                 last_exc = exc
@@ -766,9 +848,7 @@ class LocalVoiceProvider:
                 and await self._is_incompatible_auth_worker()
             ):
                 await self._reset_client()
-                recovered = await ensure_local_voice_worker_running(
-                    base_url=self.base_url
-                )
+                recovered = await self._await_bounded_recovery()
                 if recovered:
                     continue
             return resp
@@ -811,7 +891,10 @@ class LocalVoiceProvider:
                 client.get(
                     f"{self.base_url}/health",
                     headers=self._request_headers(include_auth=self.is_loopback),
-                    timeout=self._make_timeout(2.0, 2.0),
+                    timeout=self._make_timeout(
+                        2.0,
+                        LOOPBACK_CONNECT_TIMEOUT_SECONDS if self.is_loopback else 2.0,
+                    ),
                 ),
                 timeout=2.5,
             )
@@ -890,6 +973,18 @@ class LocalVoiceProvider:
                 "worker_version": data.get("version"),
                 "latency_ms": latency_ms,
             }
+        except httpx.ConnectTimeout:
+            self._trip_remote_circuit(client, "LOCAL_VOICE_TIMEOUT", allow_loopback=True)
+            return {
+                "configured": True,
+                "available": False,
+                "stt_ready": False,
+                "tts_ready": False,
+                "error_code": "LOCAL_VOICE_TIMEOUT",
+                "stt_error_code": "LOCAL_VOICE_TIMEOUT",
+                "tts_error_code": "LOCAL_VOICE_TIMEOUT",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+            }
         except (httpx.TimeoutException, asyncio.TimeoutError):
             self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
             return {
@@ -903,7 +998,7 @@ class LocalVoiceProvider:
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             }
         except httpx.ConnectError:
-            self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
+            self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE", allow_loopback=True)
             self._schedule_background_recovery()
             return {
                 "configured": True,
@@ -1336,6 +1431,8 @@ class LocalVoiceProvider:
         source: str | None = None,
         session_id: str | None = None,
         turn_id: str | None = None,
+        timeout: float | None = None,
+        retry_on_timeout: bool | None = None,
     ) -> LocalTranscription:
         form_data: dict[str, Any] = {
             "language": (language_code or "vi").strip() or "vi",
@@ -1358,12 +1455,25 @@ class LocalVoiceProvider:
             form_data["session_id"] = session_id.strip()[:80]
         if turn_id:
             form_data["turn_id"] = turn_id.strip()[:80]
+        effective_timeout = (
+            max(0.5, float(timeout))
+            if timeout is not None
+            else (
+                DEFAULT_LOOPBACK_STT_TIMEOUT_SECONDS
+                if self.is_loopback
+                else DEFAULT_REMOTE_STT_TIMEOUT_SECONDS
+            )
+        )
+        should_retry_timeout = (
+            (True if retry_on_timeout is None else bool(retry_on_timeout))
+            and effective_timeout >= 3.0
+        )
         try:
             resp = await self._post_with_retry(
                 "/stt",
-                timeout=9.0,
+                timeout=effective_timeout,
                 max_retries=1,
-                retry_on_timeout=True,
+                retry_on_timeout=should_retry_timeout,
                 data=form_data,
                 files={"audio_file": (filename, audio, content_type)},
             )

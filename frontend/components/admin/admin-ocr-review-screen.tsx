@@ -87,6 +87,25 @@ import type {
   AdminRevisionWordDTO,
   AdminRevisionVerifyRequestDTO,
 } from "@/types/admin";
+import type { GlobalTaskStatus } from "@/types/global-tasks";
+
+function mapAdminWorkflowStatusToGlobalTaskStatus(
+  status: AdminAiWorkflowDTO["status"] | undefined,
+): GlobalTaskStatus | undefined {
+  switch (status) {
+    case "READY_FOR_ADMIN_REVIEW":
+      return "WAITING_FOR_REVIEW";
+    case "FAILED":
+      return "FAILED";
+    case "QUEUED":
+      return "QUEUED";
+    case "PROOFREADING":
+    case "CHILD_SAFETY_SCANNING":
+      return "RUNNING";
+    default:
+      return undefined;
+  }
+}
 
 type LoadError = "not-found" | "unavailable" | "safe";
 type WordFilter = "all" | "review" | "risk" | "disagreement" | "red" | "green";
@@ -878,6 +897,10 @@ export function AdminOcrReviewScreen({
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
   const taskCenter = useOptionalAiTaskCenter();
+  const taskCenterRef = useRef(taskCenter);
+  useEffect(() => {
+    taskCenterRef.current = taskCenter;
+  }, [taskCenter]);
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
@@ -1244,6 +1267,17 @@ export function AdminOcrReviewScreen({
           }
           setAiWorkflow(updated);
           setCandidateEditPending(false);
+          if (
+            updated.status !== aiWorkflow.status ||
+            updated.candidate_version !== aiWorkflow.candidate_version
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(updated.workflow_id);
+            taskCenterRef.current?.markTargetAlertsSeen({
+              bookId,
+              bookPageId: pageId,
+            });
+            emitStudioTasksChanged({ portal: "admin" });
+          }
         })
         .catch(async (cause: unknown) => {
           if (
@@ -1292,6 +1326,7 @@ export function AdminOcrReviewScreen({
     };
   }, [
     aiWorkflow,
+    bookId,
     candidateEditPending,
     detail,
     draftText,
@@ -1334,6 +1369,34 @@ export function AdminOcrReviewScreen({
         );
         if (!disposed && latest?.workflow_id === activeWorkflowId) {
           setAiWorkflow(latest);
+          if (
+            !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+              latest.status,
+            )
+          ) {
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(latest.workflow_id, {
+                includeNextSync: true,
+                optimisticTask: {
+                  source: "admin_ai_workflow",
+                  status: mapAdminWorkflowStatusToGlobalTaskStatus(
+                    latest.status,
+                  ),
+                  updated_at: latest.updated_at,
+                  completed_at: latest.ocr_approved_at,
+                  attempt_count: latest.attempts,
+                },
+              });
+              taskCenterRef.current?.markTargetAlertsSeen(
+                { bookId, bookPageId: pageId },
+                { includeNextSync: true },
+              );
+            }
+            emitStudioTasksChanged({ portal: "admin" });
+          }
         }
       } catch {
         // The page remains usable while this durable workflow is temporarily unavailable.
@@ -1349,6 +1412,7 @@ export function AdminOcrReviewScreen({
     activeWorkflowId,
     activeWorkflowRevisionId,
     activeWorkflowStatus,
+    bookId,
     ocr,
     pageId,
   ]);
@@ -1635,13 +1699,25 @@ export function AdminOcrReviewScreen({
         return;
       }
       setAiWorkflow(workflow);
-      taskCenter?.markTaskAlertSeen(workflow.workflow_id, {
-        includeNextSync: true,
-      });
-      taskCenter?.markTargetAlertsSeen(
-        { bookId, bookPageId: pageId },
-        { includeNextSync: true },
-      );
+      if (
+        typeof document === "undefined" ||
+        document.visibilityState !== "hidden"
+      ) {
+        taskCenter?.markTaskAlertSeen(workflow.workflow_id, {
+          includeNextSync: true,
+          optimisticTask: {
+            source: "admin_ai_workflow",
+            status: mapAdminWorkflowStatusToGlobalTaskStatus(workflow.status),
+            updated_at: workflow.updated_at,
+            completed_at: workflow.ocr_approved_at,
+            attempt_count: workflow.attempts,
+          },
+        });
+        taskCenter?.markTargetAlertsSeen(
+          { bookId, bookPageId: pageId },
+          { includeNextSync: true },
+        );
+      }
       emitStudioTasksChanged({ portal: "admin" });
       const correctedText = workflow.proofread_text?.normalize("NFC");
       if (!correctedText) {
@@ -1752,6 +1828,15 @@ export function AdminOcrReviewScreen({
       setAiWorkflow(updatedWorkflow);
       taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
         includeNextSync: true,
+        optimisticTask: {
+          source: "admin_ai_workflow",
+          status: mapAdminWorkflowStatusToGlobalTaskStatus(
+            updatedWorkflow.status,
+          ),
+          updated_at: updatedWorkflow.updated_at,
+          completed_at: updatedWorkflow.ocr_approved_at,
+          attempt_count: updatedWorkflow.attempts,
+        },
       });
       taskCenter?.markTargetAlertsSeen(
         { bookId, bookPageId: pageId },
@@ -1795,6 +1880,15 @@ export function AdminOcrReviewScreen({
       setAiWorkflow(updatedWorkflow);
       taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
         includeNextSync: true,
+        optimisticTask: {
+          source: "admin_ai_workflow",
+          status: mapAdminWorkflowStatusToGlobalTaskStatus(
+            updatedWorkflow.status,
+          ),
+          updated_at: updatedWorkflow.updated_at,
+          completed_at: updatedWorkflow.ocr_approved_at,
+          attempt_count: updatedWorkflow.attempts,
+        },
       });
       taskCenter?.markTargetAlertsSeen(
         { bookId, bookPageId: pageId },
@@ -2065,6 +2159,15 @@ export function AdminOcrReviewScreen({
       if (latestWorkflow) {
         taskCenter?.markTaskAlertSeen(latestWorkflow.workflow_id, {
           includeNextSync: true,
+          optimisticTask: {
+            source: "admin_ai_workflow",
+            status: mapAdminWorkflowStatusToGlobalTaskStatus(
+              latestWorkflow.status,
+            ),
+            updated_at: latestWorkflow.updated_at,
+            completed_at: latestWorkflow.ocr_approved_at,
+            attempt_count: latestWorkflow.attempts,
+          },
         });
       }
       taskCenter?.markTargetAlertsSeen(
@@ -2319,11 +2422,12 @@ export function AdminOcrReviewScreen({
     try {
       if (typeof pages.cancelOcrJob === "function") {
         await pages.cancelOcrJob(queuedOcrJobId);
+        taskCenter?.markTaskAlertSeen(queuedOcrJobId);
         emitStudioTasksChanged({ portal: "admin" });
       } else {
+        taskCenter?.markTaskAlertSeen(queuedOcrJobId);
         await cancelAdminOcrJob(queuedOcrJobId);
       }
-      taskCenter?.markTaskAlertSeen(queuedOcrJobId);
       if (!mountedRef.current) return;
       setQueuedOcrJob(null);
       setNotice(
@@ -2469,6 +2573,7 @@ export function AdminOcrReviewScreen({
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
         taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+        emitStudioTasksChanged({ portal: "admin" });
         setNotice(cause.message, "info");
         return;
       }
@@ -2541,6 +2646,7 @@ export function AdminOcrReviewScreen({
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
         taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+        emitStudioTasksChanged({ portal: "admin" });
         setReplacementFile(null);
         const input = document.getElementById(
           "replacement-page-image",

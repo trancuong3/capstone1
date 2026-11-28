@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
@@ -786,6 +787,14 @@ function ProgressReportContent({
           />
         </div>
       </header>
+
+      <FiveMinuteTrainCtaCard
+        childAlias={child.alias}
+        childId={child.id}
+        compact
+        focusWords={allDifficultWords.slice(0, 3).map((w) => w.display_text)}
+        sourceSurface="reports"
+      />
 
       {state.periodsError ? (
         <StatusMessage title={t("overview.periodListErrorTitle")} tone="error">

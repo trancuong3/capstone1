@@ -322,7 +322,8 @@
     "listenPhonics": "Écouter le découpage syllabique",
     "listeningRetry": "Écoute de l'enfant…",
     "readAgain": "Relire",
-    "stepsAria": "Étapes d'épellation"
+    "stepsAria": "Étapes d'épellation",
+    "autoHideHint": "Épellation terminée · Masquage pour mieux lire le texte…"
   },
   "companion": {
     "teacherFemaleTitle": "Professeur IA",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "Exemple de phonétique · Lire le groupe de mots",
     "quickFixTitle": "Encouragement · Auto-correction très rapide !",
     "phonicsWinTitle": "Encouragement · Excellent travail de décodage !",
-    "overcameWordTitle": "Bravo · Tu as maîtrisé un mot difficile !"
+    "overcameWordTitle": "Bravo · Tu as maîtrisé un mot difficile !",
+    "dismissAria": "Masquer le message"
   },
   "tutor": {
     "title": "Comment lit-on ce mot ?",

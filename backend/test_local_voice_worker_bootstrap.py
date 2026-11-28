@@ -134,11 +134,14 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
     async def test_local_voice_provider_does_not_autostart_when_unarmed(self) -> None:
         bootstrap.arm_local_voice_worker_autostart(False)
         provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        calls = 0
 
         class AlwaysFailClient:
             is_closed = False
 
             async def post(self, url, **_kwargs):
+                nonlocal calls
+                calls += 1
                 raise httpx.ConnectError(
                     "Connection refused", request=httpx.Request("POST", url)
                 )
@@ -159,6 +162,7 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         mock_ensure.assert_not_called()
+        self.assertEqual(calls, 1)
 
     async def test_ensure_local_voice_worker_uses_pipe_free_popen_for_uvicorn_windows_loop(
         self,
@@ -390,6 +394,114 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 base_url="http://127.0.0.1:8010"
             )
             self.assertIsNone(provider._recovery_task)
+
+    async def test_slow_autostart_is_bounded_inline_and_trips_loopback_circuit_breaker(
+        self,
+    ) -> None:
+        import time
+        from app.providers import local_voice_provider as lvp_mod
+
+        bootstrap.arm_local_voice_worker_autostart(True)
+        provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        self.assertEqual(provider._make_timeout(5.0).connect, 0.5)
+
+        post_calls = 0
+
+        class DownClient:
+            is_closed = False
+
+            async def post(self, url, **_kwargs):
+                nonlocal post_calls
+                post_calls += 1
+                raise httpx.ConnectError(
+                    "Connection refused", request=httpx.Request("POST", url)
+                )
+
+            async def aclose(self):
+                self.is_closed = True
+
+        started_gate = asyncio.Event()
+        release_gate = asyncio.Event()
+
+        async def _slow_ensure(*, base_url: str | None = None) -> bool:
+            del base_url
+            started_gate.set()
+            await release_gate.wait()
+            return True
+
+        provider._client = DownClient()  # type: ignore[assignment]
+        with (
+            patch.object(lvp_mod, "AUTOSTART_INLINE_WAIT_SECONDS", 0.08),
+            patch.object(
+                lvp_mod,
+                "ensure_local_voice_worker_running",
+                side_effect=_slow_ensure,
+            ),
+        ):
+            t0 = time.perf_counter()
+            with self.assertRaises(lvp_mod.LocalVoiceTechnicalError) as err1:
+                await provider.transcribe(
+                    audio=b"RIFF....",
+                    filename="seg.wav",
+                    content_type="audio/wav",
+                )
+            elapsed = time.perf_counter() - t0
+            self.assertEqual(err1.exception.code, "LOCAL_STT_UNAVAILABLE")
+            self.assertLess(elapsed, 0.5)
+            self.assertTrue(started_gate.is_set())
+            self.assertIsNotNone(provider._recovery_task)
+            self.assertTrue(provider.is_circuit_open())
+            self.assertEqual(post_calls, 1)
+
+            # Second request fails fast immediately via loopback circuit breaker
+            t1 = time.perf_counter()
+            with self.assertRaises(lvp_mod.LocalVoiceTechnicalError):
+                await provider.transcribe(
+                    audio=b"RIFF....",
+                    filename="seg.wav",
+                    content_type="audio/wav",
+                )
+            self.assertLess(time.perf_counter() - t1, 0.05)
+            self.assertEqual(post_calls, 1)
+
+            # Once background startup finishes True, circuit clears automatically
+            release_gate.set()
+            await asyncio.sleep(0.02)
+            self.assertFalse(provider.is_circuit_open())
+
+    async def test_aclose_cancels_and_awaits_background_recovery_task(self) -> None:
+        from app.providers import local_voice_provider as lvp_mod
+
+        bootstrap.arm_local_voice_worker_autostart(True)
+        provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        started = asyncio.Event()
+        cancelled = False
+
+        async def _hung_ensure(*, base_url: str | None = None) -> bool:
+            nonlocal cancelled
+            del base_url
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+            return False
+
+        with patch.object(
+            lvp_mod, "ensure_local_voice_worker_running", side_effect=_hung_ensure
+        ):
+            provider._schedule_background_recovery()
+            task = provider._recovery_task
+            self.assertIsNotNone(task)
+            assert task is not None
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+            await provider.aclose()
+
+        self.assertIsNone(provider._recovery_task)
+        self.assertTrue(task.done())
+        self.assertTrue(task.cancelled())
+        self.assertTrue(cancelled)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { ReadingPassportPanel } from "@/components/dashboard/reading-passport-panel";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -154,11 +155,20 @@ export function FamilyReadingDesk({
             </button>
           </div>
         ) : null}
-
         {child && deskTab === "passport" ? (
           <ReadingPassportPanel childAlias={child.alias} childId={child.id} />
         ) : (
           <>
+            {hasProfiles && child ? (
+              <div className="mb-3">
+                <FiveMinuteTrainCtaCard
+                  childAlias={child.alias}
+                  childId={child.id}
+                  compact
+                  sourceSurface="dashboard"
+                />
+              </div>
+            ) : null}
             <div className="desk-label">
               <BookOpen aria-hidden="true" size={17} />
               {recent?.resumable

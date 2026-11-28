@@ -3,9 +3,12 @@
 import Image from "next/image";
 import {
   ArrowRight,
+  BookHeart,
   BookOpen,
   Brain,
   Coffee,
+  Ear,
+  Flower2,
   HelpCircle,
   Mic,
   Music2,
@@ -19,16 +22,23 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { TaiThinhEarTrainerModal } from "@/components/entertainment/tai-thinh-ear-trainer-modal";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
-import { AppStoreContext } from "@/components/providers/app-store-provider";
+import {
+  AppStoreContext,
+  areEquivalentChildProfiles,
+} from "@/components/providers/app-store-provider";
+import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -37,9 +47,21 @@ import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import {
+  createRegionalPhoneticService,
+  type RegionalPhoneticService,
+} from "@/lib/api/regional-phonetics-service";
+import {
+  createVocabularyNotebookService,
+  type VocabularyNotebookListDTO,
+  type VocabularyNotebookService,
+} from "@/lib/api/vocabulary-notebook-service";
 import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
+import { usePhonemeGardenTranslations } from "@/messages/features/phoneme_garden";
+import { useRegionalDialectTranslations } from "@/messages/features/regional_dialect";
+import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
 import type {
   CrossGameRecommendationDTO,
   EntertainmentRecommendationsDTO,
@@ -51,6 +73,8 @@ const ONBOARDING_STORAGE_KEY = "viread:entertainment-v4-onboarding-done";
 
 interface Props {
   readonly initialRecommendations?: EntertainmentRecommendationsDTO | null;
+  readonly vocabularyService?: VocabularyNotebookService;
+  readonly regionalPhoneticService?: RegionalPhoneticService;
 }
 
 function ViReadMascot({ reducedMotion }: { readonly reducedMotion: boolean }) {
@@ -187,20 +211,35 @@ function HubSelectedChildSync({
   readonly onChildReady: (child: ChildProfileDTO) => void;
 }) {
   const { state } = useValidatedSelectedChild();
+  const readyChild = state.status === "ready" ? state.child : null;
 
   useEffect(() => {
-    if (state.status === "ready") {
-      onChildReady(state.child);
+    if (readyChild) {
+      onChildReady(readyChild);
     }
-  }, [onChildReady, state]);
+  }, [onChildReady, readyChild]);
 
   return null;
 }
 
 export function EntertainmentScreen({
   initialRecommendations = null,
+  vocabularyService,
+  regionalPhoneticService,
 }: Props = {}) {
   const tRaw = useTranslations("entertainment");
+  const tGlossary = useWordGlossaryTranslations();
+  const tDialect = useRegionalDialectTranslations();
+  const tGarden = usePhonemeGardenTranslations();
+  const resolvedVocabService = useMemo(
+    () => vocabularyService ?? createVocabularyNotebookService(),
+    [vocabularyService],
+  );
+  const resolvedDialectService = useMemo(
+    () => regionalPhoneticService ?? createRegionalPhoneticService(),
+    [regionalPhoneticService],
+  );
+  const [earTrainerOpen, setEarTrainerOpen] = useState(false);
   const teacherPersona = useTeacherPersona();
   const t = useCallback(
     (
@@ -217,7 +256,13 @@ export function EntertainmentScreen({
   const tCommon = useTranslations("common");
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
+  const appStoreRef = useRef(appStore);
+  const hasAppStore = appStore !== null;
   const appServices = useContext(AppServicesContext);
+
+  useEffect(() => {
+    appStoreRef.current = appStore;
+  }, [appStore]);
   const speechPlayer = useSpeechPlayer();
   const speechPlayerRef = useRef(speechPlayer);
   const {
@@ -243,7 +288,11 @@ export function EntertainmentScreen({
     const cleaned = word.trim();
     if (!cleaned || !calmSound) return;
     void speechPlayer
-      .play(cleaned, { wordSample: true, speedScale: 0.92 })
+      .play(cleaned, {
+        wordSample: true,
+        speedScale: 0.92,
+        bypassSessionLock: true,
+      })
       .catch(() => undefined);
   }
 
@@ -259,6 +308,9 @@ export function EntertainmentScreen({
   const [loadingRecsForChildId, setLoadingRecsForChildId] = useState<
     string | null
   >(null);
+  const [notebookData, setNotebookData] =
+    useState<VocabularyNotebookListDTO | null>(null);
+  const [notebookDrawerOpen, setNotebookDrawerOpen] = useState(false);
 
   const storedShowOnboarding = useSyncExternalStore(
     emptySubscribe,
@@ -284,9 +336,11 @@ export function EntertainmentScreen({
 
   const handleValidatedChildReady = useCallback((child: ChildProfileDTO) => {
     setValidatedChild((current) =>
-      current?.id === child.id ? current : child,
+      areEquivalentChildProfiles(current, child) ? current : child,
     );
   }, []);
+
+  const hasInitialRecommendations = initialRecommendations !== null;
 
   useEffect(() => {
     let active = true;
@@ -298,21 +352,22 @@ export function EntertainmentScreen({
         if (!active) return;
         setChildrenList(children);
         if (!children.length) return;
-        const currentSelected = appStore?.selectedChildId ?? null;
+        const store = appStoreRef.current;
+        const currentSelected = store?.selectedChildId ?? null;
         if (currentSelected) {
           const matchedSelected =
             children.find((item) => item.id === currentSelected) ?? null;
           if (matchedSelected) {
-            appStore?.setValidatedSelectedChild(matchedSelected);
+            store?.setValidatedSelectedChild(matchedSelected);
             hydrateTeacherVoiceFromChildProfile(matchedSelected);
           }
           return;
         }
-        if (appStore) {
-          appStore.selectChild(children[0].id);
-          appStore.setValidatedSelectedChild(children[0]);
+        if (store) {
+          store.selectChild(children[0].id);
+          store.setValidatedSelectedChild(children[0]);
           hydrateTeacherVoiceFromChildProfile(children[0]);
-        } else if (!initialRecommendations) {
+        } else if (!hasInitialRecommendations) {
           setFallbackChildId(children[0].id);
           hydrateTeacherVoiceFromChildProfile(children[0]);
         }
@@ -325,7 +380,7 @@ export function EntertainmentScreen({
     return () => {
       active = false;
     };
-  }, [appServices?.childService, appStore, initialRecommendations]);
+  }, [appServices?.childService, hasAppStore, hasInitialRecommendations]);
 
   useEffect(() => {
     const targetChildId = appStore?.selectedChildId ?? fallbackChildId;
@@ -369,6 +424,65 @@ export function EntertainmentScreen({
     initialRecommendations,
     teacherPersona.gender,
   ]);
+
+  useEffect(() => {
+    if (!activeChildId) return;
+    const childId = activeChildId;
+    let active = true;
+    let controller: AbortController | null = null;
+
+    const refreshOnReturn = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      controller?.abort();
+      const nextController = new AbortController();
+      controller = nextController;
+      void createAdaptiveLearningService()
+        .getRecommendations(childId, teacherPersona.gender, {
+          bypassCache: true,
+          signal: nextController.signal,
+        })
+        .then((recs) => {
+          if (active && !nextController.signal.aborted) {
+            setFetchedRecommendations(recs);
+          }
+        })
+        .catch(() => undefined);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshOnReturn();
+      }
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        refreshOnReturn();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      active = false;
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [activeChildId, teacherPersona.gender]);
+
+  useEffect(() => {
+    if (!activeChildId) return;
+    const controller = new AbortController();
+    void resolvedVocabService
+      .listNotebook(activeChildId, 20, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setNotebookData(data);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [activeChildId, resolvedVocabService]);
 
   const recommendations =
     fetchedRecommendations &&
@@ -426,10 +540,102 @@ export function EntertainmentScreen({
       item,
     ]),
   );
+  const activeChildNotebook =
+    notebookData && (!activeChildId || notebookData.child_id === activeChildId)
+      ? notebookData
+      : null;
+  const notebookBonusWords = useMemo(() => {
+    if (!activeChildNotebook) return [];
+    const difficultNormSet = new Set(
+      (recommendations?.focus_difficult_words ?? []).map((w) =>
+        w.trim().toLowerCase(),
+      ),
+    );
+    const candidates = activeChildNotebook.storytelling_words?.length
+      ? activeChildNotebook.storytelling_words
+      : activeChildNotebook.items.map((item) => item.word);
+    return candidates
+      .filter(
+        (w) =>
+          Boolean(w.trim()) && !difficultNormSet.has(w.trim().toLowerCase()),
+      )
+      .slice(0, 3);
+  }, [activeChildNotebook, recommendations?.focus_difficult_words]);
+
   const primaryRec = recommendations?.primary_recommendation ?? null;
-  const focusWordsForLaunch = primaryRec?.target_words.length
+  const dueFocusWords = recommendations?.focus_difficult_words ?? [];
+  const baseFocusWordsForLaunch = primaryRec?.target_words.length
     ? primaryRec.target_words
-    : (recommendations?.focus_difficult_words ?? []);
+    : dueFocusWords;
+  const focusWordsForLaunch = Array.from(
+    new Set([...baseFocusWordsForLaunch, ...notebookBonusWords]),
+  );
+  const pictureFocusWords = Array.from(
+    new Set([
+      ...(recommendationByGame.get("PICTURE_DESCRIPTION")?.target_words ?? []),
+      ...dueFocusWords,
+      ...notebookBonusWords,
+    ]),
+  ).slice(0, 5);
+  const pictureCardHref = pictureFocusWords.length
+    ? `/entertainment/picture-description?focus=${encodeURIComponent(
+        pictureFocusWords.join(","),
+      )}`
+    : "/entertainment/picture-description";
+  const shooterFocusWords = Array.from(
+    new Set([
+      ...(recommendationByGame.get("SENTENCE_SHOOTER")?.target_words ?? []),
+      ...dueFocusWords,
+    ]),
+  ).slice(0, 5);
+  const shooterCardHref = shooterFocusWords.length
+    ? `/entertainment/sentence-shooter?focus=${encodeURIComponent(
+        shooterFocusWords.join(","),
+      )}`
+    : "/entertainment/sentence-shooter";
+  const karaokeFocusWords = Array.from(
+    new Set([
+      ...(recommendationByGame.get("KARAOKE")?.target_words ?? []),
+      ...dueFocusWords,
+    ]),
+  ).slice(0, 5);
+  const karaokeCardHref = karaokeFocusWords.length
+    ? `/karaoke?focus=${encodeURIComponent(karaokeFocusWords.join(","))}`
+    : "/karaoke";
+  const karaokeMagicChantHref = (() => {
+    const params = new URLSearchParams();
+    params.set("mode", "magic-chant");
+    if (dueFocusWords.length > 0) {
+      params.set("focus", dueFocusWords.slice(0, 5).join(","));
+    }
+    if (autopilotEnabled) {
+      params.set("autopilot", "1");
+    }
+    return `/karaoke?${params.toString()}`;
+  })();
+  const memoryFocusWords = Array.from(
+    new Set([
+      ...(recommendationByGame.get("MEMORY_GAME")?.target_words ?? []),
+      ...dueFocusWords,
+      ...notebookBonusWords,
+    ]),
+  ).slice(0, 5);
+  const memoryCardHref = memoryFocusWords.length
+    ? `/entertainment/memory-game?focus=${encodeURIComponent(
+        memoryFocusWords.join(","),
+      )}`
+    : "/entertainment/memory-game";
+  const magicQuestHref = (() => {
+    const params = new URLSearchParams();
+    params.set("mode", "magic-quest");
+    if (dueFocusWords.length > 0) {
+      params.set("focus", dueFocusWords.slice(0, 5).join(","));
+    }
+    if (autopilotEnabled) {
+      params.set("autopilot", "1");
+    }
+    return `/entertainment/sentence-shooter?${params.toString()}`;
+  })();
   const autopilotHref = (() => {
     if (!primaryRec) return null;
     const baseHref = primaryRec.href;
@@ -546,6 +752,37 @@ export function EntertainmentScreen({
               ? t("hub.reducedMotionActive")
               : t("hub.reduceMotion")}
           </Button>
+          {activeChildId ? (
+            <Button
+              className="min-h-12 px-4"
+              data-testid="hub-open-vocabulary-notebook-btn"
+              fullWidth={false}
+              onClick={() => setNotebookDrawerOpen(true)}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+              {activeChildNotebook && activeChildNotebook.total > 0
+                ? tGlossary("hubNotebookButton", {
+                    count: activeChildNotebook.total,
+                  })
+                : tGlossary("hubNotebookButtonEmpty")}
+            </Button>
+          ) : null}
+          {activeChildId ? (
+            <ButtonLink
+              className="min-h-12 px-4"
+              data-testid="hub-open-phoneme-garden-link"
+              fullWidth={false}
+              href={`/achievements?childId=${encodeURIComponent(activeChildId)}`}
+              size="compact"
+              variant="secondary"
+            >
+              <Flower2 aria-hidden="true" className="size-4 text-emerald-700" />
+              {tGarden("hubHeaderBadge")}
+            </ButtonLink>
+          ) : null}
           <Button
             className="min-h-12 px-4"
             fullWidth={false}
@@ -651,9 +888,53 @@ export function EntertainmentScreen({
               ))}
             </div>
           ) : null}
+          {notebookBonusWords.length > 0 ? (
+            <div
+              className="flex flex-wrap items-center gap-2 pt-1"
+              data-testid="hub-notebook-bonus-words"
+            >
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900">
+                <BookHeart aria-hidden="true" className="size-3.5" />
+                {tGlossary("bonusStoryWordsLabel")}
+              </span>
+              {notebookBonusWords.map((word) => (
+                <button
+                  aria-label={`Nghe từ yêu thích ${word}`}
+                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50/90 px-3 py-1 text-xs font-bold text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  data-testid={`hub-notebook-word-${word}`}
+                  key={word}
+                  onClick={() => handleSpeakFocusWord(word)}
+                  type="button"
+                >
+                  <Volume2
+                    aria-hidden="true"
+                    className="size-3.5 text-emerald-700"
+                  />
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {word}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
-        {primaryRec ? (
+        {primaryRec || dueFocusWords.length > 0 ? (
           <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto">
+            {dueFocusWords.length > 0 ? (
+              <ButtonLink
+                className="min-h-12 w-full sm:w-auto"
+                data-testid="hub-magic-quest-cta"
+                href={magicQuestHref}
+                size="compact"
+                variant={primaryRec ? "secondary" : "primary"}
+              >
+                {t("hub.magicQuestCta")}{" "}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+              </ButtonLink>
+            ) : null}
             {autopilotEnabled && autopilotHref ? (
               <ButtonLink
                 className="min-h-12 w-full sm:w-auto"
@@ -668,21 +949,62 @@ export function EntertainmentScreen({
                 />
               </ButtonLink>
             ) : null}
-            <ButtonLink
-              className="min-h-12 w-full sm:w-auto"
-              href={primaryRec.href}
-              size="compact"
-              variant={autopilotEnabled ? "secondary" : "primary"}
-            >
-              {t("hub.playSuggestedCta")}{" "}
-              <ArrowRight
-                aria-hidden="true"
-                className="viread-rtl-flip size-4"
-              />
-            </ButtonLink>
+            {primaryRec ? (
+              <ButtonLink
+                className="min-h-12 w-full sm:w-auto"
+                href={primaryRec.href}
+                size="compact"
+                variant={autopilotEnabled ? "secondary" : "primary"}
+              >
+                {t("hub.playSuggestedCta")}{" "}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+              </ButtonLink>
+            ) : null}
           </div>
         ) : null}
       </div>
+
+      <FiveMinuteTrainCtaCard
+        childAlias={profileBadgeAlias}
+        childId={activeChildId}
+        focusWords={recommendations?.focus_difficult_words?.slice(0, 3)}
+        sourceSurface="entertainment"
+      />
+
+      {activeChildId ? (
+        <aside
+          aria-label={tDialect("entertainmentCardTitle")}
+          className="flex flex-col justify-between gap-3 rounded-card border border-sky-200/90 bg-gradient-to-r from-sky-50/85 via-white to-amber-50/75 p-4 shadow-xs sm:flex-row sm:items-center sm:p-5"
+          data-testid="hub-tai-thinh-card"
+        >
+          <div className="min-w-0 flex-1 space-y-1">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-xs font-extrabold text-sky-900 shadow-xs">
+              <Ear aria-hidden="true" className="size-3.5 text-primary" />
+              {tDialect("entertainmentCardBadge")}
+            </span>
+            <h3 className="text-base font-extrabold text-ink sm:text-lg">
+              {tDialect("entertainmentCardTitle")}
+            </h3>
+            <p className="text-xs leading-relaxed text-muted sm:text-sm">
+              {tDialect("entertainmentCardDesc")}
+            </p>
+          </div>
+          <Button
+            className="min-h-12 w-full shrink-0 sm:w-auto"
+            data-testid="hub-open-tai-thinh-btn"
+            fullWidth={false}
+            onClick={() => setEarTrainerOpen(true)}
+            size="compact"
+            type="button"
+          >
+            <Ear aria-hidden="true" className="size-4" />
+            {tDialect("entertainmentCardCta")}
+          </Button>
+        </aside>
+      ) : null}
 
       {/* Interactive First-Visit Onboarding (Calm, Zero Dark Patterns) */}
       {showOnboarding ? (
@@ -788,7 +1110,7 @@ export function EntertainmentScreen({
           ) : null}
           <ButtonLink
             className="mt-auto min-h-12"
-            href="/entertainment/picture-description"
+            href={pictureCardHref}
             size="compact"
           >
             {t("hub.pictureCta")}{" "}
@@ -837,7 +1159,7 @@ export function EntertainmentScreen({
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
-            href="/entertainment/sentence-shooter"
+            href={shooterCardHref}
             size="compact"
           >
             {t("hub.shooterCta")}{" "}
@@ -883,14 +1205,34 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.karaokeDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href="/karaoke"
-            size="compact"
-          >
-            {t("hub.karaokeCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-col gap-2">
+            {dueFocusWords.length > 0 ? (
+              <ButtonLink
+                className="min-h-11"
+                data-testid="hub-karaoke-magic-chant-cta"
+                href={karaokeMagicChantHref}
+                size="compact"
+                variant="secondary"
+              >
+                {t("hub.karaokeMagicChantCta")}{" "}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+              </ButtonLink>
+            ) : null}
+            <ButtonLink
+              className="min-h-12"
+              href={karaokeCardHref}
+              size="compact"
+            >
+              {t("hub.karaokeCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 4: Memory Explorer */}
@@ -919,7 +1261,7 @@ export function EntertainmentScreen({
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
-            href="/entertainment/memory-game"
+            href={memoryCardHref}
             size="compact"
           >
             {t("hub.memoryCta")}{" "}
@@ -927,6 +1269,29 @@ export function EntertainmentScreen({
           </ButtonLink>
         </article>
       </div>
+
+      {activeChildId ? (
+        <>
+          <VocabularyNotebookDrawer
+            childAlias={profileBadgeAlias}
+            childId={activeChildId}
+            initialNotebook={activeChildNotebook}
+            onClose={() => setNotebookDrawerOpen(false)}
+            onNotebookChange={setNotebookData}
+            open={notebookDrawerOpen}
+            service={resolvedVocabService}
+            speechPlayer={speechPlayer}
+          />
+          <TaiThinhEarTrainerModal
+            childAlias={profileBadgeAlias}
+            childId={activeChildId}
+            isOpen={earTrainerOpen}
+            onClose={() => setEarTrainerOpen(false)}
+            service={resolvedDialectService}
+            speechPlayer={speechPlayer}
+          />
+        </>
+      ) : null}
 
       {/* Healthy Natural Break Cue (Anti-Addiction, Zero Dark Patterns) */}
       <footer className="flex items-center gap-3 rounded-card border border-border bg-white/80 px-5 py-4 text-sm text-muted">

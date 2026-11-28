@@ -779,6 +779,7 @@ class Item7DifficultWordsServiceTests(unittest.IsolatedAsyncioTestCase):
             call_order.append("create_event")
             return ev
 
+        repo.save_practice_attempt_and_retry_event = None
         repo.create_retry_event = AsyncMock(side_effect=save_event)
         repo.list_retry_events_for_child = AsyncMock(side_effect=lambda *_a, **_k: created_events)
 

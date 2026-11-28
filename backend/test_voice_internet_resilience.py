@@ -517,19 +517,19 @@ class VoiceWorkerContractTests(unittest.TestCase):
 
             self.assertEqual(
                 worker._guess_av_format_hints(b"\x1a\x45\xdf\xa3rest", filename="a.bin", content_type=""),
-                [None, "webm", "matroska"],
+                ["webm", "matroska", None],
             )
             self.assertEqual(
                 worker._guess_av_format_hints(b"OggS\x00\x02", filename="a.bin", content_type=""),
-                [None, "ogg"],
+                ["ogg", None],
             )
             self.assertEqual(
                 worker._guess_av_format_hints(b"\x00\x00\x00\x18ftypmp42", filename="a.bin", content_type=""),
-                [None, "mp4", "mov"],
+                ["mp4", "mov", None],
             )
             self.assertEqual(
                 worker._guess_av_format_hints(b"RIFF\x00\x00\x00\x00WAVE", filename="a.bin", content_type=""),
-                [None, "wav"],
+                ["wav", None],
             )
 
             handler = _CaptureHandler()

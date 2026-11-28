@@ -16,6 +16,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
 import { OfflinePackAndQrPanel } from "@/components/books/offline-pack-and-qr-panel";
+import { OfflinePackControls } from "@/components/offline/offline-pack-controls";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
@@ -551,6 +552,15 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               />
             ) : null}
           </Button>
+
+          <OfflinePackControls
+            bookId={book.id}
+            bookTitle={book.title}
+            estimatedPageCount={pages.length || 4}
+            parentAccountId={currentUserId || null}
+            childProfileId={child.id}
+            child={child}
+          />
 
           {targetPageId && !selectedPage ? (
             <StatusMessage
