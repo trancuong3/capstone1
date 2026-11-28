@@ -146,10 +146,48 @@ class BackendOcrClient:
         self._client.close()
         self._storage_client.close()
 
+    def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        retryable_statuses: frozenset[int],
+        retryable_exceptions: tuple[type[Exception], ...],
+        return_on_409: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        max_attempts = max(1, min(3, self._completion_retry_attempts))
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._client.request(method, path, json=json_body)
+                if return_on_409 is not None and resp.status_code == 409:
+                    return dict(return_on_409)
+                if resp.status_code in retryable_statuses and attempt < max_attempts:
+                    delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return dict(resp.json() or {})
+            except retryable_exceptions as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
+
     def send_worker_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = self._client.post("/internal/ocr-jobs/worker-heartbeat", json=payload)
-        resp.raise_for_status()
-        return dict(resp.json())
+        return self._request_with_retry(
+            "POST",
+            "/internal/ocr-jobs/worker-heartbeat",
+            json_body=payload,
+            retryable_statuses=frozenset({429, 500, 502, 503, 504}),
+            retryable_exceptions=(httpx.RequestError,),
+        )
 
     def get_active_model(self) -> dict[str, Any]:
         retryable_statuses = {429, 500, 502, 503, 504}
@@ -194,12 +232,15 @@ class BackendOcrClient:
         return bytes(resp.content)
 
     def claim_next_job(self, worker_id: str, *, lease_seconds: int = 120) -> dict[str, Any] | None:
-        resp = self._client.post(
+        # Retry only pre-commit gateway/connect failures; never retry ReadTimeout to avoid double-leasing.
+        data = self._request_with_retry(
+            "POST",
             "/internal/ocr-jobs/claim",
-            json={"worker_id": worker_id, "lease_seconds": lease_seconds},
+            json_body={"worker_id": worker_id, "lease_seconds": lease_seconds},
+            retryable_statuses=frozenset({502, 503, 504}),
+            retryable_exceptions=(httpx.ConnectError, httpx.ConnectTimeout),
         )
-        resp.raise_for_status()
-        return (resp.json() or {}).get("job")
+        return data.get("job")
 
     def heartbeat_job(
         self,
@@ -210,19 +251,19 @@ class BackendOcrClient:
         lease_seconds: int = 120,
         phase: str | None = None,
     ) -> dict[str, Any]:
-        resp = self._client.post(
+        return self._request_with_retry(
+            "POST",
             f"/internal/ocr-jobs/{job_id}/heartbeat",
-            json={
+            json_body={
                 "worker_id": worker_id,
                 "fencing_token": fencing_token,
                 "lease_seconds": lease_seconds,
                 "phase": phase,
             },
+            retryable_statuses=frozenset({429, 500, 502, 503, 504}),
+            retryable_exceptions=(httpx.RequestError,),
+            return_on_409={"cancelled": True, "status": "CONFLICT"},
         )
-        if resp.status_code == 409:
-            return {"cancelled": True, "status": "CONFLICT"}
-        resp.raise_for_status()
-        return dict(resp.json())
 
     def refresh_source_url(
         self, job_id: str, *, worker_id: str, fencing_token: int

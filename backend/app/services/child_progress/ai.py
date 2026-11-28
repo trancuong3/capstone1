@@ -97,9 +97,9 @@ class ChildProgressConfig:
     enabled: bool = True
     gemini_api_key: str | None = field(default=None, repr=False)
     groq_api_key: str | None = field(default=None, repr=False)
-    gemini_model: str = "gemini-3.5-flash-lite"
-    gemini_fallback_model: str = "gemini-3.1-flash-lite"
-    groq_model: str = "qwen/qwen3.8-27b"
+    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_fallback_model: str = "gemini-2.5-flash"
+    groq_model: str = "llama-3.3-70b-versatile"
     timeout_seconds: int = 20
     cache_ttl_seconds: int = 24 * 3600
     refresh_cooldown_seconds: int = 60
@@ -110,11 +110,11 @@ class ChildProgressConfig:
             enabled=_bool("CHILD_PROGRESS_AI_ENABLED", True),
             gemini_api_key=_secret("GEMINI_API_KEY"),
             groq_api_key=_secret("GROQ_API_KEY"),
-            gemini_model=_model("CHILD_PROGRESS_GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            gemini_model=_model("CHILD_PROGRESS_GEMINI_MODEL", "gemini-2.5-flash-lite"),
             gemini_fallback_model=_model(
-                "CHILD_PROGRESS_GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite"
+                "CHILD_PROGRESS_GEMINI_FALLBACK_MODEL", "gemini-2.5-flash"
             ),
-            groq_model=_model("CHILD_PROGRESS_GROQ_MODEL", "qwen/qwen3.8-27b"),
+            groq_model=_model("CHILD_PROGRESS_GROQ_MODEL", "llama-3.3-70b-versatile"),
             timeout_seconds=_int("CHILD_PROGRESS_TIMEOUT_SECONDS", 20, 1, 120),
             cache_ttl_seconds=_int("CHILD_PROGRESS_CACHE_TTL_SECONDS", 24 * 3600, 60, 7 * 24 * 3600),
             refresh_cooldown_seconds=_int("CHILD_PROGRESS_REFRESH_COOLDOWN_SECONDS", 60, 0, 3600),

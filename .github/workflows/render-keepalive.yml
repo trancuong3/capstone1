@@ -1,8 +1,6 @@
 name: Render Backend Keep-Alive
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -31,12 +29,12 @@ jobs:
         run: |
           if [ -z "$VIREAD_CRON_DISPATCH_TOKEN" ]; then
             if [ -n "$PARENT_EMAIL_CRON_SECRET" ]; then
-              echo "::notice::VIREAD_CRON_DISPATCH_TOKEN not set; falling back to parent email cron dispatch."
+              echo "::notice::VIREAD_CRON_DISPATCH_TOKEN not set; falling back to parent email cron dispatch (scheduled */30 * * * * dispatch runs via Cloudflare Cron)."
               curl -fsS --max-time 60 -X POST -H "Accept: application/json" -H "X-Cron-Secret: ${PARENT_EMAIL_CRON_SECRET}" "https://capstone1-ssd8.onrender.com/parent-notifications/cron/dispatch?scope=all" > /dev/null
               echo "Fallback parent email automation dispatch completed."
               exit 0
             fi
-            echo "::notice::Neither VIREAD_CRON_DISPATCH_TOKEN nor PARENT_EMAIL_CRON_SECRET is set in GitHub Secrets; skipping cron dispatch."
+            echo "::notice::Neither VIREAD_CRON_DISPATCH_TOKEN nor PARENT_EMAIL_CRON_SECRET is set in GitHub Secrets; skipping manual cron dispatch (scheduled */30 * * * * dispatch runs via Cloudflare Cron)."
             exit 0
           fi
           curl -fsS --max-time 75 \

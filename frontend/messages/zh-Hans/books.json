@@ -28,7 +28,7 @@
     "clearFilter": "清除筛选",
     "paginationAria": "书库分页",
     "paginationItemLabel": "本书",
-    "savedStatusError": "无法加载已保存的书籍状态。请检查后端和 Reading Management 迁移。",
+    "savedStatusError": "无法加载已保存的书籍状态。请稍后再试。",
     "removedFromCollection": "书籍已从收藏中移除。",
     "savedForChild": "书籍已保存到儿童资料。",
     "saveCollectionFailed": "无法保存更改。请重试；状态未更新。",

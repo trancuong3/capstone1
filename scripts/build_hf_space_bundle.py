@@ -275,19 +275,93 @@ if importlib.util.find_spec("PIL") is None:
     pil_image = ModuleType("PIL.Image")
     pil_image.Resampling = SimpleNamespace(LANCZOS=1)
     pil_image.Image = object
+    pil_draw = ModuleType("PIL.ImageDraw")
+    pil_font = ModuleType("PIL.ImageFont")
     pil_mod.Image = pil_image
+    pil_mod.ImageDraw = pil_draw
+    pil_mod.ImageFont = pil_font
     sys.modules["PIL"] = pil_mod
     sys.modules["PIL.Image"] = pil_image
+    sys.modules["PIL.ImageDraw"] = pil_draw
+    sys.modules["PIL.ImageFont"] = pil_font
 
-for third_party in ("cv2", "numpy", "yaml", "requests"):
+if importlib.util.find_spec("fastapi") is None:
+    fastapi_mod = ModuleType("fastapi")
+
+    class _StubHTTPException(Exception):
+        def __init__(self, status_code: int = 500, detail: object = None) -> None:
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class _StubFastAPI:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get(self, *args: object, **kwargs: object):
+            return lambda fn: fn
+
+        def post(self, *args: object, **kwargs: object):
+            return lambda fn: fn
+
+    def _param_stub(default: object = None, **_kwargs: object) -> object:
+        return default
+
+    fastapi_mod.Body = _param_stub
+    fastapi_mod.FastAPI = _StubFastAPI
+    fastapi_mod.Header = _param_stub
+    fastapi_mod.HTTPException = _StubHTTPException
+    fastapi_mod.Query = _param_stub
+    fastapi_mod.status = SimpleNamespace(
+        HTTP_401_UNAUTHORIZED=401,
+        HTTP_503_SERVICE_UNAVAILABLE=503,
+    )
+    sys.modules["fastapi"] = fastapi_mod
+
+if importlib.util.find_spec("pydantic") is None:
+    pydantic_mod = ModuleType("pydantic")
+
+    class _StubBaseModel:
+        def __init__(self, **kwargs: object) -> None:
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    def _field_stub(default: object = None, **_kwargs: object) -> object:
+        return default
+
+    pydantic_mod.BaseModel = _StubBaseModel
+    pydantic_mod.Field = _field_stub
+    sys.modules["pydantic"] = pydantic_mod
+
+for third_party in ("cv2", "numpy", "yaml", "requests", "httpx", "uvicorn"):
     if importlib.util.find_spec(third_party) is None:
         sys.modules[third_party] = ModuleType(third_party)
 
+import app.services.ocr_adjudication as ocr_adjudication
 import app.services.ocr_engine as ocr_engine
+import app.services.ocr_evidence as ocr_evidence
+import app.services.ocr_executor as ocr_executor
+import app.services.ocr_punctuation as ocr_punctuation
+import app.services.ocr_text_utils as ocr_text_utils
+import app.services.viread_vietocr_v2_preprocessing as ocr_preproc
+import app.services.word_box_geometry as word_box_geometry
+import ocr_worker.prebake as worker_prebake
 import ocr_worker.service as worker_service
 import ocr_worker.worker as worker_entrypoint
 
-for loaded_mod in (ocr_engine, worker_service, worker_entrypoint):
+for loaded_mod in (
+    ocr_adjudication,
+    ocr_engine,
+    ocr_evidence,
+    ocr_executor,
+    ocr_punctuation,
+    ocr_text_utils,
+    ocr_preproc,
+    word_box_geometry,
+    worker_prebake,
+    worker_service,
+    worker_entrypoint,
+):
     mod_path = Path(loaded_mod.__file__).resolve()
     assert mod_path.is_relative_to(bundle_dir), f"{loaded_mod.__name__} loaded outside bundle: {mod_path}"
 

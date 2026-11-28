@@ -39,11 +39,17 @@ async def list_game_books(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_difficulty: Difficulty = (
+        difficulty if isinstance(difficulty, str) and difficulty in ("easy", "medium", "challenge") else "easy"
+    )
+    resolved_rounds = (
+        total_rounds if isinstance(total_rounds, int) and not isinstance(total_rounds, bool) else 3
+    )
     return await build_service(db).list_books(
         actor_id,
         child_id,
-        difficulty,
-        total_rounds,
+        resolved_difficulty,
+        resolved_rounds,
     )
 
 

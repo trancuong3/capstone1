@@ -42,6 +42,41 @@ VIETNAMESE_TTS_MODELS = {
 }
 SHORT_TTS_CACHE_MAX_ENTRIES = 32
 SHORT_TTS_CACHE_MAX_BYTES = 8 * 1024 * 1024
+CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES = 16
+CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def is_constrained_web_runtime() -> bool:
+    """Detect 512 MiB Render / remote-worker web deployments where memory headroom is tight."""
+    render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+    return render or disable_heavy or remote_ocr
+
+
+def _resolve_short_tts_cache_limits() -> tuple[int, int]:
+    constrained = is_constrained_web_runtime()
+    default_bytes = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES if constrained else SHORT_TTS_CACHE_MAX_BYTES
+    )
+    max_entries = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES
+        if constrained
+        else SHORT_TTS_CACHE_MAX_ENTRIES
+    )
+    raw = (os.getenv("VIREAD_ELEVENLABS_SHORT_CACHE_MAX_BYTES") or "").strip()
+    if raw:
+        try:
+            max_bytes = max(0, min(32 * 1024 * 1024, int(raw)))
+            return max_bytes, max_entries
+        except ValueError:
+            pass
+    return default_bytes, max_entries
 
 
 class VoiceProviderError(Exception):
@@ -386,8 +421,9 @@ class ElevenLabsVoiceProvider:
     @staticmethod
     def _short_cache_put(cache_key: str, item: SynthesizedAudio) -> None:
         global _short_tts_cache_bytes
+        max_bytes, max_entries = _resolve_short_tts_cache_limits()
         size = len(item.content)
-        if size > SHORT_TTS_CACHE_MAX_BYTES // 2:
+        if max_bytes <= 0 or max_entries <= 0 or size > max_bytes // 2:
             return
         previous = _short_tts_cache.pop(cache_key, None)
         if previous is not None:
@@ -395,8 +431,8 @@ class ElevenLabsVoiceProvider:
         _short_tts_cache[cache_key] = item
         _short_tts_cache_bytes += size
         while _short_tts_cache and (
-            len(_short_tts_cache) > SHORT_TTS_CACHE_MAX_ENTRIES
-            or _short_tts_cache_bytes > SHORT_TTS_CACHE_MAX_BYTES
+            len(_short_tts_cache) > max_entries
+            or _short_tts_cache_bytes > max_bytes
         ):
             _, evicted = _short_tts_cache.popitem(last=False)
             _short_tts_cache_bytes -= len(evicted.content)

@@ -7,6 +7,11 @@ import httpx
 from app.services.admin_ocr_chunking import OcrTextChunk
 from app.services.ocr_ai.exceptions import OcrProviderError
 from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt, response_json_schema
+from app.services.ocr_ai.runtime import (
+    detect_limit_zero,
+    get_shared_ocr_ai_http_client,
+    parse_retry_after_seconds,
+)
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import decode_and_validate_content
 
@@ -34,6 +39,8 @@ class GeminiOcrProvider:
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
+        if self._transport is None:
+            return get_shared_ocr_ai_http_client()
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout_seconds),
@@ -84,6 +91,7 @@ class GeminiOcrProvider:
                 url,
                 headers={"x-goog-api-key": self._api_key},
                 json=payload,
+                timeout=httpx.Timeout(self._timeout_seconds),
             )
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
@@ -100,7 +108,7 @@ class GeminiOcrProvider:
                 disables_family=True,
             ) from exc
         if response.status_code != 200:
-            raise self._http_error(response.status_code)
+            raise self._http_error(response.status_code, response=response)
         try:
             data = response.json()
             candidates = data.get("candidates") if isinstance(data, dict) else None
@@ -114,7 +122,15 @@ class GeminiOcrProvider:
             ) from exc
         return decode_and_validate_content(text, chunk=chunk, provider=self.name)
 
-    def _http_error(self, status_code: int) -> OcrProviderError:
+    def _http_error(
+        self, status_code: int, *, response: httpx.Response | None = None
+    ) -> OcrProviderError:
+        retry_after_seconds = (
+            parse_retry_after_seconds(response.headers.get("retry-after"))
+            if response is not None
+            else None
+        )
+        limit_zero = detect_limit_zero(response)
         if status_code in (401, 403):
             return OcrProviderError(
                 provider=self.name,
@@ -122,6 +138,8 @@ class GeminiOcrProvider:
                 status_code=502,
                 upstream_status_code=status_code,
                 disables_family=True,
+                retry_after_seconds=retry_after_seconds,
+                limit_zero=limit_zero,
             )
         if status_code == 429:
             return OcrProviderError(
@@ -130,6 +148,8 @@ class GeminiOcrProvider:
                 status_code=503,
                 upstream_status_code=status_code,
                 disables_family=True,
+                retry_after_seconds=retry_after_seconds,
+                limit_zero=limit_zero,
             )
         if status_code >= 500:
             return OcrProviderError(
@@ -138,6 +158,8 @@ class GeminiOcrProvider:
                 status_code=503,
                 upstream_status_code=status_code,
                 disables_family=True,
+                retry_after_seconds=retry_after_seconds,
+                limit_zero=limit_zero,
             )
         if status_code == 404:
             return OcrProviderError(
@@ -145,10 +167,14 @@ class GeminiOcrProvider:
                 code="MODEL_UNAVAILABLE",
                 status_code=502,
                 upstream_status_code=status_code,
+                retry_after_seconds=retry_after_seconds,
+                limit_zero=limit_zero,
             )
         return OcrProviderError(
             provider=self.name,
             code="PROVIDER_REJECTED",
             status_code=502,
             upstream_status_code=status_code,
+            retry_after_seconds=retry_after_seconds,
+            limit_zero=limit_zero,
         )

@@ -305,13 +305,15 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         env["SUPABASE_URL"] = "https://x.supabase.co"
         env["SUPABASE_KEY"] = "test-key"
         env.pop("DATABASE_FORCE_NULL_POOL", None)
+        env.pop("DATABASE_CONCURRENCY_LIMIT", None)
         code_bounded = (
             "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
             "from sqlalchemy.pool import AsyncAdaptedQueuePool;"
             "from app.database import session;"
             "assert isinstance(session.engine.pool, AsyncAdaptedQueuePool), type(session.engine.pool);"
             "assert session.engine.pool.size() == 4, session.engine.pool.size();"
-            "assert session.engine.pool._max_overflow == 4, session.engine.pool._max_overflow;"
+            "assert session.engine.pool._max_overflow == 12, session.engine.pool._max_overflow;"
+            "assert session.engine.pool.size() + session.engine.pool._max_overflow == session.DATABASE_CONCURRENCY_LIMIT;"
             "assert session.engine.pool._timeout >= 10.0, session.engine.pool._timeout;"
             "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
             "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"

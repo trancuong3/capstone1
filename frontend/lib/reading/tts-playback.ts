@@ -83,11 +83,12 @@ import {
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getCachedVoiceEngineHealth,
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
   markHostedLocalUnconfigured,
   recordTtsEngineUsage,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import {
   resolveVoiceGender,
@@ -313,29 +314,42 @@ function recordIfLocalUnconfiguredError(error: unknown): boolean {
 }
 
 function isLocalVoiceUnconfiguredHealth(): boolean {
-  const health = getFreshVoiceEngineHealth();
-  return isPermanentlyHostedLocalUnconfigured(health);
+  const health = getVoiceEngineHealthForRouting();
+  return (
+    isPermanentlyHostedLocalUnconfigured(health) ||
+    health?.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED"
+  );
 }
 
 function hasWasmVietnameseTts(): boolean {
   return detectBrowserWasmTtsSupport().supported;
 }
 
+function isElevenLabsLiveTtsUsable(
+  health: VoiceEngineHealthSnapshot | null,
+): boolean {
+  if (!health?.elevenlabs?.tts_configured || health.elevenlabs.tts_cooldown) {
+    return false;
+  }
+  // Enforce strict offline `local_only` policy across BOTH Web & Android APK:
+  // only route to ElevenLabs when cloud fallback is explicitly permitted.
+  if (!canUseGoogleTtsFallback()) {
+    return false;
+  }
+  return true;
+}
+
 function isHostedNoLiveServerTts(error?: unknown): boolean {
   const errUnconfigured = recordIfLocalUnconfiguredError(error);
   const unconfigured = errUnconfigured || isLocalVoiceUnconfiguredHealth();
   if (!unconfigured) return false;
-  const cloudTtsAllowed = canUseGoogleTtsFallback();
-  const health = getFreshVoiceEngineHealth() ?? getCachedVoiceEngineHealth();
-  if (
-    cloudTtsAllowed &&
-    health?.elevenlabs?.tts_configured &&
-    !health.elevenlabs.tts_cooldown
-  ) {
+  const health =
+    getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
+  if (isElevenLabsLiveTtsUsable(health)) {
     return false;
   }
   if (
-    cloudTtsAllowed &&
+    canUseGoogleTtsFallback() &&
     health?.google.tts_configured &&
     !health.google.tts_cooldown
   ) {
@@ -359,6 +373,13 @@ function canUseAllowedDeviceFallbackTts(
   error?: unknown,
 ): boolean {
   recordIfLocalUnconfiguredError(error);
+  // Enforce SessionVoiceLock ("Một buổi, một giọng"):
+  // never silently jump to OS/Android/browser voice mid-session unless:
+  // (a) parent opted into `local_with_google_fallback` + `allowGoogleTtsFallback`
+  //     and the local worker is unconfigured/outaged, OR
+  // (b) `/voice/status` confirmed hosted `LOCAL_VOICE_UNCONFIGURED` with no
+  //     active ElevenLabs/Google server TTS, allowing 100% on-device
+  //     Android Native / WASM Vietnamese Neural TTS fallback.
   const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
   const isSessionLocked = voice?.bypassSessionLock
     ? false
@@ -449,27 +470,19 @@ function shouldSkipBackendTtsForVoice(
   }
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured();
   const health =
-    getFreshVoiceEngineHealth() ??
+    getVoiceEngineHealthForRouting() ??
     (permanentlyUnconfigured ? getCachedVoiceEngineHealth() : null);
   if (!health && !permanentlyUnconfigured) return false;
-  const cloudTtsAllowed = canUseGoogleTtsFallback();
-  if (
-    cloudTtsAllowed &&
-    health?.elevenlabs?.tts_configured &&
-    !health.elevenlabs.tts_cooldown
-  ) {
+  if (isElevenLabsLiveTtsUsable(health)) {
     return false;
   }
-  const googleActive =
-    cloudTtsAllowed &&
+  const googleUsable =
+    canUseGoogleTtsFallback() &&
     Boolean(health?.google.tts_configured) &&
     !Boolean(health?.google.tts_cooldown);
-  const localReady = Boolean(
-    health?.local.available && health?.local.tts_ready,
+  return (
+    (!health?.local.available || !health?.local.tts_ready) && !googleUsable
   );
-  const noLiveServerTts = !localReady && !googleActive;
-  if (!noLiveServerTts) return false;
-  return true;
 }
 
 function shouldSkipBackendTtsForBrowserFallback(
@@ -585,7 +598,7 @@ function shouldRetryBackendWithGoogleTts(
   if (!canUseGoogleTtsFallback() || operation.voice.provider !== "local") {
     return false;
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return true;
   return health.google.tts_configured && !health.google.tts_cooldown;
 }
@@ -1643,14 +1656,13 @@ export class TtsPlayback {
         let approxIdx = startWordIdx;
 
         try {
-          const preferredGender = resolveVoiceGender(
-            operation.voice.requestedVoiceId,
-          );
+          const targetVoiceId =
+            operation.voice.requestedVoiceId ?? operation.voice.cacheVoiceId;
           const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
             rate: operation.voice.speed,
             pitch: 1.0,
-            voiceGender: preferredGender,
-            voiceId: operation.voice.requestedVoiceId,
+            voiceId: targetVoiceId,
+            voiceGender: resolveVoiceGender(targetVoiceId),
             signal: operation.controller.signal,
             onStart: (meta) => {
               if (

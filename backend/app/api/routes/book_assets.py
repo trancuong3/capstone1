@@ -89,6 +89,11 @@ async def upload_book_cover(
     _rate_limited: None = Depends(rate_limit("studio_assets_write", default_max=60, default_window=60.0)),
 ) -> BookPresentationAssetRead:
     _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
+    resolved_crop_x = float(crop_x) if isinstance(crop_x, (int, float)) and not isinstance(crop_x, bool) else None
+    resolved_crop_y = float(crop_y) if isinstance(crop_y, (int, float)) and not isinstance(crop_y, bool) else None
+    resolved_crop_w = float(crop_w) if isinstance(crop_w, (int, float)) and not isinstance(crop_w, bool) else None
+    resolved_crop_h = float(crop_h) if isinstance(crop_h, (int, float)) and not isinstance(crop_h, bool) else None
+    resolved_rotation = rotation if isinstance(rotation, int) and not isinstance(rotation, bool) else 0
     try:
         raw_bytes = await file.read(MAX_COVER_UPLOAD_BYTES + 1)
     finally:
@@ -98,11 +103,11 @@ async def upload_book_cover(
         book_id,
         raw_bytes,
         file.content_type,
-        crop_x=crop_x,
-        crop_y=crop_y,
-        crop_w=crop_w,
-        crop_h=crop_h,
-        rotation=rotation,
+        crop_x=resolved_crop_x,
+        crop_y=resolved_crop_y,
+        crop_w=resolved_crop_w,
+        crop_h=resolved_crop_h,
+        rotation=resolved_rotation,
     )
 
 

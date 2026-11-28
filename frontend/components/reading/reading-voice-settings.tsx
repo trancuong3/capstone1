@@ -69,6 +69,7 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -742,7 +743,7 @@ export function ReadingVoiceSettings({
         onClose={close}
         title={`${t("settings.modalTitle")} · ${teacherPersona.title}`}
       >
-        <div className="space-y-4">
+        <div className="space-y-4 pb-4">
           <div
             aria-label={t("settings.teacherPersonaAria")}
             className="grid grid-cols-2 gap-2"
@@ -800,7 +801,9 @@ export function ReadingVoiceSettings({
                 ? t("settings.localOnlyMode")
                 : t("settings.localWithGoogleMode")}
             </div>
-            {activeSessionLock || !isBrowserOnline ? (
+            {activeSessionLock ||
+            !isBrowserOnline ||
+            isAndroidNativeSpeechAvailable() ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
                 {activeSessionLock ? (
                   <span
@@ -808,6 +811,14 @@ export function ReadingVoiceSettings({
                     className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"
                   >
                     {t("settings.sessionLockedBadge")}
+                  </span>
+                ) : null}
+                {isAndroidNativeSpeechAvailable() ? (
+                  <span
+                    data-testid="android-native-speech-badge"
+                    className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-900"
+                  >
+                    Android TTS/STT (vi-VN)
                   </span>
                 ) : null}
                 {!isBrowserOnline ? (

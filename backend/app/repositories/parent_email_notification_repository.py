@@ -254,6 +254,14 @@ class ParentEmailNotificationRepository:
             stmt = stmt.where(ParentEmailDelivery.SentAt >= since)
         return int(await self.db.scalar(stmt) or 0)
 
+    async def count_global_sent_since(self, since: datetime) -> int:
+        """Count global automated/claimed email deliveries across all parents since timestamp."""
+        stmt = select(func.count(ParentEmailDelivery.Id)).where(
+            ParentEmailDelivery.Status.in_(("SENDING", "SENT")),
+            ParentEmailDelivery.CreatedAt >= since,
+        )
+        return int(await self.db.scalar(stmt) or 0)
+
     async def is_storage_ready(self) -> bool:
         """Safely probe migration table existence without aborting the transaction."""
         prefs_tbl = await self.db.scalar(

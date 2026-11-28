@@ -63,6 +63,19 @@ VIREAD_GDRIVE_MIN_FREE_BYTES=536870912
 
 ---
 
+## 3b. Apps Script Bridge Setup (Recommended for Render Free — No 7-Day OAuth Expiry)
+
+When using `scripts/google-apps-script/viread_flow2_drive_bridge.gs` as the Flow 2 Drive bridge:
+
+1. Paste `scripts/google-apps-script/viread_flow2_drive_bridge.gs` into your Apps Script project (`Code.gs`).
+2. **Enable Advanced Drive Service (`Drive API`) for permanent deletion (MANDATORY to avoid 30-day Trash quota buildup):**
+   - In the Apps Script editor left sidebar, click **Services (+)** -> select **Drive API** (Identifier: `Drive`) -> click **Add**.
+   - Without `Drive` enabled, `deleteFilePermanentlyOrTrash_` falls back to `file.setTrashed(true)` (`delete_mode: "trash_fallback"`), which keeps deleted checkpoints/resume blobs in Drive Trash for 30 days consuming the 15 GiB quota.
+3. Deploy (or **Manage deployments -> Edit -> New version**) as a Web App (`Execute as: Me`, `Who has access: Anyone`, guarded by `VIREAD_BRIDGE_SECRET` HMAC-SHA256).
+4. In `/admin/viread-training`, click **Kiểm tra kết nối** and **Chạy Self-Test** and confirm `advanced_drive_enabled: true` and `delete_mode: "permanent_delete"` (no amber Trash fallback warning).
+
+---
+
 ## 4. Running On-Demand GPU Training on Colab Free (0 VNĐ)
 
 Colab Free provides free interactive T4 GPU (`15 GiB VRAM`) sessions and is **not** a 24/7 daemon:

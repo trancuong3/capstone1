@@ -614,4 +614,42 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       ).toBeInTheDocument();
     });
   });
+
+  it("shows trash fallback warning when GAS health check reports advanced_drive_enabled=false", async () => {
+    mockService.checkDriveHealth = vi.fn().mockResolvedValue({
+      ...connectedDriveStatus,
+      connection_mode: "apps_script_bridge",
+      oauth_scope: "apps_script_bridge",
+      advanced_drive_enabled: false,
+      delete_mode: "trash_fallback",
+      warnings: [
+        "Apps Script Advanced Drive Service (Drive API) chưa được bật.",
+      ],
+    });
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Google Drive/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Kiểm tra kết nối/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Kiểm tra kết nối/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Cảnh báo xóa tạm thời \(Google Drive Trash Fallback\)/i,
+        ),
+      ).toBeInTheDocument();
+    });
+  });
 });

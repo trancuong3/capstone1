@@ -87,6 +87,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 }
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -299,6 +300,27 @@ export function getFreshVoiceEngineHealth(
   return cachedHealth;
 }
 
+/**
+ * Returns fresh voice health, or retains a confirmed `LOCAL_VOICE_UNCONFIGURED`
+ * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
+ * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
+ */
+export function getVoiceEngineHealthForRouting(
+  maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
+): VoiceEngineHealthSnapshot | null {
+  const fresh = getFreshVoiceEngineHealth(maxAgeMs);
+  if (fresh) return fresh;
+  if (
+    cachedHealth &&
+    cachedHealthFetchedAt > 0 &&
+    isHostedLocalVoiceUnconfigured(cachedHealth) &&
+    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+  ) {
+    return cachedHealth;
+  }
+  return null;
+}
+
 export function setCachedVoiceEngineHealth(
   health: VoiceEngineHealthSnapshot | null,
   fetchedAt = Date.now(),
@@ -382,7 +404,10 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
     const rec = raw as Record<string, unknown>;
     const localRaw = rec.local as Record<string, unknown> | undefined;
     const googleRaw = rec.google as Record<string, unknown> | undefined;
-    const elevenlabsRaw = rec.elevenlabs as Record<string, unknown> | undefined;
+    const elevenlabsRaw =
+      rec.elevenlabs && typeof rec.elevenlabs === "object"
+        ? (rec.elevenlabs as Record<string, unknown>)
+        : undefined;
     if (!localRaw || !googleRaw) return null;
 
     const snapshot: VoiceEngineHealthSnapshot = {
@@ -425,7 +450,7 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
         stt_cooldown: Boolean(googleRaw.stt_cooldown),
         tts_cooldown: Boolean(googleRaw.tts_cooldown),
       },
-      ...(elevenlabsRaw && typeof elevenlabsRaw === "object"
+      ...(elevenlabsRaw
         ? {
             elevenlabs: {
               configured: Boolean(elevenlabsRaw.configured),

@@ -419,7 +419,7 @@
     "errorTitle": "Etwas ist schiefgelaufen",
     "savedTitle": "Gespeichert",
     "loadChildFailed": "Kinderprofil konnte nicht geladen werden. Bitte versuche es erneut.",
-    "loadManagementFailed": "Leseverwaltungsdaten konnten nicht geladen werden. Überprüfe das Backend und die Leseverwaltungs-Migrationen und versuche es dann erneut.",
+    "loadManagementFailed": "Leseverwaltungsdaten konnten nicht geladen werden. Bitte versuche es gleich noch einmal.",
     "mutationUnconfirmed": "Aktion konnte nicht ausgeführt werden. Die Daten wurden nicht als gespeichert bestätigt; bitte versuche es erneut.",
     "overviewAria": "Übersicht der Lesegewohnheiten",
     "summaryRunningGoals": "Aktive Ziele",
