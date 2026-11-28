@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,6 +54,37 @@ class HfSpaceBundleZeroDbTests(unittest.TestCase):
 
             with self.assertRaisesRegex(AssertionError, "app.database"):
                 bundle_mod.verify_hf_space_bundle(bundle_dir)
+
+    def test_verify_bundle_succeeds_under_bare_stdlib_python_without_site_packages(self) -> None:
+        """Reproduces bare ubuntu-24.04 CI host runner (`python3 -B`) where httpx/fastapi/PIL are absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "hf-ocr-space-bare"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    "-B",
+                    str(BUNDLE_SCRIPT_PATH),
+                    "--output-dir",
+                    str(bundle_dir),
+                    "--json",
+                ],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=45,
+                check=False,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                f"Bare stdlib (-S) bundle verification failed: {proc.stderr or proc.stdout}",
+            )
+            summary = json.loads(proc.stdout)
+            self.assertTrue(summary["standalone_imports_verified"])
+            self.assertLess(summary["total_bytes"], bundle_mod.MAX_BUNDLE_TOTAL_BYTES)
 
     def test_ocr_engine_fallback_supabase_admin_headers_contract(self) -> None:
         ocr_engine_path = BACKEND_ROOT / "app" / "services" / "ocr_engine.py"
