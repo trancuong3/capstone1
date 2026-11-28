@@ -51,9 +51,9 @@ Configure these under the Render Web Service's Environment section:
 | OCR_CLOUD_CORRECTION_ENABLED | true for cloud-first Admin OCR; false selects local Ollama only |
 | GEMINI_API_KEY | Server-only Gemini key; store as a Render secret |
 | GROQ_API_KEY | Server-only Groq key; store as a Render secret |
-| GEMINI_OCR_PRIMARY_MODEL | gemini-3.5-flash-lite |
-| GROQ_OCR_MODEL | qwen/qwen3.8-27b |
-| GEMINI_OCR_FALLBACK_MODEL | gemini-3.1-flash-lite |
+| GEMINI_OCR_PRIMARY_MODEL | Optional override (`gemini-3.1-flash-lite`; leave unset to use `cloud_ai_defaults.py`) |
+| GEMINI_OCR_FALLBACK_MODEL | Optional override (`gemini-3.5-flash-lite`; leave unset to use `cloud_ai_defaults.py`) |
+| GROQ_OCR_MODEL | Optional override (`qwen/qwen3.8-27b`; leave unset to use `cloud_ai_defaults.py`) |
 | VIREAD_OCR_MODE | remote_worker (offloads 3-engine OCR off Render 512 MB) |
 | VIREAD_WEB_DISABLE_HEAVY_WORKERS | true (disables heavy in-process loops & caps post-OCR concurrency to 1) |
 | VIREAD_OCR_WORKER_TOKEN | >= 32-char shared secret matching remote OCR worker |
@@ -65,7 +65,7 @@ Configure these under the Render Web Service's Environment section:
 Do not set `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` on Render (either remove it or keep `LOCAL_OCR_ENABLED=false`). Hosted runtime flags (`RENDER`, `VIREAD_WEB_DISABLE_HEAVY_WORKERS`, `VIREAD_OCR_MODE=remote_worker`) take precedence over `LOCAL_OCR_BASE_URL` unless `LOCAL_OCR_ENABLED=true` is explicitly set.
 
 Restart the Render service after changing OCR settings. Missing keys cause their
-providers to be skipped while the configured chain continues. Local repository
+providers to be skipped while the configured chain continues. **Do not set `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` on Render** unless an Ollama sidecar is actually listening on loopback with `LOCAL_OCR_ENABLED=true`. Local repository
 checks cannot change or verify Render secrets.
 
 Never place the database URL, password, Supabase secret key or service-role key in the frontend or a committed file.

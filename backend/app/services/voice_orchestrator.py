@@ -18,6 +18,7 @@ import inspect
 import logging
 import math
 import time
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Literal
@@ -54,8 +55,168 @@ from app.services.tts_audio_cache_service import (
     folded_catalog_tts_text,
     is_tts_cache_enabled,
 )
+from app.services.vietnamese_phonics import (
+    TONE_CHAR_MAP as _PHONICS_TONE_CHAR_MAP,
+    VALID_VIETNAMESE_UNTONED_RHYMES as _VALID_VIETNAMESE_UNTONED_RHYMES,
+    _resolve_underlying_rhyme,
+    decompose_vietnamese_syllable,
+    normalize_vietnamese_word,
+    split_vietnamese_rhyme,
+)
 
 logger = logging.getLogger("viread.voice_orchestrator")
+
+MAX_CONTRASTIVE_KEYTERMS = 14
+_ALL_TONES: tuple[str, ...] = ("ngang", "sac", "huyen", "hoi", "nga", "nang")
+_CHECKED_TONES: tuple[str, ...] = ("sac", "nang")
+_NASAL_CODAS: tuple[str, ...] = ("m", "n", "ng", "nh")
+_STOPPED_CODAS: tuple[str, ...] = ("t", "c", "p", "ch")
+_VOWEL_WITH_TONE: dict[tuple[str, str], str] = {
+    **{
+        (base, tone): toned
+        for toned, (base, tone) in _PHONICS_TONE_CHAR_MAP.items()
+    },
+    **{
+        (base, "ngang"): base
+        for base in ("a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y")
+    },
+}
+
+
+def _tone_vowel_index(nucleus: str, coda: str) -> int:
+    for idx in range(len(nucleus) - 1, -1, -1):
+        if nucleus[idx] in "ăâêôơư":
+            return idx
+    if coda and len(nucleus) >= 2:
+        return 1
+    if len(nucleus) >= 3:
+        return 1
+    if len(nucleus) == 2 and nucleus in ("oa", "oe", "uy"):
+        return 0
+    return 0
+
+
+def _render_vietnamese_syllable(
+    onset: str, nucleus: str, coda: str, tone: str
+) -> str | None:
+    if not nucleus:
+        return None
+    idx = _tone_vowel_index(nucleus, coda)
+    ch = nucleus[idx]
+    toned = _VOWEL_WITH_TONE.get((ch, tone))
+    if toned is None:
+        return None
+    return unicodedata.normalize(
+        "NFC", f"{onset}{nucleus[:idx]}{toned}{nucleus[idx + 1:]}{coda}"
+    )
+
+
+def _expand_syllable_contrastive_terms(syllable: str) -> list[str]:
+    parts = decompose_vietnamese_syllable(syllable)
+    if parts is None:
+        return []
+    canonical_rhyme = _resolve_underlying_rhyme(parts.onset, parts.rhyme)
+    nucleus, coda = split_vietnamese_rhyme(canonical_rhyme)
+    if not nucleus:
+        return []
+
+    out: list[str] = [parts.normalized]
+    tones = _CHECKED_TONES if coda in _STOPPED_CODAS else _ALL_TONES
+    for tone in tones:
+        if tone == parts.tone:
+            continue
+        variant = _render_vietnamese_syllable(parts.onset, nucleus, coda, tone)
+        if variant:
+            out.append(variant)
+
+    coda_group = (
+        _NASAL_CODAS
+        if coda in _NASAL_CODAS
+        else _STOPPED_CODAS
+        if coda in _STOPPED_CODAS
+        else ()
+    )
+    for alt_coda in coda_group:
+        if alt_coda == coda:
+            continue
+        candidate_rhyme = _resolve_underlying_rhyme(parts.onset, f"{nucleus}{alt_coda}")
+        if candidate_rhyme not in _VALID_VIETNAMESE_UNTONED_RHYMES:
+            continue
+        competitor = _render_vietnamese_syllable(
+            parts.onset, nucleus, alt_coda, parts.tone
+        )
+        if competitor:
+            out.append(competitor)
+        if coda in _STOPPED_CODAS:
+            alt_tone = "sac" if parts.tone == "nang" else "nang"
+            alt_comp = _render_vietnamese_syllable(
+                parts.onset, nucleus, alt_coda, alt_tone
+            )
+            if alt_comp:
+                out.append(alt_comp)
+
+    if parts.onset == "đ":
+        d_variant = _render_vietnamese_syllable("d", nucleus, coda, parts.tone)
+        if d_variant:
+            out.append(d_variant)
+    elif parts.onset == "d":
+        dd_variant = _render_vietnamese_syllable("đ", nucleus, coda, parts.tone)
+        if dd_variant:
+            out.append(dd_variant)
+
+    return out
+
+
+def build_contrastive_vietnamese_keyterms(
+    keyterms: list[str] | None,
+    *,
+    max_items: int = MAX_CONTRASTIVE_KEYTERMS,
+) -> list[str]:
+    """Expand Vietnamese target keyterms into their 6-tone + close-coda contrastive family."""
+    if not keyterms:
+        return []
+    limit = max(1, int(max_items))
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def _add(term: str) -> bool:
+        cleaned = unicodedata.normalize("NFC", term).strip()
+        if not cleaned:
+            return False
+        key = cleaned.lower()
+        if key in seen:
+            return False
+        if len(result) >= limit:
+            return False
+        seen.add(key)
+        result.append(cleaned)
+        return True
+
+    single_syllables: list[str] = []
+    for raw in keyterms:
+        if not isinstance(raw, str):
+            continue
+        cleaned = unicodedata.normalize("NFC", raw).strip()
+        if not cleaned:
+            continue
+        _add(cleaned)
+        tokens = [
+            normalize_vietnamese_word(tok)
+            for tok in cleaned.replace("-", " ").split()
+        ]
+        tokens = [tok for tok in tokens if tok]
+        if len(tokens) == 1:
+            single_syllables.append(tokens[0])
+        elif len(tokens) == 2 and "-" in cleaned:
+            single_syllables.extend(tokens)
+
+    for syl in single_syllables:
+        for variant in _expand_syllable_contrastive_terms(syl):
+            if len(result) >= limit:
+                return result
+            _add(variant)
+
+    return result[:limit]
 
 VoiceProviderMode = Literal["local_only", "local_with_google_fallback"]
 
@@ -91,6 +252,7 @@ _session_voice_locks: "OrderedDict[tuple[str, str], tuple[float, str, str]]" = O
 _tts_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
 
 _ELEVENLABS_QUOTA_COOLDOWN_SECONDS = 300.0
+_ELEVENLABS_FAILURE_COOLDOWN_SECONDS = 45.0
 _elevenlabs_tts_cooldown_until: float = 0.0
 _elevenlabs_stt_cooldown_until: float = 0.0
 
@@ -146,7 +308,7 @@ async def _call_local_with_busy_retry(call_fn: Any) -> Any:
     except LocalVoiceTechnicalError as err:
         if err.code not in _TRANSIENT_BUSY_CODES:
             raise
-        await asyncio.sleep(0.45)
+        await asyncio.sleep(0.20)
         return await call_fn()
 
 
@@ -159,13 +321,27 @@ def _resolve_local_voice_region_gender(voice_id: str) -> tuple[str, str]:
             gender = str(item.get("gender") or "female")
             return region, gender
     lower = voice_id.lower()
-    if "south" in lower or "nam" in lower:
-        region = "south"
-    elif "central" in lower or "trung" in lower:
+    if "central" in lower or "trung" in lower:
         region = "central"
+    elif (
+        "south" in lower
+        or "mien_nam" in lower
+        or "mien-nam" in lower
+        or "nam_bo" in lower
+        or "wavenet_b" in lower
+        or "wavenet_c" in lower
+    ):
+        region = "south"
     if any(
         marker in lower
-        for marker in ("thien_minh", "quang_son", "thai_son", "_male")
+        for marker in (
+            "thien_minh",
+            "quang_son",
+            "thai_son",
+            "neural2_d",
+            "wavenet_b",
+            "_male",
+        )
     ):
         gender = "male"
     return region, gender
@@ -220,6 +396,9 @@ class VoiceOrchestrator:
         aclose_google = getattr(self.google, "aclose", None)
         if callable(aclose_google):
             await aclose_google()
+        aclose_el = getattr(self.elevenlabs, "aclose", None)
+        if callable(aclose_el):
+            await aclose_el()
 
     async def get_status(self) -> dict[str, Any]:
         local_health = await self.local.get_health()
@@ -286,24 +465,49 @@ class VoiceOrchestrator:
         global _elevenlabs_tts_cooldown_until, _elevenlabs_stt_cooldown_until
         code_upper = str(getattr(err, "code", "") or "").upper()
         status_code = getattr(err, "status_code", None)
+        cooldown_s: float = 0.0
         if (
             "QUOTA" in code_upper
             or "RATE_LIMIT" in code_upper
             or status_code == 429
         ):
-            until = time.monotonic() + _ELEVENLABS_QUOTA_COOLDOWN_SECONDS
+            cooldown_s = _ELEVENLABS_QUOTA_COOLDOWN_SECONDS
+        elif (
+            code_upper
+            in {
+                "STT_TIMEOUT",
+                "STT_NETWORK_ERROR",
+                "STT_AUTH_FAILED",
+                "STT_TEMPORARILY_UNAVAILABLE",
+                "TTS_TIMEOUT",
+                "TTS_NETWORK_ERROR",
+                "TTS_AUTH_FAILED",
+                "SPEECH_UNAVAILABLE",
+            }
+            or (isinstance(status_code, int) and status_code >= 500)
+        ):
+            cooldown_s = _ELEVENLABS_FAILURE_COOLDOWN_SECONDS
+        if cooldown_s > 0.0:
+            until = time.monotonic() + cooldown_s
             if capability == "tts":
-                _elevenlabs_tts_cooldown_until = until
+                _elevenlabs_tts_cooldown_until = max(_elevenlabs_tts_cooldown_until, until)
             else:
-                _elevenlabs_stt_cooldown_until = until
+                _elevenlabs_stt_cooldown_until = max(_elevenlabs_stt_cooldown_until, until)
 
     def _elevenlabs_status(self) -> dict[str, Any]:
         is_conf_fn = getattr(self.elevenlabs, "is_configured", None)
         el_configured = bool(callable(is_conf_fn) and is_conf_fn())
+        gender_fn = getattr(self.elevenlabs, "get_voice_id_for_gender", None)
+        male_voice_id = (
+            gender_fn("male")
+            if el_configured and callable(gender_fn)
+            else None
+        )
         return {
             "configured": el_configured,
             "stt_configured": el_configured,
             "tts_configured": el_configured,
+            "male_tts_configured": bool(male_voice_id),
             "stt_cooldown": self._is_elevenlabs_stt_in_cooldown(),
             "tts_cooldown": self._is_elevenlabs_tts_in_cooldown(),
             "model_id": self.elevenlabs.get_configured_model_id(),
@@ -751,53 +955,58 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
+                    _el_region, req_gender = _resolve_local_voice_region_gender(voice_id)
+                    el_kwargs: dict[str, Any] = {
+                        "text": text,
+                        "requested_voice_id": el_voice_id,
+                        "speed": speed,
+                    }
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize, "expected_gender"):
+                        el_kwargs["expected_gender"] = req_gender
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize, "allow_default_fallback"
+                    ):
+                        el_kwargs["allow_default_fallback"] = False
                     try:
-                        el_audio = await self.elevenlabs.synthesize(
-                            text=text,
-                            requested_voice_id=el_voice_id,
-                            speed=speed,
-                        )
+                        el_audio = await self.elevenlabs.synthesize(**el_kwargs)
                     except VoiceProviderError as el_err:
                         self._mark_elevenlabs_cooldown("tts", el_err)
-                        raise
-                    el_resolved_voice = (
-                        el_audio.resolved_voice_id
-                        or self.elevenlabs.get_configured_voice_id()
-                    )
-                    el_model = self.elevenlabs.get_configured_model_id()
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                        and normalized_text
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=normalized_text,
-                            voice_id=voice_id,
-                            model_version=el_model,
-                            speed=speed,
-                            audio_bytes=el_audio.content,
-                            source_content_type=el_audio.content_type or "audio/mpeg",
+                        if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
+                            raise
+                        logger.warning(
+                            "tts_elevenlabs_fail_falling_back_to_google code=%s voice=%s session=%s request_id=%s",
+                            getattr(el_err, "code", "SPEECH_UNAVAILABLE"),
+                            voice_id,
+                            ctx.session_id or "-",
+                            get_request_id(),
                         )
-                    logger.info(
-                        "tts_ok provider=elevenlabs reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                        local_err.code,
-                        el_resolved_voice,
-                        (time.perf_counter() - t_el) * 1000,
-                        ctx.session_id or "-",
-                        get_request_id(),
-                    )
-                    return LocalSynthesizedAudio(
-                        content=el_audio.content,
-                        content_type=el_audio.content_type or "audio/mpeg",
-                        resolved_voice_id=el_resolved_voice,
-                        region=self._voice_region(voice_id),
-                        model_version=el_model,
-                        provider="elevenlabs",
-                        used_fallback_voice=False,
-                    )
+                    else:
+                        el_resolved_voice = (
+                            el_audio.resolved_voice_id
+                            or el_voice_id
+                            or self.elevenlabs.get_configured_voice_id()
+                        )
+                        el_model = self.elevenlabs.get_configured_model_id()
+                        # NEVER cache ElevenLabs cloud fallback audio under a `local_*`
+                        # voice_id in `tts_audio_cache_entries` so VieNeu precomputed
+                        # cache rows are never contaminated across providers/voices.
+                        logger.info(
+                            "tts_ok provider=elevenlabs reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                            local_err.code,
+                            el_resolved_voice,
+                            (time.perf_counter() - t_el) * 1000,
+                            ctx.session_id or "-",
+                            get_request_id(),
+                        )
+                        return LocalSynthesizedAudio(
+                            content=el_audio.content,
+                            content_type=el_audio.content_type or "audio/mpeg",
+                            resolved_voice_id=el_resolved_voice,
+                            region=self._voice_region(voice_id),
+                            model_version=el_model,
+                            provider="elevenlabs",
+                            used_fallback_voice=False,
+                        )
                 if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                     logger.warning(
                         "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
@@ -1113,47 +1322,47 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
+                    _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
+                    el_timed_kwargs: dict[str, Any] = {
+                        "words": words,
+                        "requested_voice_id": el_voice_id,
+                        "speed": speed,
+                    }
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "expected_gender"):
+                        el_timed_kwargs["expected_gender"] = el_expected_gender
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
+                        el_timed_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_timed, "allow_default_fallback"
+                    ):
+                        el_timed_kwargs["allow_default_fallback"] = False
                     try:
-                        el_timed = await self.elevenlabs.synthesize_timed(
-                            words=words,
-                            requested_voice_id=el_voice_id,
-                            speed=speed,
-                        )
+                        el_timed = await self.elevenlabs.synthesize_timed(**el_timed_kwargs)
                     except VoiceProviderError as el_err:
                         self._mark_elevenlabs_cooldown("tts", el_err)
-                        raise
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                        and normalized_text
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=normalized_text,
-                            voice_id=voice_id,
-                            model_version=el_timed.model_version
-                            or self.elevenlabs.get_configured_model_id(),
-                            speed=speed,
-                            audio_bytes=el_timed.audio,
-                            source_content_type=el_timed.content_type or "audio/mpeg",
-                            duration_seconds=el_timed.duration_seconds,
-                            word_timings_json=[
-                                {"index": w.index, "start": w.start, "end": w.end}
-                                for w in el_timed.words
-                            ],
+                        if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
+                            raise
+                        logger.warning(
+                            "tts_timed_elevenlabs_fail_falling_back_to_google code=%s voice=%s session=%s request_id=%s",
+                            getattr(el_err, "code", "SPEECH_UNAVAILABLE"),
+                            voice_id,
+                            ctx.session_id or "-",
+                            get_request_id(),
                         )
-                    logger.info(
-                        "tts_timed_ok provider=elevenlabs reason=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
-                        local_err.code,
-                        el_timed.resolved_voice_id,
-                        len(words),
-                        (time.perf_counter() - t_el) * 1000,
-                        ctx.session_id or "-",
-                        get_request_id(),
-                    )
-                    return el_timed
+                    else:
+                        el_timed = replace(el_timed, region=self._voice_region(voice_id))
+                        # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
+                        logger.info(
+                            "tts_timed_ok provider=elevenlabs reason=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                            local_err.code,
+                            el_timed.resolved_voice_id,
+                            len(words),
+                            (time.perf_counter() - t_el) * 1000,
+                            ctx.session_id or "-",
+                            get_request_id(),
+                        )
+                        return el_timed
                 if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                     logger.warning(
                         "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
@@ -1398,51 +1607,47 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
+                    _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
+                    el_phonics_kwargs: dict[str, Any] = {
+                        "steps": steps,
+                        "requested_voice_id": el_voice_id,
+                        "speed": speed,
+                    }
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "expected_gender"):
+                        el_phonics_kwargs["expected_gender"] = el_expected_gender
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
+                        el_phonics_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_phonics, "allow_default_fallback"
+                    ):
+                        el_phonics_kwargs["allow_default_fallback"] = False
                     try:
-                        el_phonics = await self.elevenlabs.synthesize_phonics(
-                            steps=steps,
-                            requested_voice_id=el_voice_id,
-                            speed=speed,
-                        )
+                        el_phonics = await self.elevenlabs.synthesize_phonics(**el_phonics_kwargs)
                     except VoiceProviderError as el_err:
                         self._mark_elevenlabs_cooldown("tts", el_err)
-                        raise
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=phonics_key,
-                            voice_id=voice_id,
-                            model_version=el_phonics.model_version
-                            or self.elevenlabs.get_configured_model_id(),
-                            speed=speed,
-                            audio_bytes=el_phonics.audio,
-                            source_content_type=el_phonics.content_type or "audio/mpeg",
-                            duration_seconds=el_phonics.duration_seconds,
-                            word_timings_json=[
-                                {
-                                    "id": s.id,
-                                    "index": s.index,
-                                    "start": s.start,
-                                    "end": s.end,
-                                }
-                                for s in el_phonics.step_timings
-                            ],
+                        if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
+                            raise
+                        logger.warning(
+                            "tts_phonics_elevenlabs_fail_falling_back_to_google code=%s voice=%s session=%s request_id=%s",
+                            getattr(el_err, "code", "SPEECH_UNAVAILABLE"),
+                            voice_id,
+                            ctx.session_id or "-",
+                            get_request_id(),
                         )
-                    logger.info(
-                        "tts_phonics_ok provider=elevenlabs reason=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                        local_err.code,
-                        el_phonics.resolved_voice_id,
-                        len(steps),
-                        (time.perf_counter() - t_el) * 1000,
-                        ctx.session_id or "-",
-                        get_request_id(),
-                    )
-                    return el_phonics
+                    else:
+                        el_phonics = replace(el_phonics, region=self._voice_region(voice_id))
+                        # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
+                        logger.info(
+                            "tts_phonics_ok provider=elevenlabs reason=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                            local_err.code,
+                            el_phonics.resolved_voice_id,
+                            len(steps),
+                            (time.perf_counter() - t_el) * 1000,
+                            ctx.session_id or "-",
+                            get_request_id(),
+                        )
+                        return el_phonics
                 if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                     logger.warning(
                         "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
@@ -1548,17 +1753,25 @@ class VoiceOrchestrator:
         ctx: VoicePolicyContext,
     ) -> LocalTranscription:
         t0 = time.perf_counter()
+        expanded_keyterms = (
+            build_contrastive_vietnamese_keyterms(keyterms) or None
+            if keyterms
+            else None
+        )
         try:
+            local_kwargs: dict[str, Any] = {
+                "audio": audio,
+                "filename": filename,
+                "content_type": content_type,
+                "language_code": language_code,
+                "source": ctx.source,
+                "session_id": ctx.session_id,
+                "turn_id": ctx.turn_id,
+            }
+            if expanded_keyterms is not None:
+                local_kwargs["keyterms"] = expanded_keyterms
             res = await _call_local_with_busy_retry(
-                lambda: self.local.transcribe(
-                    audio=audio,
-                    filename=filename,
-                    content_type=content_type,
-                    language_code=language_code,
-                    source=ctx.source,
-                    session_id=ctx.session_id,
-                    turn_id=ctx.turn_id,
-                )
+                lambda: self.local.transcribe(**local_kwargs)
             )
             logger.info(
                 "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s request_id=%s",
@@ -1570,44 +1783,64 @@ class VoiceOrchestrator:
             )
             return res
         except LocalVoiceTechnicalError as local_err:
-            if self._can_use_elevenlabs_stt(ctx):
-                t_el = time.perf_counter()
-                try:
-                    el_res = await self.elevenlabs.transcribe(
-                        audio=audio,
-                        filename=filename,
-                        content_type=content_type,
-                        language_code=language_code or "vi",
-                        keyterms=keyterms,
-                    )
-                except VoiceProviderError as el_err:
-                    self._mark_elevenlabs_cooldown("stt", el_err)
-                    raise
-                logger.info(
-                    "stt_ok provider=elevenlabs fallback=1 reason=%s ms=%.1f session=%s page=%s turn=%s request_id=%s",
-                    local_err.code,
-                    (time.perf_counter() - t_el) * 1000,
-                    ctx.session_id or "-",
-                    ctx.page_id or "-",
-                    ctx.turn_id or "-",
-                    get_request_id(),
-                )
-                return LocalTranscription(
-                    text=el_res.text,
-                    language_code=el_res.language_code or "vi",
-                    language_probability=el_res.language_probability,
-                    words=el_res.words,
-                    provider="elevenlabs",
-                    model_version="scribe_v2",
-                    fallback_used=True,
-                    fallback_reason=local_err.code,
-                )
             can_fallback = (
                 ctx.provider_mode == "local_with_google_fallback"
                 and ctx.allow_google_stt
                 and self.google.is_stt_configured()
                 and not self.google.is_stt_in_cooldown()
             )
+            if self._can_use_elevenlabs_stt(ctx):
+                t_el = time.perf_counter()
+                try:
+                    el_kwargs: dict[str, Any] = {
+                        "audio": audio,
+                        "filename": filename,
+                        "content_type": content_type,
+                        "language_code": language_code or "vi",
+                        "keyterms": keyterms,
+                    }
+                    try:
+                        el_sig = inspect.signature(self.elevenlabs.transcribe)
+                        if "max_retries" in el_sig.parameters or any(
+                            p.kind == inspect.Parameter.VAR_KEYWORD
+                            for p in el_sig.parameters.values()
+                        ):
+                            el_kwargs["max_retries"] = 0
+                    except (TypeError, ValueError):
+                        pass
+                    el_res = await self.elevenlabs.transcribe(**el_kwargs)
+                except VoiceProviderError as el_err:
+                    self._mark_elevenlabs_cooldown("stt", el_err)
+                    if not can_fallback:
+                        raise
+                    logger.warning(
+                        "stt_elevenlabs_fail_falling_back_to_google code=%s session=%s page=%s turn=%s request_id=%s",
+                        getattr(el_err, "code", "SPEECH_UNAVAILABLE"),
+                        ctx.session_id or "-",
+                        ctx.page_id or "-",
+                        ctx.turn_id or "-",
+                        get_request_id(),
+                    )
+                else:
+                    logger.info(
+                        "stt_ok provider=elevenlabs fallback=1 reason=%s ms=%.1f session=%s page=%s turn=%s request_id=%s",
+                        local_err.code,
+                        (time.perf_counter() - t_el) * 1000,
+                        ctx.session_id or "-",
+                        ctx.page_id or "-",
+                        ctx.turn_id or "-",
+                        get_request_id(),
+                    )
+                    return LocalTranscription(
+                        text=el_res.text,
+                        language_code=el_res.language_code or "vi",
+                        language_probability=el_res.language_probability,
+                        words=el_res.words,
+                        provider="elevenlabs",
+                        model_version="scribe_v2",
+                        fallback_used=True,
+                        fallback_reason=local_err.code,
+                    )
             if not can_fallback:
                 logger.warning(
                     "stt_fail provider=local fallback=0 reason=%s mode=%s allow_google=%s request_id=%s",
@@ -1626,7 +1859,7 @@ class VoiceOrchestrator:
                 filename=filename,
                 content_type=content_type,
                 language_code=language_code,
-                keyterms=keyterms,
+                keyterms=expanded_keyterms,
                 fallback_reason=local_err.code,
             )
             logger.info(

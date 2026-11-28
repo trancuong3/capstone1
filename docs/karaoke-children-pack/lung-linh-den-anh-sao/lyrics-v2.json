@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "ba9c8df5-0ef3-55fa-b5fd-77fc40639840",
+      "text": "Đêm thu trăng sáng tròn vằng vặc",
+      "start_ms": 2553,
+      "end_ms": 7018,
+      "syllables": [
+        {
+          "id": "dde6a645-0396-51b6-8fc5-4d7fca2cfd7e",
+          "text": "Đêm",
+          "start_ms": 2553,
+          "end_ms": 3127
+        },
+        {
+          "id": "f65c3c45-e98a-52ea-92c4-38a055643688",
+          "text": "thu",
+          "start_ms": 3127,
+          "end_ms": 3701
+        },
+        {
+          "id": "41d6600c-3cc3-58bd-b161-8a02e21513ba",
+          "text": "trăng",
+          "start_ms": 3701,
+          "end_ms": 4275
+        },
+        {
+          "id": "551d48fe-0b00-5554-b3a2-b47091349876",
+          "text": "sáng",
+          "start_ms": 4275,
+          "end_ms": 4849
+        },
+        {
+          "id": "a697aec0-9103-5bde-b4ec-bd51ef738501",
+          "text": "tròn",
+          "start_ms": 4849,
+          "end_ms": 5423
+        },
+        {
+          "id": "5501d88c-ac42-5619-bd89-130c6869393b",
+          "text": "vằng",
+          "start_ms": 5423,
+          "end_ms": 5997
+        },
+        {
+          "id": "813bd901-011e-589a-a1eb-cd86b33cea75",
+          "text": "vặc",
+          "start_ms": 5997,
+          "end_ms": 7018
+        }
+      ]
+    },
+    {
+      "id": "ab67168a-d449-53f8-9b04-d60840ebdd93",
+      "text": "Đèn sao năm cánh rực sắc màu",
+      "start_ms": 7656,
+      "end_ms": 12121,
+      "syllables": [
+        {
+          "id": "6b01641f-b1aa-5c4b-b9c8-9870f0d51a30",
+          "text": "Đèn",
+          "start_ms": 7656,
+          "end_ms": 8230
+        },
+        {
+          "id": "48c2da42-53eb-5964-b600-a996cff285e9",
+          "text": "sao",
+          "start_ms": 8230,
+          "end_ms": 8804
+        },
+        {
+          "id": "608dc824-6a27-5181-8e1a-b5f96aab2519",
+          "text": "năm",
+          "start_ms": 8804,
+          "end_ms": 9378
+        },
+        {
+          "id": "e8415dd1-5414-5e12-9de3-bc945f884d38",
+          "text": "cánh",
+          "start_ms": 9378,
+          "end_ms": 9952
+        },
+        {
+          "id": "d8b1dfd2-8b3c-5a11-b375-3c051c4472c3",
+          "text": "rực",
+          "start_ms": 9952,
+          "end_ms": 10526
+        },
+        {
+          "id": "7458a410-f6d9-531e-b330-d8ed6a8ef291",
+          "text": "sắc",
+          "start_ms": 10526,
+          "end_ms": 11100
+        },
+        {
+          "id": "ed531293-ac73-5bb5-8769-59496f992b6a",
+          "text": "màu",
+          "start_ms": 11100,
+          "end_ms": 12121
+        }
+      ]
+    },
+    {
+      "id": "1d3b060e-d207-5cdd-9081-e8a9975ff1a2",
+      "text": "Tiếng trống tùng dinh vang khắp ngõ",
+      "start_ms": 12759,
+      "end_ms": 17224,
+      "syllables": [
+        {
+          "id": "e4d3b003-a5f9-5205-875b-e05fe954ff3e",
+          "text": "Tiếng",
+          "start_ms": 12759,
+          "end_ms": 13333
+        },
+        {
+          "id": "96e7ec7c-961f-51ed-adfa-6b0fa88c367e",
+          "text": "trống",
+          "start_ms": 13333,
+          "end_ms": 13907
+        },
+        {
+          "id": "a9583f6d-9a4c-501e-8052-d307b3b78037",
+          "text": "tùng",
+          "start_ms": 13907,
+          "end_ms": 14481
+        },
+        {
+          "id": "790cd5a7-47e9-5358-badb-7f6ead258ba5",
+          "text": "dinh",
+          "start_ms": 14481,
+          "end_ms": 15055
+        },
+        {
+          "id": "9b7e5975-b87d-59b0-aa6e-aa52119f6e6b",
+          "text": "vang",
+          "start_ms": 15055,
+          "end_ms": 15629
+        },
+        {
+          "id": "fc72164c-863b-5969-bac8-6021ef78b6d5",
+          "text": "khắp",
+          "start_ms": 15629,
+          "end_ms": 16203
+        },
+        {
+          "id": "e5aca5b3-39a3-5609-9043-6b3f9055e21d",
+          "text": "ngõ",
+          "start_ms": 16203,
+          "end_ms": 17224
+        }
+      ]
+    },
+    {
+      "id": "4bd6a54d-50f9-53a7-96fc-dc51453eb102",
+      "text": "Bạn bè ríu rít bước bên nhau",
+      "start_ms": 17862,
+      "end_ms": 22327,
+      "syllables": [
+        {
+          "id": "072113a0-06e0-53ef-8dd0-70c598d6138f",
+          "text": "Bạn",
+          "start_ms": 17862,
+          "end_ms": 18436
+        },
+        {
+          "id": "e675e46b-0751-58f2-a1f8-29fa6e052959",
+          "text": "bè",
+          "start_ms": 18436,
+          "end_ms": 19010
+        },
+        {
+          "id": "1208f94f-6f43-52fe-a18a-5eac2eba9321",
+          "text": "ríu",
+          "start_ms": 19010,
+          "end_ms": 19584
+        },
+        {
+          "id": "0cee7069-e974-5bd8-8cec-2c89167d003b",
+          "text": "rít",
+          "start_ms": 19584,
+          "end_ms": 20158
+        },
+        {
+          "id": "fe7fbc73-96e6-5a41-9b2a-ee06248fa213",
+          "text": "bước",
+          "start_ms": 20158,
+          "end_ms": 20732
+        },
+        {
+          "id": "21175bd1-72ab-581e-8b17-258fcb2ee4a9",
+          "text": "bên",
+          "start_ms": 20732,
+          "end_ms": 21306
+        },
+        {
+          "id": "6a49662b-48f4-532e-ae61-8c5acab1d691",
+          "text": "nhau",
+          "start_ms": 21306,
+          "end_ms": 22327
+        }
+      ]
+    },
+    {
+      "id": "5dd4e47b-111f-5450-a459-082cdd00b033",
+      "text": "Trao chiếc đèn xinh cùng em nhỏ",
+      "start_ms": 22965,
+      "end_ms": 27430,
+      "syllables": [
+        {
+          "id": "63cd00f0-8326-5c5a-b387-5d4c159531f7",
+          "text": "Trao",
+          "start_ms": 22965,
+          "end_ms": 23539
+        },
+        {
+          "id": "89c37830-6bb0-588a-a8d8-6fe0a360e3f8",
+          "text": "chiếc",
+          "start_ms": 23539,
+          "end_ms": 24113
+        },
+        {
+          "id": "eb1d39db-57c6-5d65-abce-5b198bf7e8c5",
+          "text": "đèn",
+          "start_ms": 24113,
+          "end_ms": 24687
+        },
+        {
+          "id": "f5d23c54-2544-5048-b21f-a859bf309b85",
+          "text": "xinh",
+          "start_ms": 24687,
+          "end_ms": 25261
+        },
+        {
+          "id": "3c9f595e-b311-5546-9bff-fab756f39f97",
+          "text": "cùng",
+          "start_ms": 25261,
+          "end_ms": 25835
+        },
+        {
+          "id": "5ec4e160-8dd5-508b-a464-ab4dd6bfda99",
+          "text": "em",
+          "start_ms": 25835,
+          "end_ms": 26409
+        },
+        {
+          "id": "cc450250-ae60-58c2-994f-68ceb5b14f60",
+          "text": "nhỏ",
+          "start_ms": 26409,
+          "end_ms": 27430
+        }
+      ]
+    },
+    {
+      "id": "2e656952-6dee-5072-8df5-8eaaf5d0ac8b",
+      "text": "Ánh sao sẻ chia sáng đêm rằm",
+      "start_ms": 28068,
+      "end_ms": 32533,
+      "syllables": [
+        {
+          "id": "9c81faff-b62f-547a-87d1-e9057b4e88ff",
+          "text": "Ánh",
+          "start_ms": 28068,
+          "end_ms": 28642
+        },
+        {
+          "id": "2697a28d-f301-5d47-b8a4-973c9815396f",
+          "text": "sao",
+          "start_ms": 28642,
+          "end_ms": 29216
+        },
+        {
+          "id": "935e285f-470f-520c-a82c-17c6375418cb",
+          "text": "sẻ",
+          "start_ms": 29216,
+          "end_ms": 29790
+        },
+        {
+          "id": "efd5394b-48e3-5082-a7bb-811554a10eba",
+          "text": "chia",
+          "start_ms": 29790,
+          "end_ms": 30364
+        },
+        {
+          "id": "df46feb0-0bf1-5120-907d-7e73bf19420e",
+          "text": "sáng",
+          "start_ms": 30364,
+          "end_ms": 30938
+        },
+        {
+          "id": "f951f10d-7ce8-556a-a75a-6732509f6e2b",
+          "text": "đêm",
+          "start_ms": 30938,
+          "end_ms": 31512
+        },
+        {
+          "id": "7ded7acf-1bb0-561b-9880-95bbd94d28c0",
+          "text": "rằm",
+          "start_ms": 31512,
+          "end_ms": 32533
+        }
+      ]
+    }
+  ]
+}

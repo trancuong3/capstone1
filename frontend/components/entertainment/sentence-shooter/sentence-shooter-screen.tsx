@@ -26,6 +26,7 @@ import {
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { BookCover } from "@/components/books/book-cover";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
@@ -43,12 +44,20 @@ import {
   suspendShooterAudio,
 } from "@/components/entertainment/sentence-shooter/sound-engine";
 import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
+import { MagicWordQuestPanel } from "@/components/entertainment/sentence-shooter/magic-word-quest-panel";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import {
+  lockSessionVoice,
+  releaseSessionVoiceLock,
+} from "@/lib/reading/session-voice-lock";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
 import type {
@@ -62,7 +71,9 @@ import type {
   SentenceShooterTokenDTO,
 } from "@/types/sentence-shooter";
 
-type ScreenMode = "lobby" | "playing" | "result";
+export const MAGIC_QUEST_BOOK_ID = "__magic_word_quest__";
+
+type ScreenMode = "lobby" | "playing" | "magic-quest" | "result";
 type BookLoadState =
   | { status: "loading" }
   | { status: "ready"; books: SentenceShooterBookDTO[] }
@@ -130,8 +141,10 @@ const LEARNING_MODE_LABEL_KEYS: Record<SentenceShooterLearningMode, string> = {
 
 const MAX_ACTIVE_PROJECTILES = 6;
 
-interface SentenceShooterScreenProps {
+export interface SentenceShooterScreenProps {
   initialBookId?: string;
+  initialMode?: "magic-quest";
+  initialPageId?: string;
   readingSessionId?: string;
 }
 
@@ -181,7 +194,17 @@ function SentenceShooterResultView({
   session,
 }: SentenceShooterResultViewProps) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const speechPlayer = useSpeechPlayer();
+  const resultDetailsProgress = useAiProgress({
+    active: !result && isLoadingResult,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const summaryBookId = result?.book.id ?? session?.book.id ?? null;
   const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
   const summaryCompletedRounds =
     result?.completed_rounds ?? session?.completed_rounds ?? 0;
@@ -203,7 +226,14 @@ function SentenceShooterResultView({
   function readSentence() {
     if (!calmSound || !finalSentence.trim()) return;
     speechPlayer.stop();
-    void speechPlayer.play(finalSentence).catch(() => undefined);
+    void speechPlayer
+      .play(finalSentence, {
+        bookId: summaryBookId,
+        cacheScope: "CATALOG",
+        bypassSessionLock: true,
+        utteranceKind: "game_sample",
+      })
+      .catch(() => undefined);
   }
 
   return (
@@ -297,9 +327,22 @@ function SentenceShooterResultView({
             })}
           </p>
         ) : isLoadingResult ? (
-          <p className="mt-3 text-sm font-semibold text-muted" role="status">
-            {t("sentenceShooter.loadingResultDetails")}
-          </p>
+          <div className="mx-auto mt-3 flex max-w-sm flex-col items-center gap-2">
+            <p className="text-sm font-semibold text-muted" role="status">
+              {t("sentenceShooter.loadingResultDetails")}
+            </p>
+            <AiProgressBar
+              active
+              className="w-full"
+              label={
+                resultDetailsProgress.stageLabel ??
+                tCommon("aiProgress.evaluatingAnswer")
+              }
+              percent={resultDetailsProgress.percent}
+              size="compact"
+              testId="sentence-shooter-result-details-progress"
+            />
+          </div>
         ) : resultError ? (
           <div className="mt-3 flex flex-col items-center gap-2">
             <p className="text-sm font-semibold text-danger">
@@ -359,9 +402,12 @@ function SentenceShooterResultView({
 
 export function SentenceShooterScreen({
   initialBookId,
+  initialMode,
+  initialPageId,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const gameError = t("sentenceShooter.gameError");
   const shootError = t("sentenceShooter.shootError");
   const router = useRouter();
@@ -370,10 +416,65 @@ export function SentenceShooterScreen({
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
+  const shooterVoiceSessionId = childId
+    ? `game_shooter_${childId}`
+    : "game_shooter";
 
-  const { reducedMotion, calmSound, setCalmSound } =
-    useEntertainmentPreferences();
+  useEffect(() => {
+    lockSessionVoice(shooterVoiceSessionId);
+    void preloadReadingVoiceEngines({ warmWasmStt: false });
+    return () => {
+      releaseSessionVoiceLock(shooterVoiceSessionId);
+    };
+  }, [shooterVoiceSessionId]);
+
+  const {
+    reducedMotion,
+    calmSound,
+    autopilotEnabled,
+    setCalmSound,
+    toggleAutopilot,
+  } = useEntertainmentPreferences();
   const soundEnabled = calmSound;
+
+  const [urlFocusWords] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("focus") ?? "";
+      return raw
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+    } catch {
+      return [];
+    }
+  });
+  const [hasUrlAutopilot] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        new URLSearchParams(window.location.search).get("autopilot") === "1"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const [hasUrlMagicQuestMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        new URLSearchParams(window.location.search).get("mode") ===
+        "magic-quest"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const isInitialMagicQuestMode =
+    initialMode === "magic-quest" || hasUrlMagicQuestMode;
+  const [isAutoNextRoundPending, setIsAutoNextRoundPending] = useState(false);
 
   const [difficulty, setDifficulty] =
     useState<SentenceShooterDifficulty>("easy");
@@ -385,7 +486,7 @@ export function SentenceShooterScreen({
   });
   const [selectedBookId, setSelectedBookId] = useState("");
   const [booksPage, setBooksPage] = useState(1);
-  const SHOOTER_BOOKS_PAGE_SIZE = 9;
+  const SHOOTER_BOOKS_PAGE_SIZE = 6;
   const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
@@ -418,6 +519,39 @@ export function SentenceShooterScreen({
   const [prefetchedNextRound, setPrefetchedNextRound] =
     useState<SentenceShooterRoundDTO | null>(null);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
+  const startSessionProgress = useAiProgress({
+    active: isStartingSession,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 48, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const nextRoundProgress = useAiProgress({
+    active: isLoadingNextRound,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 75, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const hintProgress = useAiProgress({
+    active: isRequestingHint,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingHint") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 3_500,
+  });
+  const loadResultProgress = useAiProgress({
+    active: isLoadingResult,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 75, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_500,
+  });
   const [resultError, setResultError] = useState(false);
   const [sessionScore, setSessionScore] = useState(0);
   const [projectiles, setProjectiles] = useState<readonly ActiveProjectile[]>(
@@ -447,16 +581,37 @@ export function SentenceShooterScreen({
   );
   const sessionEpochRef = useRef(0);
   const controlAbortRef = useRef<AbortController | null>(null);
+  const autoNextRoundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const continueToNextRoundRef = useRef<() => Promise<void>>(
+    async () => undefined,
+  );
   const shooterServiceRef = useRef(shooterService);
   const speechPlayerRef = useRef(speechPlayer);
   const soundEnabledRef = useRef(soundEnabled);
   const reducedMotionRef = useRef(reducedMotion);
   const calmSoundRef = useRef(calmSound);
+  const autopilotEnabledRef = useRef(autopilotEnabled);
+  const userToggledAutopilotOnRef = useRef(false);
   const roundRef = useRef(round);
+  const sessionBookIdRef = useRef<string | null>(
+    session?.book.id ??
+      result?.book.id ??
+      (selectedBookId || initialBookId || null),
+  );
   const shootErrorRef = useRef(shootError);
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
+
+  const cancelAutoNextRound = () => {
+    if (autoNextRoundTimerRef.current !== null) {
+      clearTimeout(autoNextRoundTimerRef.current);
+      autoNextRoundTimerRef.current = null;
+    }
+    setIsAutoNextRoundPending(false);
+  };
 
   useEffect(() => {
     shooterServiceRef.current = shooterService;
@@ -473,6 +628,26 @@ export function SentenceShooterScreen({
       speechPlayerRef.current.stop();
     }
   }, [calmSound, soundEnabled]);
+
+  useEffect(() => {
+    autopilotEnabledRef.current = autopilotEnabled;
+    if (!autopilotEnabled) {
+      if (autoNextRoundTimerRef.current !== null) {
+        clearTimeout(autoNextRoundTimerRef.current);
+        autoNextRoundTimerRef.current = null;
+      }
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setIsAutoNextRoundPending(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    return undefined;
+  }, [autopilotEnabled]);
 
   useEffect(() => {
     reducedMotionRef.current = reducedMotion;
@@ -553,6 +728,25 @@ export function SentenceShooterScreen({
               calmSound: calmSoundRef.current,
             },
           );
+          const autopilotAudioActive =
+            autopilotEnabledRef.current &&
+            (hasUrlAutopilot || userToggledAutopilotOnRef.current);
+          if (
+            !response.round_completed &&
+            shot.token.is_difficult_word &&
+            autopilotAudioActive &&
+            calmSoundRef.current &&
+            shot.token.text.trim()
+          ) {
+            speechPlayerRef.current.stop();
+            void speechPlayerRef.current
+              .play(shot.token.text.trim(), {
+                wordSample: true,
+                speedScale: 0.92,
+                bypassSessionLock: true,
+              })
+              .catch(() => undefined);
+          }
           if (response.round_completed) {
             roundCompletedRef.current = true;
             const completedText = response.completed_sentence ?? "";
@@ -574,6 +768,7 @@ export function SentenceShooterScreen({
                 : current,
             );
             if (response.session_completed) {
+              cancelAutoNextRound();
               setFinalSentence(completedText);
               setResult(null);
               setMode("result");
@@ -583,6 +778,33 @@ export function SentenceShooterScreen({
               );
             } else {
               setPrefetchedNextRound(response.next_round ?? null);
+              if (
+                autopilotAudioActive &&
+                calmSoundRef.current &&
+                completedText.trim()
+              ) {
+                speechPlayerRef.current.stop();
+                void speechPlayerRef.current
+                  .play(completedText.trim(), {
+                    bookId: sessionBookIdRef.current,
+                    cacheScope: "CATALOG",
+                    bypassSessionLock: true,
+                    utteranceKind: "game_sample",
+                  })
+                  .catch(() => undefined);
+              }
+              if (autopilotEnabledRef.current) {
+                cancelAutoNextRound();
+                setIsAutoNextRoundPending(true);
+                const armedEpoch = sessionEpochRef.current;
+                autoNextRoundTimerRef.current = setTimeout(() => {
+                  autoNextRoundTimerRef.current = null;
+                  setIsAutoNextRoundPending(false);
+                  if (sessionEpochRef.current === armedEpoch) {
+                    void continueToNextRoundRef.current();
+                  }
+                }, 2200);
+              }
             }
           }
         } else {
@@ -640,9 +862,15 @@ export function SentenceShooterScreen({
     );
     shotQueueRef.current = shotQueue;
 
-    const onBackground = () => suspendShooterAudio();
+    const onBackground = () => {
+      cancelAutoNextRound();
+      suspendShooterAudio();
+    };
     const onVisibility = () => {
-      if (document.hidden) suspendShooterAudio();
+      if (document.hidden) {
+        cancelAutoNextRound();
+        suspendShooterAudio();
+      }
     };
     document.addEventListener("viread:android-background", onBackground);
     document.addEventListener("visibilitychange", onVisibility);
@@ -651,6 +879,7 @@ export function SentenceShooterScreen({
       document.removeEventListener("viread:android-background", onBackground);
       document.removeEventListener("visibilitychange", onVisibility);
       sessionEpochRef.current += 1;
+      cancelAutoNextRound();
       controlAbortRef.current?.abort();
       shotQueue.resetEpoch();
       shotQueueRef.current = null;
@@ -678,7 +907,14 @@ export function SentenceShooterScreen({
           controller.signal,
         );
         if (!active) return;
-        setBooksPage(1);
+        const initialBookIdx = initialBookId
+          ? books.findIndex((book) => book.id === initialBookId)
+          : -1;
+        setBooksPage(
+          initialBookIdx >= 0
+            ? Math.floor(initialBookIdx / SHOOTER_BOOKS_PAGE_SIZE) + 1
+            : 1,
+        );
         setBookState({ status: "ready", books });
       } catch {
         if (!active || controller.signal.aborted) return;
@@ -690,15 +926,62 @@ export function SentenceShooterScreen({
       active = false;
       controller.abort();
     };
-  }, [childId, difficulty, reloadKey, shooterService, totalRounds]);
+  }, [
+    childId,
+    difficulty,
+    initialBookId,
+    reloadKey,
+    shooterService,
+    totalRounds,
+  ]);
 
-  const effectiveSelectedBookId =
-    !hasManuallySelectedBook &&
-    initialBookId &&
-    bookState.status === "ready" &&
-    bookState.books.some((book) => book.id === initialBookId)
-      ? initialBookId
-      : selectedBookId;
+  const effectiveSelectedBookId = (() => {
+    if (hasManuallySelectedBook) {
+      return selectedBookId;
+    }
+    if (isInitialMagicQuestMode) {
+      return MAGIC_QUEST_BOOK_ID;
+    }
+    if (initialBookId) {
+      if (bookState.status !== "ready") return selectedBookId;
+      if (bookState.books.some((book) => book.id === initialBookId)) {
+        return initialBookId;
+      }
+      return readingSessionId ? selectedBookId : MAGIC_QUEST_BOOK_ID;
+    }
+    if (!selectedBookId && bookState.status === "ready") {
+      if (bookState.books.length === 0) {
+        return MAGIC_QUEST_BOOK_ID;
+      }
+      if (
+        (bookState.books[0]?.difficult_word_count ?? 0) === 0 &&
+        urlFocusWords.length > 0
+      ) {
+        return MAGIC_QUEST_BOOK_ID;
+      }
+      if (
+        (bookState.books[0]?.difficult_word_count ?? 0) > 0 ||
+        hasUrlAutopilot
+      ) {
+        return bookState.books[0]?.id ?? "";
+      }
+    }
+    return selectedBookId;
+  })();
+
+  const isMagicQuestSelected = effectiveSelectedBookId === MAGIC_QUEST_BOOK_ID;
+
+  useEffect(() => {
+    sessionBookIdRef.current =
+      session?.book.id ??
+      result?.book.id ??
+      (effectiveSelectedBookId || initialBookId || null);
+  }, [
+    effectiveSelectedBookId,
+    initialBookId,
+    result?.book.id,
+    session?.book.id,
+  ]);
 
   const selectedBook = useMemo(
     () =>
@@ -807,7 +1090,16 @@ export function SentenceShooterScreen({
   }
 
   async function startGame() {
-    if (!child || !selectedBook || isStartingSession) return;
+    if (!child || isStartingSession) return;
+    if (isMagicQuestSelected) {
+      cancelAutoNextRound();
+      speechPlayer.stop();
+      setError("");
+      setMode("magic-quest");
+      return;
+    }
+    if (!selectedBook) return;
+    cancelAutoNextRound();
     sessionEpochRef.current += 1;
     const epoch = sessionEpochRef.current;
     shotQueueRef.current?.resetEpoch();
@@ -821,9 +1113,14 @@ export function SentenceShooterScreen({
         {
           child_id: child.id,
           book_id: selectedBook.id,
+          ...(initialPageId &&
+          (!hasManuallySelectedBook || selectedBook.id === initialBookId)
+            ? { book_page_id: initialPageId }
+            : {}),
           difficulty,
           total_rounds: totalRounds,
           learning_mode: learningMode,
+          ...(urlFocusWords.length > 0 ? { focus_words: urlFocusWords } : {}),
         },
         controller.signal,
       );
@@ -903,6 +1200,7 @@ export function SentenceShooterScreen({
   }
 
   async function continueToNextRound() {
+    cancelAutoNextRound();
     if (!session || !round || isLoadingNextRound) return;
     setError("");
     speechPlayer.stop();
@@ -987,8 +1285,12 @@ export function SentenceShooterScreen({
       }
     }
   }
+  useEffect(() => {
+    continueToNextRoundRef.current = continueToNextRound;
+  });
 
   async function loadCompletedResult() {
+    cancelAutoNextRound();
     if (!session) return;
     setMode("result");
     await fetchCompletedResult(session.session_id, sessionEpochRef.current);
@@ -998,6 +1300,7 @@ export function SentenceShooterScreen({
     if (!session) return;
     const shouldExit = window.confirm(t("sentenceShooter.exitConfirm"));
     if (!shouldExit) return;
+    cancelAutoNextRound();
     sessionEpochRef.current += 1;
     shotQueueRef.current?.resetEpoch();
     controlAbortRef.current?.abort();
@@ -1017,6 +1320,7 @@ export function SentenceShooterScreen({
   }
 
   function restartLobby() {
+    cancelAutoNextRound();
     sessionEpochRef.current += 1;
     shotQueueRef.current?.resetEpoch();
     controlAbortRef.current?.abort();
@@ -1052,9 +1356,20 @@ export function SentenceShooterScreen({
   }
 
   function playSentenceAudio(text: string) {
+    cancelAutoNextRound();
     if (!calmSound || !text.trim()) return;
     speechPlayer.stop();
-    void speechPlayer.play(text).catch(() => undefined);
+    void speechPlayer
+      .play(text, {
+        bookId:
+          session?.book.id ??
+          result?.book.id ??
+          (effectiveSelectedBookId || initialBookId || null),
+        cacheScope: "CATALOG",
+        bypassSessionLock: true,
+        utteranceKind: "game_sample",
+      })
+      .catch(() => undefined);
   }
 
   if (childState.status === "loading" || childState.status === "redirecting") {
@@ -1104,6 +1419,20 @@ export function SentenceShooterScreen({
         result={result}
         resultError={resultError}
         session={session}
+      />
+    );
+  }
+
+  if (mode === "magic-quest" && child) {
+    return (
+      <MagicWordQuestPanel
+        autopilotEnabled={autopilotEnabled}
+        calmSound={calmSound}
+        child={child}
+        focusWords={urlFocusWords}
+        onExitToLobby={restartLobby}
+        onToggleCalmSound={() => setCalmSound(!calmSound)}
+        reducedMotion={reducedMotion}
       />
     );
   }
@@ -1237,6 +1566,21 @@ export function SentenceShooterScreen({
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <ReadingVoiceSettings
+                fallbackNotice={speechPlayer.fallbackNotice}
+                isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+                onPreview={(sample) => {
+                  speechPlayer.stop();
+                  return speechPlayer.play(sample, {
+                    coaching: true,
+                    cacheScope: "COACHING",
+                    isPrivateBook: false,
+                    bypassSessionLock: true,
+                    utteranceKind: "voice_preview",
+                  });
+                }}
+                onStopPreview={speechPlayer.stop}
+              />
               <button
                 aria-label={
                   soundEnabled
@@ -1257,7 +1601,10 @@ export function SentenceShooterScreen({
               <button
                 aria-label={t("sentenceShooter.pauseAria")}
                 className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
-                onClick={() => setIsPaused(true)}
+                onClick={() => {
+                  cancelAutoNextRound();
+                  setIsPaused(true);
+                }}
                 type="button"
               >
                 <Pause aria-hidden="true" className="size-5" />
@@ -1559,6 +1906,20 @@ export function SentenceShooterScreen({
                 {t("sentenceShooter.hintButton")}
               </button>
             </div>
+            {isRequestingHint ? (
+              <div className="w-full">
+                <AiProgressBar
+                  active
+                  label={
+                    hintProgress.stageLabel ??
+                    tCommon("aiProgress.generatingHint")
+                  }
+                  percent={hintProgress.percent}
+                  size="compact"
+                  testId="sentence-shooter-hint-progress"
+                />
+              </div>
+            ) : null}
             {roundComplete ? (
               <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-5 text-center">
                 <p
@@ -1613,27 +1974,85 @@ export function SentenceShooterScreen({
                     </span>
                   </p>
                 ) : null}
-                <div className="mt-4">
+                <div className="mt-4 space-y-2.5">
                   {session.completed_rounds < session.total_rounds ? (
-                    <Button
-                      className="mx-auto max-w-sm"
-                      disabled={isLoadingNextRound}
-                      isLoading={isLoadingNextRound}
-                      onClick={() => void continueToNextRound()}
-                    >
-                      <Play aria-hidden="true" className="size-5" />{" "}
-                      {t("sentenceShooter.nextRound")}
-                    </Button>
+                    <>
+                      <Button
+                        className="mx-auto max-w-sm"
+                        disabled={isLoadingNextRound}
+                        isLoading={isLoadingNextRound}
+                        onClick={() => void continueToNextRound()}
+                      >
+                        <Play aria-hidden="true" className="size-5" />{" "}
+                        {t("sentenceShooter.nextRound")}
+                      </Button>
+                      {isAutoNextRoundPending && !isLoadingNextRound ? (
+                        <div
+                          className="mx-auto flex max-w-sm flex-wrap items-center justify-center gap-2 text-xs font-bold text-success-ink"
+                          data-testid="shooter-autonext-banner"
+                        >
+                          <span>
+                            {t(
+                              "sentenceShooter.autoNextNotice",
+                              undefined,
+                              "Tự chuyển sang câu mới sau giây lát…",
+                            )}
+                          </span>
+                          <button
+                            className="cursor-pointer rounded-full bg-white px-2.5 py-1 font-extrabold text-primary underline hover:bg-cream"
+                            data-testid="shooter-cancel-autonext"
+                            onClick={cancelAutoNextRound}
+                            type="button"
+                          >
+                            {t(
+                              "sentenceShooter.cancelAutoNext",
+                              undefined,
+                              "Dừng tự chuyển",
+                            )}
+                          </button>
+                        </div>
+                      ) : null}
+                      {isLoadingNextRound ? (
+                        <div className="mx-auto max-w-sm">
+                          <AiProgressBar
+                            active
+                            label={
+                              nextRoundProgress.stageLabel ??
+                              tCommon("aiProgress.generatingQuestion")
+                            }
+                            percent={nextRoundProgress.percent}
+                            size="compact"
+                            testId="sentence-shooter-next-round-progress"
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   ) : (
-                    <Button
-                      className="mx-auto max-w-sm"
-                      disabled={isLoadingResult}
-                      isLoading={isLoadingResult}
-                      onClick={() => void loadCompletedResult()}
-                    >
-                      <RefreshCw aria-hidden="true" className="size-5" />{" "}
-                      {t("sentenceShooter.viewResult")}
-                    </Button>
+                    <>
+                      <Button
+                        className="mx-auto max-w-sm"
+                        disabled={isLoadingResult}
+                        isLoading={isLoadingResult}
+                        onClick={() => void loadCompletedResult()}
+                      >
+                        <RefreshCw aria-hidden="true" className="size-5" />{" "}
+                        {t("sentenceShooter.viewResult")}
+                      </Button>
+                      {isLoadingResult ? (
+                        <div className="mx-auto max-w-sm">
+                          <AiProgressBar
+                            active
+                            label={
+                              loadResultProgress.stageLabel ??
+                              tCommon("aiProgress.evaluatingAnswer")
+                            }
+                            percent={loadResultProgress.percent}
+                            size="compact"
+                            testId="sentence-shooter-result-progress"
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </div>
@@ -1735,16 +2154,33 @@ export function SentenceShooterScreen({
             : t("sentenceShooter.mobilePlayZoneLabel")
         }
       />
-      <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="font-extrabold text-primary">
-          {t("sentenceShooter.eyebrow")}
-        </p>
-        <h1 className="text-heading font-extrabold text-ink">
-          {t("sentenceShooter.lobbyTitle")}
-        </h1>
-        <p className="text-body text-muted">
-          {t("sentenceShooter.lobbySubtitle")}
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-5">
+        <div className="flex flex-col gap-2">
+          <p className="font-extrabold text-primary">
+            {t("sentenceShooter.eyebrow")}
+          </p>
+          <h1 className="text-heading font-extrabold text-ink">
+            {t("sentenceShooter.lobbyTitle")}
+          </h1>
+          <p className="text-body text-muted">
+            {t("sentenceShooter.lobbySubtitle")}
+          </p>
+        </div>
+        <ReadingVoiceSettings
+          fallbackNotice={speechPlayer.fallbackNotice}
+          isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+          onPreview={(sample) => {
+            speechPlayer.stop();
+            return speechPlayer.play(sample, {
+              coaching: true,
+              cacheScope: "COACHING",
+              isPrivateBook: false,
+              bypassSessionLock: true,
+              utteranceKind: "voice_preview",
+            });
+          }}
+          onStopPreview={speechPlayer.stop}
+        />
       </header>
 
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
@@ -1854,20 +2290,75 @@ export function SentenceShooterScreen({
           <h2 className="text-lg font-extrabold text-ink">
             {t("sentenceShooter.chooseBook")}
           </h2>
-          <span className="text-sm font-semibold text-muted">
-            {t("sentenceShooter.selectedConfigWithMode", {
-              mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
-              difficulty: selectedDifficultyOption
-                ? t(selectedDifficultyOption.titleKey)
-                : "",
-              rounds: totalRounds,
-            })}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              aria-pressed={autopilotEnabled}
+              className={cn(
+                "inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition",
+                autopilotEnabled
+                  ? "border-primary bg-sky text-primary"
+                  : "border-border bg-white text-muted",
+              )}
+              data-testid="shooter-autopilot-toggle"
+              onClick={() => {
+                userToggledAutopilotOnRef.current = !autopilotEnabled;
+                toggleAutopilot();
+              }}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              {autopilotEnabled
+                ? t(
+                    "sentenceShooter.autopilotOn",
+                    undefined,
+                    "Tự chuyển câu: Bật",
+                  )
+                : t(
+                    "sentenceShooter.autopilotOff",
+                    undefined,
+                    "Tự chuyển câu: Tắt",
+                  )}
+            </button>
+            <span className="text-sm font-semibold text-muted">
+              {t("sentenceShooter.selectedConfigWithMode", {
+                mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
+                difficulty: selectedDifficultyOption
+                  ? t(selectedDifficultyOption.titleKey)
+                  : "",
+                rounds: totalRounds,
+              })}
+            </span>
+          </div>
         </div>
-        {initialBookId && selectedBook?.id === initialBookId ? (
+        {isMagicQuestSelected && !hasManuallySelectedBook ? (
+          <p
+            className="mb-3 rounded-control border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950"
+            data-testid="shooter-preselected-magic-quest"
+          >
+            ✨ {t("sentenceShooter.magicQuest.preselectedBanner")}
+          </p>
+        ) : initialBookId && selectedBook?.id === initialBookId ? (
           <p className="mb-3 rounded-control bg-success-surface px-4 py-3 text-sm font-semibold text-success-ink">
             <Gamepad2 aria-hidden="true" className="me-2 inline size-4" />
             {t("sentenceShooter.preselectedRecentBook")}
+            <strong className="viread-learning-content" dir="ltr" lang="vi">
+              {selectedBook.title}
+            </strong>
+          </p>
+        ) : !initialBookId &&
+          !hasManuallySelectedBook &&
+          selectedBook &&
+          (selectedBook.difficult_word_count ?? 0) > 0 ? (
+          <p
+            className="mb-3 rounded-control border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950"
+            data-testid="shooter-preselected-difficult-book"
+          >
+            ⭐{" "}
+            {t(
+              "sentenceShooter.preselectedDifficultBook",
+              { count: selectedBook.difficult_word_count ?? 0 },
+              `Đã chọn sẵn sách có ${selectedBook.difficult_word_count ?? 0} từ bé đang ôn: `,
+            )}
             <strong className="viread-learning-content" dir="ltr" lang="vi">
               {selectedBook.title}
             </strong>
@@ -1904,6 +2395,60 @@ export function SentenceShooterScreen({
             </Button>
           </div>
         ) : null}
+        {bookState.status === "ready" ||
+        bookState.status === "error" ||
+        isInitialMagicQuestMode ? (
+          <div className="mb-4">
+            <button
+              aria-pressed={isMagicQuestSelected}
+              className={cn(
+                "flex min-h-28 w-full items-center gap-4 rounded-control border-2 bg-gradient-to-r from-amber-50/90 via-white to-sky/70 p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                isMagicQuestSelected
+                  ? "border-primary ring-2 ring-primary/25"
+                  : "border-amber-300 hover:border-primary/70",
+              )}
+              data-testid="magic-quest-deck-card"
+              onClick={() => {
+                setHasManuallySelectedBook(true);
+                setSelectedBookId(MAGIC_QUEST_BOOK_ID);
+              }}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-16 shrink-0 place-items-center rounded-2xl bg-amber-100 text-3xl shadow-2xs"
+              >
+                🦉
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-extrabold text-amber-950">
+                  {t("sentenceShooter.magicQuest.deckBadge")}
+                </span>
+                <span className="mt-1 block text-base font-extrabold text-ink sm:text-lg">
+                  {t("sentenceShooter.magicQuest.deckTitle")}
+                </span>
+                <span className="mt-0.5 block text-sm font-semibold text-muted">
+                  {urlFocusWords.length > 0
+                    ? t("sentenceShooter.magicQuest.deckSubtitle")
+                    : t("sentenceShooter.magicQuest.deckStarterSubtitle")}
+                </span>
+                <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                    {t("sentenceShooter.magicQuest.deckReadyBadge")}
+                  </span>
+                  {urlFocusWords.length > 0 ? (
+                    <span className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-xs font-extrabold text-amber-950">
+                      ⭐{" "}
+                      {t("sentenceShooter.magicQuest.deckWordsBadge", {
+                        count: urlFocusWords.length,
+                      })}
+                    </span>
+                  ) : null}
+                </span>
+              </span>
+            </button>
+          </div>
+        ) : null}
         {bookState.status === "ready" && bookState.books.length === 0 ? (
           <EmptyState
             description={t("sentenceShooter.emptyBooksDesc")}
@@ -1915,80 +2460,106 @@ export function SentenceShooterScreen({
             title={t("sentenceShooter.emptyBooksTitle")}
           />
         ) : null}
-        {bookState.status === "ready" && bookState.books.length > 0 ? (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {bookState.books
-                .slice(
-                  (booksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
-                  booksPage * SHOOTER_BOOKS_PAGE_SIZE,
-                )
-                .map((book) => {
-                  const selected = effectiveSelectedBookId === book.id;
-                  return (
-                    <button
-                      aria-pressed={selected}
-                      className={[
-                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
-                        selected
-                          ? "border-primary ring-2 ring-primary/20"
-                          : "border-border hover:border-primary/60",
-                      ].join(" ")}
-                      key={book.id}
-                      onClick={() => {
-                        setHasManuallySelectedBook(true);
-                        setSelectedBookId(book.id);
-                      }}
-                      type="button"
-                    >
-                      <BookCover book={toBookCover(book)} size="small" />
-                      <span className="min-w-0">
-                        <span
-                          className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
-                          dir="ltr"
-                          lang="vi"
+        {bookState.status === "ready" && bookState.books.length > 0
+          ? (() => {
+              const totalBooksPages = Math.max(
+                1,
+                Math.ceil(bookState.books.length / SHOOTER_BOOKS_PAGE_SIZE),
+              );
+              const safeBooksPage = Math.min(
+                Math.max(1, booksPage),
+                totalBooksPages,
+              );
+              const visibleBooks = bookState.books.slice(
+                (safeBooksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
+                safeBooksPage * SHOOTER_BOOKS_PAGE_SIZE,
+              );
+              return (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleBooks.map((book) => {
+                      const selected = effectiveSelectedBookId === book.id;
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={[
+                            "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                            selected
+                              ? "border-primary ring-2 ring-primary/20"
+                              : "border-border hover:border-primary/60",
+                          ].join(" ")}
+                          key={book.id}
+                          onClick={() => {
+                            setHasManuallySelectedBook(true);
+                            setSelectedBookId(book.id);
+                          }}
+                          type="button"
                         >
-                          {book.title}
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-muted">
-                          {book.author ? (
-                            <>
-                              {t("sentenceShooter.authorPrefix", {
-                                author: "",
-                              }).trimEnd()}{" "}
-                              <span
-                                className="viread-learning-content"
-                                dir="ltr"
-                                lang="vi"
-                              >
-                                {book.author}
+                          <BookCover book={toBookCover(book)} size="small" />
+                          <span className="min-w-0">
+                            <span
+                              className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {book.title}
+                            </span>
+                            <span className="mt-1 block text-sm font-semibold text-muted">
+                              {book.author ? (
+                                <>
+                                  {t("sentenceShooter.authorPrefix", {
+                                    author: "",
+                                  }).trimEnd()}{" "}
+                                  <span
+                                    className="viread-learning-content"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
+                                    {book.author}
+                                  </span>
+                                </>
+                              ) : (
+                                t("sentenceShooter.defaultBookSource")
+                              )}
+                            </span>
+                            <span className="mt-3 flex flex-wrap items-center gap-1.5">
+                              <span className="inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                                {t("sentenceShooter.readyRoundsBadge", {
+                                  count: book.available_rounds,
+                                })}
                               </span>
-                            </>
-                          ) : (
-                            t("sentenceShooter.defaultBookSource")
-                          )}
-                        </span>
-                        <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                          {t("sentenceShooter.readyRoundsBadge", {
-                            count: book.available_rounds,
-                          })}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-            </div>
-            <PaginationBar
-              ariaLabel={t("sentenceShooter.booksPaginationAria")}
-              compact
-              itemLabel={t("sentenceShooter.booksPaginationItem")}
-              onPageChange={setBooksPage}
-              page={booksPage}
-              pageSize={SHOOTER_BOOKS_PAGE_SIZE}
-              total={bookState.books.length}
-            />
-          </>
-        ) : null}
+                              {(book.difficult_word_count ?? 0) > 0 ? (
+                                <span
+                                  className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-xs font-extrabold text-amber-950"
+                                  data-testid={`book-difficult-count-${book.id}`}
+                                >
+                                  ⭐{" "}
+                                  {t(
+                                    "sentenceShooter.bookDifficultWordsBadge",
+                                    { count: book.difficult_word_count ?? 0 },
+                                    `${book.difficult_word_count ?? 0} từ bé cần ôn`,
+                                  )}
+                                </span>
+                              ) : null}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <PaginationBar
+                    ariaLabel={t("sentenceShooter.booksPaginationAria")}
+                    compact
+                    itemLabel={t("sentenceShooter.booksPaginationItem")}
+                    onPageChange={setBooksPage}
+                    page={safeBooksPage}
+                    pageSize={SHOOTER_BOOKS_PAGE_SIZE}
+                    total={bookState.books.length}
+                  />
+                </>
+              );
+            })()
+          : null}
       </div>
 
       <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-between">
@@ -2002,7 +2573,9 @@ export function SentenceShooterScreen({
         <Button
           className="sm:max-w-sm"
           disabled={
-            !selectedBook || isStartingSession || bookState.status !== "ready"
+            (!selectedBook && !isMagicQuestSelected) ||
+            isStartingSession ||
+            (!isMagicQuestSelected && bookState.status !== "ready")
           }
           isLoading={isStartingSession}
           onClick={() => void startGame()}
@@ -2011,6 +2584,19 @@ export function SentenceShooterScreen({
           {t("sentenceShooter.startPlaying")}
         </Button>
       </div>
+      {isStartingSession ? (
+        <div className="mx-auto w-full max-w-md">
+          <AiProgressBar
+            active
+            label={
+              startSessionProgress.stageLabel ?? tCommon("aiProgress.preparing")
+            }
+            percent={startSessionProgress.percent}
+            size="sm"
+            testId="sentence-shooter-starting-progress"
+          />
+        </div>
+      ) : null}
       <p className="text-center text-sm font-semibold text-muted">
         {t("sentenceShooter.duplicateTokenNote")}
       </p>

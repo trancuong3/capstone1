@@ -32,6 +32,7 @@ from app.services.difficult_words_service import (
     normalize_vietnamese_practice_word,
 )
 from app.services.reading_assessment import aggregate_assessment
+from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 
 BOOK_1 = UUID("33333333-3333-4333-8333-333333333331")
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -1124,6 +1125,352 @@ class ReadingComparisonSelfCorrectedTests(unittest.IsolatedAsyncioTestCase):
         display_by_norm = {item.normalized_word: item.display_text for item in history.items}
         self.assertEqual(display_by_norm["đường"], "Đường")
         self.assertEqual(display_by_norm["mèo"], "Mèo")
+
+    def test_phonics_spelling_hyphenated_words_and_10_mapping(self):
+        # 6-token Grade-1 phonics spelling is CORRECT (not UNCERTAIN)
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca sắc cá"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("tê", "ê tờ ê tê"), "CORRECT")
+        # In-progress phonics spelling is UNCERTAIN (not INCORRECT)
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca"), "UNCERTAIN")
+        # Wrong final tone in phonics spelling remains INCORRECT
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca huyền cà"), "INCORRECT")
+
+        # Hyphenated words ("ô-tô", "ba-lô")
+        self.assertEqual(classify_practice_transcript("ô-tô", "ô tô"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("ba-lô", "ba lô"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("ô-tô", "ô tồ"), "INCORRECT")
+
+        # "10" -> "mười" and digits inside phrases; "01" stays strict
+        self.assertEqual(classify_practice_transcript("mười", "10"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("mười", "10 điểm"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("một", "01"), "INCORRECT")
+
+        # Strict 6-tone & đ/d discrimination preserved
+        self.assertEqual(classify_practice_transcript("có", "cò"), "INCORRECT")
+        self.assertEqual(classify_practice_transcript("một", "mốt"), "INCORRECT")
+        self.assertEqual(classify_practice_transcript("đứa", "dứa"), "INCORRECT")
+
+    async def test_single_source_audio_without_browser_transcript_evaluates_cleanly_via_orchestrator(self):
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+        from app.providers.local_voice_provider import LocalTranscription, LocalVoiceProvider
+
+        repo = InMemoryPracticeRepo()
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                # Pass 1 empty/unclear -> triggers Pass 2 because SPEECH_DETECTED
+                LocalTranscription(text="", language_code="vi", language_probability=None, words=None),
+                # Pass 2 with contrastive keyterms succeeds cleanly with valid Zipformer logprob
+                LocalTranscription(
+                    text="có",
+                    language_code="vi",
+                    language_probability=None,
+                    words=[{"text": "có", "start": 0.1, "end": 0.35, "logprob": -0.62}],
+                ),
+            ]
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="test-key")
+        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+        service = DifficultWordsService(repo, make_access(), voice_provider=orch)
+
+        res = await service.evaluate_word_direct(
+            CHILD_A,
+            ACTOR,
+            request_id=uuid4(),
+            normalized_word="có",
+            display_text="có",
+            audio_bytes=b"RIFF-fake-wav",
+            filename="co.wav",
+            content_type="audio/wav",
+            audio_quality_status="SPEECH_DETECTED",
+            browser_transcript="",
+            policy=VoicePolicyContext(provider_mode="local_only", allow_google_stt=False),
+        )
+        self.assertEqual(res.assessment_status, "CORRECT")
+        self.assertEqual(res.recognition_source, "SERVER_STT_KEYTERM")
+        self.assertEqual(local.transcribe.await_count, 2)
+
+    async def test_rank_cache_and_include_next_recommended_false_skip_recomputation(self):
+        from app.services.difficult_words_service import clear_difficult_words_rank_cache
+
+        clear_difficult_words_rank_cache()
+        self.addCleanup(clear_difficult_words_rank_cache)
+
+        repo = InMemoryPracticeRepo()
+        report = SimpleNamespace(
+            Id=uuid4(),
+            SessionId=SESSION_1,
+            PageId=PAGE_1,
+            PageRevisionId=REV_1,
+            Transcript="chú cò",
+            Distance=2,
+            Alignment=[],
+            Summary={
+                "assessment_version": 1,
+                "initial_assessment": [
+                    {"word_id": str(WORD_1), "word_index": 0, "text": "mèo", "status": "MISPRONUNCIATION"},
+                    {"word_id": str(WORD_2), "word_index": 1, "text": "ngập", "status": "OMISSION"},
+                ],
+            },
+            CreatedAt=NOW,
+        )
+        repo.sessions_rows = [SimpleNamespace(Id=SESSION_1, ChildId=CHILD_A, BookId=BOOK_1, StartedAt=NOW)]
+        repo.reports_rows = [report]
+
+        sessions_spy = AsyncMock(side_effect=repo.reading_sessions)
+        pages_spy = AsyncMock(side_effect=repo.pages_and_revision_words)
+        books_spy = AsyncMock(side_effect=repo.books_by_ids)
+        repo.reading_sessions = sessions_spy  # type: ignore[method-assign]
+        repo.pages_and_revision_words = pages_spy  # type: ignore[method-assign]
+        repo.books_by_ids = books_spy  # type: ignore[method-assign]
+
+        voice = MagicMock()
+        voice.transcribe = AsyncMock(
+            return_value=Transcription(text="mèo", language_code="vi", language_probability=0.99, words=[])
+        )
+        service = DifficultWordsService(repo, make_access(), voice_provider=voice)
+
+        # 1. Cold miss on _next_recommended_word skips books_by_ids & pages_and_revision_words (include_context=False)
+        first_res = await service.evaluate_word_direct(
+            CHILD_A,
+            ACTOR,
+            request_id=uuid4(),
+            normalized_word="mèo",
+            display_text="mèo",
+            audio_bytes=b"RIFF-audio",
+            filename="p.wav",
+            content_type="audio/wav",
+            include_next_recommended=True,
+        )
+        self.assertEqual(first_res.next_recommended_word, "ngập")
+        self.assertEqual(sessions_spy.await_count, 1)
+        pages_spy.assert_not_awaited()
+        books_spy.assert_not_awaited()
+
+        # 2. Warm rank cache hit -> 0 additional reading_sessions calls when include_next_recommended=True
+        second_res = await service.evaluate_word_direct(
+            CHILD_A,
+            ACTOR,
+            request_id=uuid4(),
+            normalized_word="mèo",
+            display_text="mèo",
+            audio_bytes=b"RIFF-audio",
+            filename="p.wav",
+            content_type="audio/wav",
+            include_next_recommended=True,
+        )
+        self.assertEqual(second_res.next_recommended_word, "ngập")
+        self.assertEqual(sessions_spy.await_count, 1)
+
+        # 3. include_next_recommended=False skips recommendation completely even on cold cache
+        clear_difficult_words_rank_cache()
+        third_res = await service.evaluate_word_direct(
+            CHILD_A,
+            ACTOR,
+            request_id=uuid4(),
+            normalized_word="ngập",
+            display_text="ngập",
+            audio_bytes=b"RIFF-audio",
+            filename="p.wav",
+            content_type="audio/wav",
+            include_next_recommended=False,
+        )
+        self.assertIsNone(third_res.next_recommended_word)
+        self.assertEqual(sessions_spy.await_count, 1)
+
+    async def test_trusted_client_stt_statuses_skip_server_stt_for_all_outcomes(self):
+        voice = MagicMock()
+        voice.transcribe = AsyncMock(side_effect=AssertionError("Server STT must not be called"))
+        service = DifficultWordsService(InMemoryPracticeRepo(), make_access(), voice_provider=voice)
+
+        cases = [
+            ("BROWSER_WASM_VERIFIED", "mèo", "mèo", None, "CORRECT"),
+            ("BROWSER_WASM_VERIFIED", "mèo", "mẹo", None, "INCORRECT"),
+            ("BROWSER_WASM", "cá", "cờ a ca", None, "UNCERTAIN"),
+            ("WASM_VERIFIED", "một", "một bông hoa", "Bé có một bông hoa", "CORRECT"),
+            ("ANDROID_NATIVE_STT", "có", "cò", None, "INCORRECT"),
+        ]
+        for q_status, target, spoken, ctx_phrase, expected in cases:
+            with self.subTest(q_status=q_status, target=target, spoken=spoken):
+                status_val, source_val, transcript, _ = await service._evaluate_audio_payload(
+                    display_text=target,
+                    audio_bytes=b"RIFF-wav-bytes",
+                    filename="p.wav",
+                    content_type="audio/wav",
+                    audio_quality_status=q_status,
+                    browser_transcript=spoken,
+                    browser_confidence=0.85,
+                    context_phrase=ctx_phrase,
+                )
+                self.assertEqual(status_val, expected)
+                self.assertEqual(source_val, "BROWSER_SPEECH")
+                self.assertEqual(transcript, spoken)
+        # Transcript-only (audio_bytes=None) help phrases must remain UNCERTAIN, never INCORRECT
+        for q_status in ("BROWSER_WASM_VERIFIED", "ANDROID_NATIVE_STT"):
+            with self.subTest(audio_none_help=q_status):
+                help_status, help_source, help_text, _ = await service._evaluate_audio_payload(
+                    display_text="đọc",
+                    audio_bytes=None,
+                    filename="p.wav",
+                    content_type=None,
+                    audio_quality_status=q_status,
+                    browser_transcript="Con không biết đọc.",
+                    browser_confidence=0.9,
+                )
+                self.assertEqual(help_status, "UNCERTAIN")
+                self.assertEqual(help_source, "BROWSER_SPEECH")
+                self.assertEqual(help_text, "Con không biết đọc.")
+        voice.transcribe.assert_not_awaited()
+
+    async def test_repository_storage_ready_cache_sql_retry_filter_and_single_commit(self):
+        from sqlalchemy.dialects import postgresql
+        from app.models import ReadingEvent
+        from app.models.difficult_word_practice import DifficultWordPracticeAttempt
+        from app.repositories.difficult_words_repository import (
+            DifficultWordsRepository,
+            clear_practice_storage_ready_cache,
+        )
+
+        clear_practice_storage_ready_cache()
+        self.addCleanup(clear_practice_storage_ready_cache)
+
+        fake_db = MagicMock()
+        fake_db.bind = object()
+        fake_db.sync_session = SimpleNamespace(expire_on_commit=False)
+        fake_db.scalar = AsyncMock(return_value="difficult_word_practice_attempts")
+        res_mock = MagicMock()
+        res_mock.scalars.return_value.all.return_value = []
+        fake_db.execute = AsyncMock(return_value=res_mock)
+        fake_db.add = MagicMock()
+        fake_db.flush = AsyncMock()
+        fake_db.commit = AsyncMock()
+        fake_db.refresh = AsyncMock()
+        fake_db.rollback = AsyncMock()
+        fake_db.begin_nested = None
+
+        repo = DifficultWordsRepository(fake_db)
+        self.assertTrue(await repo.is_practice_storage_ready())
+        self.assertTrue(await repo.is_practice_storage_ready())
+        self.assertEqual(fake_db.scalar.await_count, 1)
+
+        await repo.list_retry_events_for_child(CHILD_A, ACTOR, normalized_word="mèo")
+        compiled_stmt = fake_db.execute.await_args.args[0].compile(dialect=postgresql.dialect())
+        self.assertIn("readingevents.metadata ->>", str(compiled_stmt).lower())
+        self.assertIn("normalized_word", compiled_stmt.params.values())
+        self.assertIn("target_word", compiled_stmt.params.values())
+
+        attempt = DifficultWordPracticeAttempt(
+            ChildId=CHILD_A,
+            ParentId=ACTOR,
+            NormalizedWord="mèo",
+            DisplayText="mèo",
+            AttemptNumber=1,
+            RequestId=uuid4(),
+            State="COMPLETED",
+        )
+        event = ReadingEvent(
+            SessionId=SESSION_1,
+            PageId=PAGE_1,
+            PageRevisionId=REV_1,
+            WordId=WORD_1,
+            Type="WORD_RETRY",
+            StartMs=0,
+            Status="CONFIRMED",
+            Metadata={"normalized_word": "mèo"},
+        )
+        saved_a, saved_e = await repo.save_practice_attempt_and_retry_event(attempt, event)
+        self.assertIsNotNone(saved_a.Id)
+        self.assertIsNotNone(saved_e.Id)
+        self.assertEqual(fake_db.commit.await_count, 1)
+        fake_db.refresh.assert_not_awaited()
+
+    def test_evaluate_route_forwards_include_next_recommended_and_policy_source(self):
+        from unittest.mock import patch
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.api.deps import get_current_parent_id, get_db
+        from app.api.routes import system as system_routes
+        from app.schemas.difficult_words import (
+            DifficultWordPracticeAttemptRead,
+            DifficultWordProgressSummaryRead,
+        )
+
+        captured: dict[str, object] = {}
+        sample_read = DifficultWordPracticeAttemptRead(
+            attempt_id=uuid4(),
+            child_id=CHILD_A,
+            normalized_word="mèo",
+            display_text="mèo",
+            attempt_number=1,
+            state="COMPLETED",
+            assessment_status="CORRECT",
+            recognition_source="BROWSER_SPEECH",
+            spoken_transcript="mèo",
+            confidence=0.95,
+            audio_duration_ms=500,
+            assessment_version=1,
+            started_at=NOW,
+            completed_at=NOW,
+            feedback_message="Giỏi lắm!",
+            word_progress=DifficultWordProgressSummaryRead(
+                normalized_word="mèo",
+                practice_status="COMPLETED",
+                practice_attempts_count=1,
+                practice_correct_count=1,
+                practice_incorrect_count=0,
+                practice_uncertain_count=0,
+                consecutive_correct_count=1,
+                required_consecutive_correct=1,
+                last_practiced_at=NOW,
+                last_practice_status="CORRECT",
+            ),
+            next_recommended_word=None,
+            evidence_count_unchanged=True,
+        )
+
+        class _StubService:
+            async def evaluate_word_direct(self, child_id, actor_id, **kwargs):
+                captured["direct"] = kwargs
+                return sample_read
+
+            async def evaluate_audio_attempt(self, child_id, attempt_id, actor_id, **kwargs):
+                captured["audio"] = kwargs
+                return sample_read
+
+        app = FastAPI()
+        app.include_router(system_routes.router, prefix="/system")
+        app.dependency_overrides[get_current_parent_id] = lambda: ACTOR
+        app.dependency_overrides[get_db] = lambda: object()
+
+        with patch.object(system_routes, "_difficult_words_service", return_value=_StubService()):
+            with TestClient(app) as client:
+                r1 = client.post(
+                    f"/system/difficult-words/{CHILD_A}/practice/evaluate",
+                    data={
+                        "request_id": str(uuid4()),
+                        "normalized_word": "mèo",
+                        "browser_transcript": "mèo",
+                        "audio_quality_status": "BROWSER_WASM_VERIFIED",
+                        "include_next_recommended": "false",
+                    },
+                )
+                self.assertEqual(r1.status_code, 200)
+                self.assertIs(captured["direct"]["include_next_recommended"], False)
+                self.assertEqual(captured["direct"]["policy"].source, "difficult_word_practice")
+
+                r2 = client.post(
+                    f"/system/difficult-words/{CHILD_A}/practice/{uuid4()}/evaluate-audio",
+                    data={
+                        "completion_request_id": str(uuid4()),
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_stt": "true",
+                    },
+                    files={"file": ("p.wav", b"RIFF1234", "audio/wav")},
+                )
+                self.assertEqual(r2.status_code, 200)
+                self.assertEqual(captured["audio"]["policy"].provider_mode, "local_with_google_fallback")
+                self.assertTrue(captured["audio"]["policy"].allow_google_stt)
+                self.assertEqual(captured["audio"]["policy"].source, "difficult_word_practice")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Protocol
 
 import httpx
 
+from app.services.cloud_ai_defaults import (
+    extract_gemini_text,
+    gemini_thinking_config,
+    strip_think_tags,
+)
 from app.services.tutor_questions.prompts import (
     SYSTEM_PROMPT,
     response_json_schema,
     user_prompt,
 )
 from app.services.tutor_questions.types import QuestionProviderError, SourcePage
+
+logger = logging.getLogger(__name__)
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -41,10 +49,9 @@ def _http_error(provider: str, status_code: int) -> QuestionProviderError:
 def _decode_json(provider: str, text: Any) -> Any:
     if not isinstance(text, str) or not text.strip():
         raise QuestionProviderError(provider=provider, code="INVALID_RESPONSE")
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        cleaned = cleaned[4:] if cleaned.lower().startswith("json") else cleaned
+    cleaned = strip_think_tags(text)
+    if not cleaned:
+        raise QuestionProviderError(provider=provider, code="INVALID_RESPONSE")
     try:
         return json.loads(cleaned)
     except ValueError as exc:
@@ -73,6 +80,7 @@ async def _post(
     except httpx.RequestError as exc:
         raise QuestionProviderError(provider=provider, code="PROVIDER_NETWORK") from exc
     if response.status_code != 200:
+        logger.warning("llm_http_error provider=%s status=%s", provider, response.status_code)
         raise _http_error(provider, response.status_code)
     try:
         return response.json()
@@ -99,6 +107,14 @@ class GeminiQuestionProvider:
     async def generate(
         self, *, pages: list[SourcePage], count: int, max_chars: int
     ) -> Any:
+        thinking_cfg = gemini_thinking_config(self.model)
+        generation_config: dict[str, Any] = {
+            "temperature": 0.7,
+            "responseMimeType": "application/json",
+            "responseJsonSchema": response_json_schema(count),
+        }
+        if thinking_cfg is not None:
+            generation_config["thinkingConfig"] = thinking_cfg
         payload = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": [
@@ -107,26 +123,39 @@ class GeminiQuestionProvider:
                     "parts": [{"text": user_prompt(pages, count=count, max_chars=max_chars)}],
                 }
             ],
-            "generationConfig": {
-                "temperature": 0.7,
-                "responseMimeType": "application/json",
-                "responseJsonSchema": response_json_schema(count),
-            },
+            "generationConfig": generation_config,
         }
-        data = await _post(
-            self.name,
-            f"{_GEMINI_API_BASE}/models/{self.model}:generateContent",
-            headers={"x-goog-api-key": self._api_key},
-            payload=payload,
-            timeout_seconds=self._timeout_seconds,
-            transport=self._transport,
-        )
+        url = f"{_GEMINI_API_BASE}/models/{self.model}:generateContent"
+        headers = {"x-goog-api-key": self._api_key}
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+            data = await _post(
+                self.name,
+                url,
+                headers=headers,
+                payload=payload,
+                timeout_seconds=self._timeout_seconds,
+                transport=self._transport,
+            )
+        except QuestionProviderError as error:
+            if error.code == "PROVIDER_REJECTED" and thinking_cfg is not None:
+                retry_gen_cfg = dict(generation_config)
+                retry_gen_cfg.pop("thinkingConfig", None)
+                retry_payload = {**payload, "generationConfig": retry_gen_cfg}
+                data = await _post(
+                    self.name,
+                    url,
+                    headers=headers,
+                    payload=retry_payload,
+                    timeout_seconds=self._timeout_seconds,
+                    transport=self._transport,
+                )
+            else:
+                raise
+        text = extract_gemini_text(data)
+        if text is None:
             raise QuestionProviderError(
                 provider=self.name, code="INVALID_RESPONSE"
-            ) from exc
+            )
         return _decode_json(self.name, text)
 
 

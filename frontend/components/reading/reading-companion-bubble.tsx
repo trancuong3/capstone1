@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
+import { BookOpenCheck, Heart, Sparkles, Volume2, X } from "lucide-react";
 
 import { useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -24,6 +24,7 @@ interface ReadingCompanionBubbleProps {
   readonly state: CompanionBubbleState;
   readonly isSpeaking?: boolean;
   readonly gender?: VoiceGender;
+  readonly onDismiss?: () => void;
 }
 
 const MOOD_STYLES: Readonly<
@@ -77,17 +78,39 @@ const MOOD_STYLES: Readonly<
 
 function MoodIcon({ mood }: { readonly mood: CompanionMood }) {
   if (mood === "comforting") {
-    return (
-      <Heart aria-hidden="true" className="size-3.5 fill-current sm:size-5" />
-    );
+    return <Heart aria-hidden="true" className="size-5 fill-current" />;
   }
   if (mood === "teaching") {
-    return <BookOpenCheck aria-hidden="true" className="size-3.5 sm:size-5" />;
+    return <BookOpenCheck aria-hidden="true" className="size-5" />;
   }
   if (mood === "celebrating") {
-    return <Sparkles aria-hidden="true" className="size-3.5 sm:size-5" />;
+    return <Sparkles aria-hidden="true" className="size-5" />;
   }
-  return <Volume2 aria-hidden="true" className="size-3.5 sm:size-5" />;
+  return <Volume2 aria-hidden="true" className="size-5" />;
+}
+
+const QUOTED_BOOK_SEGMENT_RE = /(“[^”]*”|"[^"]*")/gu;
+
+function adaptFramingPreservingQuotedText(
+  text: string,
+  gender: VoiceGender,
+): string {
+  if (gender !== "male" || !text) return text;
+  if (!text.includes("“") && !text.includes('"')) {
+    return adaptTextToTeacherPersona(text, gender);
+  }
+  return text
+    .split(QUOTED_BOOK_SEGMENT_RE)
+    .map((segment) => {
+      if (
+        (segment.startsWith("“") && segment.endsWith("”")) ||
+        (segment.startsWith('"') && segment.endsWith('"'))
+      ) {
+        return segment;
+      }
+      return adaptTextToTeacherPersona(segment, gender);
+    })
+    .join("");
 }
 
 /**
@@ -99,6 +122,7 @@ export function ReadingCompanionBubble({
   state,
   isSpeaking = false,
   gender,
+  onDismiss,
 }: ReadingCompanionBubbleProps) {
   const t = useTranslations("reading");
   const activePersona = useTeacherPersona();
@@ -112,7 +136,7 @@ export function ReadingCompanionBubble({
   const fallbackLabel = t(
     persona.gender === "male" ? theme.labelKeys.male : theme.labelKeys.female,
   );
-  const normalizedTitle = adaptTextToTeacherPersona(
+  const normalizedTitle = adaptFramingPreservingQuotedText(
     state.title || fallbackLabel,
     persona.gender,
   ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, localizedPersonaTitle);
@@ -121,7 +145,7 @@ export function ReadingCompanionBubble({
     normalizedTitle.includes(persona.title)
       ? normalizedTitle
       : `${localizedPersonaTitle} · ${normalizedTitle}`;
-  const displayMessage = adaptTextToTeacherPersona(
+  const displayMessage = adaptFramingPreservingQuotedText(
     state.message,
     persona.gender,
   );
@@ -130,7 +154,7 @@ export function ReadingCompanionBubble({
     <div
       aria-live="polite"
       className={cn(
-        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-card border px-3 py-1.5 text-xs transition-colors sm:min-h-14 sm:gap-3 sm:px-4 sm:py-2.5 sm:text-sm",
+        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-xl border px-2.5 py-1.5 transition-colors sm:gap-2.5 sm:px-3.5 sm:py-2",
         theme.card,
       )}
       data-companion-mood={state.mood}
@@ -141,9 +165,9 @@ export function ReadingCompanionBubble({
       <div
         aria-hidden="true"
         className={cn(
-          "flex size-6 shrink-0 items-center justify-center rounded-full shadow-xs sm:size-10",
+          "flex size-7 shrink-0 items-center justify-center rounded-full shadow-2xs sm:size-8",
           theme.badge,
-          isSpeaking && "ring-2 ring-offset-2 ring-primary/40",
+          isSpeaking && "ring-2 ring-offset-1 ring-primary/40",
         )}
       >
         <MoodIcon mood={state.mood} />
@@ -157,10 +181,21 @@ export function ReadingCompanionBubble({
         >
           {displayTitle}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-sm">
+        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:text-sm">
           {displayMessage}
         </p>
       </div>
+      {onDismiss ? (
+        <button
+          type="button"
+          aria-label={t("companion.dismissAria")}
+          data-testid="dismiss-companion-bubble-btn"
+          onClick={onDismiss}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-white/80 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <X aria-hidden="true" className="size-4" />
+        </button>
+      ) : null}
     </div>
   );
 }

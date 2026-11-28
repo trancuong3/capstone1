@@ -130,7 +130,7 @@
     "loadingBook": "جاري تحميل معلومات الكتاب…",
     "bookUnavailableTitle": "الكتاب غير جاهز بعد",
     "bookNotFoundTitle": "الكتاب غير موجود",
-    "bookUnavailableDesc": "هذا الكتاب ليس لديه محتوى نشط ومتحقق منه ليقرأه الطفل بعد.",
+    "bookUnavailableDesc": "هذا الكتاب لا يحتوي على محتوى جاهز للقراءة بعد.",
     "bookNotFoundDesc": "هذا الكتاب غير موجود أو ليس في المكتبة الحالية.",
     "backToLibrary": "العودة إلى المكتبة",
     "loadErrorTitle": "تعذر تحميل معلومات الكتاب",
@@ -138,9 +138,9 @@
     "micReady": "الميكروفون جاهز",
     "micGranted": "تم منح الإذن للميكروفون",
     "rangeSummary": "نطاق القراءة: الصفحات {start}–{end}",
-    "ocrMatchSummary": "تم تأكيد صفحة OCR: الصفحة {page} · نسبة الدقة {percent}%",
+    "ocrMatchSummary": "الصفحة المُتعرَّف عليها: صفحة {page} · الدقة {percent}%",
     "matchedPageMissingTitle": "لم يتم العثور على الصفحة المقروءة",
-    "matchedPageMissingDesc": "صفحة OCR ليست ضمن قائمة صفحات الكتاب الصالحة. لن يقوم ViRead بتغيير الصفحات تلقائياً.",
+    "matchedPageMissingDesc": "الصفحة المُتعرَّف عليها ليست ضمن الصفحات الصالحة للكتاب. لن يبدّل ViRead تلقائيًا إلى صفحة أخرى.",
     "invalidRangeTitle": "نطاق الصفحات غير صالح",
     "invalidRangeDesc": "يرجى العودة إلى تفاصيل الكتاب وإعادة اختيار صفحة البداية أو صفحة النهاية أو النطاق المتصل.",
     "micCheckSectionTitle": "التحقق من الميكروفون",
@@ -173,7 +173,16 @@
       "unsupported": "المتصفح لا يوفر حالة تلقائية. لا يزال بإمكانك التحقق من الميكروفون باستخدام الزر أدناه.",
       "no_device": "لم يتم العثور على ميكروفون على الجهاز. يرجى توصيل ميكروفون والمحاولة مرة أخرى.",
       "device_busy": "الميكروفون مستخدم بواسطة تطبيق آخر. يرجى إغلاق ذلك التطبيق والمحاولة مرة أخرى.",
-      "error": "تعذر التحقق من الميكروفون. يرجى استخدام HTTPS أو localhost والمحاولة مرة أخرى."
+      "error": "تعذر التحقق من الميكروفون. يُرجى التأكد من الاتصال الآمن وإعدادات المتصفح ثم المحاولة مجددًا."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "مراجعة متباعدة للكلمات (1-3-7 أيام)",
+      "starterEyebrow": "إحماء لطيف قبل القراءة",
+      "title": "قصة إحماء قصيرة قبل القراءة",
+      "listenStory": "استمع للقصة",
+      "stopListen": "إيقاف الصوت",
+      "refreshStory": "تحديث القصة القصيرة",
+      "focusWordsLabel": "كلمات التركيز اليوم"
     }
   },
   "ready": {
@@ -260,7 +269,7 @@
     "referencePageAlt": "صورة مرجعية للصفحة {page}",
     "scrollToCurrentWord": "حول الكلمة التي يتم قراءتها",
     "currentWordPrefix": "الكلمة الحالية: ",
-    "overlayAria": "تمييز الكلمة الحالية عبر المربع المحيط",
+    "overlayAria": "منطقة تمييز الكلمة الحالية",
     "readingModeSwitcherAria": "وضع قراءة صفحة الكتاب",
     "readingModeIllustrated": "قراءة بالرسوم",
     "readingModeIllustratedTitle": "عرض رسم توضيحي خالٍ من النص مع نص القراءة",
@@ -313,7 +322,8 @@
     "listenPhonics": "استماع إلى الصوتيات والتهجئة",
     "listeningRetry": "جارٍ الاستماع إلى طفلك...",
     "readAgain": "إعادة القراءة",
-    "stepsAria": "خطوات التهجئة"
+    "stepsAria": "خطوات التهجئة",
+    "autoHideHint": "انتهى التهجئة · جارٍ الإخفاء لتقرأ بوضوح…"
   },
   "companion": {
     "teacherFemaleTitle": "معلمة الذكاء الاصطناعي",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "نموذج التهجئة · قراءة العبارة متصلة",
     "quickFixTitle": "الثناء · تصحيح ذاتي سريع جداً!",
     "phonicsWinTitle": "الثناء · تهجئة رائعة جداً!",
-    "overcameWordTitle": "يا هلا · لقد تجاوز طفلك الكلمة الصعبة!"
+    "overcameWordTitle": "يا هلا · لقد تجاوز طفلك الكلمة الصعبة!",
+    "dismissAria": "إخفاء رسالة المعلم"
   },
   "tutor": {
     "title": "كيف نقرأ هذه الكلمة برأيك؟",
@@ -417,7 +428,7 @@
     "practicedWordsLabel": "في هذه الجلسة",
     "collapseDetails": "طي",
     "viewSpokenWords": "عرض الكلمات المقروءة",
-    "sttResultsTitle": "نتائج التعرف على الكلام (STT)",
+    "sttResultsTitle": "نتائج التعرف على صوت الطفل",
     "recognizedWordsBadge": "تم التعرف على {count} كلمة",
     "unassessedOnlyLabel": "الكلمات المعترف بها؛ بيانات غير كافية للتقييم الصحيح أو تتطلب الاهتمام:",
     "correctWordsTitle": "قائمة الكلمات التي قرأها الطفل بنجاح ({count} كلمة):",
@@ -439,7 +450,7 @@
     "versionLoadError": "تعذر تحميل محتوى الصفحة لإصدار القراءة المطابق.",
     "pageLoadError": "تعذر تحميل محتوى الصفحة.",
     "loadingAria": "جارٍ تحميل محتوى القراءة",
-    "verifiedContentTitle": "محتوى الصفحة المتحقق منه",
+    "verifiedContentTitle": "محتوى صفحة الكتاب",
     "legendAria": "دليل الألوان",
     "recordedTranscriptLabel": "الكلام المسجل",
     "notRecorded": "غير مسجل",
@@ -459,5 +470,38 @@
     "keepTrying": "حاول القراءة ببطء ووضوح لكل مقطع.",
     "wordsRead": "{count, plural, =0 {لم يتم قراءة أي كلمات} one {تم قراءة كلمة واحدة} few {تم قراءة # كلمات} many {تم قراءة # كلمة} other {تم قراءة # كلمة}}"
   },
-  "learningContentNotice": "يتم عرض محتوى القراءة وتدريبها من اليسار إلى اليمين للحفاظ على الإملاء الصحيح."
+  "learningContentNotice": "يتم عرض محتوى القراءة وتدريبها من اليسار إلى اليمين للحفاظ على الإملاء الصحيح.",
+  "pageKinds": {
+    "TEXT_ONLY": "نص سردي",
+    "TEXT_AND_IMAGE": "قصة مصورة",
+    "IMAGE_PRIMARY": "صفحة مصورة",
+    "COMIC": "قصص مصورة / حوار",
+    "POEM": "شعر أطفال",
+    "EXERCISE": "صفحة تدريبات",
+    "MULTI_COLUMN": "متعدد الأعمدة",
+    "TEXT_OVER_IMAGE": "نص فوق الرسم",
+    "LOW_QUALITY": "يحتاج مراجعة"
+  },
+  "duet": {
+    "toggleLabel": "قراءة تبادلية مع الوالد",
+    "toggleActive": "وضع القراءة التبادلية مفعّل",
+    "parentTurnBadge": "دور الوالد في القراءة التمهيدية",
+    "childTurnBadge": "حان دور طفلك للقراءة!",
+    "listenParentSample": "استمع للنموذج",
+    "completeParentTurn": "أنهى الوالد القراءة — دور الطفل",
+    "turnCounter": "الدور {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "استكشف رسوم وجمل الصفحة",
+    "subtitle": "وسّع المفردات ومهارات بناء الجمل مباشرة من الصفحة التي قرأها طفلك للتو.",
+    "pictureCta": "وصف رسم الصفحة",
+    "shooterCta": "ترتيب جمل الصفحة"
+  },
+  "lucBat": {
+    "toggleLabel": "إيقاع شعر 6-8 الفيتنامي",
+    "toggleActive": "إيقاع الشعر مفعل",
+    "coupletBadge": "{count} مقاطع ثنائية (6-8)",
+    "beatGuide": "تقسيم الإيقاع 2/2/2 (سطر 6) · 2/2/2/2 (سطر 8)",
+    "rhymePairLabel": "قافية المقطع السادس: \"{sixthLuc}\" <-> \"{sixthBat}\""
+  }
 }

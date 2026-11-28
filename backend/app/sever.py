@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException as FastAPIHTTPException, Request
+from fastapi import FastAPI, HTTPException as FastAPIHTTPException, Query, Request
 from fastapi.exception_handlers import (
     http_exception_handler as default_http_exception_handler,
     request_validation_exception_handler as default_request_validation_exception_handler,
@@ -648,6 +648,13 @@ async def lifespan(_app: FastAPI):
             pass
 
         try:
+            from app.services.ocr_ai.runtime import aclose_ocr_ai_http_clients
+
+            await aclose_ocr_ai_http_clients()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
             await engine.dispose()
         except asyncio.CancelledError:
             pass
@@ -965,6 +972,17 @@ app.add_middleware(
     ],
 )
 
+_HEALTH_PROBE_CACHE_TTL_SECONDS = 20.0
+_HEALTH_PROBE_CACHE: (
+    tuple[float, tuple[object, ...], dict[str, object], dict[str, object]] | None
+) = None
+
+
+def clear_health_probe_cache() -> None:
+    global _HEALTH_PROBE_CACHE
+    _HEALTH_PROBE_CACHE = None
+
+
 def _remote_ocr_health_timeout_seconds() -> float:
     raw = (os.getenv("VIREAD_HEALTH_OCR_TIMEOUT_SECONDS") or "").strip()
     if raw:
@@ -976,8 +994,13 @@ def _remote_ocr_health_timeout_seconds() -> float:
 
 
 @app.get("/health", tags=["System"])
-async def get_health(request: Request) -> dict[str, object]:
+async def get_health(
+    request: Request,
+    probe: str | None = Query(default=None),
+) -> dict[str, object]:
     """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
+    global _HEALTH_PROBE_CACHE
+    probe_mode = probe.strip().lower() if isinstance(probe, str) and probe.strip() else None
     workers = getattr(request.app.state, "background_workers", None) or {}
     active_model_thread = workers.get("active_model_registry")
     local_trainer = workers.get("local_trainer_process")
@@ -1002,6 +1025,28 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
+
+    if probe_mode == "shallow":
+        ocr_mode = get_ocr_mode()
+        if _is_production_runtime():
+            return {
+                "status": "ok",
+                "version": get_viread_app_version(),
+                "ocr_mode": ocr_mode,
+                "database": {"status": "shallow"},
+                "ocr": {"mode": ocr_mode, "ready": True, "shallow": True},
+            }
+        return {
+            "status": "ok",
+            "version": get_viread_app_version(),
+            "ocr_mode": ocr_mode,
+            "database": {
+                "status": "shallow",
+                "pool_class": type(engine.pool).__name__,
+            },
+            "ocr": {"mode": ocr_mode, "ready": True, "shallow": True},
+            "workers": worker_states,
+        }
 
     ocr_timeout = _remote_ocr_health_timeout_seconds()
 
@@ -1067,33 +1112,60 @@ async def get_health(request: Request) -> dict[str, object]:
             "engines": ocr_engines,
         }
 
-    # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
-    db_probe_res, ocr_payload = await asyncio.gather(
-        probe_database_connection(timeout=max(6.0, ocr_timeout)),
-        _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
-        return_exceptions=True,
+    cache_key = (
+        id(probe_database_connection),
+        id(collect_remote_ocr_health),
+        id(collect_ocr_health),
+        is_remote_ocr_mode(),
+        get_ocr_mode(),
     )
-    if isinstance(db_probe_res, BaseException):
-        db_probe: dict[str, object] = {
-            "ok": False,
-            "dns_resolved": False,
-            "ssl_enabled": False,
-            "pool_class": type(engine.pool).__name__,
-            "pooler_mode": "unknown",
-            "latency_ms": 0,
-        }
+    now = time.monotonic()
+    cached = _HEALTH_PROBE_CACHE
+    if (
+        probe_mode != "fresh"
+        and cached is not None
+        and now < cached[0]
+        and cached[1] == cache_key
+    ):
+        db_probe = dict(cached[2])
+        ocr_payload = dict(cached[3])
     else:
-        db_probe = db_probe_res
-    if isinstance(ocr_payload, BaseException):
-        ocr_payload = {
-            "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
-            "ready": False,
-            "engines": {},
-            "workers": [],
-            "queue": {},
-            "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
-            "probe_degraded": True,
-        }
+        # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
+        db_probe_res, ocr_payload = await asyncio.gather(
+            probe_database_connection(timeout=max(6.0, ocr_timeout)),
+            _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+            return_exceptions=True,
+        )
+        if isinstance(db_probe_res, BaseException):
+            db_probe = {
+                "ok": False,
+                "dns_resolved": False,
+                "ssl_enabled": False,
+                "pool_class": type(engine.pool).__name__,
+                "pooler_mode": "unknown",
+                "latency_ms": 0,
+            }
+        else:
+            db_probe = db_probe_res
+        if isinstance(ocr_payload, BaseException):
+            ocr_payload = {
+                "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
+                "ready": False,
+                "engines": {},
+                "workers": [],
+                "queue": {},
+                "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+                "probe_degraded": True,
+            }
+        if db_probe.get("ok") is True and not ocr_payload.get("probe_degraded"):
+            _HEALTH_PROBE_CACHE = (
+                time.monotonic() + _HEALTH_PROBE_CACHE_TTL_SECONDS,
+                cache_key,
+                dict(db_probe),
+                dict(ocr_payload),
+            )
+        else:
+            _HEALTH_PROBE_CACHE = None
 
     if _is_production_runtime():
         ocr_minimal: dict[str, object] = {

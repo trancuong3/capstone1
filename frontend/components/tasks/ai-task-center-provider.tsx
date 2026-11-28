@@ -8,10 +8,12 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
 import {
+  ACTOR_SWITCH_BROADCAST_KEY,
   buildTaskActorCacheKey,
   clearGlobalTasksMemoryCache,
   createGlobalTasksService,
@@ -21,20 +23,73 @@ import {
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import type {
-  GlobalTaskActorRole,
-  GlobalTaskItem,
-  GlobalTaskListResponse,
+import {
+  acknowledgeTaskAlerts,
+  computeUnreadTaskAlertCounts,
+  EMPTY_TASK_ALERT_ACK_STATE,
+  getTaskAlertAckState,
+  resetTaskAlertAckMemoryCache,
+  subscribeTaskAlertAck,
+  type TaskAlertSignatureInput,
+} from "@/lib/tasks/task-alert-acknowledgment";
+import {
+  ACTIVE_GLOBAL_TASK_STATUSES,
+  type GlobalTaskActorRole,
+  type GlobalTaskItem,
+  type GlobalTaskListResponse,
+  type GlobalTaskStatus,
+  type StudioTasksChangedDetail,
 } from "@/types/global-tasks";
+
+export interface OptimisticTaskAckPatch {
+  readonly source?: GlobalTaskItem["source"];
+  readonly status?: GlobalTaskStatus;
+  readonly updated_at?: string | null;
+  readonly completed_at?: string | null;
+  readonly attempt_count?: number | null;
+}
+
+export interface TaskAlertAckOptions {
+  /**
+   * Also acknowledge matching alertable tasks returned by the immediately
+   * following feed sync for the current scope. Use when a user's own
+   * synchronous action updates an entity's `updated_at` while keeping its
+   * mapped task status alertable (e.g. `ADDED_TO_BOOK` -> `SUCCEEDED`,
+   * `PENDING_ADMIN` or Admin safety decision -> `WAITING_FOR_REVIEW`).
+   */
+  readonly includeNextSync?: boolean;
+  /**
+   * Optional post-action server fields returned directly by the mutation API
+   * (`updated_at`, `status`, `attempt_count`, etc.) so the post-action
+   * signature is persisted synchronously to `localStorage` even if the user
+   * reloads before the follow-up `/studio/{portal}/tasks` sync returns.
+   */
+  readonly optimisticTask?: OptimisticTaskAckPatch;
+}
+
+interface PendingSyncAckRule {
+  readonly scopeKey: string;
+  readonly taskId?: string | null;
+  readonly bookId?: string | null;
+  readonly bookPageId?: string | null;
+  readonly jobTypes?: readonly string[];
+  readonly minSyncSeq: number;
+  readonly expiresAtMs: number;
+}
 
 export interface AiTaskCenterContextValue {
   readonly scopeKey: string | null;
+  readonly actorId: string | null;
   readonly actorRole: GlobalTaskActorRole | null;
   readonly tasks: readonly GlobalTaskItem[];
   readonly activeCount: number;
   readonly waitingReviewCount: number;
   readonly failedCount: number;
   readonly completedCount: number;
+  readonly unreadWaitingReviewCount: number;
+  readonly unreadFailedCount: number;
+  readonly unreadCompletedCount: number;
+  readonly unreadAlertCount: number;
   readonly workerOnline: boolean | null;
   readonly isOpen: boolean;
   readonly isRefreshing: boolean;
@@ -43,6 +98,19 @@ export interface AiTaskCenterContextValue {
   readonly openPanel: () => void;
   readonly closePanel: () => void;
   readonly togglePanel: () => void;
+  readonly markAllAlertsSeen: () => void;
+  readonly markTaskAlertSeen: (
+    taskOrId: GlobalTaskItem | string,
+    options?: TaskAlertAckOptions,
+  ) => void;
+  readonly markTargetAlertsSeen: (
+    target: {
+      readonly bookId?: string | null;
+      readonly bookPageId?: string | null;
+      readonly jobTypes?: readonly string[];
+    },
+    options?: TaskAlertAckOptions,
+  ) => void;
   readonly refresh: () => Promise<void>;
   readonly retryTask: (jobId: string) => Promise<void>;
   readonly cancelTask: (jobId: string) => Promise<void>;
@@ -67,11 +135,11 @@ interface PanelState {
 export interface AiTaskCenterProviderProps {
   readonly actorId?: string | null;
   readonly actorRole?: GlobalTaskActorRole | null;
-  /** Resolve current authenticated user ID from browser Supabase session (e.g. Admin layout). */
+  /** Resolve current authenticated user ID from browser Supabase session (e.g. fallback outside SSR layout). */
   readonly resolveSessionActor?: boolean;
   readonly service?: GlobalTasksService;
   readonly enabled?: boolean;
-  /** When false, defers initial background GET /studio/tasks until panel opens, cache exists, or task event fires. */
+  /** When false, defers initial background GET until panel opens, cache exists, or task event fires. */
   readonly autoSyncOnMount?: boolean;
   readonly children: ReactNode;
 }
@@ -79,12 +147,87 @@ export interface AiTaskCenterProviderProps {
 const MIN_POLL_MS = 2500;
 const MAX_POLL_MS = 15000;
 const DEFAULT_ACTIVE_POLL_MS = 4000;
+const PENDING_SYNC_ACK_TTL_MS = 15_000;
+const EMPTY_TASKS: readonly GlobalTaskItem[] = [];
+
+function matchesPendingSyncAckRule(
+  task: GlobalTaskItem,
+  rule: PendingSyncAckRule,
+): boolean {
+  if (
+    rule.jobTypes &&
+    rule.jobTypes.length > 0 &&
+    !rule.jobTypes.includes(task.job_type)
+  ) {
+    return false;
+  }
+  if (rule.taskId) {
+    return task.id === rule.taskId;
+  }
+  if (rule.bookPageId) {
+    if (task.book_page_id !== rule.bookPageId) return false;
+    if (rule.bookId && task.book_id && task.book_id !== rule.bookId) {
+      return false;
+    }
+    return true;
+  }
+  if (rule.bookId) {
+    return task.book_id === rule.bookId;
+  }
+  return false;
+}
 
 function clampPollMs(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_ACTIVE_POLL_MS;
   }
   return Math.max(MIN_POLL_MS, Math.min(MAX_POLL_MS, Math.round(value)));
+}
+
+/**
+ * Defense-in-depth scope check: reject any snapshot whose actor_id, actor_role,
+ * or portal does not match the active portal/user, and filter tasks + recompute counts.
+ */
+export function sanitizeScopedTaskFeed(
+  data: GlobalTaskListResponse,
+  expectedActorId: string,
+  expectedRole: GlobalTaskActorRole,
+): GlobalTaskListResponse | null {
+  const trimmedActorId = expectedActorId.trim();
+  if (!trimmedActorId) return null;
+  if (data.actor_id !== trimmedActorId) return null;
+  if (data.actor_role !== expectedRole) return null;
+  if (data.portal && data.portal !== expectedRole) return null;
+
+  const filteredTasks = data.tasks.filter((task) => {
+    if (task.actor_role !== expectedRole) return false;
+    if (task.portal && task.portal !== expectedRole) return false;
+    if (task.actor_id && task.actor_id !== trimmedActorId) return false;
+    return true;
+  });
+
+  const activeCount = filteredTasks.filter((task) =>
+    ACTIVE_GLOBAL_TASK_STATUSES.has(task.status),
+  ).length;
+  const waitingReviewCount = filteredTasks.filter(
+    (task) => task.status === "WAITING_FOR_REVIEW",
+  ).length;
+  const failedCount = filteredTasks.filter(
+    (task) => task.status === "FAILED" || task.status === "PARTIAL_SUCCESS",
+  ).length;
+  const completedCount = filteredTasks.filter(
+    (task) => task.status === "SUCCEEDED",
+  ).length;
+
+  return {
+    ...data,
+    portal: expectedRole,
+    tasks: filteredTasks,
+    active_count: activeCount,
+    waiting_review_count: waitingReviewCount,
+    failed_count: failedCount,
+    completed_count: completedCount,
+  };
 }
 
 export function AiTaskCenterProvider({
@@ -129,8 +272,65 @@ export function AiTaskCenterProvider({
   const prevScopeKeyRef = useRef<string | null>(scopeKey);
   const activeAbortRef = useRef<AbortController | null>(null);
   const latestScopeRef = useRef<string | null>(scopeKey);
+  const isPanelOpenRef = useRef<boolean>(false);
+  const syncRequestSeqRef = useRef<number>(0);
+  const pendingSyncAckRulesRef = useRef<PendingSyncAckRule[]>([]);
 
-  // Optionally resolve actor ID from Supabase browser auth when mounted outside AuthRuntimeContext.
+  const consumePendingSyncAcks = useCallback(
+    (
+      targetScope: string,
+      targetActorId: string,
+      targetRole: GlobalTaskActorRole,
+      tasks: readonly GlobalTaskItem[],
+      requestSeq: number,
+    ) => {
+      if (pendingSyncAckRulesRef.current.length === 0) return;
+      const now = Date.now();
+      const activeForScope: PendingSyncAckRule[] = [];
+      const remaining: PendingSyncAckRule[] = [];
+      for (const rule of pendingSyncAckRulesRef.current) {
+        if (rule.expiresAtMs <= now) {
+          continue;
+        }
+        if (rule.scopeKey === targetScope && rule.minSyncSeq <= requestSeq) {
+          activeForScope.push(rule);
+        } else {
+          remaining.push(rule);
+        }
+      }
+      pendingSyncAckRulesRef.current = remaining;
+      if (activeForScope.length === 0 || tasks.length === 0) {
+        return;
+      }
+      const matchedTasks = tasks.filter((task) =>
+        activeForScope.some((rule) => matchesPendingSyncAckRule(task, rule)),
+      );
+      if (matchedTasks.length > 0) {
+        acknowledgeTaskAlerts(
+          targetScope,
+          matchedTasks,
+          targetActorId,
+          targetRole,
+        );
+      }
+    },
+    [],
+  );
+
+  const dropPendingSyncAcksBefore = useCallback(
+    (targetScope: string, requestSeq: number) => {
+      if (pendingSyncAckRulesRef.current.length === 0) return;
+      const now = Date.now();
+      pendingSyncAckRulesRef.current = pendingSyncAckRulesRef.current.filter(
+        (rule) =>
+          rule.expiresAtMs > now &&
+          !(rule.scopeKey === targetScope && rule.minSyncSeq <= requestSeq),
+      );
+    },
+    [],
+  );
+
+  // Optionally resolve actor ID from Supabase browser auth when mounted outside SSR layout.
   useEffect(() => {
     if (!resolveSessionActor || actorId !== undefined || !enabled) {
       return;
@@ -171,7 +371,9 @@ export function AiTaskCenterProvider({
           const nextId =
             event === "SIGNED_OUT" ? null : (session?.user?.id ?? null);
           if (!nextId) {
+            pendingSyncAckRulesRef.current = [];
             clearGlobalTasksMemoryCache();
+            resetTaskAlertAckMemoryCache();
           }
           setSessionActorId(nextId);
         });
@@ -193,12 +395,38 @@ export function AiTaskCenterProvider({
     if (prevScopeKeyRef.current !== scopeKey) {
       activeAbortRef.current?.abort();
       activeAbortRef.current = null;
+      isPanelOpenRef.current = false;
+      pendingSyncAckRulesRef.current = [];
       if (prevScopeKeyRef.current !== null) {
         clearGlobalTasksMemoryCache();
+        resetTaskAlertAckMemoryCache();
       }
       prevScopeKeyRef.current = scopeKey;
     }
   }, [scopeKey]);
+
+  // Cross-tab logout / actor switch listener: immediately clear in-memory task feed.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== ACTOR_SWITCH_BROADCAST_KEY) return;
+      activeAbortRef.current?.abort();
+      activeAbortRef.current = null;
+      isPanelOpenRef.current = false;
+      pendingSyncAckRulesRef.current = [];
+      clearGlobalTasksMemoryCache();
+      resetTaskAlertAckMemoryCache();
+      setFeedState({
+        scopeKey: null,
+        data: null,
+        error: null,
+        isRefreshing: false,
+      });
+      setPanelState({ scopeKey: null, open: false });
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   const fetchTasksForScope = useCallback(
     async (
@@ -209,9 +437,11 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
+      const requestSeq = ++syncRequestSeqRef.current;
 
       try {
-        const data = await resolvedService.listTasks({
+        const rawData = await resolvedService.listTasks({
+          portal: targetRole,
           limit: 40,
           signal: controller.signal,
         });
@@ -221,10 +451,34 @@ export function AiTaskCenterProvider({
         ) {
           return;
         }
-        setCachedGlobalTasksSnapshot(targetActorId, targetRole, data);
+        const sanitized = sanitizeScopedTaskFeed(
+          rawData,
+          targetActorId,
+          targetRole,
+        );
+        if (!sanitized) {
+          // Scope mismatch (e.g. token switched mid-flight): discard cleanly & wipe cache.
+          dropPendingSyncAcksBefore(targetScope, requestSeq);
+          clearGlobalTasksMemoryCache();
+          setFeedState({
+            scopeKey: targetScope,
+            data: null,
+            error: null,
+            isRefreshing: false,
+          });
+          return;
+        }
+        consumePendingSyncAcks(
+          targetScope,
+          targetActorId,
+          targetRole,
+          sanitized.tasks,
+          requestSeq,
+        );
+        setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
         setFeedState({
           scopeKey: targetScope,
-          data,
+          data: sanitized,
           error: null,
           isRefreshing: false,
         });
@@ -238,6 +492,7 @@ export function AiTaskCenterProvider({
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
+        dropPendingSyncAcksBefore(targetScope, requestSeq);
         const message =
           err instanceof Error && err.message
             ? err.message
@@ -250,7 +505,7 @@ export function AiTaskCenterProvider({
         }));
       }
     },
-    [resolvedService],
+    [consumePendingSyncAcks, dropPendingSyncAcksBefore, resolvedService],
   );
 
   // Derive scoped data cleanly during render so logout/actor switch clears UI instantaneously!
@@ -259,9 +514,16 @@ export function AiTaskCenterProvider({
       return null;
     }
     if (feedState.scopeKey === scopeKey && feedState.data) {
-      return feedState.data;
+      return sanitizeScopedTaskFeed(
+        feedState.data,
+        effectiveActorId,
+        actorRole,
+      );
     }
-    return getCachedGlobalTasksSnapshot(effectiveActorId, actorRole);
+    const cached = getCachedGlobalTasksSnapshot(effectiveActorId, actorRole);
+    return cached
+      ? sanitizeScopedTaskFeed(cached, effectiveActorId, actorRole)
+      : null;
   }, [
     actorRole,
     effectiveActorId,
@@ -287,9 +549,14 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
+      const requestSeq = ++syncRequestSeqRef.current;
       void resolvedService
-        .listTasks({ limit: 40, signal: controller.signal })
-        .then((data) => {
+        .listTasks({
+          portal: targetRole,
+          limit: 40,
+          signal: controller.signal,
+        })
+        .then((rawData) => {
           if (
             !isActive ||
             controller.signal.aborted ||
@@ -297,21 +564,49 @@ export function AiTaskCenterProvider({
           ) {
             return;
           }
-          setCachedGlobalTasksSnapshot(targetActorId, targetRole, data);
+          const sanitized = sanitizeScopedTaskFeed(
+            rawData,
+            targetActorId,
+            targetRole,
+          );
+          if (!sanitized) {
+            dropPendingSyncAcksBefore(targetScope, requestSeq);
+            clearGlobalTasksMemoryCache();
+            setFeedState({
+              scopeKey: targetScope,
+              data: null,
+              error: null,
+              isRefreshing: false,
+            });
+            return;
+          }
+          consumePendingSyncAcks(
+            targetScope,
+            targetActorId,
+            targetRole,
+            sanitized.tasks,
+            requestSeq,
+          );
+          setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
           setFeedState({
             scopeKey: targetScope,
-            data,
+            data: sanitized,
             error: null,
             isRefreshing: false,
           });
         })
         .catch((err: unknown) => {
-          if (!isActive || latestScopeRef.current !== targetScope) {
+          if (
+            !isActive ||
+            controller.signal.aborted ||
+            latestScopeRef.current !== targetScope
+          ) {
             return;
           }
           if (err instanceof DOMException && err.name === "AbortError") {
             return;
           }
+          dropPendingSyncAcksBefore(targetScope, requestSeq);
           const message =
             err instanceof Error && err.message
               ? err.message
@@ -327,7 +622,7 @@ export function AiTaskCenterProvider({
 
     const hasCachedSnapshot =
       getCachedGlobalTasksSnapshot(targetActorId, targetRole) !== null;
-    if (autoSyncOnMount || hasCachedSnapshot || panelState.open) {
+    if (autoSyncOnMount || hasCachedSnapshot || isPanelOpenRef.current) {
       triggerSync();
     }
 
@@ -342,7 +637,7 @@ export function AiTaskCenterProvider({
       }
       const hasLiveCache =
         getCachedGlobalTasksSnapshot(targetActorId, targetRole) !== null;
-      if (autoSyncOnMount || hasLiveCache || panelState.open) {
+      if (autoSyncOnMount || hasLiveCache || isPanelOpenRef.current) {
         triggerSync();
       }
     }
@@ -363,8 +658,16 @@ export function AiTaskCenterProvider({
     }
 
     function handleTaskChanged(event: Event) {
-      const detail = (event as CustomEvent<{ source?: string }>).detail;
+      const detail = (
+        event as CustomEvent<StudioTasksChangedDetail | undefined>
+      ).detail;
       if (detail?.source === "ai-task-center-provider") {
+        return;
+      }
+      if (detail?.portal && detail.portal !== targetRole) {
+        return;
+      }
+      if (detail?.actorId && detail.actorId !== targetActorId) {
         return;
       }
       triggerSync();
@@ -405,8 +708,9 @@ export function AiTaskCenterProvider({
   }, [
     actorRole,
     autoSyncOnMount,
+    consumePendingSyncAcks,
+    dropPendingSyncAcksBefore,
     effectiveActorId,
-    panelState.open,
     resolvedService,
     scopeKey,
   ]);
@@ -488,6 +792,239 @@ export function AiTaskCenterProvider({
     scopeKey,
   ]);
 
+  const scopedTasks = scopedData?.tasks ?? EMPTY_TASKS;
+  const isOpen = Boolean(
+    scopeKey && panelState.scopeKey === scopeKey && panelState.open,
+  );
+
+  useEffect(() => {
+    isPanelOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  const subscribeAck = useCallback(
+    (onStoreChange: () => void) =>
+      subscribeTaskAlertAck(
+        scopeKey,
+        effectiveActorId,
+        actorRole,
+        onStoreChange,
+      ),
+    [actorRole, effectiveActorId, scopeKey],
+  );
+  const getAckSnapshot = useCallback(
+    () => getTaskAlertAckState(scopeKey, effectiveActorId, actorRole),
+    [actorRole, effectiveActorId, scopeKey],
+  );
+  const ackState = useSyncExternalStore(
+    subscribeAck,
+    getAckSnapshot,
+    () => EMPTY_TASK_ALERT_ACK_STATE,
+  );
+
+  const unreadCounts = useMemo(
+    () => computeUnreadTaskAlertCounts(scopedTasks, ackState),
+    [ackState, scopedTasks],
+  );
+
+  const markAllAlertsSeen = useCallback(() => {
+    if (!scopeKey || scopedTasks.length === 0) return;
+    acknowledgeTaskAlerts(scopeKey, scopedTasks, effectiveActorId, actorRole);
+  }, [actorRole, effectiveActorId, scopeKey, scopedTasks]);
+
+  const markTaskAlertSeen = useCallback(
+    (taskOrId: GlobalTaskItem | string, options?: TaskAlertAckOptions) => {
+      if (!scopeKey) return;
+      const taskId =
+        typeof taskOrId === "string" ? taskOrId.trim() : taskOrId.id.trim();
+      if (options?.includeNextSync && taskId) {
+        const now = Date.now();
+        pendingSyncAckRulesRef.current.push({
+          scopeKey,
+          taskId,
+          minSyncSeq: syncRequestSeqRef.current + 1,
+          expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
+        });
+      }
+      const patch = options?.optimisticTask;
+      const matchedTasks =
+        typeof taskOrId === "string"
+          ? scopedTasks.filter((item) => item.id === taskId)
+          : [taskOrId];
+
+      if (matchedTasks.length === 0) {
+        if (
+          patch &&
+          taskId &&
+          patch.source &&
+          patch.status &&
+          patch.updated_at &&
+          typeof patch.attempt_count === "number"
+        ) {
+          const synthetic: TaskAlertSignatureInput = {
+            id: taskId,
+            source: patch.source,
+            status: patch.status,
+            updated_at: patch.updated_at,
+            completed_at: patch.completed_at ?? null,
+            created_at: patch.updated_at,
+            attempt_count: patch.attempt_count,
+          };
+          acknowledgeTaskAlerts(
+            scopeKey,
+            [synthetic],
+            effectiveActorId,
+            actorRole,
+          );
+        }
+        return;
+      }
+
+      if (patch) {
+        const patchedTasks = matchedTasks.map((item) => {
+          if (patch.source && item.source !== patch.source) {
+            return item;
+          }
+          return {
+            ...item,
+            status: patch.status ?? item.status,
+            updated_at: patch.updated_at || item.updated_at,
+            completed_at:
+              patch.completed_at !== undefined
+                ? patch.completed_at
+                : item.completed_at,
+            attempt_count:
+              typeof patch.attempt_count === "number"
+                ? patch.attempt_count
+                : item.attempt_count,
+          };
+        });
+        acknowledgeTaskAlerts(
+          scopeKey,
+          patchedTasks,
+          effectiveActorId,
+          actorRole,
+        );
+        if (scopedData && effectiveActorId && actorRole) {
+          const patchedByKey = new Map(
+            patchedTasks.map((item) => [`${item.source}:${item.id}`, item]),
+          );
+          const nextFeed = sanitizeScopedTaskFeed(
+            {
+              ...scopedData,
+              tasks: scopedData.tasks.map(
+                (item) => patchedByKey.get(`${item.source}:${item.id}`) ?? item,
+              ),
+            },
+            effectiveActorId,
+            actorRole,
+          );
+          if (nextFeed) {
+            setCachedGlobalTasksSnapshot(effectiveActorId, actorRole, nextFeed);
+            setFeedState((prev) => ({
+              scopeKey,
+              data: nextFeed,
+              error: prev.scopeKey === scopeKey ? prev.error : null,
+              isRefreshing:
+                prev.scopeKey === scopeKey ? prev.isRefreshing : false,
+            }));
+          }
+        }
+        return;
+      }
+
+      acknowledgeTaskAlerts(
+        scopeKey,
+        matchedTasks,
+        effectiveActorId,
+        actorRole,
+      );
+    },
+    [actorRole, effectiveActorId, scopeKey, scopedData, scopedTasks],
+  );
+
+  const markTargetAlertsSeen = useCallback(
+    (
+      target: {
+        readonly bookId?: string | null;
+        readonly bookPageId?: string | null;
+        readonly jobTypes?: readonly string[];
+      },
+      options?: TaskAlertAckOptions,
+    ) => {
+      if (!scopeKey) return;
+      const targetBookId = target.bookId?.trim() || null;
+      const targetPageId = target.bookPageId?.trim() || null;
+      const normalizedJobTypes = target.jobTypes
+        ?.map((jt) => jt.trim())
+        .filter((jt) => jt.length > 0);
+      if (!targetBookId && !targetPageId) return;
+      if (options?.includeNextSync) {
+        const now = Date.now();
+        pendingSyncAckRulesRef.current.push({
+          scopeKey,
+          bookId: targetBookId,
+          bookPageId: targetPageId,
+          jobTypes:
+            normalizedJobTypes && normalizedJobTypes.length > 0
+              ? normalizedJobTypes
+              : undefined,
+          minSyncSeq: syncRequestSeqRef.current + 1,
+          expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
+        });
+      }
+      const matchedTasks = scopedTasks.filter((item) => {
+        if (
+          normalizedJobTypes &&
+          normalizedJobTypes.length > 0 &&
+          !normalizedJobTypes.includes(item.job_type)
+        ) {
+          return false;
+        }
+        if (targetPageId) {
+          if (item.book_page_id !== targetPageId) return false;
+          if (targetBookId && item.book_id && item.book_id !== targetBookId) {
+            return false;
+          }
+          return true;
+        }
+        return item.book_id === targetBookId;
+      });
+      if (matchedTasks.length === 0) return;
+      acknowledgeTaskAlerts(
+        scopeKey,
+        matchedTasks,
+        effectiveActorId,
+        actorRole,
+      );
+    },
+    [actorRole, effectiveActorId, scopeKey, scopedTasks],
+  );
+
+  // While the AI Task Center drawer is open and visible, acknowledge any alert
+  // tasks that load asynchronously or complete while the user is reading them.
+  useEffect(() => {
+    if (!isOpen || !scopeKey || scopedTasks.length === 0) {
+      return;
+    }
+    const acknowledgeIfVisible = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      acknowledgeTaskAlerts(scopeKey, scopedTasks, effectiveActorId, actorRole);
+    };
+    acknowledgeIfVisible();
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.addEventListener("visibilitychange", acknowledgeIfVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", acknowledgeIfVisible);
+    };
+  }, [actorRole, effectiveActorId, isOpen, scopeKey, scopedTasks]);
+
   const refresh = useCallback(async () => {
     if (!scopeKey || !effectiveActorId || !actorRole) return;
     setFeedState((prev) => ({
@@ -502,15 +1039,23 @@ export function AiTaskCenterProvider({
   const retryTask = useCallback(
     async (jobId: string) => {
       if (!scopeKey || !effectiveActorId || !actorRole) return;
+      markTaskAlertSeen(jobId);
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
-        await resolvedService.retryTask(jobId);
+        await resolvedService.retryTask(jobId, { portal: actorRole });
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
         if (typeof window !== "undefined") {
           window.dispatchEvent(
-            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
-              detail: { source: "ai-task-center-provider" },
-            }),
+            new CustomEvent<StudioTasksChangedDetail>(
+              STUDIO_TASKS_CHANGED_EVENT,
+              {
+                detail: {
+                  source: "ai-task-center-provider",
+                  actorId: effectiveActorId,
+                  portal: actorRole,
+                },
+              },
+            ),
           );
         }
       } finally {
@@ -525,6 +1070,7 @@ export function AiTaskCenterProvider({
       actorRole,
       effectiveActorId,
       fetchTasksForScope,
+      markTaskAlertSeen,
       resolvedService,
       scopeKey,
     ],
@@ -533,15 +1079,23 @@ export function AiTaskCenterProvider({
   const cancelTask = useCallback(
     async (jobId: string) => {
       if (!scopeKey || !effectiveActorId || !actorRole) return;
+      markTaskAlertSeen(jobId);
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
-        await resolvedService.cancelTask(jobId);
+        await resolvedService.cancelTask(jobId, { portal: actorRole });
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
         if (typeof window !== "undefined") {
           window.dispatchEvent(
-            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
-              detail: { source: "ai-task-center-provider" },
-            }),
+            new CustomEvent<StudioTasksChangedDetail>(
+              STUDIO_TASKS_CHANGED_EVENT,
+              {
+                detail: {
+                  source: "ai-task-center-provider",
+                  actorId: effectiveActorId,
+                  portal: actorRole,
+                },
+              },
+            ),
           );
         }
       } finally {
@@ -556,6 +1110,7 @@ export function AiTaskCenterProvider({
       actorRole,
       effectiveActorId,
       fetchTasksForScope,
+      markTaskAlertSeen,
       resolvedService,
       scopeKey,
     ],
@@ -563,31 +1118,66 @@ export function AiTaskCenterProvider({
 
   const openPanel = useCallback(() => {
     if (!scopeKey) return;
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = true;
     setPanelState({ scopeKey, open: true });
     if (effectiveActorId && actorRole) {
       void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
     }
-  }, [actorRole, effectiveActorId, fetchTasksForScope, scopeKey]);
+  }, [
+    actorRole,
+    effectiveActorId,
+    fetchTasksForScope,
+    markAllAlertsSeen,
+    scopeKey,
+  ]);
 
   const closePanel = useCallback(() => {
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = false;
     setPanelState({ scopeKey, open: false });
-  }, [scopeKey]);
+  }, [markAllAlertsSeen, scopeKey]);
 
   const togglePanel = useCallback(() => {
     if (!scopeKey) return;
-    setPanelState((prev) => {
-      const nextOpen = !(prev.scopeKey === scopeKey && prev.open);
-      if (nextOpen && effectiveActorId && actorRole) {
-        void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
-      }
-      return { scopeKey, open: nextOpen };
-    });
-  }, [actorRole, effectiveActorId, fetchTasksForScope, scopeKey]);
+    const nextOpen = !isOpen;
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = nextOpen;
+    setPanelState({ scopeKey, open: nextOpen });
+    if (nextOpen && effectiveActorId && actorRole) {
+      void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
+    }
+  }, [
+    actorRole,
+    effectiveActorId,
+    fetchTasksForScope,
+    isOpen,
+    markAllAlertsSeen,
+    scopeKey,
+  ]);
 
   const clearForLogout = useCallback(() => {
     activeAbortRef.current?.abort();
     activeAbortRef.current = null;
+    isPanelOpenRef.current = false;
+    pendingSyncAckRulesRef.current = [];
     clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
     setFeedState({
       scopeKey: null,
       data: null,
@@ -597,9 +1187,6 @@ export function AiTaskCenterProvider({
     setPanelState({ scopeKey: null, open: false });
   }, []);
 
-  const isOpen = Boolean(
-    scopeKey && panelState.scopeKey === scopeKey && panelState.open,
-  );
   const errorMessage =
     scopeKey && feedState.scopeKey === scopeKey ? feedState.error : null;
   const isRefreshing = Boolean(
@@ -609,12 +1196,17 @@ export function AiTaskCenterProvider({
   const contextValue = useMemo<AiTaskCenterContextValue>(
     () => ({
       scopeKey,
+      actorId: effectiveActorId,
       actorRole,
-      tasks: scopedData?.tasks ?? [],
+      tasks: scopedTasks,
       activeCount,
       waitingReviewCount: scopedData?.waiting_review_count ?? 0,
       failedCount: scopedData?.failed_count ?? 0,
       completedCount: scopedData?.completed_count ?? 0,
+      unreadWaitingReviewCount: unreadCounts.unreadWaitingReviewCount,
+      unreadFailedCount: unreadCounts.unreadFailedCount,
+      unreadCompletedCount: unreadCounts.unreadCompletedCount,
+      unreadAlertCount: unreadCounts.unreadAlertCount,
       workerOnline: scopedData?.worker_online ?? null,
       isOpen,
       isRefreshing,
@@ -623,6 +1215,9 @@ export function AiTaskCenterProvider({
       openPanel,
       closePanel,
       togglePanel,
+      markAllAlertsSeen,
+      markTaskAlertSeen,
+      markTargetAlertsSeen,
       refresh,
       retryTask,
       cancelTask,
@@ -634,9 +1229,13 @@ export function AiTaskCenterProvider({
       cancelTask,
       clearForLogout,
       closePanel,
+      effectiveActorId,
       errorMessage,
       isOpen,
       isRefreshing,
+      markAllAlertsSeen,
+      markTargetAlertsSeen,
+      markTaskAlertSeen,
       openPanel,
       pendingActionIds,
       refresh,
@@ -644,10 +1243,14 @@ export function AiTaskCenterProvider({
       scopeKey,
       scopedData?.completed_count,
       scopedData?.failed_count,
-      scopedData?.tasks,
       scopedData?.waiting_review_count,
       scopedData?.worker_online,
+      scopedTasks,
       togglePanel,
+      unreadCounts.unreadAlertCount,
+      unreadCounts.unreadCompletedCount,
+      unreadCounts.unreadFailedCount,
+      unreadCounts.unreadWaitingReviewCount,
     ],
   );
 

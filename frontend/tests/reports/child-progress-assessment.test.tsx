@@ -11,6 +11,7 @@ import type {
   ChildProgressAssessment,
   ChildProgressService,
 } from "@/lib/api/child-progress-service";
+import { ServiceError } from "@/lib/api/service-error";
 
 const CHILD_ID = "33333333-3333-4333-8333-333333333333";
 
@@ -156,9 +157,12 @@ describe("AI progress assessment card", () => {
     expect(screen.getByText("+5 điểm so với kỳ trước")).toBeInTheDocument();
     expect(screen.getByText("76/100")).toBeInTheDocument();
     expect(screen.getByText("Chưa đủ dữ liệu")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /AI đang viết nhận xét/ }),
-    ).toBeDisabled();
+    const writingButton = screen.getByRole("button", {
+      name: /AI đang viết nhận xét/,
+    });
+    expect(writingButton).toBeDisabled();
+    // Button already renders a loading spinner; RefreshCw must not render a second SVG icon.
+    expect(writingButton.querySelectorAll("svg")).toHaveLength(1);
     expect(service.generate).toHaveBeenCalledWith(CHILD_ID, 30, {
       signal: expect.any(AbortSignal),
     });
@@ -166,9 +170,11 @@ describe("AI progress assessment card", () => {
     resolveAi(aiVersion());
     expect(await screen.findByText("AI: bé đang tiến bộ")).toBeInTheDocument();
     expect(screen.getByText("Nhận xét do AI viết")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
-    ).toBeEnabled();
+    const refreshButton = screen.getByRole("button", {
+      name: "Nhờ AI nhận xét lại",
+    });
+    expect(refreshButton).toBeEnabled();
+    expect(refreshButton.querySelectorAll("svg")).toHaveLength(1);
   });
 
   it("shows weaknesses, what to do for parents and child, and practice words", async () => {
@@ -274,7 +280,149 @@ describe("AI progress assessment card", () => {
     expect(await screen.findByText("AI: nhận xét mới")).toBeInTheDocument();
     expect(service.generate).toHaveBeenCalledWith(CHILD_ID, 30, {
       refresh: true,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("displays specific fallback guidance when the backend returns RULE_BASED with ai_fallback_reason", async () => {
+    const quotaView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "PROVIDER_QUOTA",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI đang tạm bận hoặc hết hạn mức lượt gọi/),
+    ).toBeInTheDocument();
+    quotaView.unmount();
+
+    const timeoutView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "PROVIDER_TIMEOUT",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI phản hồi lâu hơn dự kiến/),
+    ).toBeInTheDocument();
+    timeoutView.unmount();
+
+    const configView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "AI_NOT_CONFIGURED",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/Dịch vụ AI trên máy chủ hiện chưa sẵn sàng/),
+    ).toBeInTheDocument();
+    configView.unmount();
+  });
+
+  it("classifies rejected ServiceError statuses instead of swallowing them", async () => {
+    const quotaView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockRejectedValue(
+        new ServiceError({
+          code: "NETWORK_ERROR",
+          message: "Too many requests",
+          status: 429,
+          request_id: "",
+          retryable: true,
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI đang tạm bận hoặc hết hạn mức lượt gọi/),
+    ).toBeInTheDocument();
+    quotaView.unmount();
+
+    const timeoutView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockRejectedValue(
+        new ServiceError({
+          code: "NETWORK_ERROR",
+          message: "Gateway timeout",
+          status: 504,
+          request_id: "",
+          retryable: true,
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI phản hồi lâu hơn dự kiến/),
+    ).toBeInTheDocument();
+    timeoutView.unmount();
+  });
+
+  it("aborts an in-flight manual refresh when switching periods or unmounting", async () => {
+    const user = userEvent.setup();
+    let capturedSignal: AbortSignal | undefined;
+    const service = {
+      get: vi.fn().mockResolvedValue(aiVersion()),
+      generate: vi.fn().mockImplementation((_childId, _days, options) => {
+        capturedSignal = options?.signal;
+        return new Promise<ChildProgressAssessment>(() => {});
+      }),
+    };
+
+    const view = setup(service);
+    await screen.findByText("AI: bé đang tiến bộ");
+
+    await user.click(
+      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
+    );
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    const firstRefreshSignal = capturedSignal;
+    await user.click(screen.getByRole("radio", { name: "90 ngày" }));
+    expect(firstRefreshSignal?.aborted).toBe(true);
+
+    await screen.findByText("AI: bé đang tiến bộ");
+    await user.click(
+      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
+    );
+    const secondRefreshSignal = capturedSignal;
+    expect(secondRefreshSignal?.aborted).toBe(false);
+
+    view.unmount();
+    expect(secondRefreshSignal?.aborted).toBe(true);
+  });
+
+  it("renders the weekly chart when short sessions round to 0 minutes", async () => {
+    setup({
+      get: vi.fn().mockResolvedValue({
+        ...aiVersion(),
+        weekly: [
+          {
+            week_start: "2026-10-11",
+            sessions: 0,
+            minutes: 0,
+            accuracy_pct: null,
+          },
+          {
+            week_start: "2026-10-18",
+            sessions: 1,
+            minutes: 0,
+            accuracy_pct: 91.6,
+          },
+        ],
+      }),
+      generate: vi.fn(),
+    });
+
+    expect(
+      await screen.findByText("Thời gian đọc theo tuần"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("92%")).toBeInTheDocument();
+    expect(screen.getAllByText("0p")).toHaveLength(2);
   });
 
   it("offers a retry when the scores cannot be loaded", async () => {

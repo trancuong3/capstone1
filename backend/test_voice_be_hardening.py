@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_active_profile_id
 from app.api.routes import voice as voice_route
 from app.api.routes import voice_studio as voice_studio_route
-from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider, VoiceProviderError
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
@@ -689,6 +689,15 @@ class TestVoiceWorkerHardeningAndClientVad(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
+        clear_voice_orchestrator_caches()
+
+    def tearDown(self) -> None:
+        clear_voice_orchestrator_caches()
+        self._env_patch.stop()
+
     async def test_session_voice_lock_rejects_mid_session_google_override_and_tracks_central_backup(self) -> None:
         clear_voice_orchestrator_caches()
         local = MagicMock(spec=LocalVoiceProvider)
@@ -715,7 +724,11 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
                 provider="google",
             )
         )
-        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+        orch = VoiceOrchestrator(
+            local_provider=local,
+            google_provider=google,
+            elevenlabs_provider=ElevenLabsVoiceProvider(api_key=""),
+        )
         sid = str(uuid4())
         actor = uuid4()
 
@@ -1220,6 +1233,112 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(txt, "")
         self.assertEqual(words, [])
         self.assertEqual(decode_calls["count"], 0)
+
+    async def test_destacked_busy_retries_loopback_timeout_and_elevenlabs_failure_cooldown(self) -> None:
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+
+        # 1. LocalVoiceProvider BUSY retry capped at 1 (2 attempts total, not 4) + 5.0s loopback read timeout
+        provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        seen_timeouts: list[httpx.Timeout] = []
+        busy_calls = 0
+
+        class _BusyClient:
+            is_closed = False
+
+            async def post(self, _url, **kwargs):
+                nonlocal busy_calls
+                busy_calls += 1
+                seen_timeouts.append(kwargs["timeout"])
+                return httpx.Response(503, json={"detail": {"code": "VOICE_WORKER_BUSY"}})
+
+        with (
+            patch.object(provider, "_get_client", return_value=_BusyClient()),
+            patch("app.providers.local_voice_provider.asyncio.sleep", new=AsyncMock()),
+        ):
+            with self.assertRaises(LocalVoiceTechnicalError) as busy_err:
+                await provider.transcribe(audio=b"wav", filename="a.wav", content_type="audio/wav")
+        self.assertEqual(busy_err.exception.code, "LOCAL_STT_BUSY")
+        self.assertEqual(busy_calls, 2)
+        self.assertEqual(seen_timeouts[0].read, 5.0)
+        self.assertEqual(seen_timeouts[0].connect, 0.5)
+
+        # 2. retry_on_timeout=False and budget < 3.0s both skip timeout retry (1 attempt only)
+        timeout_calls = 0
+
+        class _TimeoutClient:
+            is_closed = False
+
+            async def post(self, _url, **_kwargs):
+                nonlocal timeout_calls
+                timeout_calls += 1
+                raise httpx.ReadTimeout("slow")
+
+        with (
+            patch.object(provider, "_get_client", return_value=_TimeoutClient()),
+            patch("app.providers.local_voice_provider.asyncio.sleep", new=AsyncMock()),
+        ):
+            with self.assertRaises(LocalVoiceTechnicalError):
+                await provider.transcribe(
+                    audio=b"wav", filename="a.wav", content_type="audio/wav", retry_on_timeout=False
+                )
+            self.assertEqual(timeout_calls, 1)
+
+            timeout_calls = 0
+            with self.assertRaises(LocalVoiceTechnicalError):
+                await provider.transcribe(
+                    audio=b"wav", filename="a.wav", content_type="audio/wav", timeout=2.5
+                )
+            self.assertEqual(timeout_calls, 1)
+
+        # 3. ElevenLabs STT_TIMEOUT cools down immediately and passes max_retries=0 on interactive fallback
+        clear_voice_orchestrator_caches()
+        local_down = MagicMock(spec=LocalVoiceProvider)
+        local_down.transcribe = AsyncMock(
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_STT_UNAVAILABLE")
+        )
+        el = ElevenLabsVoiceProvider(api_key="unit-test-el-key")
+        el_kwargs_seen: list[dict] = []
+
+        async def _el_timeout(**kwargs):
+            el_kwargs_seen.append(kwargs)
+            raise VoiceProviderError(status_code=503, code="STT_TIMEOUT")
+
+        el.transcribe = _el_timeout  # type: ignore[method-assign]
+        google = GoogleCloudVoiceProvider(stt_api_key="unit-test-google-key")
+        google.transcribe = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalTranscription(
+                text="xin chào",
+                language_code="vi",
+                language_probability=None,
+                words=None,
+                provider="google",
+                fallback_used=True,
+            )
+        )
+        orch = VoiceOrchestrator(
+            local_provider=local_down,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+        policy = VoicePolicyContext(
+            provider_mode="local_with_google_fallback",
+            allow_google_stt=True,
+        )
+        res1 = await orch.transcribe(
+            audio=b"wav", filename="a.wav", content_type="audio/wav", policy=policy
+        )
+        self.assertEqual(res1.provider, "google")
+        self.assertEqual(len(el_kwargs_seen), 1)
+        self.assertEqual(el_kwargs_seen[0].get("max_retries"), 0)
+        self.assertTrue(orch._is_elevenlabs_stt_in_cooldown())
+
+        # Second turn skips ElevenLabs completely and goes straight to Google
+        res2 = await orch.transcribe(
+            audio=b"wav", filename="b.wav", content_type="audio/wav", policy=policy
+        )
+        self.assertEqual(res2.provider, "google")
+        self.assertEqual(len(el_kwargs_seen), 1)
+        clear_voice_orchestrator_caches()
 
 
 if __name__ == "__main__":

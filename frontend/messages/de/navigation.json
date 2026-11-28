@@ -26,7 +26,11 @@
       "sessions": "Abgeschlossene Lesesitzungen ansehen",
       "entertainment": "Sprachspiele, Geschichten und Karaoke",
       "difficultWords": "Wörter üben, die Ihr Kind oft falsch liest"
-    }
+    },
+    "devicePermissions": "Mikrofon & Kamera prüfen",
+    "aiTasksNotifications": "KI-Aufgaben & Hinweise",
+    "userGuide": "Schritt-für-Schritt-Anleitung",
+    "helpFeedback": "Hilfe & Feedback senden"
   },
   "admin": {
     "navLabel": "Administrator-Navigation",
@@ -37,15 +41,15 @@
     "books": "Bücherregal",
     "metadataQuality": "Buchqualität",
     "auditLogs": "Prüfprotokolle",
-    "training": "OCR-Training",
+    "training": "Texterkennungsmodelle",
     "health": "Betrieb",
     "moreTitle": "Weitere Verwaltung",
     "mobileQualityShort": "Qualität",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Text-KI",
     "mobileMoreDescriptions": {
       "auditLogs": "Admin-Prüfprotokolle verfolgen",
-      "training": "VietOCR V2-Modell trainieren und betreiben",
-      "health": "Systemstatus, OCR-Worker und Stimme"
+      "training": "Texterkennungsmodelle trainieren und verwalten",
+      "health": "Systemstatus, Texterkennung und Sprache"
     }
   },
   "accountMenu": {
@@ -58,7 +62,19 @@
     "accountSection": "Konto",
     "helpSection": "Hilfe",
     "sessionSection": "Sitzung",
-    "defaultAccountLabel": "ViRead-Konto"
+    "defaultAccountLabel": "ViRead-Konto",
+    "activitiesSection": "Aktivität & Werkzeuge",
+    "accountDeviceSection": "Konto & Geräte",
+    "guideSupportSection": "Anleitung & Hilfe",
+    "quickChildTitle": "Aktives Kinderprofil",
+    "languageLabel": "Oberflächensprache",
+    "taskStatusRunning": "{count} Aufgabe(n) im Hintergrund",
+    "taskStatusReview": "{count} Aufgabe(n) warten auf Prüfung",
+    "taskStatusFailed": "{count} Aufgabe(n) fehlerhaft",
+    "taskStatusNewDone": "{count} Aufgabe(n) neu abgeschlossen",
+    "taskStatusIdle": "Keine neuen Aufgaben",
+    "unreadBadgeAria": "Ungelesene KI-Aufgabenbenachrichtigungen",
+    "runningBadgeAria": "KI-Aufgaben laufen im Hintergrund"
   },
   "childSwitcher": {
     "selectedAria": "Ausgewähltes Kind: {alias}, zum Wechseln tippen",
@@ -73,5 +89,38 @@
     "ariaLabel": "ViRead-Informationen",
     "logoDashboardAria": "ViRead - Zur Übersicht",
     "logoHomeAria": "ViRead - Zur Startseite"
+  },
+  "guide": {
+    "title": "ViRead Kurzanleitung",
+    "subtitle": "5 einfache Schritte für das tägliche Lesen mit Ihrem Kind.",
+    "closeAction": "Verstanden",
+    "openHelpCenter": "Hilfecenter öffnen",
+    "steps": {
+      "1": {
+        "title": "1. Kinderprofil anlegen",
+        "body": "Namen und Klassenstufe (1–5) hinzufügen für passende Bücher.",
+        "action": "Kinderprofile"
+      },
+      "2": {
+        "title": "2. Buch wählen oder privat hochladen",
+        "body": "Aus der Bibliothek wählen oder Bilder, PDF, DOCX in Meine Bücher laden.",
+        "action": "Meine Bücher"
+      },
+      "3": {
+        "title": "3. Mikrofon prüfen & gemeinsam lesen",
+        "body": "Vor dem Lesen das Mikrofon testen, damit ViRead klar zuhört.",
+        "action": "Geräte prüfen"
+      },
+      "4": {
+        "title": "4. Schwierige Wörter üben & Fortschritt",
+        "body": "Wörter pro Buch wiederholen und wöchentliche Fortschritte verfolgen.",
+        "action": "Übungswörter"
+      },
+      "5": {
+        "title": "5. Leseplan & KI-Aufgaben verwalten",
+        "body": "Ziele und Erinnerungen festlegen und OCR-Aufgaben im Blick behalten.",
+        "action": "Leseverwaltung"
+      }
+    }
   }
 }

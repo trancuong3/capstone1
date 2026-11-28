@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app.models import ParentBookPageSubmission
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
@@ -146,6 +146,10 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
                 ParentBookPageSubmission.WorkflowStatus.not_in(
                     ("PENDING_ADMIN", "ADDED_TO_BOOK", "CANCELLED")
                 ),
+                or_(
+                    ParentBookPageSubmission.WorkflowStatus != "CHECKING",
+                    ParentBookPageSubmission.OcrStatus != "PENDING",
+                ),
                 ParentBookPageSubmission.TempExpiresAt < cutoff,
             )
             .order_by(ParentBookPageSubmission.TempExpiresAt.asc(), ParentBookPageSubmission.Id.asc())
@@ -154,6 +158,8 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
         )
         expired = list(result.scalars().all())
         for row in expired:
+            if row.WorkflowStatus == "CHECKING" and row.OcrStatus == "PENDING":
+                continue
             targets.append((row.Id, row.SourceStoragePath))
             row.WorkflowStatus = "CANCELLED"
             row.WorkerId = None

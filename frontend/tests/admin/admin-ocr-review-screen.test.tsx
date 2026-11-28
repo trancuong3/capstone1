@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -9,11 +9,21 @@ import {
   getWordReviewLabel,
   getWordReviewStatus,
 } from "@/components/admin/admin-ocr-review-screen";
+import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
+import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
+import {
+  clearGlobalTasksMemoryCache,
+  type GlobalTasksService,
+} from "@/lib/api/global-tasks-service";
 import {
   adminRevisionDetailSchema,
   type AdminAiWorkflowDTO,
 } from "@/lib/api/ocr-review-service";
+import { resetTaskAlertAckMemoryCache } from "@/lib/tasks/task-alert-acknowledgment";
 import type { AdminPageRevisionDetailDTO } from "@/types/admin";
+import type { AdminServices } from "@/components/providers/admin-services-provider";
+import type { AdminOcrJobDTO } from "@/lib/api/admin-page-service";
+import type { GlobalTaskItem } from "@/types/global-tasks";
 import {
   ADMIN_BOOK_ID,
   ADMIN_PAGE_ID,
@@ -157,7 +167,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         ocr_confidence: 0.8,
         ocr_score_source: "tesseract_raw_word_score_v1",
       }),
-    ).toContain("Điểm thô Tesseract: 80/100 · raw recognition score");
+    ).toContain("Độ tin cậy nhận diện: 80/100");
     expect(
       getOcrScoreLabel({
         ...word,
@@ -228,7 +238,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "green",
     );
     expect(getWordReviewLabel("engine_agreement", consensus)).toContain(
-      "Hai OCR đồng thuận · chưa đối chiếu reference",
+      "Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu",
     );
     expect(getWordReviewColorGroup("engine_agreement")).toBe("yellow");
 
@@ -264,7 +274,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "border-red-600",
     );
     expect(getWordReviewLabel("needs_review", mismatch)).toBe(
-      "Sai so với reference đã xác minh",
+      "Sai so với văn bản đã xác minh",
     );
     expect(getWordReviewColorGroup("verified", mismatch)).toBe("red");
     expect(
@@ -282,7 +292,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "border-red-600",
     );
     expect(getWordReviewLabel("verified", mismatch)).toBe(
-      "Sai so với reference đã xác minh",
+      "Sai so với văn bản đã xác minh",
     );
     expect(getWordReviewColorGroup("confirmed_mismatch")).toBe("yellow");
     expect(
@@ -448,37 +458,18 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
-    const evidence = screen.getByRole("region", {
-      name: "Bằng chứng OCR từ 1",
-    });
-    expect(within(evidence).getByText(/PaddleOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText(/VietOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText("Alignment: match")).toBeInTheDocument();
     expect(
-      within(evidence).getByText(
-        "PaddleOCR dòng: 81/100 · điểm thô · không phải xác suất đúng",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        /Not calibrated · chưa có calibration evidence/,
-      ),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "Bằng chứng OCR từ 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/PaddleOCR:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/VietOCR:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tesseract:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/OCR source token:/)).not.toBeInTheDocument();
 
     const pageText = screen.getByLabelText("Nội dung trang");
     await user.clear(pageText);
     await user.type(pageText, "Ta");
 
-    expect(within(evidence).getByText(/PaddleOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText(/VietOCR: on ·/)).toBeInTheDocument();
-    expect(
-      within(evidence).getByText("OCR source token: on"),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        /Evidence engine thuộc token OCR ban đầu “on”/,
-      ),
-    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Từ 1: Ta\./ })).toHaveClass(
       "border-amber-600",
     );
@@ -533,29 +524,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
-    const evidence = screen.getByRole("region", {
-      name: "Bằng chứng OCR từ 1",
-    });
     expect(
-      within(evidence).getByText(
-        "PaddleOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "VietOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "PaddleOCR dòng gốc (không phải token căn chỉnh): công chúa",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "VietOCR dòng gốc (không phải token căn chỉnh): công chú",
-      ),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "Bằng chứng OCR từ 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Từ 1: công\./ })).toHaveClass(
+      "border-amber-600",
+    );
   });
 
   it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {
@@ -636,10 +610,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: đừng\. Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
     });
     const highPaddleScore = screen.getByRole("button", {
-      name: /Từ 2: chàng\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
+      name: /Từ 2: chàng\. Kết quả nhận diện chưa thống nhất · cần kiểm tra thêm/,
     });
     const vietOcrSelected = screen.getByRole("button", {
-      name: /Từ 3: mới\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
+      name: /Từ 3: mới\. Kết quả nhận diện chưa thống nhất · cần kiểm tra thêm/,
     });
 
     expect(accentDifference).toHaveClass("border-amber-600");
@@ -717,7 +691,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
     expect(
-      await screen.findByText(/Không thể chạy lại OCR/),
+      await screen.findByText(/Không thể chạy lại nhận diện chữ/),
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
@@ -840,7 +814,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const mismatch = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Sai so với reference đã xác minh/,
+      name: /Từ 1: Cao\. Sai so với văn bản đã xác minh/,
     });
     const needsReview = screen.getByRole("button", {
       name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
@@ -852,7 +826,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 4: Chưa rõ\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
     });
     const engineAgreement = screen.getByRole("button", {
-      name: /Từ 5: Khớp\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 5: Khớp\. Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu/,
     });
     expect(mismatch).toHaveClass("border-red-600");
     expect(needsReview).toHaveClass("border-amber-600");
@@ -862,8 +836,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/2\s*Xanh · evidence tốt/);
-    expect(stats).toHaveTextContent(/1\s*Đỏ · reference xác nhận sai/);
+    expect(stats).toHaveTextContent(/2\s*Xanh · độ tin cậy tốt/);
+    expect(stats).toHaveTextContent(/1\s*Đỏ · đã xác nhận sai/);
     expect(stats).toHaveTextContent(/2\s*Vàng · cần kiểm tra/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
@@ -1021,18 +995,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     expect(wordButtons).toHaveLength(20);
     expect(
-      screen.getByRole("button", { name: /Từ 1: từ1\. Hai OCR đồng thuận/ }),
+      screen.getByRole("button", {
+        name: /Từ 1: từ1\. Hai lượt nhận diện đồng thuận/,
+      }),
     ).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ }),
     ).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 12: từ12\. Sai so với reference/,
+        name: /Từ 12: từ12\. Sai so với văn bản đã xác minh/,
       }),
     ).toHaveClass("border-red-600");
     expect(
-      screen.getByRole("button", { name: /Từ 14: từ14\. Hai OCR bất đồng/ }),
+      screen.getByRole("button", {
+        name: /Từ 14: từ14\. Kết quả nhận diện chưa thống nhất/,
+      }),
     ).toHaveClass("border-amber-600");
     expect(screen.getByRole("button", { name: /^Từ 17: từ17\./ })).toHaveClass(
       "border-amber-600",
@@ -1083,7 +1061,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 1: Nội\. Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu/,
     });
     expect(matchedWord).toHaveClass("border-green-600");
     expect(screen.getByRole("button", { name: "Cần xem (0)" })).toHaveAttribute(
@@ -1141,13 +1119,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Bounding box từ OCR: 3 từ/,
     });
     const high = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 95\/100 · raw recognition score/,
+      name: /Từ 1: Cao\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 95\/100/,
     });
     const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 62\/100 · raw recognition score/,
+      name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 62\/100/,
     });
     const low = screen.getByRole("button", {
-      name: /Từ 3: Thấp\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 27\/100 · raw recognition score/,
+      name: /Từ 3: Thấp\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 27\/100/,
     });
     expect(overlay).toContainElement(high);
     expect(high).toHaveClass("border-amber-600");
@@ -1407,7 +1385,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     ).toEqual(originalBoxes);
     expect(
-      screen.getByText(/Đã ghi nhận 1 gợi ý được Admin chấp nhận/),
+      screen.getByText(/Đã ghi nhận 1 gợi ý được chấp nhận/),
     ).toBeInTheDocument();
   });
 
@@ -1463,7 +1441,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     expect(
-      (await screen.findAllByText(/Đã xác minh revision/)).length,
+      (await screen.findAllByText(/Đã xác minh bản chữ/)).length,
     ).toBeGreaterThan(0);
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
@@ -1648,7 +1626,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(screen.getByRole("button", { name: /Dừng theo dõi/ }));
 
     expect(
-      await screen.findByText(/Workflow bền vững tiếp tục ở Backend/),
+      await screen.findByText(
+        /Quy trình kiểm tra vẫn tiếp tục xử lý ở hệ thống/,
+      ),
     ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
@@ -1746,7 +1726,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.createDraft).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
+        "Bản nháp từ phiên bản này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
       ),
     ).toBeInTheDocument();
   });
@@ -1823,12 +1803,629 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(verifyButton).not.toBeDisabled();
   });
+
+  it("shows pre-action OcrServiceStatusBanner when OCR worker is offline and supports Check Now + Cancel on queued banner", async () => {
+    const baseServices = createAdminServiceFixture();
+    const jobId = "91000000-0000-4000-8000-000000000001";
+    const updatedRevision: AdminPageRevisionDetailDTO = {
+      ...adminR2Fixture,
+      page_revision_id: "92000000-0000-4000-8000-000000000002",
+      revision_no: 3,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "Nội dung mới sau OCR.",
+    };
+    let queuedJobComplete = false;
+    const cancelOcrJob = vi.fn(async (id: string) => ({
+      id,
+      job_kind: "ADMIN_PAGE_REPROCESS",
+      status: "CANCELLED" as const,
+    }));
+    const listOcrJobs = vi.fn<() => Promise<readonly AdminOcrJobDTO[]>>(
+      async () => [],
+    );
+    const services: AdminServices = {
+      ...baseServices,
+      pages: {
+        ...baseServices.pages,
+        listOcrJobs,
+        cancelOcrJob,
+      },
+    };
+
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: { mode: "remote_worker", ready: false },
+        });
+      }
+      if (url.pathname === `/books/admin/ocr-jobs/${jobId}`) {
+        return Response.json({
+          id: jobId,
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: queuedJobComplete ? "SUCCEEDED" : "QUEUED",
+          book_id: ADMIN_BOOK_ID,
+          page_id: ADMIN_PAGE_ID,
+          revision_id: queuedJobComplete
+            ? updatedRevision.page_revision_id
+            : null,
+          worker_online: queuedJobComplete,
+        });
+      }
+      return Response.json({}, { status: 404 });
+    });
+    const prevApiUrl = process.env.NEXT_PUBLIC_API_URL;
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000";
+    vi.stubGlobal("fetch", fetchStub);
+
+    try {
+      const user = userEvent.setup();
+      // 1. Pre-action banner visible when no queued job exists yet
+      const firstView = render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      expect(
+        await screen.findByTestId("admin-ocr-worker-offline-banner"),
+      ).toHaveTextContent(/Dịch vụ xử lý OCR hiện đang ngoại tuyến/i);
+      firstView.unmount();
+
+      // 2. When a queued job is active, banner shows Kiểm tra lại ngay & Hủy yêu cầu chờ
+      listOcrJobs.mockResolvedValue([
+        {
+          id: jobId,
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: "QUEUED",
+          book_id: ADMIN_BOOK_ID,
+          page_id: ADMIN_PAGE_ID,
+          worker_online: false,
+        },
+      ]);
+      const secondView = render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      expect(
+        await screen.findByTestId("admin-review-ocr-queued-banner"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("admin-review-check-ocr-now"),
+      ).toHaveTextContent(/Kiểm tra lại ngay/i);
+      expect(
+        screen.getByTestId("admin-review-cancel-ocr-job"),
+      ).toHaveTextContent(/Hủy yêu cầu chờ/i);
+
+      await user.click(screen.getByTestId("admin-review-cancel-ocr-job"));
+      expect(cancelOcrJob).toHaveBeenCalledWith(jobId);
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("admin-review-ocr-queued-banner"),
+        ).not.toBeInTheDocument();
+      });
+      secondView.unmount();
+
+      // 3. Immediate poll ("Kiểm tra lại ngay") picks up SUCCEEDED revision
+      queuedJobComplete = true;
+      baseServices.ocr.getRevision.mockResolvedValue(updatedRevision);
+      baseServices.pages.getImage.mockResolvedValue({
+        page_id: ADMIN_PAGE_ID,
+        page_revision_id: updatedRevision.page_revision_id,
+        page_number: 1,
+        preview_url: "https://example.com/p1-r3.png",
+        width: 600,
+        height: 800,
+      });
+      render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      await user.click(await screen.findByTestId("admin-review-check-ocr-now"));
+      expect(
+        await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+      ).toBeInTheDocument();
+    } finally {
+      if (prevApiUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_API_URL;
+      } else {
+        process.env.NEXT_PUBLIC_API_URL = prevApiUrl;
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("suppresses Admin GlobalTaskCenter warnings directly after runCombinedWorkflow, decideWorkflowSafety, decideWorkflowImageSafety, and saveDraft without opening the drawer", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const OTHER_PAGE_ID = "82000000-0000-4000-8000-000000000099";
+    const WF_ID = "85000000-0000-4000-8000-000000000001";
+    const OTHER_WF_ID = "85000000-0000-4000-8000-000000000099";
+
+    const makeAdminTask = (
+      overrides: Partial<GlobalTaskItem> = {},
+    ): GlobalTaskItem => ({
+      id: WF_ID,
+      source: "admin_ai_workflow",
+      job_type: "ADMIN_AI_WORKFLOW",
+      title_vi: "Soát lỗi AI & Kiểm tra an toàn",
+      book_id: ADMIN_BOOK_ID,
+      book_page_id: ADMIN_PAGE_ID,
+      book_title: "Chuyện Rừng Xanh",
+      page_number: 1,
+      source_revision_id: ADMIN_R2_ID,
+      actor_id: "admin-1",
+      actor_role: "admin",
+      portal: "admin",
+      status: "WAITING_FOR_REVIEW",
+      status_label_vi: "Cần xác minh",
+      stage: "WAITING_FOR_REVIEW",
+      stage_label_vi: "Chờ người dùng xác minh",
+      priority: 60,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 1,
+      progress_total: 1,
+      progress_unit: "đoạn",
+      progress_pct: 100,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/admin/books/${ADMIN_BOOK_ID}/pages/${ADMIN_PAGE_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: null,
+      error_message_vi: null,
+      created_at: "2026-11-28T09:00:00.000Z",
+      updated_at: "2026-11-28T09:00:00.000Z",
+      started_at: "2026-11-28T09:00:00.000Z",
+      completed_at: null,
+      ...overrides,
+    });
+
+    const otherPageTask = makeAdminTask({
+      id: OTHER_WF_ID,
+      book_page_id: OTHER_PAGE_ID,
+      page_number: 2,
+      updated_at: "2026-11-28T09:00:05.000Z",
+    });
+
+    let currentTasks: GlobalTaskItem[] = [
+      makeAdminTask({
+        id: "old-failed-job",
+        source: "ocr_inference_job",
+        status: "FAILED",
+        status_label_vi: "Xử lý thất bại",
+        stage: "FAILED",
+        stage_label_vi: "Gặp lỗi",
+        updated_at: "2026-11-28T09:00:00.000Z",
+      }),
+      otherPageTask,
+    ];
+
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => ({
+        actor_id: "admin-1",
+        actor_role: "admin" as const,
+        portal: "admin" as const,
+        active_count: 0,
+        waiting_review_count: currentTasks.filter(
+          (item) => item.status === "WAITING_FOR_REVIEW",
+        ).length,
+        failed_count: currentTasks.filter((item) => item.status === "FAILED")
+          .length,
+        completed_count: currentTasks.filter(
+          (item) => item.status === "SUCCEEDED",
+        ).length,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: currentTasks,
+      })),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const services = createAdminServiceFixture();
+    const editable = makeEditableDetail();
+    const combinedWorkflow: AdminAiWorkflowDTO = {
+      ...makeReadyWorkflow(editable.draft_text ?? ""),
+      workflow_id: WF_ID,
+      suitability: "SUITABLE_WITH_GUIDANCE",
+      text_safety_status: "PROVISIONAL",
+      safety_status: "PROVISIONAL",
+      image_safety_status: "UNASSESSED_NO_VISION_MODEL",
+      source_image_sha256: "e".repeat(64),
+      all_chunks_completed: true,
+      updated_at: "2026-11-28T09:01:00.000Z",
+    };
+
+    services.ocr.getRevision.mockResolvedValue(editable);
+    services.ocr.getLatestWorkflow.mockResolvedValue(null);
+    services.ocr.runCombinedWorkflow.mockImplementation(async () => {
+      // Backend creates a brand-new WAITING_FOR_REVIEW workflow at T1 while Admin watches!
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:01:00.000Z",
+        }),
+        otherPageTask,
+      ];
+      return combinedWorkflow;
+    });
+    services.ocr.decideWorkflowSafety.mockImplementation(async () => {
+      // Backend keeps WAITING_FOR_REVIEW and bumps updated_at to T2!
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:02:00.000Z",
+        }),
+        otherPageTask,
+      ];
+      return {
+        ...combinedWorkflow,
+        safety_status: "CONFIRMED",
+        text_safety_status: "CONFIRMED",
+        updated_at: "2026-11-28T09:02:00.000Z",
+      };
+    });
+    services.ocr.decideWorkflowImageSafety = vi.fn(async () => {
+      // Backend keeps WAITING_FOR_REVIEW and bumps updated_at to T3!
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:03:00.000Z",
+        }),
+        otherPageTask,
+      ];
+      return {
+        ...combinedWorkflow,
+        safety_status: "CONFIRMED",
+        text_safety_status: "CONFIRMED",
+        image_safety_status: "ADMIN_CONFIRMED_SAFE",
+        image_safety_image_sha256: "e".repeat(64),
+        updated_at: "2026-11-28T09:03:00.000Z",
+      };
+    });
+    services.ocr.saveDraft.mockImplementation(async () => {
+      const staleWorkflow: AdminAiWorkflowDTO = {
+        ...combinedWorkflow,
+        safety_status: "STALE",
+        text_safety_status: "STALE",
+        image_safety_status: "ADMIN_CONFIRMED_SAFE",
+        image_safety_image_sha256: "e".repeat(64),
+        updated_at: "2026-11-28T09:04:00.000Z",
+      };
+      services.ocr.getLatestWorkflow.mockResolvedValue(staleWorkflow);
+      // Backend keeps WAITING_FOR_REVIEW and bumps updated_at to T4!
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:04:00.000Z",
+        }),
+        otherPageTask,
+      ];
+      return editable;
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AiTaskCenterProvider
+        actorId="admin-1"
+        actorRole="admin"
+        service={taskService}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+        {withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        )}
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    // Before acting: current page has 1 FAILED task (shows Tác vụ lỗi (1)) and otherPage has 1 WAITING_FOR_REVIEW.
+    await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ lỗi (1)"));
+
+    // 1) Run combined workflow directly on this page -> old FAILED alert & brand-new WF_ID T1 are acknowledged!
+    // Only OTHER_PAGE_ID's WAITING_FOR_REVIEW remains unread -> "Cần xác minh (1)" (not 2!).
+    await user.click(
+      await screen.findByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
+    await waitFor(() =>
+      expect(services.ocr.runCombinedWorkflow).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (1)"));
+
+    // 2) Confirm text safety (requires reason because suitability is SUITABLE_WITH_GUIDANCE) ->
+    // bumps updated_at to T2; current page stays suppressed, otherPage remains 1!
+    const safetyTab = screen.queryByRole("tab", { name: /An toàn/i });
+    if (safetyTab) {
+      await user.click(safetyTab);
+    }
+    const reasonInput = screen.getByLabelText(/Lý do Admin xem xét Safety/i);
+    await user.type(reasonInput, "Đã rà soát thủ công phù hợp cho bé.");
+    await user.click(
+      screen.getByRole("button", { name: /Xác nhận kết quả Safety/i }),
+    );
+    await waitFor(() =>
+      expect(services.ocr.decideWorkflowSafety).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (1)"));
+
+    // 3) Confirm image safety -> bumps updated_at to T3; current page stays suppressed!
+    await user.click(
+      screen.getByRole("button", { name: /Xác nhận ảnh an toàn/i }),
+    );
+    await waitFor(() =>
+      expect(services.ocr.decideWorkflowImageSafety).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (1)"));
+
+    // 4) Save draft -> bumps updated_at to T4; current page stays suppressed!
+    const draftTab = screen.queryByRole("tab", { name: /Bản nháp|Soạn thảo/i });
+    if (draftTab) {
+      await user.click(draftTab);
+    }
+    await user.click(screen.getByRole("button", { name: /Lưu bản nháp/i }));
+    await waitFor(() =>
+      expect(services.ocr.saveDraft).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (1)"));
+
+    // 5) Later a genuinely NEW update (T5) arrives for WF_ID -> MUST re-alert (count rises 1 -> 2)!
+    currentTasks = [
+      makeAdminTask({
+        id: WF_ID,
+        status: "WAITING_FOR_REVIEW",
+        updated_at: "2026-11-28T09:10:00.000Z",
+      }),
+      otherPageTask,
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (2)"));
+  });
+
+  it("never silently acknowledges runCombinedWorkflow when the tab is hidden, and clears stale warnings when updateWorkflowCandidate re-queues safety", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const WF_ID = "85000000-0000-4000-8000-000000000011";
+    const makeAdminTask = (
+      overrides: Partial<GlobalTaskItem> = {},
+    ): GlobalTaskItem => ({
+      id: WF_ID,
+      source: "admin_ai_workflow",
+      job_type: "ADMIN_AI_WORKFLOW",
+      title_vi: "Soát lỗi AI & Kiểm tra an toàn",
+      book_id: ADMIN_BOOK_ID,
+      book_page_id: ADMIN_PAGE_ID,
+      book_title: "Chuyện Rừng Xanh",
+      page_number: 1,
+      source_revision_id: ADMIN_R2_ID,
+      actor_id: "admin-1",
+      actor_role: "admin",
+      portal: "admin",
+      status: "WAITING_FOR_REVIEW",
+      status_label_vi: "Cần xác minh",
+      stage: "WAITING_FOR_REVIEW",
+      stage_label_vi: "Chờ người dùng xác minh",
+      priority: 60,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 1,
+      progress_total: 1,
+      progress_unit: "đoạn",
+      progress_pct: 100,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/admin/books/${ADMIN_BOOK_ID}/pages/${ADMIN_PAGE_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: null,
+      error_message_vi: null,
+      created_at: "2026-11-28T09:00:00.000Z",
+      updated_at: "2026-11-28T09:00:00.000Z",
+      started_at: "2026-11-28T09:00:00.000Z",
+      completed_at: null,
+      ...overrides,
+    });
+
+    let currentTasks: GlobalTaskItem[] = [];
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => ({
+        actor_id: "admin-1",
+        actor_role: "admin" as const,
+        portal: "admin" as const,
+        active_count: currentTasks.filter(
+          (item) => item.status === "QUEUED" || item.status === "RUNNING",
+        ).length,
+        waiting_review_count: currentTasks.filter(
+          (item) => item.status === "WAITING_FOR_REVIEW",
+        ).length,
+        failed_count: currentTasks.filter((item) => item.status === "FAILED")
+          .length,
+        completed_count: currentTasks.filter(
+          (item) => item.status === "SUCCEEDED",
+        ).length,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: currentTasks,
+      })),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const services = createAdminServiceFixture();
+    const editable = makeEditableDetail();
+    const readyWorkflow: AdminAiWorkflowDTO = {
+      ...makeReadyWorkflow(editable.draft_text ?? ""),
+      workflow_id: WF_ID,
+      updated_at: "2026-11-28T09:01:00.000Z",
+    };
+
+    let resolveWorkflow!: (wf: AdminAiWorkflowDTO) => void;
+    services.ocr.getRevision.mockResolvedValue(editable);
+    services.ocr.getLatestWorkflow.mockResolvedValue(null);
+    services.ocr.runCombinedWorkflow.mockImplementation(
+      () =>
+        new Promise<AdminAiWorkflowDTO>((resolve) => {
+          resolveWorkflow = resolve;
+        }),
+    );
+    services.ocr.updateWorkflowCandidate.mockImplementation(async () => {
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "QUEUED",
+          status_label_vi: "Chờ xử lý",
+          stage: "CHILD_SAFETY_SCANNING",
+          stage_label_vi: "Kiểm tra an toàn trẻ em",
+          progress_pct: 10,
+          updated_at: "2026-11-28T09:02:00.000Z",
+        }),
+      ];
+      return {
+        ...readyWorkflow,
+        status: "QUEUED",
+        stage: "CHILD_SAFETY_SCANNING",
+        safety_status: "STALE",
+        candidate_version: 2,
+        updated_at: "2026-11-28T09:02:00.000Z",
+      };
+    });
+
+    const prevVisibilityDescriptor = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
+    const user = userEvent.setup();
+
+    try {
+      render(
+        <AiTaskCenterProvider
+          actorId="admin-1"
+          actorRole="admin"
+          service={taskService}
+        >
+          <GlobalTaskCenter variant="sidebar" />
+          {withAdminFixture(
+            <AdminOcrReviewScreen
+              bookId={ADMIN_BOOK_ID}
+              pageId={ADMIN_PAGE_ID}
+            />,
+            services,
+          )}
+        </AiTaskCenterProvider>,
+      );
+
+      const trigger = await screen.findByTestId("global-task-center-trigger");
+      await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ AI"));
+
+      // 1) Start runCombinedWorkflow, then hide the tab before it finishes!
+      await user.click(
+        await screen.findByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+      );
+      await waitFor(() =>
+        expect(services.ocr.runCombinedWorkflow).toHaveBeenCalledTimes(1),
+      );
+
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:01:00.000Z",
+        }),
+      ];
+      await act(async () => {
+        resolveWorkflow(readyWorkflow);
+        await Promise.resolve();
+      });
+
+      // Because tab was hidden, the finished workflow MUST NOT be silently acknowledged!
+      await waitFor(() =>
+        expect(trigger).toHaveTextContent("Cần xác minh (1)"),
+      );
+
+      // Restore tab visibility and edit the draft text -> debounced updateWorkflowCandidate
+      // clears the stale warning and transitions GlobalTaskCenter to active running state!
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      const textarea = screen.getByLabelText("Nội dung trang");
+      await user.clear(textarea);
+      await user.type(textarea, "Nội dung revision mới hành");
+
+      await waitFor(
+        () =>
+          expect(services.ocr.updateWorkflowCandidate).toHaveBeenCalledTimes(1),
+        { timeout: 2500 },
+      );
+      await waitFor(() =>
+        expect(trigger).toHaveTextContent("AI đang chạy (1)"),
+      );
+      expect(trigger).not.toHaveTextContent("Cần xác minh");
+    } finally {
+      if (prevVisibilityDescriptor) {
+        Object.defineProperty(
+          document,
+          "visibilityState",
+          prevVisibilityDescriptor,
+        );
+      } else {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+      }
+    }
+  });
 });
 
 vi.mock("next/navigation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/navigation")>();
   return {
     ...actual,
+    usePathname: () => "/admin/books",
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
     useSearchParams: () => new URLSearchParams(),
   };

@@ -27,6 +27,7 @@ from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
 from app.services import remote_ocr_wakeup
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.cloud_ai_defaults import get_cloud_ai_health_snapshot
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_inference_job_service import is_remote_ocr_mode
@@ -56,7 +57,7 @@ from app.services.tts_audio_cache_service import (
     set_cached_tts_audio_cache_summary,
 )
 from app.services.worker_telemetry import get_worker_telemetry
-from app.services.voice_orchestrator import VoiceOrchestrator
+from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 from app.services.difficult_words_service import (
     DifficultWordsService,
     MAX_PRACTICE_AUDIO_BYTES,
@@ -310,6 +311,28 @@ class LegacyReportService:
     def __init__(self, repository: LegacyReportRepository):
         self.repository = repository
 
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _bounded_session_duration_ms(
+        cls, started_at: datetime | None, ended_at: datetime | None
+    ) -> int:
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
+        if started_at is None or ended_at is None:
+            return 0
+        start_utc = cls._as_utc(started_at)
+        end_utc = cls._as_utc(ended_at)
+        if end_utc <= start_utc:
+            return 0
+        max_session_ms = MAX_SESSION_MINUTES * 60 * 1000
+        raw_ms = (end_utc - start_utc) // timedelta(milliseconds=1)
+        return min(raw_ms, max_session_ms)
+
     async def create(self, report_in: ProgressReportCreate, actor_id: UUID) -> ProgressReport:
         # Keep the old JSON request shape but reject claimed scores and metrics.
         if report_in.Summary:
@@ -335,22 +358,30 @@ class LegacyReportService:
         sessions = await self.repository.completed_sessions(
             actor_id, report_in.ChildId, begin, finish, datetime.now(timezone.utc)
         )
-        if not sessions:
+        valid_durations: list[int] = []
+        for started_at, ended_at in sessions:
+            if started_at is None or ended_at is None:
+                continue
+            start_utc = self._as_utc(started_at)
+            end_utc = self._as_utc(ended_at)
+            if end_utc < start_utc:
+                continue
+            valid_durations.append(
+                self._bounded_session_duration_ms(start_utc, end_utc)
+            )
+        if not valid_durations:
             # An empty snapshot would be indistinguishable from unsupported
             # evidence in old reports; do not invent a successful period.
             raise HTTPException(status_code=409, detail="No completed reading sessions in period")
 
-        duration_ms = sum(
-            max(0, int((ended_at - started_at).total_seconds() * 1000))
-            for started_at, ended_at in sessions
-        )
+        duration_ms = sum(valid_durations)
         snapshot = ProgressReport(
             ChildId=report_in.ChildId,
             PeriodStart=start,
             PeriodEnd=end,
             Summary={
                 "source": "server_completed_sessions_v1",
-                "completed_sessions": len(sessions),
+                "completed_sessions": len(valid_durations),
                 "reading_duration_ms": duration_ms,
             },
         )
@@ -407,6 +438,8 @@ async def get_audit_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Raw audit records are restricted to active administrators."""
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 100
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     result = await db.execute(
         select(AuditLog)
         .order_by(AuditLog.CreatedAt.desc(), AuditLog.Id.desc())
@@ -807,6 +840,8 @@ async def get_difficult_word_practice_history(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    normalized_word = normalized_word if isinstance(normalized_word, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
     return await _difficult_words_service(db).practice_history(
         child_id,
         actor_id,
@@ -836,9 +871,14 @@ async def evaluate_difficult_word_direct(
     word_id: Annotated[UUID | None, Form()] = None,
     context_phrase: Annotated[str | None, Form(max_length=240)] = None,
     evidence_word_ids: Annotated[str | None, Form(max_length=4096)] = None,
+    provider_mode: Annotated[str | None, Form(max_length=40)] = None,
+    allow_google_stt: Annotated[str | None, Form(max_length=16)] = None,
+    include_next_recommended: Annotated[bool, Form()] = True,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.api.routes.voice import _parse_bool_form, _parse_provider_mode
+
     audio_bytes: bytes | None = None
     filename = "practice.webm"
     content_type: str | None = None
@@ -861,26 +901,56 @@ async def evaluate_difficult_word_direct(
         except (ValueError, TypeError):
             raise HTTPException(status_code=422, detail="INVALID_EVIDENCE_WORD_IDS") from None
 
-    return await _difficult_words_service(db).evaluate_word_direct(
+    policy = VoicePolicyContext(
+        provider_mode=_parse_provider_mode(provider_mode),
+        allow_google_stt=_parse_bool_form(allow_google_stt),
+        actor_id=actor_id,
+        book_id=book_id,
+        session_id=str(session_id) if session_id is not None else None,
+        page_id=str(page_id) if page_id is not None else None,
+        page_revision_id=page_revision_id,
+        source="difficult_word_practice",
+    )
+    service = _difficult_words_service(db)
+    evaluate_kwargs: dict[str, object] = {
+        "request_id": request_id,
+        "normalized_word": normalized_word,
+        "display_text": display_text,
+        "audio_bytes": audio_bytes,
+        "filename": filename,
+        "content_type": content_type,
+        "audio_duration_ms": audio_duration_ms,
+        "audio_quality_status": audio_quality_status,
+        "browser_transcript": browser_transcript,
+        "browser_confidence": browser_confidence,
+        "evidence_word_ids": parsed_evidence_ids,
+        "book_id": book_id,
+        "session_id": session_id,
+        "page_id": page_id,
+        "page_revision_id": page_revision_id,
+        "word_id": word_id,
+        "context_phrase": context_phrase,
+    }
+    import inspect
+
+    try:
+        sig = inspect.signature(service.evaluate_word_direct)
+        has_var_kw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+        if "policy" in sig.parameters or has_var_kw:
+            evaluate_kwargs["policy"] = policy
+        if "include_next_recommended" in sig.parameters or has_var_kw:
+            evaluate_kwargs["include_next_recommended"] = include_next_recommended
+    except (TypeError, ValueError):
+        evaluate_kwargs["policy"] = policy
+        evaluate_kwargs["include_next_recommended"] = include_next_recommended
+
+    return await service.evaluate_word_direct(
         child_id,
         actor_id,
-        request_id=request_id,
-        normalized_word=normalized_word,
-        display_text=display_text,
-        audio_bytes=audio_bytes,
-        filename=filename,
-        content_type=content_type,
-        audio_duration_ms=audio_duration_ms,
-        audio_quality_status=audio_quality_status,
-        browser_transcript=browser_transcript,
-        browser_confidence=browser_confidence,
-        evidence_word_ids=parsed_evidence_ids,
-        book_id=book_id,
-        session_id=session_id,
-        page_id=page_id,
-        page_revision_id=page_revision_id,
-        word_id=word_id,
-        context_phrase=context_phrase,
+        **evaluate_kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -914,26 +984,51 @@ async def evaluate_difficult_word_practice_audio(
     audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
     browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
     browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    provider_mode: Annotated[str | None, Form(max_length=40)] = None,
+    allow_google_stt: Annotated[str | None, Form(max_length=16)] = None,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    import inspect
+    from app.api.routes.voice import _parse_bool_form, _parse_provider_mode
+
     try:
         audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
     finally:
         await file.close()
 
-    return await _difficult_words_service(db).evaluate_audio_attempt(
+    policy = VoicePolicyContext(
+        provider_mode=_parse_provider_mode(provider_mode),
+        allow_google_stt=_parse_bool_form(allow_google_stt),
+        actor_id=actor_id,
+        source="difficult_word_practice",
+    )
+    service = _difficult_words_service(db)
+    eval_kwargs: dict[str, object] = {
+        "completion_request_id": completion_request_id,
+        "audio_bytes": audio_bytes,
+        "filename": file.filename or "practice.webm",
+        "content_type": file.content_type,
+        "audio_duration_ms": audio_duration_ms,
+        "audio_quality_status": audio_quality_status,
+        "browser_transcript": browser_transcript,
+        "browser_confidence": browser_confidence,
+    }
+    try:
+        sig = inspect.signature(service.evaluate_audio_attempt)
+        if "policy" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        ):
+            eval_kwargs["policy"] = policy
+    except (TypeError, ValueError):
+        eval_kwargs["policy"] = policy
+
+    return await service.evaluate_audio_attempt(
         child_id,
         attempt_id,
         actor_id,
-        completion_request_id=completion_request_id,
-        audio_bytes=audio_bytes,
-        filename=file.filename or "practice.webm",
-        content_type=file.content_type,
-        audio_duration_ms=audio_duration_ms,
-        audio_quality_status=audio_quality_status,
-        browser_transcript=browser_transcript,
-        browser_confidence=browser_confidence,
+        **eval_kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -1092,12 +1187,15 @@ class AdminSystemService:
             local_configured = False
 
         if local.get(ready_key):
-            engine_name = "VieNeu-TTS" if capability == "tts" else "Sherpa-ONNX"
             return {
                 "status": "HEALTHY",
                 "detail_status": "healthy",
                 "operational_state": "Healthy",
-                "safe_message": f"Local {cap_label} ({engine_name}) đang sẵn sàng.",
+                "safe_message": (
+                    "Dịch vụ giọng đọc cục bộ đang sẵn sàng."
+                    if capability == "tts"
+                    else "Dịch vụ nhận diện giọng nói cục bộ đang sẵn sàng."
+                ),
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -1121,7 +1219,7 @@ class AdminSystemService:
                     "status": "HEALTHY",
                     "detail_status": "cloud_ready",
                     "operational_state": "Healthy",
-                    "safe_message": "Dịch vụ Google Cloud TTS đang sẵn sàng.",
+                    "safe_message": "Dịch vụ giọng đọc đám mây đang sẵn sàng.",
                     "execution_mode": "cloud_ai",
                     "criticality": "important",
                     "action_hint": None,
@@ -1198,7 +1296,7 @@ class AdminSystemService:
                     "status": "DEGRADED",
                     "detail_status": "unknown",
                     "operational_state": "Quota exhausted",
-                    "safe_message": "Bộ nhớ đệm TTS đã chạm hạn mức lưu lượng ngày và chưa có dịch vụ TTS trực tuyến dự phòng.",
+                    "safe_message": "Bộ nhớ đệm giọng đọc đã chạm hạn mức lưu lượng ngày và chưa có dịch vụ giọng đọc trực tuyến dự phòng.",
                     "execution_mode": "precomputed_cache",
                     "criticality": "important",
                     "action_hint": "Chờ qua ngày mới hoặc tăng VIREAD_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES / bật Google Cloud TTS dự phòng.",
@@ -1222,7 +1320,7 @@ class AdminSystemService:
                     "status": "UNAVAILABLE",
                     "detail_status": "disabled",
                     "operational_state": None,
-                    "safe_message": "Local TTS chưa được cấu hình (VIREAD_LOCAL_VOICE_WORKER_URL).",
+                    "safe_message": "Dịch vụ giọng đọc cục bộ chưa được cấu hình.",
                     "execution_mode": "on_demand",
                     "criticality": "important",
                     "action_hint": "Dựng sẵn TTS Audio Cache hoặc cấu hình ElevenLabs / Google Cloud TTS / Local Voice Worker.",
@@ -1233,7 +1331,7 @@ class AdminSystemService:
                     "status": "UNAVAILABLE",
                     "detail_status": "failed",
                     "operational_state": None,
-                    "safe_message": "Kết nối Local TTS bị hết thời gian chờ.",
+                    "safe_message": "Kết nối dịch vụ giọng đọc cục bộ bị hết thời gian chờ.",
                     "execution_mode": "on_demand",
                     "criticality": "important",
                     "action_hint": "Kiểm tra hoặc gỡ bỏ biến VIREAD_LOCAL_VOICE_WORKER_URL nếu tunnel không còn hoạt động.",
@@ -1244,7 +1342,7 @@ class AdminSystemService:
                     "status": "DEGRADED",
                     "detail_status": "unknown",
                     "operational_state": None,
-                    "safe_message": "Local TTS đang bận xử lý.",
+                    "safe_message": "Dịch vụ giọng đọc cục bộ đang bận xử lý.",
                     "execution_mode": "on_demand",
                     "criticality": "important",
                     "action_hint": None,
@@ -1254,7 +1352,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kết nối dịch vụ TTS.",
+                "safe_message": "Không thể kết nối dịch vụ giọng đọc.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": (
@@ -1272,7 +1370,7 @@ class AdminSystemService:
                     "status": "HEALTHY",
                     "detail_status": "client_side",
                     "operational_state": "Healthy",
-                    "safe_message": "Nhận diện giọng nói chạy trực tiếp trên trình duyệt bằng Sherpa-ONNX WASM.",
+                    "safe_message": "Nhận diện giọng nói hoạt động trực tiếp trên trình duyệt.",
                     "execution_mode": "browser_wasm",
                     "criticality": "important",
                     "action_hint": None,
@@ -1282,7 +1380,7 @@ class AdminSystemService:
                 "status": "DEGRADED",
                 "detail_status": "client_side",
                 "operational_state": "Degraded",
-                "safe_message": "Tunnel Local STT không phản hồi; nhận diện giọng nói WASM trên trình duyệt vẫn hoạt động bình thường.",
+                "safe_message": "Kết nối nhận diện giọng nói cục bộ không phản hồi; nhận diện giọng nói trên trình duyệt vẫn hoạt động bình thường.",
                 "execution_mode": "browser_wasm",
                 "criticality": "optional",
                 "action_hint": "Nhận diện giọng nói WASM trên trình duyệt vẫn đang hoạt động; hãy gỡ bỏ biến VIREAD_LOCAL_VOICE_WORKER_URL đã hết hạn trên Render.",
@@ -1305,7 +1403,7 @@ class AdminSystemService:
                 "status": "HEALTHY",
                 "detail_status": "cloud_ready",
                 "operational_state": "Healthy",
-                "safe_message": "Dịch vụ Google Cloud STT dự phòng đang sẵn sàng.",
+                "safe_message": "Dịch vụ nhận diện giọng nói đám mây dự phòng đang sẵn sàng.",
                 "execution_mode": "cloud_ai",
                 "criticality": "important",
                 "action_hint": None,
@@ -1316,7 +1414,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "disabled",
                 "operational_state": None,
-                "safe_message": "Local STT chưa được cấu hình (VIREAD_LOCAL_VOICE_WORKER_URL).",
+                "safe_message": "Dịch vụ nhận diện giọng nói cục bộ chưa được cấu hình.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -1327,7 +1425,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Kết nối Local STT bị hết thời gian chờ.",
+                "safe_message": "Kết nối dịch vụ nhận diện giọng nói cục bộ bị hết thời gian chờ.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -1338,7 +1436,7 @@ class AdminSystemService:
                 "status": "DEGRADED",
                 "detail_status": "unknown",
                 "operational_state": None,
-                "safe_message": "Local STT đang bận xử lý.",
+                "safe_message": "Dịch vụ nhận diện giọng nói cục bộ đang bận xử lý.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -1348,7 +1446,7 @@ class AdminSystemService:
             "status": "UNAVAILABLE",
             "detail_status": "failed",
             "operational_state": None,
-            "safe_message": "Không thể kết nối dịch vụ STT.",
+            "safe_message": "Không thể kết nối dịch vụ nhận diện giọng nói.",
             "execution_mode": "on_demand",
             "criticality": "important",
             "action_hint": None,
@@ -1543,24 +1641,65 @@ class AdminSystemService:
                         "status": "DEGRADED",
                         "detail_status": "failed",
                         "operational_state": None,
-                        "safe_message": "Cấu hình AI hậu kiểm OCR đám mây chưa hợp lệ.",
+                        "safe_message": "Cấu hình hỗ trợ hậu kiểm nhận diện chữ đám mây chưa hợp lệ.",
                         "service_group": "ocr",
                         "execution_mode": "cloud_ai",
                         "criticality": "important",
                         "action_hint": "Kiểm tra lại OCR_CLOUD_CORRECTION_ENABLED và biến khóa API đám mây.",
                         "last_error": "INVALID_CLOUD_OCR_CONFIG",
                     }
+                ai_snap = get_cloud_ai_health_snapshot()
                 if cfg.gemini_enabled or cfg.groq_enabled:
                     providers = (
                         "Gemini & Groq"
                         if (cfg.gemini_enabled and cfg.groq_enabled)
                         else ("Gemini" if cfg.gemini_enabled else "Groq")
                     )
+                    default_models = ai_snap.get("default_models") or {}
+                    model_parts: list[str] = []
+                    if cfg.gemini_enabled:
+                        gem_primary = str(
+                            default_models.get("gemini_primary") or cfg.gemini_primary_model
+                        )
+                        gem_fallback = str(
+                            default_models.get("gemini_fallback") or cfg.gemini_fallback_model
+                        )
+                        model_parts.append(f"Gemini: {gem_primary}/{gem_fallback}")
+                    if cfg.groq_enabled:
+                        groq_primary = str(
+                            default_models.get("groq_primary") or cfg.groq_model
+                        )
+                        model_parts.append(f"Groq: {groq_primary}")
+                    model_summary = ", ".join(model_parts)
+                    snap_error = ai_snap.get("last_error")
+                    if (
+                        ai_snap.get("status") == "DEGRADED"
+                        and snap_error
+                        and snap_error != "AI_NOT_CONFIGURED"
+                    ):
+                        err_code = str(snap_error)
+                        return {
+                            "status": "DEGRADED",
+                            "detail_status": "failed",
+                            "operational_state": "Degraded",
+                            "safe_message": (
+                                f"AI đám mây ({providers}; {model_summary}) đang gặp lỗi liên tiếp ({err_code})."
+                            ),
+                            "service_group": "ocr",
+                            "execution_mode": "cloud_ai",
+                            "criticality": "important",
+                            "action_hint": (
+                                "Kiểm tra khóa API (GEMINI_API_KEY / GROQ_API_KEY), hạn mức hoặc tên model AI trong biến môi trường."
+                            ),
+                            "last_error": err_code,
+                        }
                     return {
                         "status": "HEALTHY",
                         "detail_status": "cloud_ready",
                         "operational_state": "Healthy",
-                        "safe_message": f"AI hậu kiểm OCR đang chạy trên đám mây ({providers}); không cần Ollama cục bộ.",
+                        "safe_message": (
+                            f"Hỗ trợ hậu kiểm nhận diện chữ đang hoạt động qua dịch vụ đám mây ({providers}; {model_summary})."
+                        ),
                         "service_group": "ocr",
                         "execution_mode": "cloud_ai",
                         "criticality": "important",
@@ -1571,7 +1710,7 @@ class AdminSystemService:
                     "status": "HEALTHY",
                     "detail_status": "local_only",
                     "operational_state": "Local only",
-                    "safe_message": "AI OCR cục bộ (Ollama) chỉ chạy trên máy dev cục bộ; môi trường cloud chưa bật AI hậu kiểm đám mây.",
+                    "safe_message": "Hỗ trợ hậu kiểm nhận diện chữ cục bộ chỉ dùng trên máy phát triển; môi trường hiện tại chưa bật hậu kiểm đám mây.",
                     "service_group": "ocr",
                     "execution_mode": "local_only",
                     "criticality": "optional",
@@ -1598,7 +1737,7 @@ class AdminSystemService:
                     "status": "UNAVAILABLE",
                     "detail_status": "failed",
                     "operational_state": None,
-                    "safe_message": "Cấu hình AI OCR cục bộ chưa hợp lệ.",
+                    "safe_message": "Cấu hình dịch vụ nhận diện chữ cục bộ chưa hợp lệ.",
                     "service_group": "ocr",
                     "execution_mode": "local_only",
                     "criticality": "important",
@@ -1610,7 +1749,7 @@ class AdminSystemService:
                     "status": "UNAVAILABLE",
                     "detail_status": "failed",
                     "operational_state": None,
-                    "safe_message": "Không thể kiểm tra AI OCR cục bộ.",
+                    "safe_message": "Không thể kiểm tra dịch vụ nhận diện chữ.",
                     "service_group": "ocr",
                     "execution_mode": "local_only",
                     "criticality": "important",
@@ -1674,9 +1813,9 @@ class AdminSystemService:
             }
             items_out: list[dict[str, object]] = []
             for key, label in (
-                ("paddleocr", "PaddleOCR"),
-                ("vietocr", "VietOCR"),
-                ("tesseract_vie", "Tesseract tiếng Việt"),
+                ("paddleocr", "Nhận diện vùng chữ"),
+                ("vietocr", "Nhận diện chữ tiếng Việt"),
+                ("tesseract_vie", "Bộ đối chiếu chữ tiếng Việt"),
             ):
                 eng = engines_map.get(key)
                 if isinstance(eng, dict) and online_workers:
@@ -1692,7 +1831,7 @@ class AdminSystemService:
                                 "label": label,
                                 "status": "HEALTHY",
                                 "detail_status": "healthy",
-                                "safe_message": f"Đã xác minh suy luận trên OCR worker độc lập {remote_worker_desc} (inference_verified).",
+                                "safe_message": f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) đã sẵn sàng.",
                             }
                         )
                     elif loaded or raw_detail == "loaded":
@@ -1703,7 +1842,7 @@ class AdminSystemService:
                                 "label": label,
                                 "status": "HEALTHY",
                                 "detail_status": "loaded",
-                                "safe_message": f"Đã nạp model sẵn trên OCR worker {remote_worker_desc}.",
+                                "safe_message": f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) đã nạp mô hình sẵn sàng.",
                             }
                         )
                     elif installed:
@@ -1714,7 +1853,7 @@ class AdminSystemService:
                                 "label": label,
                                 "status": "DEGRADED",
                                 "detail_status": "installed",
-                                "safe_message": f"OCR worker {remote_worker_desc} đã cài thư viện nhưng chưa xác minh suy luận.",
+                                "safe_message": f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) đã cài đặt nhưng chưa xác minh xử lý.",
                             }
                         )
                     else:
@@ -1725,7 +1864,7 @@ class AdminSystemService:
                                 "label": label,
                                 "status": "DEGRADED",
                                 "detail_status": "unknown",
-                                "safe_message": f"OCR worker {remote_worker_desc} chưa báo cáo trạng thái engine.",
+                                "safe_message": f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) chưa báo cáo trạng thái.",
                             }
                         )
                 elif is_sleeping_standby:
@@ -1744,9 +1883,9 @@ class AdminSystemService:
                             "detail_status": "standby",
                             "operational_state": "Standby",
                             "safe_message": (
-                                f"Engine trên OCR worker {remote_worker_desc} đang ở chế độ chờ/ngủ (lần kiểm tra gần nhất đã sẵn sàng)."
+                                f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) đang ở chế độ chờ (lần kiểm tra gần nhất đã sẵn sàng)."
                                 if had_known_engine
-                                else f"OCR worker từ xa {remote_worker_desc} đang ngủ hoặc đang khởi động; engine ở trạng thái chờ."
+                                else f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) đang tạm nghỉ hoặc khởi động."
                             ),
                         }
                     )
@@ -1760,7 +1899,7 @@ class AdminSystemService:
                             "detail_status": "failed",
                             "operational_state": "Offline",
                             "last_error": "REMOTE_OCR_SLEEPING_OR_WAKING",
-                            "safe_message": f"OCR worker {remote_worker_desc} chưa phản hồi trong khi có {q_depth} trang chờ OCR.",
+                            "safe_message": f"Dịch vụ nhận diện chữ từ xa ({remote_worker_desc}) chưa phản hồi trong khi có {q_depth} trang đang chờ.",
                         }
                     )
                 elif is_hosted_idle_standby:
@@ -1784,7 +1923,7 @@ class AdminSystemService:
                             "label": label,
                             "status": "DEGRADED",
                             "detail_status": "unknown",
-                            "safe_message": "Chưa có OCR worker độc lập online báo cáo engine này.",
+                            "safe_message": "Chưa có dịch vụ nhận diện chữ từ xa trực tuyến báo cáo thành phần này.",
                             "action_hint": (
                                 "Cấu hình VIREAD_OCR_REMOTE_WORKER_URL hoặc khởi chạy OCR worker độc lập."
                                 if not wakeup_configured
@@ -1798,31 +1937,31 @@ class AdminSystemService:
                 tess_item: dict[str, object] = {
                     **base_meta,
                     "id": "tesseract",
-                    "label": "Tesseract",
+                    "label": "Bộ đối chiếu chữ viết",
                     "status": "HEALTHY",
                     "detail_status": "healthy",
-                    "safe_message": f"Binary Tesseract sẵn sàng trên OCR worker độc lập {remote_worker_desc}.",
+                    "safe_message": f"Bộ đối chiếu chữ viết sẵn sàng trên dịch vụ nhận diện chữ từ xa ({remote_worker_desc}).",
                 }
             elif is_sleeping_standby:
                 tess_item = {
                     **base_meta,
                     "id": "tesseract",
-                    "label": "Tesseract",
+                    "label": "Bộ đối chiếu chữ viết",
                     "status": "DEGRADED",
                     "detail_status": "standby",
                     "operational_state": "Standby",
-                    "safe_message": f"Binary Tesseract trên OCR worker {remote_worker_desc} đang ở chế độ chờ/ngủ.",
+                    "safe_message": f"Bộ đối chiếu chữ viết trên dịch vụ từ xa ({remote_worker_desc}) đang ở chế độ chờ.",
                 }
             elif is_sleeping_with_backlog:
                 tess_item = {
                     **base_meta,
                     "id": "tesseract",
-                    "label": "Tesseract",
+                    "label": "Bộ đối chiếu chữ viết",
                     "status": "UNAVAILABLE",
                     "detail_status": "failed",
                     "operational_state": "Offline",
                     "last_error": "REMOTE_OCR_SLEEPING_OR_WAKING",
-                    "safe_message": f"Không thể xác minh binary Tesseract khi OCR worker {remote_worker_desc} đang ngoại tuyến với hàng đợi tồn đọng.",
+                    "safe_message": f"Không thể xác minh bộ đối chiếu chữ viết khi dịch vụ từ xa ({remote_worker_desc}) đang ngoại tuyến.",
                 }
             elif is_hosted_idle_standby:
                 tess_item = {
@@ -1838,10 +1977,10 @@ class AdminSystemService:
                 tess_item = {
                     **base_meta,
                     "id": "tesseract",
-                    "label": "Tesseract",
+                    "label": "Bộ đối chiếu chữ viết",
                     "status": "DEGRADED",
                     "detail_status": "unknown",
-                    "safe_message": "Chưa xác minh binary Tesseract trên OCR worker độc lập.",
+                    "safe_message": "Chưa xác minh được bộ đối chiếu chữ viết trên dịch vụ từ xa.",
                 }
             items_out.insert(2, tess_item)
             return items_out
@@ -1900,10 +2039,10 @@ class AdminSystemService:
                             criticality="important",
                         )
                         for key, label in (
-                            ("paddleocr", "PaddleOCR"),
-                            ("vietocr", "VietOCR"),
-                            ("tesseract", "Tesseract"),
-                            ("tesseract_vie", "Tesseract tiếng Việt"),
+                            ("paddleocr", "Nhận diện vùng chữ"),
+                            ("vietocr", "Nhận diện chữ tiếng Việt"),
+                            ("tesseract", "Bộ đối chiếu chữ viết"),
+                            ("tesseract_vie", "Bộ đối chiếu chữ tiếng Việt"),
                         )
                     ]
             try:
@@ -1926,16 +2065,16 @@ class AdminSystemService:
                         label=label,
                         status="DEGRADED",
                         detail_status="unknown",
-                        safe_message="Chưa xác minh được trạng thái runtime OCR.",
+                        safe_message="Chưa xác minh được trạng thái hệ thống nhận diện chữ.",
                         service_group="ocr",
                         execution_mode="in_process",
                         criticality="important",
                     )
                     for key, label in (
-                        ("paddleocr", "PaddleOCR"),
-                        ("vietocr", "VietOCR"),
-                        ("tesseract", "Tesseract"),
-                        ("tesseract_vie", "Tesseract tiếng Việt"),
+                        ("paddleocr", "Nhận diện vùng chữ"),
+                        ("vietocr", "Nhận diện chữ tiếng Việt"),
+                        ("tesseract", "Bộ đối chiếu chữ viết"),
+                        ("tesseract_vie", "Bộ đối chiếu chữ tiếng Việt"),
                     )
                 ]
 
@@ -1951,10 +2090,10 @@ class AdminSystemService:
             except Exception:
                 return dict(
                     id="storage",
-                    label="Supabase Storage",
+                    label="Lưu trữ tệp tin",
                     status="DEGRADED",
                     detail_status="unknown",
-                    safe_message="Chưa thể xác minh trạng thái Storage.",
+                    safe_message="Chưa thể xác minh trạng thái lưu trữ tệp tin.",
                     service_group="core",
                     execution_mode="always_on",
                     criticality="core",
@@ -2038,7 +2177,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kiểm tra AI OCR cục bộ.",
+                "safe_message": "Không thể kiểm tra dịch vụ nhận diện chữ.",
                 "service_group": "ocr",
                 "execution_mode": "local_only",
                 "criticality": "important",
@@ -2053,7 +2192,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kiểm tra dịch vụ TTS.",
+                "safe_message": "Không thể kiểm tra dịch vụ giọng đọc.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -2063,7 +2202,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kiểm tra dịch vụ STT.",
+                "safe_message": "Không thể kiểm tra dịch vụ nhận diện giọng nói.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -2097,7 +2236,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kiểm tra dịch vụ TTS.",
+                "safe_message": "Không thể kiểm tra dịch vụ giọng đọc.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -2107,7 +2246,7 @@ class AdminSystemService:
                 "status": "UNAVAILABLE",
                 "detail_status": "failed",
                 "operational_state": None,
-                "safe_message": "Không thể kiểm tra dịch vụ STT.",
+                "safe_message": "Không thể kiểm tra dịch vụ nhận diện giọng nói.",
                 "execution_mode": "on_demand",
                 "criticality": "important",
                 "action_hint": None,
@@ -2143,16 +2282,16 @@ class AdminSystemService:
                     label=label,
                     status="DEGRADED",
                     detail_status="unknown",
-                    safe_message="Chưa xác minh được trạng thái runtime OCR.",
+                    safe_message="Chưa xác minh được trạng thái hệ thống nhận diện chữ.",
                     service_group="ocr",
                     execution_mode="remote_worker" if remote_ocr_mode else "in_process",
                     criticality="important",
                 )
                 for key, label in (
-                    ("paddleocr", "PaddleOCR"),
-                    ("vietocr", "VietOCR"),
-                    ("tesseract", "Tesseract"),
-                    ("tesseract_vie", "Tesseract tiếng Việt"),
+                    ("paddleocr", "Nhận diện vùng chữ"),
+                    ("vietocr", "Nhận diện chữ tiếng Việt"),
+                    ("tesseract", "Bộ đối chiếu chữ viết"),
+                    ("tesseract_vie", "Bộ đối chiếu chữ tiếng Việt"),
                 )
             ]
         else:
@@ -2161,10 +2300,10 @@ class AdminSystemService:
         if isinstance(storage_res, BaseException):
             storage_details: dict[str, object] = dict(
                 id="storage",
-                label="Supabase Storage",
+                label="Lưu trữ tệp tin",
                 status="DEGRADED",
                 detail_status="unknown",
-                safe_message="Chưa thể xác minh trạng thái Storage.",
+                safe_message="Chưa thể xác minh trạng thái lưu trữ tệp tin.",
                 service_group="core",
                 execution_mode="always_on",
                 criticality="core",
@@ -2183,25 +2322,25 @@ class AdminSystemService:
         items = [
             AdminHealthItemRead(
                 id="api",
-                label="FastAPI",
+                label="Hệ thống xử lý chính",
                 status="HEALTHY",
                 detail_status="healthy",
                 checked_at=checked_at,
-                safe_message="API đã phản hồi yêu cầu kiểm tra.",
+                safe_message="Hệ thống xử lý chính đang hoạt động bình thường.",
                 service_group="core",
                 execution_mode="always_on",
                 criticality="core",
             ),
             AdminHealthItemRead(
                 id="database",
-                label="Database",
+                label="Cơ sở dữ liệu",
                 status="HEALTHY" if database_ready else "UNAVAILABLE",
                 detail_status="healthy" if database_ready else "failed",
                 checked_at=checked_at,
                 safe_message=(
-                    "Database đã phản hồi truy vấn đọc."
+                    "Cơ sở dữ liệu đã phản hồi truy vấn kiểm tra."
                     if database_ready
-                    else "Chưa kiểm tra được kết nối database. Vui lòng thử lại."
+                    else "Chưa kiểm tra được kết nối cơ sở dữ liệu. Vui lòng thử lại."
                 ),
                 last_error=None if database_ready else "DATABASE_UNAVAILABLE",
                 service_group="core",
@@ -2215,7 +2354,11 @@ class AdminSystemService:
             ),
             AdminHealthItemRead(
                 id="local_ocr",
-                label="AI OCR cục bộ",
+                label=(
+                    "AI OCR đám mây"
+                    if local_ocr_info.get("execution_mode") == "cloud_ai"
+                    else "Nhận diện chữ"
+                ),
                 status=local_ocr_info["status"],  # type: ignore[arg-type]
                 detail_status=local_ocr_info.get("detail_status"),  # type: ignore[arg-type]
                 operational_state=local_ocr_info.get("operational_state"),  # type: ignore[arg-type]
@@ -2229,7 +2372,7 @@ class AdminSystemService:
             ),
             AdminHealthItemRead(
                 id="tts",
-                label="Text-to-Speech (TTS)",
+                label="Giọng đọc & nghe",
                 status=tts_info["status"],  # type: ignore[arg-type]
                 detail_status=tts_info.get("detail_status"),  # type: ignore[arg-type]
                 operational_state=tts_info.get("operational_state"),  # type: ignore[arg-type]
@@ -2243,7 +2386,7 @@ class AdminSystemService:
             ),
             AdminHealthItemRead(
                 id="stt",
-                label="Speech-to-Text (STT)",
+                label="Nhận diện giọng nói",
                 status=stt_info["status"],  # type: ignore[arg-type]
                 detail_status=stt_info.get("detail_status"),  # type: ignore[arg-type]
                 operational_state=stt_info.get("operational_state"),  # type: ignore[arg-type]
@@ -2257,15 +2400,52 @@ class AdminSystemService:
             ),
         ]
 
+        # Surface runtime Cloud AI failures (e.g. Child Progress / Tutor Questions) even when
+        # OCR cloud correction is disabled (`local_ocr` stays cleanly `local_only`).
+        if local_ocr_info.get("detail_status") == "local_only":
+            cloud_ai_snap = get_cloud_ai_health_snapshot()
+            failing_cloud = [
+                (svc, meta)
+                for svc, meta in (cloud_ai_snap.get("services") or {}).items()
+                if int(meta.get("consecutive_failures") or 0) >= 2
+            ]
+            if failing_cloud:
+                err_code = str(
+                    cloud_ai_snap.get("last_error")
+                    or failing_cloud[0][1].get("last_error_code")
+                    or "CLOUD_AI_UNAVAILABLE"
+                )
+                failing_names = ", ".join(sorted(svc for svc, _ in failing_cloud))
+                items.append(
+                    AdminHealthItemRead(
+                        id="cloud_ai",
+                        label="Cloud AI (Gemini / Groq)",
+                        status="DEGRADED",
+                        detail_status="failed",
+                        operational_state="Degraded",
+                        checked_at=checked_at,
+                        safe_message=(
+                            f"Dịch vụ Cloud AI ({failing_names}) đang gặp lỗi liên tiếp ({err_code})."
+                        ),
+                        last_error=err_code,
+                        service_group="ocr",
+                        execution_mode="cloud_ai",
+                        criticality="important",
+                        action_hint=(
+                            "Kiểm tra khóa API (GEMINI_API_KEY / GROQ_API_KEY), hạn mức hoặc tên model AI trong biến môi trường."
+                        ),
+                    )
+                )
+
         if not tts_cache_enabled:
             cache_item = AdminHealthItemRead(
                 id="tts_audio_cache",
-                label="TTS Audio Cache",
+                label="Bộ nhớ đệm giọng đọc",
                 status="DEGRADED",
                 detail_status="disabled",
                 operational_state="Offline",
                 checked_at=checked_at,
-                safe_message="Bộ nhớ đệm TTS đang tắt theo cấu hình.",
+                safe_message="Bộ nhớ đệm giọng đọc đang tắt theo cấu hình.",
                 service_group="voice",
                 execution_mode="precomputed_cache",
                 criticality="important",
@@ -2273,12 +2453,12 @@ class AdminSystemService:
         elif audio_cache_error is not None or audio_cache_summary is None:
             cache_item = AdminHealthItemRead(
                 id="tts_audio_cache",
-                label="TTS Audio Cache",
+                label="Bộ nhớ đệm giọng đọc",
                 status="DEGRADED",
                 detail_status="unknown",
                 operational_state="Unknown",
                 checked_at=checked_at,
-                safe_message="Không thể đọc thống kê bộ nhớ đệm TTS từ database.",
+                safe_message="Không thể đọc thống kê bộ nhớ đệm giọng đọc từ cơ sở dữ liệu.",
                 last_error=audio_cache_error or "AUDIO_CACHE_PROBE_FAILED",
                 service_group="voice",
                 execution_mode="precomputed_cache",
@@ -2288,12 +2468,12 @@ class AdminSystemService:
         elif bool(audio_cache_summary.get("quota_exhausted")):
             cache_item = AdminHealthItemRead(
                 id="tts_audio_cache",
-                label="TTS Audio Cache",
+                label="Bộ nhớ đệm giọng đọc",
                 status="DEGRADED",
                 detail_status="unknown",
                 operational_state="Quota exhausted",
                 checked_at=checked_at,
-                safe_message="Lưu lượng cache TTS hôm nay đã chạm ngưỡng giới hạn miễn phí.",
+                safe_message="Lưu lượng bộ nhớ đệm giọng đọc hôm nay đã chạm ngưỡng giới hạn miễn phí.",
                 last_error="QUOTA_EXHAUSTED",
                 service_group="voice",
                 execution_mode="precomputed_cache",
@@ -2302,12 +2482,12 @@ class AdminSystemService:
         else:
             cache_item = AdminHealthItemRead(
                 id="tts_audio_cache",
-                label="TTS Audio Cache",
+                label="Bộ nhớ đệm giọng đọc",
                 status="HEALTHY",
                 detail_status="healthy",
                 operational_state="Healthy",
                 checked_at=checked_at,
-                safe_message=f"Bộ nhớ đệm TTS sẵn sàng ({int(audio_cache_summary.get('entry_count') or 0)} mục).",
+                safe_message=f"Bộ nhớ đệm giọng đọc sẵn sàng ({int(audio_cache_summary.get('entry_count') or 0)} mục).",
                 service_group="voice",
                 execution_mode="precomputed_cache",
                 criticality="important",
@@ -2485,19 +2665,19 @@ class AdminSystemService:
                     ocr_op_state = "Queued" if has_backlog else "Standby"
                     ocr_w_err = None
                     ocr_can_wake = True
-                    ocr_w_msg = f"OCR worker {remote_worker_desc} ở chế độ chờ tiết kiệm ({standby_mode}) và sẵn sàng đánh thức tức thì."
+                    ocr_w_msg = f"Máy chủ nhận diện chữ ({remote_worker_desc}) đang ở chế độ chờ tiết kiệm và sẵn sàng khởi động tức thì."
                 elif remote_ocr_ready:
                     ocr_w_status = "HEALTHY"
                     ocr_w_detail = "healthy"
                     ocr_w_err = None
                     ocr_can_wake = wakeup_configured
-                    ocr_w_msg = f"OCR worker {remote_worker_desc} online và đã xác minh suy luận."
+                    ocr_w_msg = f"Máy chủ nhận diện chữ ({remote_worker_desc}) đang trực tuyến và hoạt động bình thường."
                 elif online_workers:
                     ocr_w_status = "DEGRADED"
                     ocr_w_detail = "initialized"
                     ocr_w_err = "OCR_ENGINES_NOT_READY"
                     ocr_can_wake = wakeup_configured
-                    ocr_w_msg = f"OCR worker {remote_worker_desc} online nhưng engine chưa sẵn sàng."
+                    ocr_w_msg = f"Máy chủ nhận diện chữ ({remote_worker_desc}) trực tuyến nhưng mô hình chưa sẵn sàng."
                 elif wakeup_configured and probe_degraded:
                     ocr_can_wake = True
                     if has_backlog:
@@ -2505,21 +2685,21 @@ class AdminSystemService:
                         ocr_w_detail = "failed"
                         ocr_op_state = "Offline"
                         ocr_w_err = "REMOTE_OCR_SLEEPING_OR_WAKING"
-                        ocr_w_msg = f"OCR worker từ xa ({remote_worker_desc}) chưa phản hồi trong khi có {q_depth} trang đang chờ xử lý."
+                        ocr_w_msg = f"Máy chủ nhận diện chữ từ xa ({remote_worker_desc}) chưa phản hồi trong khi có {q_depth} trang đang chờ xử lý."
                         ocr_action_hint = "Bấm nút Đánh thức OCR worker và kiểm tra trạng thái Hugging Face Space / Container App."
                     else:
                         ocr_w_status = "DEGRADED"
                         ocr_w_detail = "standby"
                         ocr_op_state = "Standby"
                         ocr_w_err = "REMOTE_OCR_SLEEPING_OR_WAKING"
-                        ocr_w_msg = f"OCR worker từ xa ({remote_worker_desc}) đang ngủ hoặc đang khởi động (hàng đợi trống)."
+                        ocr_w_msg = f"Máy chủ nhận diện chữ từ xa ({remote_worker_desc}) đang tạm nghỉ hoặc đang khởi động (hàng đợi trống)."
                         ocr_action_hint = "Bấm nút Đánh thức OCR worker để khởi động trước, hoặc tải trang mới để hệ thống tự đánh thức."
                 elif wakeup_configured:
                     ocr_can_wake = True
                     ocr_w_status = "UNAVAILABLE" if has_backlog else "DEGRADED"
                     ocr_w_detail = "failed" if has_backlog else "disabled"
                     ocr_w_err = "NO_ONLINE_OCR_WORKER"
-                    ocr_w_msg = "OCR worker từ xa chưa phản hồi kiểm tra sẵn sàng."
+                    ocr_w_msg = "Máy chủ nhận diện chữ từ xa chưa phản hồi kiểm tra sẵn sàng."
                     ocr_action_hint = "Kiểm tra VIREAD_OCR_REMOTE_WORKER_URL, VIREAD_OCR_WORKER_TOKEN và VIREAD_HF_SPACE_TOKEN."
                 elif hosted_mode and not has_backlog:
                     ocr_can_wake = False
@@ -2534,13 +2714,13 @@ class AdminSystemService:
                     ocr_w_status = "UNAVAILABLE" if has_backlog else "DEGRADED"
                     ocr_w_detail = "failed" if has_backlog else "disabled"
                     ocr_w_err = "REMOTE_OCR_WORKER_UNCONFIGURED"
-                    ocr_w_msg = "Chưa có OCR worker độc lập nào online và chưa cấu hình URL worker từ xa."
+                    ocr_w_msg = "Chưa có máy chủ nhận diện chữ nào trực tuyến và chưa cấu hình địa chỉ máy chủ từ xa."
                     ocr_action_hint = "Cấu hình biến VIREAD_OCR_REMOTE_WORKER_URL và VIREAD_OCR_WORKER_TOKEN (cùng VIREAD_HF_SPACE_TOKEN nếu là Private Space) hoặc khởi chạy ocr_worker."
 
                 items.append(
                     AdminHealthItemRead(
                         id="ocr_worker",
-                        label="OCR worker",
+                        label="Máy chủ nhận diện chữ",
                         status=ocr_w_status,
                         detail_status=ocr_w_detail,
                         operational_state=ocr_op_state,  # type: ignore[arg-type]
@@ -2566,14 +2746,14 @@ class AdminSystemService:
                 items.append(
                     AdminHealthItemRead(
                         id="ocr_worker",
-                        label="OCR worker",
+                        label="Máy chủ nhận diện chữ",
                         status="HEALTHY" if local_ready else "DEGRADED",
                         detail_status="loaded" if local_ready else "installed",
                         checked_at=checked_at,
                         safe_message=(
-                            "OCR chạy trực tiếp trong tiến trình (local_inprocess)."
+                            "Hệ thống nhận diện chữ chạy trực tiếp trên máy chủ chính."
                             if local_ready
-                            else "OCR local_inprocess chưa nạp model."
+                            else "Hệ thống nhận diện chữ chưa nạp mô hình."
                         ),
                         last_success_at=ocr_m.get("last_success_at"),  # type: ignore[arg-type]
                         oldest_pending_job_age_seconds=ocr_m.get("oldest_pending_job_age_seconds"),  # type: ignore[arg-type]
@@ -2614,7 +2794,7 @@ class AdminSystemService:
                             detail_status="remote_delegated",
                             operational_state="Standby",
                             checked_at=checked_at,
-                            safe_message="Đồng bộ model OCR do remote OCR worker tự quản lý khi chạy.",
+                            safe_message="Đồng bộ mô hình nhận diện chữ do máy chủ nhận diện chữ từ xa tự quản lý khi chạy.",
                             last_success_at=_parse_utc_datetime(m.get("last_success_at")),
                             queue_depth=0,
                             service_group="workers",
@@ -2635,7 +2815,7 @@ class AdminSystemService:
                             detail_status="local_only",
                             operational_state="Local only",
                             checked_at=checked_at,
-                            safe_message="Tiến trình huấn luyện VietOCR cục bộ chỉ dùng trên máy GPU dev (đã tắt trên cloud).",
+                            safe_message="Tiến trình huấn luyện nhận diện chữ chỉ dùng trên máy nội bộ (đã tắt trên máy chủ đám mây).",
                             service_group="workers",
                             execution_mode="local_only",
                             criticality="optional",
@@ -2713,8 +2893,8 @@ class AdminSystemService:
 
             # Report external/cron workers honestly (reading_reminder, reading_presence, karaoke_processing)
             for ext_key, ext_label in (
-                ("reading_reminder", "Reading reminder worker"),
-                ("reading_presence", "Reading presence worker"),
+                ("reading_reminder", "Nhắc nhở đọc sách"),
+                ("reading_presence", "Theo dõi phiên đọc"),
             ):
                 items.append(
                     _build_cron_or_event_worker_item(
@@ -2737,11 +2917,11 @@ class AdminSystemService:
                 items.append(
                     AdminHealthItemRead(
                         id="karaoke_processing",
-                        label="Karaoke processing worker",
+                        label="Xử lý tách nhạc Karaoke",
                         status="DEGRADED",
                         detail_status="failed",
                         checked_at=checked_at,
-                        safe_message="Cấu hình Karaoke processing worker chưa hợp lệ.",
+                        safe_message="Cấu hình xử lý tách nhạc Karaoke chưa hợp lệ.",
                         last_error="KARAOKE_CONFIG_INVALID",
                         service_group="workers",
                         execution_mode="disabled_opt_in",
@@ -2753,12 +2933,12 @@ class AdminSystemService:
                 items.append(
                     AdminHealthItemRead(
                         id="karaoke_processing",
-                        label="Karaoke processing worker",
+                        label="Xử lý tách nhạc Karaoke",
                         status="HEALTHY",
                         detail_status="local_only",
                         operational_state="Local only",
                         checked_at=checked_at,
-                        safe_message="Xử lý tách nhạc Karaoke là tính năng tùy chọn cục bộ (đang tắt theo cấu hình).",
+                        safe_message="Xử lý tách nhạc Karaoke là tính năng tùy chọn nội bộ (đang tắt theo cấu hình).",
                         service_group="workers",
                         execution_mode="disabled_opt_in",
                         criticality="optional",
@@ -2768,7 +2948,7 @@ class AdminSystemService:
                 items.append(
                     _build_cron_or_event_worker_item(
                         "karaoke_processing",
-                        "Karaoke processing worker",
+                        "Xử lý tách nhạc Karaoke",
                         criticality="optional",
                         default_execution_mode="on_demand",
                         allow_old_db_activity_healthy=True,
@@ -2827,6 +3007,10 @@ async def get_admin_audit_logs(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    action = action if isinstance(action, str) else None
+    resource_type = resource_type if isinstance(resource_type, str) else None
+    cursor = cursor if isinstance(cursor, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
     return await service.logs(action, resource_type, cursor, limit)

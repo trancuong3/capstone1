@@ -636,7 +636,11 @@ class CronIsolationAndHeartbeatSweepTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(
                     cron_svc, "_sweep_ocr_leases_and_heartbeats", side_effect=_slow_ocr_reap
                 ),
-                patch.object(cron_svc, "_remaining_budget", side_effect=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                patch.object(
+                    cron_svc,
+                    "_remaining_budget",
+                    side_effect=lambda *_a, _it=iter([1.0]): next(_it, 0.0),
+                ),
             ):
                 await cron_svc.run_scheduled_cron_dispatch(
                     run_remote_sweeps=True,
@@ -1378,10 +1382,16 @@ class OcrOutboxAndTrainingMaintenanceTests(unittest.IsolatedAsyncioTestCase):
                     "_dispatch_or_poll_colab_once",
                     new=AsyncMock(return_value=False),
                 ) as colab_mock,
+                patch.object(
+                    viread_ocr_training_auto_worker,
+                    "_prune_flow2_drive_artifacts_once",
+                    new=AsyncMock(return_value={"pruned_runs": 0, "pruned_resume_jobs": 0}),
+                ),
             ):
                 res = await viread_ocr_training_auto_worker.run_maintenance_once()
 
             self.assertEqual(res, {"ok": True, "colab_activity": False})
+            self.assertGreaterEqual(cron_svc.TRAINING_MAINTENANCE_TIMEOUT_SECONDS, 12.0)
             expire_mock.assert_awaited_once()
             colab_mock.assert_awaited_once()
             self.assertIsNotNone(
@@ -1412,6 +1422,11 @@ async def _run():
     with (
         patch.object(w, "_expire_exhausted_jobs", new=AsyncMock()),
         patch.object(w, "_dispatch_or_poll_colab_once", new=AsyncMock(return_value=False)),
+        patch.object(
+            w,
+            "_prune_flow2_drive_artifacts_once",
+            new=AsyncMock(return_value={{"pruned_runs": 0, "pruned_resume_jobs": 0}}),
+        ),
         patch.object(w, "persist_worker_heartbeat_with_factory", new=AsyncMock()),
     ):
         return await w.run_maintenance_once()
@@ -1522,6 +1537,383 @@ class SmartStudioEventDrainAndServerShutdownTests(unittest.IsolatedAsyncioTestCa
                 f"{hook_name} must be imported on app.sever",
             )
             self.assertIn(f"{hook_name}()", lifespan_src)
+
+
+TTS_AND_OCR_PRUNING_DDL_SQLITE = """
+CREATE TABLE tts_audio_cache_entries (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    owner_parent_id TEXT,
+    book_id TEXT,
+    page_id TEXT,
+    page_revision_id TEXT,
+    content_sha256 TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    voice_id TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    speed NUMERIC NOT NULL DEFAULT 1.00,
+    audio_format TEXT NOT NULL,
+    storage_bucket TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    duration_seconds REAL,
+    word_timings_json TEXT,
+    status TEXT NOT NULL,
+    last_accessed_at TIMESTAMP NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE tts_audio_cache_daily_usage (
+    usage_date DATE PRIMARY KEY,
+    bytes_served INTEGER NOT NULL DEFAULT 0,
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    miss_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE ocr_inference_jobs (
+    id TEXT PRIMARY KEY,
+    job_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 100,
+    idempotency_key TEXT,
+    owner_user_id TEXT,
+    book_id TEXT,
+    page_id TEXT,
+    revision_id TEXT,
+    submission_id TEXT,
+    local_scan_request_id TEXT,
+    image_bucket TEXT,
+    image_path TEXT NOT NULL,
+    image_sha256 TEXT NOT NULL,
+    image_width INTEGER,
+    image_height INTEGER,
+    image_mime_type TEXT,
+    processing_meta TEXT NOT NULL DEFAULT '{}',
+    expected_version INTEGER NOT NULL DEFAULT 1,
+    expected_candidate_hash TEXT,
+    expected_verified_revision_id TEXT,
+    expected_latest_revision_id TEXT,
+    fencing_token INTEGER NOT NULL DEFAULT 0,
+    worker_id TEXT,
+    claimed_at TIMESTAMP,
+    heartbeat_at TIMESTAMP,
+    lease_expires_at TIMESTAMP,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    next_retry_at TIMESTAMP,
+    retry_delay_seconds INTEGER,
+    error_code TEXT,
+    error_message TEXT,
+    result_payload TEXT,
+    model_profile TEXT,
+    model_sha256 TEXT,
+    engine_diagnostics TEXT NOT NULL DEFAULT '{}',
+    duration_ms INTEGER,
+    cancelled_reason TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP
+);
+CREATE TABLE ocr_worker_heartbeats (
+    worker_id TEXT PRIMARY KEY,
+    hostname TEXT,
+    app_version TEXT,
+    git_sha TEXT,
+    status TEXT NOT NULL DEFAULT 'IDLE',
+    active_job_id TEXT,
+    active_job_count INTEGER NOT NULL DEFAULT 0,
+    concurrency_limit INTEGER NOT NULL DEFAULT 1,
+    model_profile TEXT,
+    model_sha256 TEXT,
+    engines TEXT NOT NULL DEFAULT '{}',
+    system_stats TEXT NOT NULL DEFAULT '{}',
+    last_error TEXT,
+    last_heartbeat_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+"""
+
+
+class Phase1DbPruningAndDispatcherBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_f07_tts_and_ocr_pruning_methods_respect_retention_active_refs_and_missing_tables(
+        self,
+    ) -> None:
+        from datetime import date
+        from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+
+        # 1. Missing tables degrade cleanly via is_storage_ready() == False
+        bare_engine, bare_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        try:
+            async with bare_factory() as db:
+                self.assertFalse(await TtsAudioCacheRepository(db).is_storage_ready())  # type: ignore[arg-type]
+                self.assertFalse(await OcrInferenceJobRepository(db).is_storage_ready())  # type: ignore[arg-type]
+        finally:
+            bare_engine.dispose()
+
+        # 2. Real SQLite tables verify pruning semantics
+        engine, session_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        with engine.begin() as conn:
+            for ddl_stmt in TTS_AND_OCR_PRUNING_DDL_SQLITE.strip().split(";"):
+                if ddl_stmt.strip():
+                    conn.execute(text(ddl_stmt))
+        try:
+            now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(days=20)).isoformat()
+            recent_ts = (now - timedelta(days=2)).isoformat()
+            old_job_ts = (now - timedelta(days=45)).isoformat()
+            recent_job_ts = (now - timedelta(days=5)).isoformat()
+
+            id_del_old = uuid4()
+            id_stale_shared = uuid4()
+            id_active_shared = uuid4()
+            id_stale_orphan = uuid4()
+            id_stale_recent = uuid4()
+
+            job_old_done = uuid4()
+            job_old_hb_ref = uuid4()
+            job_old_active_status = uuid4()
+            job_recent_done = uuid4()
+
+            async with session_factory() as db:
+                for eid, status, path, upd in (
+                    (id_del_old, "DELETED", "deleted/old.mp3", old_ts),
+                    (id_stale_shared, "STALE", "shared/clip.mp3", old_ts),
+                    (id_active_shared, "ACTIVE", "shared/clip.mp3", old_ts),
+                    (id_stale_orphan, "STALE", "stale/orphan.mp3", old_ts),
+                    (id_stale_recent, "STALE", "stale/recent.mp3", recent_ts),
+                ):
+                    await db.execute(
+                        text(
+                            "INSERT INTO tts_audio_cache_entries "
+                            "(id, scope, content_sha256, normalized_text, voice_id, model_version, "
+                            "audio_format, storage_bucket, storage_path, byte_size, status, "
+                            "last_accessed_at, created_at, updated_at) "
+                            "VALUES (:id, 'CATALOG', 'sha', 'txt', 'v1', 'm1', 'mp3', "
+                            "'viread-tts-cache', :path, 128, :status, :upd, :upd, :upd)"
+                        ),
+                        {"id": eid.hex, "path": path, "status": status, "upd": upd},
+                    )
+
+                for udate in (
+                    (now.date() - timedelta(days=120)).isoformat(),
+                    (now.date() - timedelta(days=10)).isoformat(),
+                ):
+                    await db.execute(
+                        text(
+                            "INSERT INTO tts_audio_cache_daily_usage (usage_date, bytes_served, hit_count, miss_count, updated_at) "
+                            "VALUES (:d, 100, 1, 0, :upd)"
+                        ),
+                        {"d": udate, "upd": now.isoformat()},
+                    )
+
+                for jid, status, comp, upd in (
+                    (job_old_done, "SUCCEEDED", old_job_ts, old_job_ts),
+                    (job_old_hb_ref, "DEAD_LETTER", old_job_ts, old_job_ts),
+                    (job_old_active_status, "QUEUED", None, old_job_ts),
+                    (job_recent_done, "CANCELLED", recent_job_ts, recent_job_ts),
+                ):
+                    await db.execute(
+                        text(
+                            "INSERT INTO ocr_inference_jobs "
+                            "(id, job_kind, status, image_path, image_sha256, created_at, updated_at, completed_at) "
+                            "VALUES (:id, 'ADMIN_PAGE_OCR', :status, 'books/p1.png', 'sha', :upd, :upd, :comp)"
+                        ),
+                        {"id": jid.hex, "status": status, "upd": upd, "comp": comp},
+                    )
+                await db.execute(
+                    text(
+                        "INSERT INTO ocr_worker_heartbeats (worker_id, status, active_job_id, last_heartbeat_at, created_at, updated_at) "
+                        "VALUES ('win-ocr-1', 'BUSY', :jid, :now, :now, :now)"
+                    ),
+                    {"jid": job_old_hb_ref.hex, "now": now.isoformat()},
+                )
+                await db.commit()
+
+            with (
+                patch.object(cron_svc, "AsyncSessionLocal", side_effect=session_factory),
+                patch.object(cron_svc, "delete_stale_tts_objects", new=AsyncMock()) as del_stale_mock,
+            ):
+                counts = await cron_svc._sweep_phase1_db_pruning(
+                    now=now,
+                    deadline=time.monotonic() + 10.0,
+                )
+
+            self.assertEqual(counts["tts_cache_entries_pruned"], 3)
+            self.assertEqual(counts["tts_daily_usage_pruned"], 1)
+            self.assertEqual(counts["ocr_jobs_pruned"], 1)
+            # Only unreferenced STALE orphan should be scheduled for Storage deletion;
+            # shared/clip.mp3 (ACTIVE owner exists) and deleted/old.mp3 (already DELETED) must NOT!
+            del_stale_mock.assert_awaited_once_with([("viread-tts-cache", "stale/orphan.mp3")])
+
+            async with session_factory() as db:
+                rem_tts = {
+                    r[0]
+                    for r in (
+                        await db.execute(text("SELECT id FROM tts_audio_cache_entries"))
+                    ).all()
+                }
+                self.assertEqual(rem_tts, {id_active_shared.hex, id_stale_recent.hex})
+                rem_usage = [
+                    r[0]
+                    for r in (
+                        await db.execute(text("SELECT usage_date FROM tts_audio_cache_daily_usage"))
+                    ).all()
+                ]
+                self.assertEqual(len(rem_usage), 1)
+                self.assertEqual(
+                    str(rem_usage[0]),
+                    (date(2026, 11, 28) - timedelta(days=10)).isoformat(),
+                )
+                rem_jobs = {
+                    r[0]
+                    for r in (
+                        await db.execute(text("SELECT id FROM ocr_inference_jobs"))
+                    ).all()
+                }
+                self.assertEqual(
+                    rem_jobs,
+                    {job_old_hb_ref.hex, job_old_active_status.hex, job_recent_done.hex},
+                )
+        finally:
+            engine.dispose()
+
+    async def test_f08_parent_email_dispatcher_budget_cutoff_dry_run_and_query_unwrap(
+        self,
+    ) -> None:
+        from fastapi import Query
+        from app.api.routes import parent_notifications
+
+        self.assertLessEqual(
+            parent_email_dispatcher_worker.DISPATCH_TOTAL_BUDGET_SECONDS, 28.0
+        )
+
+        # 1. Slow first subtask exhausts tight budget -> skips reminders & engagement cleanly
+        engine, session_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        try:
+            async def _slow_presence(_now):
+                await asyncio.sleep(1.0)
+                return 1
+
+            rem_mock = AsyncMock(return_value=1)
+            eng_mock = AsyncMock(return_value=1)
+            started = time.monotonic()
+            with (
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "AsyncSessionLocal",
+                    side_effect=session_factory,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "_worker_ready",
+                    return_value=(True, "resend"),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "active_email_provider",
+                    return_value="resend",
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_alerts_once",
+                    side_effect=_slow_presence,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_reminders_once",
+                    new=rem_mock,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_engagement_emails_once",
+                    new=eng_mock,
+                ),
+            ):
+                res = await parent_email_dispatcher_worker.dispatch_all_once(
+                    scope="all",
+                    total_budget_seconds=0.25,
+                )
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 0.8)
+            self.assertEqual(res["presence_sent"], 0)
+            rem_mock.assert_not_awaited()
+            eng_mock.assert_not_awaited()
+
+            # 2. dry_run=True performs 0 runner calls and 0 DB writes
+            pres_mock = AsyncMock(return_value=1)
+            with (
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "AsyncSessionLocal",
+                    side_effect=AssertionError("dry_run must not open DB"),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "_worker_ready",
+                    return_value=(True, "resend"),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "active_email_provider",
+                    return_value="resend",
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_alerts_once",
+                    new=pres_mock,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_reminders_once",
+                    new=rem_mock,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_engagement_emails_once",
+                    new=eng_mock,
+                ),
+            ):
+                dry_res = await parent_email_dispatcher_worker.dispatch_all_once(
+                    scope="all",
+                    dry_run=True,
+                )
+            self.assertTrue(dry_res["dry_run"])
+            self.assertEqual(dry_res["presence_sent"], 0)
+            pres_mock.assert_not_awaited()
+            rem_mock.assert_not_awaited()
+            eng_mock.assert_not_awaited()
+        finally:
+            engine.dispose()
+
+        # 3. Direct call to trigger_cron_dispatch unwraps Query(default=False) safely
+        with (
+            patch.object(parent_notifications.settings, "PARENT_EMAIL_CRON_SECRET", "s" * 24),
+            patch.object(
+                parent_notifications,
+                "dispatch_all_once",
+                new=AsyncMock(
+                    return_value={
+                        "scope": "all",
+                        "delivery_configured": True,
+                        "delivery_provider": "resend",
+                        "presence_sent": 0,
+                        "reminders_sent": 0,
+                        "engagement_sent": 0,
+                        "checked_at": datetime.now(timezone.utc),
+                    }
+                ),
+            ) as dispatch_mock,
+        ):
+            resp = await parent_notifications.trigger_cron_dispatch(
+                scope="all",
+                dry_run=Query(default=False),
+                x_cron_secret="s" * 24,
+            )
+            self.assertFalse(resp.dry_run)
+            dispatch_mock.assert_awaited_once_with(scope="all")
 
 
 if __name__ == "__main__":

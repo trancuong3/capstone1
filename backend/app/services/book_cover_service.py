@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 from dataclasses import dataclass
@@ -15,16 +16,17 @@ import httpx
 from fastapi import HTTPException, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import (
     SUPABASE_PRIVATE_BOOKS_BUCKET,
     SUPABASE_STORAGE_BUCKET,
 )
+from app.database.role_cache import get_cached_profile_role
 from app.models import Book, BookPresentationAsset, SmartStudioJob
 from app.policies.book_access import is_book_private
-from app.repositories.book_assets_repository import BookAssetsRepository
+from app.repositories.book_assets_repository import BookAssetsRepository, is_missing_v2_table_error
 from app.repositories.book_repository import CatalogRepository
 from app.schemas.book_assets import (
     BookAssetsSummaryResponse,
@@ -55,10 +57,19 @@ from app.services.gpu_workload_scheduler import (
 )
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.smart_studio_flags import SmartStudioFlags
-from app.services.storage_service import delete_object, download_object, upload_object
+from app.services.storage_service import (
+    delete_object,
+    download_object,
+    download_object_async,
+    upload_object,
+)
 
 logger = logging.getLogger(__name__)
 _ORIGINAL_CATALOG_IS_ELIGIBLE = CatalogRepository.is_eligible
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
+_ORIGINAL_REPO_GET_ACTOR_ROLE = BookAssetsRepository.get_actor_role
+_ORIGINAL_REPO_GET_ASSET_BY_ID = BookAssetsRepository.get_asset_by_id
+_ORIGINAL_REPO_GET_BOOK = BookAssetsRepository.get_book
 
 HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
 
@@ -900,6 +911,30 @@ class BookCoverService:
             v2_storage_degraded=cover_degraded or ill_degraded or bible_degraded,
         )
 
+    async def _mark_inflight_cover_jobs_stale_scoped(
+        self,
+        book_id: UUID,
+        *,
+        actor_role: str | None,
+        actor_id: UUID | None,
+    ) -> int:
+        import inspect
+
+        fn = self.repo.mark_inflight_cover_jobs_stale
+        try:
+            sig = inspect.signature(fn)
+            has_kwargs = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            kwargs: dict[str, Any] = {}
+            if has_kwargs or "actor_role" in sig.parameters:
+                kwargs["actor_role"] = actor_role
+            if has_kwargs or "actor_id" in sig.parameters:
+                kwargs["actor_id"] = actor_id
+            return await fn(book_id, **kwargs)
+        except (TypeError, ValueError):
+            return await fn(book_id)
+
     async def upload_user_cover(
         self,
         actor_id: UUID,
@@ -913,7 +948,7 @@ class BookCoverService:
         crop_h: float | None = None,
         rotation: int = 0,
     ) -> BookPresentationAssetRead:
-        book, _role = await self.authorize_book_write(actor_id, book_id)
+        book, role = await self.authorize_book_write(actor_id, book_id)
         resolved_book_id = book.Id
         private_book = is_book_private(book)
         owner_id = book.OwnerParentId if private_book else None
@@ -946,8 +981,12 @@ class BookCoverService:
             upsert=False,
         )
         try:
-            # Anti-overwrite invariant: mark any pending/running AI cover jobs STALE first!
-            stale_count = await self.repo.mark_inflight_cover_jobs_stale(resolved_book_id)
+            # Anti-overwrite invariant: mark any pending/running AI cover jobs STALE scoped to portal/actor!
+            stale_count = await self._mark_inflight_cover_jobs_stale_scoped(
+                resolved_book_id,
+                actor_role=role,
+                actor_id=actor_id,
+            )
             asset = await self.repo.create_cover_asset(
                 book_id=resolved_book_id,
                 owner_id=owner_id,
@@ -985,7 +1024,7 @@ class BookCoverService:
     async def delete_book_cover(
         self, actor_id: UUID, book_id: UUID
     ) -> BookCoverDeleteResponse:
-        book, _role = await self.authorize_book_write(actor_id, book_id)
+        book, role = await self.authorize_book_write(actor_id, book_id)
         resolved_book_id = book.Id
         bucket = _bucket_for_book(book)
         fallback = build_metadata_cover_fallback(book)
@@ -998,7 +1037,11 @@ class BookCoverService:
                     orphan_paths.append(_validate_relative_storage_path(raw_path))
                 except HTTPException:
                     continue
-        await self.repo.mark_inflight_cover_jobs_stale(resolved_book_id)
+        await self._mark_inflight_cover_jobs_stale_scoped(
+            resolved_book_id,
+            actor_role=role,
+            actor_id=actor_id,
+        )
         await self.db.commit()
 
         for orphan_path in orphan_paths:
@@ -1043,7 +1086,7 @@ class BookCoverService:
         priority and marks in-flight AI cover jobs STALE so late AI jobs never overwrite.
         """
         _ = actor_role
-        book, _resolved_role = await self.authorize_book_write(actor_id, book_id)
+        book, resolved_role = await self.authorize_book_write(actor_id, book_id)
         page = await self.repo.get_page(book.Id, page_id)
         if page is None:
             raise HTTPException(
@@ -1051,61 +1094,86 @@ class BookCoverService:
                 detail="Book page not found",
             )
 
+        # Snapshot ORM scalars and release DB read transaction before Storage/CPU work.
+        book_id_val = book.Id
+        page_id_val = page.Id
+        page_number_val = int(page.PageNumber or 1)
+        private_book = is_book_private(book)
+        owner_id = book.OwnerParentId if private_book else None
         bucket = _bucket_for_book(book)
+        raw_page_path = page.ImagePath
+
+        rollback = getattr(self.db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+
         if page_image_bytes_override is not None:
             source_bytes = page_image_bytes_override
         else:
-            safe_page_path = _validate_relative_storage_path(page.ImagePath)
-            source_bytes = download_object(safe_page_path, bucket_name=bucket)
-
-        processed = validate_and_process_cover_image(
-            source_bytes,
-            None,
-            crop_x=crop_x,
-            crop_y=crop_y,
-            crop_w=crop_w,
-            crop_h=crop_h,
-            rotation=rotation,
-        )
-        restored = False
-        if apply_clahe_restore:
-            try:
-                import cv2
-                from app.services.book_illustration_service import (
-                    _apply_gentle_clahe_restore,
-                    _decode_bgr_safely,
+            safe_page_path = _validate_relative_storage_path(raw_page_path)
+            if download_object is not _ORIGINAL_DOWNLOAD_OBJECT:
+                source_bytes = await asyncio.to_thread(
+                    download_object, safe_page_path, bucket_name=bucket
+                )
+            else:
+                source_bytes = await download_object_async(
+                    safe_page_path, bucket_name=bucket
                 )
 
-                bgr = _decode_bgr_safely(processed.webp_bytes)
-                enhanced_bgr = _apply_gentle_clahe_restore(bgr)
-                enhanced_rgb = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB)
-                webp_bytes, out_w, out_h = _encode_optimized_webp(
-                    Image.fromarray(enhanced_rgb),
-                    max_bytes=MAX_OUTPUT_WEBP_BYTES,
-                )
-                processed = ProcessedCoverImage(
-                    webp_bytes=webp_bytes,
-                    width=out_w,
-                    height=out_h,
-                    size_bytes=len(webp_bytes),
-                    asset_hash=hashlib.sha256(webp_bytes).hexdigest(),
-                    detected_format=processed.detected_format,
-                )
-                restored = True
-            except Exception as exc:
-                logger.warning(
-                    "Cover CLAHE restoration fallback to original crop (type=%s)",
-                    type(exc).__name__,
-                )
+        def _process_cover_sync() -> tuple[ProcessedCoverImage, bool]:
+            processed_local = validate_and_process_cover_image(
+                source_bytes,
+                None,
+                crop_x=crop_x,
+                crop_y=crop_y,
+                crop_w=crop_w,
+                crop_h=crop_h,
+                rotation=rotation,
+            )
+            restored_local = False
+            if apply_clahe_restore:
+                try:
+                    import cv2
+                    from app.services.book_illustration_service import (
+                        _apply_gentle_clahe_restore,
+                        _decode_bgr_safely,
+                    )
+
+                    bgr = _decode_bgr_safely(processed_local.webp_bytes)
+                    enhanced_bgr = _apply_gentle_clahe_restore(bgr)
+                    enhanced_rgb = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB)
+                    webp_bytes, out_w, out_h = _encode_optimized_webp(
+                        Image.fromarray(enhanced_rgb),
+                        max_bytes=MAX_OUTPUT_WEBP_BYTES,
+                    )
+                    processed_local = ProcessedCoverImage(
+                        webp_bytes=webp_bytes,
+                        width=out_w,
+                        height=out_h,
+                        size_bytes=len(webp_bytes),
+                        asset_hash=hashlib.sha256(webp_bytes).hexdigest(),
+                        detected_format=processed_local.detected_format,
+                    )
+                    restored_local = True
+                except Exception as exc:
+                    logger.warning(
+                        "Cover CLAHE restoration fallback to original crop (type=%s)",
+                        type(exc).__name__,
+                    )
+            return processed_local, restored_local
+
+        processed, restored = await asyncio.to_thread(_process_cover_sync)
 
         source_type = "ENHANCED_CROP" if restored else "ORIGINAL_CROP"
-        owner_id = book.OwnerParentId if is_book_private(book) else None
-        scope = f"private/{owner_id}" if is_book_private(book) else "catalog"
+        scope = f"private/{owner_id}" if private_book else "catalog"
         storage_path = _validate_relative_storage_path(
-            f"studio/covers/{scope}/{book.Id}/page_{page.Id}_{processed.asset_hash[:16]}_{uuid4().hex[:8]}.webp"
+            f"studio/covers/{scope}/{book_id_val}/page_{page_id_val}_{processed.asset_hash[:16]}_{uuid4().hex[:8]}.webp"
         )
 
-        upload_object(
+        await asyncio.to_thread(
+            upload_object,
             storage_path,
             processed.webp_bytes,
             "image/webp",
@@ -1113,11 +1181,15 @@ class BookCoverService:
             upsert=False,
         )
         try:
-            stale_count = await self.repo.mark_inflight_cover_jobs_stale(book.Id)
-            has_user_cover = await self.repo.has_active_user_uploaded_cover(book.Id)
+            stale_count = await self._mark_inflight_cover_jobs_stale_scoped(
+                book_id_val,
+                actor_role=resolved_role,
+                actor_id=actor_id,
+            )
+            has_user_cover = await self.repo.has_active_user_uploaded_cover(book_id_val)
             activate_new_cover = force_replace_user_upload or (not has_user_cover)
             asset = await self.repo.create_cover_asset(
-                book_id=book.Id,
+                book_id=book_id_val,
                 owner_id=owner_id,
                 source_type=source_type,
                 storage_path=storage_path,
@@ -1131,8 +1203,8 @@ class BookCoverService:
                 provider_name="opencv_local",
                 model_id="cover-page-crop-v2",
                 metadata_json={
-                    "source_page_id": str(page.Id),
-                    "source_page_number": int(page.PageNumber or 1),
+                    "source_page_id": str(page_id_val),
+                    "source_page_number": page_number_val,
                     "rotation": rotation,
                     "crop": (
                         {"x": crop_x, "y": crop_y, "w": crop_w, "h": crop_h}
@@ -1149,8 +1221,11 @@ class BookCoverService:
             )
             await self.db.commit()
         except Exception:
-            await self.db.rollback()
-            delete_object(storage_path, bucket_name=bucket)
+            if callable(rollback):
+                res = rollback()
+                if inspect.isawaitable(res):
+                    await res
+            await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
             raise
 
         return asset_to_dto(asset)
@@ -1410,6 +1485,39 @@ class BookCoverService:
             honest_ai_generated=False,
         )
 
+    async def _advance_worker_progress(
+        self,
+        *,
+        job_id: UUID,
+        lease_token: UUID,
+        stage: str,
+        completed: int,
+        total: int,
+        unit: str = "bước",
+    ) -> None:
+        """Persist intermediate step progress while the job is RUNNING (without pre-empting final cancel fence)."""
+        try:
+            row = await self.repo.get_studio_job(job_id)
+            if (
+                row is not None
+                and row.Status == "RUNNING"
+                and row.LeaseToken == lease_token
+            ):
+                row.Stage = stage[:40]
+                row.ProgressCompleted = max(0, min(int(completed), int(total)))
+                row.ProgressTotal = max(1, int(total))
+                row.ProgressUnit = unit[:24]
+                row.UpdatedAt = datetime.now(timezone.utc)
+                await self.db.commit()
+            elif callable(getattr(self.db, "rollback", None)):
+                await self.db.rollback()
+        except Exception:
+            if callable(getattr(self.db, "rollback", None)):
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
     async def execute_ai_cover_job(
         self,
         actor_id: UUID,
@@ -1507,7 +1615,15 @@ class BookCoverService:
         if existing_job_id is not None:
             job = await self.repo.get_studio_job(existing_job_id)
             effective_job_id: UUID | None = existing_job_id
-            if callable(getattr(self.db, "rollback", None)):
+            if managed_by_worker and existing_lease_token is not None:
+                await self._advance_worker_progress(
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    stage="STYLE_BIBLE",
+                    completed=1,
+                    total=4,
+                )
+            elif callable(getattr(self.db, "rollback", None)):
                 await self.db.rollback()
         else:
             existing_job_before = None
@@ -1564,6 +1680,9 @@ class BookCoverService:
             if job is not None:
                 now_start = datetime.now(timezone.utc)
                 job.LeaseExpiresAt = now_start + timedelta(seconds=90)
+                job.ProgressCompleted = 1
+                job.ProgressTotal = 4
+                job.ProgressUnit = "bước"
                 job.UpdatedAt = now_start
             await self.db.commit()
             effective_job_id = job.Id if job is not None else None
@@ -1655,6 +1774,23 @@ class BookCoverService:
                     honest_ai_generated=False,
                 )
 
+        # Progress step 2/4: AI image generated -> entering Dual Text-Free Gate.
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="IMAGE_GENERATING",
+                completed=2,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "TEXT_FREE_VERIFY"
+            job.ProgressCompleted = 2
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
+
         # MANDATORY Dual Text-Free Gate on AI-generated cover before saving!
         processed_preview = await asyncio.to_thread(
             validate_and_process_cover_image, raw_bytes, None, rotation=0
@@ -1700,6 +1836,23 @@ class BookCoverService:
                 style_bible=style_bible,
                 honest_ai_generated=False,
             )
+
+        # Progress step 3/4: Dual Text-Free Gate passed -> saving asset.
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="TEXT_FREE_VERIFY",
+                completed=3,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "SAVING"
+            job.ProgressCompleted = 3
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
 
         asset, superseded = await self.commit_generated_cover_bytes(
             book=book,
@@ -1748,8 +1901,8 @@ class BookCoverService:
                     checkpoint_data={"asset_id": str(asset.Id)},
                     next_status="SUCCEEDED",
                     result_ref={"asset_id": str(asset.Id), **verification_meta},
-                    progress_completed=2,
-                    progress_total=2,
+                    progress_completed=4,
+                    progress_total=4,
                     progress_unit="bước",
                 )
             except BaseException:
@@ -1784,6 +1937,9 @@ class BookCoverService:
                 now_done = datetime.now(timezone.utc)
                 job.Status = "SUCCEEDED"
                 job.Stage = "COMPLETED"
+                job.ProgressCompleted = 4
+                job.ProgressTotal = 4
+                job.ProgressUnit = "bước"
                 job.CompletedAt = now_done
                 job.UpdatedAt = now_done
                 job.LeaseExpiresAt = None
@@ -1820,22 +1976,80 @@ class BookCoverService:
             managed_by_worker=existing_job_id is not None,
         )
 
-    async def get_authorized_asset_media(
-        self, actor_id: UUID, asset_id: UUID
-    ) -> tuple[bytes, str, bool]:
-        """Stream asset bytes ONLY after strict ownership verification (Admin / Owner / Published Catalog).
+    @staticmethod
+    def _etag_matches(if_none_match: str | None, etag: str | None) -> bool:
+        if not if_none_match or not etag:
+            return False
+        target = etag.strip()
+        for raw_candidate in if_none_match.split(","):
+            candidate = raw_candidate.strip()
+            if not candidate:
+                continue
+            if candidate == "*":
+                return True
+            if candidate.startswith("W/"):
+                candidate = candidate[2:].strip()
+            if candidate == target:
+                return True
+        return False
 
-        Returns `(content_bytes, mime_type, is_private_book)`.
-        """
-        role = await self.repo.get_actor_role(actor_id)
+    async def _authorize_and_prepare_asset_media(
+        self, actor_id: UUID, asset_id: UUID
+    ) -> tuple[str, str, str, bool, str | None]:
+        """Verify authorization, snapshot Storage/ETag metadata, and release DB transaction."""
+        can_use_cached_role = (
+            isinstance(self.repo, BookAssetsRepository)
+            and hasattr(self.db, "execute")
+            and "get_actor_role" not in self.repo.__dict__
+            and type(self.repo).get_actor_role is _ORIGINAL_REPO_GET_ACTOR_ROLE
+        )
+        if can_use_cached_role:
+            role = await get_cached_profile_role(self.db, actor_id)
+        else:
+            role = await self.repo.get_actor_role(actor_id)
         if role not in ("admin", "parent"):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-        asset, degraded = await self.repo.get_asset_by_id(asset_id)
+        can_use_joined_lookup = (
+            isinstance(self.repo, BookAssetsRepository)
+            and hasattr(self.db, "execute")
+            and hasattr(self.db, "begin_nested")
+            and "get_asset_by_id" not in self.repo.__dict__
+            and "get_book" not in self.repo.__dict__
+            and type(self.repo).get_asset_by_id is _ORIGINAL_REPO_GET_ASSET_BY_ID
+            and type(self.repo).get_book is _ORIGINAL_REPO_GET_BOOK
+        )
+        asset: BookPresentationAsset | None = None
+        book: Book | None = None
+        degraded = False
+        if can_use_joined_lookup:
+            try:
+                async with self.db.begin_nested():
+                    row = (
+                        await self.db.execute(
+                            select(BookPresentationAsset, Book)
+                            .join(Book, Book.Id == BookPresentationAsset.BookId)
+                            .where(
+                                BookPresentationAsset.Id == asset_id,
+                                Book.IsDeleted.is_(False),
+                            )
+                        )
+                    ).first()
+                    if row is not None:
+                        asset, book = row[0], row[1]
+            except (ProgrammingError, OperationalError) as exc:
+                if is_missing_v2_table_error(exc):
+                    logger.warning("V2 book_presentation_assets table not migrated yet")
+                    degraded = True
+                else:
+                    raise
+        else:
+            asset, degraded = await self.repo.get_asset_by_id(asset_id)
+            if not degraded and asset is not None:
+                book = await self.repo.get_book(asset.BookId)
+
         if degraded or asset is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-
-        book = await self.repo.get_book(asset.BookId)
         if book is None or bool(getattr(book, "IsDeleted", False)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
@@ -1875,7 +2089,48 @@ class BookCoverService:
             if asset.MimeType in ("image/webp", "image/png", "image/jpeg")
             else "image/webp"
         )
-        if callable(getattr(self.db, "rollback", None)):
-            await self.db.rollback()
-        content = await asyncio.to_thread(download_object, safe_path, bucket_name=bucket)
+        raw_hash = getattr(asset, "AssetHash", None)
+        etag = (
+            f'"{raw_hash.strip()}"'
+            if isinstance(raw_hash, str) and raw_hash.strip()
+            else None
+        )
+        rollback = getattr(self.db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+        return safe_path, bucket, mime_type, private_book, etag
+
+    async def get_authorized_asset_media_response(
+        self,
+        actor_id: UUID,
+        asset_id: UUID,
+        *,
+        if_none_match: str | None = None,
+    ) -> tuple[bytes | None, str, bool, str | None]:
+        """Authorize, support 304 ETag after auth, and stream asset bytes off the event loop."""
+        safe_path, bucket, mime_type, private_book, etag = (
+            await self._authorize_and_prepare_asset_media(actor_id, asset_id)
+        )
+        if self._etag_matches(if_none_match, etag):
+            return None, mime_type, private_book, etag
+
+        if download_object is not _ORIGINAL_DOWNLOAD_OBJECT:
+            content = await asyncio.to_thread(download_object, safe_path, bucket_name=bucket)
+        else:
+            content = await download_object_async(safe_path, bucket_name=bucket)
+        return content, mime_type, private_book, etag
+
+    async def get_authorized_asset_media(
+        self, actor_id: UUID, asset_id: UUID
+    ) -> tuple[bytes, str, bool]:
+        """Stream asset bytes ONLY after strict ownership verification (Admin / Owner / Published Catalog).
+
+        Returns `(content_bytes, mime_type, is_private_book)`.
+        """
+        content, mime_type, private_book, _etag = (
+            await self.get_authorized_asset_media_response(actor_id, asset_id)
+        )
+        assert content is not None
         return content, mime_type, private_book

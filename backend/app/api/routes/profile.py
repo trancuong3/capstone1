@@ -1,9 +1,11 @@
+import inspect
+from typing import List
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy import select
-from typing import List
-from uuid import UUID
 
 from app.api.deps import (
     get_current_parent_id,
@@ -11,7 +13,6 @@ from app.api.deps import (
     require_active_profile_id,
     require_parent_id,
 )
-from app.database.config import SUPABASE_AVATAR_BUCKET
 from app.models import ChildProfile, Profile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.profile_service import (
@@ -21,6 +22,7 @@ from app.services.profile_service import (
     batch_sign_avatar_paths,
 )
 from app.schemas.profile import (
+    ChildVoicePreferencesUpdate,
     ContactPhoneUpdateRequest,
     DashboardSummaryResponse,
     AdminParentListResponse,
@@ -54,7 +56,6 @@ from app.services.avatar_service import (
     AvatarResourceNotFoundError,
     AvatarService,
 )
-from app.services.storage_service import create_signed_image_url
 
 # =========================================================
 # ERRORS
@@ -155,6 +156,42 @@ class ChildProfileRepository:
             raise
         return child
 
+    async def update_voice_preferences(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        voice_preferences: dict,
+    ):
+        child = await self.get_by_id_and_parent(child_id, parent_id)
+        if child is None:
+            return None
+
+        next_settings = dict(child.Settings or {})
+        existing_vp = next_settings.get("voice_preferences")
+        incoming_updated_at = voice_preferences.get("updated_at")
+        existing_updated_at = (
+            existing_vp.get("updated_at") if isinstance(existing_vp, dict) else None
+        )
+        if (
+            isinstance(incoming_updated_at, (int, float))
+            and not isinstance(incoming_updated_at, bool)
+            and incoming_updated_at > 0
+            and isinstance(existing_updated_at, (int, float))
+            and not isinstance(existing_updated_at, bool)
+            and int(existing_updated_at) > int(incoming_updated_at)
+        ):
+            return child
+
+        next_settings["voice_preferences"] = dict(voice_preferences)
+        child.Settings = next_settings
+        try:
+            await self.db.commit()
+            await self.db.refresh(child)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return child
+
     async def delete(
         self,
         child: ChildProfile,
@@ -195,17 +232,19 @@ class ChildProfileService:
         return None
 
     @staticmethod
-    def _response(child: ChildProfile, *, avatar_url: str | None = None, use_prebuilt_url: bool = False) -> dict:
+    async def _response(
+        child: ChildProfile,
+        *,
+        avatar_url: str | None = None,
+        use_prebuilt_url: bool = False,
+    ) -> dict:
         if not use_prebuilt_url:
             safe_path = ChildProfileService._safe_avatar_path(child)
-            avatar_url = (
-                create_signed_image_url(
-                    safe_path,
-                    bucket_name=SUPABASE_AVATAR_BUCKET,
-                )
-                if safe_path
-                else None
-            )
+            if safe_path:
+                signed_map = await batch_sign_avatar_paths([safe_path])
+                avatar_url = signed_map.get(safe_path)
+            else:
+                avatar_url = None
         return {
             "id": child.Id,
             "parent_id": child.ParentId,
@@ -217,17 +256,47 @@ class ChildProfileService:
         }
 
     async def _serialize_children_batched(self, children: list[ChildProfile]) -> list[dict]:
-        safe_paths = {child.Id: self._safe_avatar_path(child) for child in children}
-        signed_map = await batch_sign_avatar_paths(
-            [p for p in safe_paths.values() if p is not None]
-        )
-        return [
-            self._response(
-                child,
-                avatar_url=signed_map.get(safe_paths[child.Id]) if safe_paths[child.Id] else None,
-                use_prebuilt_url=True,
-            )
+        snapshots = [
+            {
+                "id": child.Id,
+                "parent_id": child.ParentId,
+                "alias": child.Alias,
+                "grade": child.Grade,
+                "settings": child.Settings,
+                "created_at": child.CreatedAt,
+                "safe_path": self._safe_avatar_path(child),
+            }
             for child in children
+        ]
+        paths_to_sign = [
+            item["safe_path"] for item in snapshots if item["safe_path"] is not None
+        ]
+        if paths_to_sign:
+            repo_db = getattr(self.repository, "db", None)
+            rollback = getattr(repo_db, "rollback", None)
+            if callable(rollback):
+                try:
+                    result = rollback()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    pass
+            signed_map = await batch_sign_avatar_paths(paths_to_sign)
+        else:
+            signed_map = {}
+        return [
+            {
+                "id": item["id"],
+                "parent_id": item["parent_id"],
+                "alias": item["alias"],
+                "grade": item["grade"],
+                "settings": item["settings"],
+                "created_at": item["created_at"],
+                "avatar_url": (
+                    signed_map.get(item["safe_path"]) if item["safe_path"] else None
+                ),
+            }
+            for item in snapshots
         ]
 
     async def list_children(
@@ -285,6 +354,30 @@ class ChildProfileService:
         child.Grade = data.grade
 
         updated = await self.repository.update(child)
+        return (await self._serialize_children_batched([updated]))[0]
+
+    async def update_child_voice_preferences(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        data: ChildVoicePreferencesUpdate,
+    ):
+        import time as _time
+
+        payload = {
+            "voice_id": data.voice_id,
+            "gender": data.gender,
+            "region": data.region,
+            "speed": data.speed,
+            "updated_at": data.updated_at if data.updated_at is not None else int(_time.time() * 1000),
+        }
+        updated = await self.repository.update_voice_preferences(
+            child_id,
+            parent_id,
+            payload,
+        )
+        if updated is None:
+            raise ChildProfileNotFoundError()
         return (await self._serialize_children_batched([updated]))[0]
 
     async def delete_child(
@@ -433,6 +526,42 @@ async def update_child(
         )
 
 
+@router.patch(
+    "/children/{child_id}/voice-preferences",
+    response_model=ChildProfileResponse,
+)
+async def update_child_voice_preferences(
+    child_id: UUID,
+    voice_in: ChildVoicePreferencesUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(
+        require_parent_id
+    ),
+):
+    """
+    Cập nhật lựa chọn giọng Cô giáo / Thầy giáo AI cho hồ sơ trẻ (lưu trong childprofiles.settings).
+    """
+
+    repository = ChildProfileRepository(db)
+    service = ChildProfileService(repository)
+
+    try:
+        return await service.update_child_voice_preferences(
+            child_id,
+            current_parent_id,
+            voice_in,
+        )
+
+    except ChildProfileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Child profile not found",
+            },
+        )
+
+
 @router.delete(
     "/children/{child_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -503,6 +632,14 @@ async def get_current_profile(
             detail={
                 "code": "RESOURCE_NOT_FOUND",
                 "message": "Profile not found",
+            },
+        )
+    except ProfileAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Access denied",
             },
         )
 
@@ -702,6 +839,14 @@ async def update_current_contact_phone(
                 "message": "Profile not found",
             },
         ) from error
+    except ProfileAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Access denied",
+            },
+        ) from error
 
     return ParentProfileResponse.model_validate(profile)
 
@@ -722,6 +867,9 @@ async def get_admin_parent_directory(
     db: AsyncSession = Depends(get_db),
 ):
     """List parent profiles for authenticated Admin users only."""
+    search = search if isinstance(search, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     service = AdminParentService(AdminParentRepository(db))
     try:
         result = await service.list_parents(

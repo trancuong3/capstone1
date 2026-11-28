@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "閱讀旅程導覽"
+  },
   "overview": {
     "title": "進度報告",
     "subtitle": "追蹤孩子的閱讀時長、準確度與連續閱讀天數。",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "目前報告仍顯示中。您可以嘗試重新載入期間列表。",
     "noPeriodReportTitle": "所選期間無報告",
     "noSavedReportTitle": "尚無已儲存的報告",
-    "noReportDescription": "此選項無報告。請選擇其他孩子或期間；系統不會使用範例資料替代。",
+    "noReportDescription": "此選擇暫無報告。您可以切換其他孩子檔案或報告週期。",
     "pendingReportTitle": "資料待補充",
-    "pendingReportDesc": "報告資料尚未準備好。系統不會顯示預估數據。",
+    "pendingReportDesc": "報告資料暫未就緒，請稍後再試。",
     "periodBannerRange": "期間：{start} → {end}",
     "periodGeneratedAt": "更新於 {dateTime} (越南時間)，不會在每次閱讀後自動重新計算。",
     "unsupportedFormatTitle": "不支援此報告格式",
@@ -61,10 +64,10 @@
     "viewAllWords": "查看全部 ({count})",
     "noDifficultWordsInPeriod": "本期報告尚未記錄練習詞彙。",
     "difficultWordsWindowNote": "注意：練習詞彙區塊預設為最近 90 天，不會隨上方報告期間變更。",
-    "legacyMetricsTitle": "舊版指標",
-    "legacyMetricsSubtitle": "保留已儲存的欄位名稱；尚未轉換為閱讀次數或準確率百分比。",
-    "legacyTotalBooks": "已儲存書籍總數 (total_books)",
-    "legacyAvgFluency": "已儲存的 avg_fluency 值 (單位未定義)",
+    "legacyMetricsTitle": "歷史儲存指標",
+    "legacyMetricsSubtitle": "來自早期紀錄格式的彙整指標。",
+    "legacyTotalBooks": "已儲存書籍總數",
+    "legacyAvgFluency": "平均流暢度評分",
     "periodSelectLabel": "已儲存的報告期間",
     "periodLatestOption": "最新",
     "periodSelectedRange": "{start} → {end} (已選)",
@@ -135,6 +138,9 @@
       "aiWriting": "AI 正在撰寫評論…",
       "aiRefresh": "請 AI 重新撰寫評論",
       "aiFallbackHint": "目前無法連接 AI，因此顯示數據自動評論。家長稍後可點擊「請 AI 重新撰寫評論」。",
+      "aiFallbackQuota": "AI 暫時忙碌或已達請求上限，目前顯示數據自動評論。請稍候幾分鐘後再點擊「請 AI 重新撰寫評論」。",
+      "aiFallbackTimeout": "AI 回應時間超出預期，目前顯示數據自動評論。您可在幾秒後再次點擊「請 AI 重新撰寫評論」。",
+      "aiFallbackConfig": "伺服器目前尚未完成 AI 服務設定，因此顯示數據自動評論。請稍後再試或聯絡管理員。",
       "strengthsTitle": "孩子表現良好",
       "improvementsTitle": "孩子需要改進",
       "actionsTitle": "後續輔導建議",
@@ -143,7 +149,11 @@
       "recommendedWordsTitle": "建議練習詞彙（{days} 天）",
       "heardAsCount": "孩子常讀成「{heardAs}」（{times} 次）",
       "recordedCount": "記錄 {times} 次",
-      "heardAsInline": "（讀成「{heardAs}」）"
+      "heardAsInline": "（讀成「{heardAs}」）",
+      "phonologyTitle": "朗讀中常需鞏固的聲調與音節對比",
+      "phonologyDisclaimer": "根據近期朗讀記錄彙整的輕鬆熱身建議（非醫學診斷）。",
+      "openMinimalPairSandbox": "60秒對立詞練習",
+      "phonologySessionsBadge": "{sessions} 次朗讀"
     },
     "firstPassSummary": {
       "regionAria": "首次與練習結果",
@@ -162,7 +172,11 @@
       "uncertainLabel": "聽不清楚",
       "uncertainNote": "分開記錄，不計入已確認的發音錯誤。"
     },
-    "entertainmentSummaryHeading": "寓教於樂學習與語言技能概況 (V4.0)"
+    "entertainmentSummaryHeading": "寓教於樂學習與語言技能概況 (V4.0)",
+    "focusAria": "篩選報告板塊",
+    "focusAssessment": "AI 評估",
+    "focusSignals": "圖表與指標",
+    "focusEntertainment": "邊玩邊學"
   },
   "sessions": {
     "title": "閱讀歷史",
@@ -174,7 +188,7 @@
     "noChildDesc": "建立個人檔案以開始儲存孩子的閱讀活動。",
     "createChildAction": "建立孩子檔案",
     "pendingDataTitle": "資料待補充",
-    "pendingHistoryDesc": "閱讀歷史數據尚未準備好。系統不會顯示範例數據。",
+    "pendingHistoryDesc": "閱讀歷程資料暫未就緒，請稍後再試。",
     "retry": "重試",
     "manageChildren": "管理兒童檔案",
     "notFoundTitle": "找不到歷史記錄",
@@ -217,7 +231,7 @@
     "durationMinutesSeconds": "{minutes} 分 {seconds} 秒",
     "detail": {
       "loadingAria": "正在載入閱讀活動詳情",
-      "pendingDesc": "此項目的資料格式目前不適用，無範例資料。",
+      "pendingDesc": "此項資料暫未就緒，請稍後再試。",
       "notFoundTitle": "找不到閱讀會話",
       "notFoundDesc": "閱讀會話不存在或不屬於當前帳號。",
       "backToHistory": "回到歷史記錄",
@@ -283,7 +297,7 @@
       "originalOmission": "漏讀",
       "originalMispronunciation": "發音不正確",
       "recognizedPrefix": "ViRead 識別為：“{text}”",
-      "pageRevisionMeta": "頁面代碼 {pageId} · 版本 ",
+      "pageRevisionMeta": "書頁",
       "firstPassSectionAria": "首次閱讀事件",
       "firstPassSectionTitle": "首次閱讀事件",
       "timestampAt": "於 ",
@@ -346,7 +360,7 @@
       "prevShort": "上一頁",
       "nextShort": "下一步",
       "loadingPageAria": "正在載入書本頁面內容",
-      "verifiedPageTitle": "已驗證頁面內容",
+      "verifiedPageTitle": "書頁內容",
       "selfCorrectedCount": "自行糾正正確：{count} 個字",
       "pageMissingContentNote": "無法按寶貝閱讀時的確切版本載入已讀頁面內容。已儲存的朗讀內容與統計資料保持不變。",
       "legendAria": "顏色對照說明",
@@ -388,7 +402,20 @@
         "repeated": "重複",
         "hesitation": "猶豫"
       }
-    }
+    },
+    "summarySessions": "閱讀次數",
+    "summaryDuration": "累計時長",
+    "summaryCompleted": "已完成",
+    "summaryDurationZero": "0 分鐘",
+    "filterAria": "依狀態篩選閱讀紀錄",
+    "filterAll": "全部",
+    "filterCompleted": "已完成",
+    "filterIncomplete": "進行中",
+    "searchPlaceholder": "依本頁書名篩選…",
+    "searchAria": "依書名搜尋閱讀紀錄",
+    "filterEmptyTitle": "沒有符合條件的紀錄",
+    "filterEmptyDesc": "請切換狀態或清空搜尋關鍵字。",
+    "clearFilterAction": "檢視全部紀錄"
   },
   "readingManagement": {
     "title": "閱讀管理與提醒",
@@ -406,7 +433,7 @@
     "errorTitle": "發生錯誤",
     "savedTitle": "已儲存",
     "loadChildFailed": "無法載入兒童檔案，請再試一次。",
-    "loadManagementFailed": "無法載入閱讀管理資料。請檢查後端與閱讀管理遷移，然後再試。",
+    "loadManagementFailed": "無法載入閱讀管理資料，請稍後再試。",
     "mutationUnconfirmed": "操作失敗。資料尚未確認儲存，請再試一次。",
     "overviewAria": "閱讀習慣概覽",
     "summaryRunningGoals": "進行中的目標",
@@ -514,7 +541,7 @@
     "goalsTimezoneRule": "進度僅計算具有有效開始/結束時間的已完成會話。目標不會僅因達到 100% 而自動完成。",
     "remindersSectionAria": "閱讀提醒",
     "remindersTitle": "閱讀提醒",
-    "remindersSubtitle": "行事曆會依所選時區儲存。開啟電子郵件提醒時，伺服器會將提醒發送至已驗證的家長地址。",
+    "remindersSubtitle": "日程依所選時區儲存。開啟電子郵件提醒後，系統將寄送提醒至家長已驗證信箱。",
     "addReminder": "新增提醒",
     "dueRemindersTitle": "閱讀時間 ({count})",
     "reminderAtPrefix": "提醒時間於 ",
@@ -565,7 +592,7 @@
       "startLabel": "開始",
       "createGoal": "建立目標",
       "localTimeLabel": "本地時間",
-      "ianaTimezoneLabel": "IANA 時區",
+      "ianaTimezoneLabel": "詳細時區",
       "repeatDaysLabel": "重複日期",
       "emailReminderLabel": "閱讀提醒電子郵件",
       "sendEmailCheck": "到閱讀時間時發送電子郵件給家長",
@@ -643,7 +670,12 @@
       "favorited": "已收藏",
       "wantToRead": "想讀",
       "savedToRead": "已儲存至閱讀清單"
-    }
+    },
+    "focusAria": "篩選閱讀管理板塊",
+    "focusPlans": "計畫",
+    "focusGoals": "目標",
+    "focusReminders": "提醒",
+    "androidReminderBody": "到時間和 {alias} 一起在 ViRead 讀書囉！"
   },
   "entertainmentSummary": {
     "loading": "正在彙總 {childName} 的趣味學習進度…",
@@ -665,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "建議以 0.85 倍速慢練的歌詞片段",
     "openSongAction": "打開歌曲",
     "homeTipsTitle": "家長居家陪伴小建議"
+  },
+  "printCertificate": {
+    "brandTagline": "家庭閱讀成長報告",
+    "printA4Action": "列印 A4 報告",
+    "downloadCertificateAction": "下載里程碑證書 (.png)",
+    "certificateHeading": "閱讀成長里程碑證書",
+    "certificateSubtitle": "表彰與家人堅持不懈的越南語朗讀成長之旅",
+    "awardedTo": "欣然授予熱愛閱讀的小讀者",
+    "progressAchievement": "{alias} 每週堅持朗讀練習，不斷豐富越南語詞彙！",
+    "progressStatsLine": "完成練習：{sessions} 次 · 累計朗讀：{words} 詞 · 平均準確率：{accuracy}",
+    "sessionReaderFallback": "勤奮的小讀者",
+    "sessionAchievement": "清晰自信地完成本次朗讀練習！",
+    "sessionStatsLine": "已讀頁數：{pages} · 總詞數：{words} · 最高準確率：{accuracy}",
+    "issuedOn": "頒發日期：{date}",
+    "encouragementFooter": "今天讀過的每一頁書，都是在家人陪伴下播下的溫暖知識種子。"
   }
 }

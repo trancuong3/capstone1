@@ -289,7 +289,7 @@ export function AdminBookEditorScreen({
                   {t(
                     "books.editor.coverDesc",
                     undefined,
-                    "Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà không làm thay đổi các trang đọc hay revision đã xác minh.",
+                    "Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà không làm thay đổi các trang đọc hay bản chữ đã xác minh.",
                   )}
                 </p>
               </div>
@@ -368,7 +368,7 @@ export function AdminBookEditorScreen({
                 ? t(
                     "books.editor.dangerZoneActiveDesc",
                     undefined,
-                    "Ngừng hoạt động sẽ ẩn sách khỏi thư viện phụ huynh nhưng vẫn giữ nguyên toàn bộ trang, revision và lịch sử đọc.",
+                    "Ngừng hoạt động sẽ ẩn sách khỏi thư viện phụ huynh nhưng vẫn giữ nguyên toàn bộ trang, bản chữ và lịch sử đọc.",
                   )
                 : t(
                     "books.editor.dangerZoneRetiredDesc",

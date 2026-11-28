@@ -31,6 +31,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_MULTIMODAL_MODEL,
+    strip_env_value,
+)
 from app.services.smart_studio_flags import SmartStudioFlags
 
 logger = logging.getLogger(__name__)
@@ -520,7 +527,7 @@ def _env_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
 
 
 def _has_secret(env: Mapping[str, str], key: str) -> bool:
-    return bool((env.get(key) or "").strip())
+    return bool(strip_env_value(env.get(key)))
 
 
 _MAX_IMAGE_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap on generated image responses
@@ -529,12 +536,37 @@ _MAX_IMAGE_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap on generated ima
 def build_default_provider_registry(
     env: Mapping[str, str] | None = None,
 ) -> tuple[ProviderSpec, ...]:
-    """Build the capability matrix grounded in empirical 2025/2026 zero-cost probe findings."""
+    """Build the capability matrix grounded in empirical 2026 zero-cost probe findings."""
+    from app.services.ocr_ai.config import OcrCorrectionConfig
+    from app.services.ocr_ai.exceptions import OcrConfigurationError
+
     source_env: Mapping[str, str] = os.environ if env is None else env
-    cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
-    ai_image_enabled = _env_bool(source_env, "SMART_AI_IMAGE_GEN_ENABLED", True)
     gemini_key_present = _has_secret(source_env, "GEMINI_API_KEY")
     groq_key_present = _has_secret(source_env, "GROQ_API_KEY")
+    if env is None:
+        ollama_local_enabled = OcrCorrectionConfig.local_ollama_enabled()
+        try:
+            cloud_ocr_enabled = OcrCorrectionConfig.from_environment().cloud_enabled
+        except OcrConfigurationError:
+            cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
+    else:
+        raw_local = source_env.get("LOCAL_OCR_ENABLED")
+        if raw_local is not None and raw_local.strip():
+            ollama_local_enabled = _env_bool(source_env, "LOCAL_OCR_ENABLED", True)
+        else:
+            ollama_local_enabled = not (
+                _env_bool(source_env, "RENDER", False)
+                or _env_bool(source_env, "VIREAD_WEB_DISABLE_HEAVY_WORKERS", False)
+                or (source_env.get("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+            )
+        raw_cloud = source_env.get("OCR_CLOUD_CORRECTION_ENABLED")
+        if raw_cloud is not None and raw_cloud.strip():
+            cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
+        else:
+            cloud_ocr_enabled = (not ollama_local_enabled) and (
+                gemini_key_present or groq_key_present
+            )
+    ai_image_enabled = _env_bool(source_env, "SMART_AI_IMAGE_GEN_ENABLED", True)
     cloudflare_ready = (
         ai_image_enabled
         and _has_secret(source_env, "CLOUDFLARE_ACCOUNT_ID")
@@ -547,19 +579,33 @@ def build_default_provider_registry(
         source_env, "GEMINI_IMAGE_GEN_PAID_OPT_IN", False
     ) or _env_bool(source_env, "GEMINI_IMAGE_BILLING_ENABLED", False)
 
-    gemini_primary = (source_env.get("GEMINI_OCR_PRIMARY_MODEL") or "gemini-2.5-flash-lite").strip()
-    gemini_fallback = (source_env.get("GEMINI_OCR_FALLBACK_MODEL") or "gemini-2.5-flash").strip()
-    groq_model = (source_env.get("GROQ_OCR_MODEL") or "llama-3.3-70b-versatile").strip()
-    ollama_model = (source_env.get("LOCAL_OCR_MODEL") or "qwen3-vl:4b-instruct-q4_K_M").strip()
+    gemini_primary = (
+        strip_env_value(source_env.get("GEMINI_OCR_PRIMARY_MODEL"))
+        or strip_env_value(source_env.get("GEMINI_PRIMARY_MODEL"))
+        or DEFAULT_GEMINI_PRIMARY_MODEL
+    )
+    gemini_fallback = (
+        strip_env_value(source_env.get("GEMINI_OCR_FALLBACK_MODEL"))
+        or strip_env_value(source_env.get("GEMINI_FALLBACK_MODEL"))
+        or DEFAULT_GEMINI_FALLBACK_MODEL
+    )
+    groq_model = (
+        strip_env_value(source_env.get("GROQ_OCR_MODEL"))
+        or strip_env_value(source_env.get("GROQ_PRIMARY_MODEL"))
+        or DEFAULT_GROQ_MULTIMODAL_MODEL
+    )
+    ollama_model = strip_env_value(source_env.get("LOCAL_OCR_MODEL")) or "qwen3-vl:4b-instruct-q4_K_M"
     cloudflare_model = (
-        source_env.get("CLOUDFLARE_IMAGE_MODEL") or "@cf/black-forest-labs/flux-1-schnell"
-    ).strip()
+        strip_env_value(source_env.get("CLOUDFLARE_IMAGE_MODEL"))
+        or "@cf/black-forest-labs/flux-1-schnell"
+    )
     local_diffusers_model = (
-        source_env.get("LOCAL_IMAGE_GEN_MODEL") or "Lykon/dreamshaper-8+lcm-lora-sdv1-5"
-    ).strip()
+        strip_env_value(source_env.get("LOCAL_IMAGE_GEN_MODEL"))
+        or "Lykon/dreamshaper-8+lcm-lora-sdv1-5"
+    )
     gemini_image_model = (
-        source_env.get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
-    ).strip()
+        strip_env_value(source_env.get("GEMINI_IMAGE_MODEL")) or "gemini-2.5-flash-image"
+    )
 
     return (
         ProviderSpec(
@@ -589,7 +635,7 @@ def build_default_provider_registry(
         ProviderSpec(
             provider_id="gemini_alias",
             family="google",
-            model_id="gemini-flash-lite-latest",
+            model_id=DEFAULT_GEMINI_ALIAS_MODEL,
             capabilities=ALL_TEXT_VISION_CAPABILITIES,
             quota_group="gemini_free_shared",
             is_local=False,
@@ -617,7 +663,7 @@ def build_default_provider_registry(
             capabilities=ALL_TEXT_VISION_CAPABILITIES,
             quota_group=None,
             is_local=True,
-            enabled=True,
+            enabled=ollama_local_enabled,
             max_attempt_timeout_seconds=45.0,
             priority_order=40,
             notes="100% local loopback privacy fallback for text/vision/JSON.",
@@ -1569,15 +1615,36 @@ class AiCapabilityRouter:
         }
 
 
+_SHARED_CIRCUIT_BREAKER_LOCK = threading.Lock()
+_SHARED_CIRCUIT_BREAKER: CircuitBreakerRegistry | None = None
+
 _DEFAULT_ROUTER_LOCK = threading.Lock()
 _DEFAULT_ROUTER: AiCapabilityRouter | None = None
+
+
+def get_shared_ai_circuit_breaker() -> CircuitBreakerRegistry:
+    global _SHARED_CIRCUIT_BREAKER
+    with _SHARED_CIRCUIT_BREAKER_LOCK:
+        if _SHARED_CIRCUIT_BREAKER is None:
+            _SHARED_CIRCUIT_BREAKER = CircuitBreakerRegistry()
+        return _SHARED_CIRCUIT_BREAKER
+
+
+def reset_shared_ai_circuit_breaker() -> None:
+    global _SHARED_CIRCUIT_BREAKER
+    with _SHARED_CIRCUIT_BREAKER_LOCK:
+        if _SHARED_CIRCUIT_BREAKER is not None:
+            _SHARED_CIRCUIT_BREAKER.reset()
+        _SHARED_CIRCUIT_BREAKER = None
 
 
 def get_default_ai_router() -> AiCapabilityRouter:
     global _DEFAULT_ROUTER
     with _DEFAULT_ROUTER_LOCK:
         if _DEFAULT_ROUTER is None:
-            _DEFAULT_ROUTER = AiCapabilityRouter()
+            _DEFAULT_ROUTER = AiCapabilityRouter(
+                circuit_breaker=get_shared_ai_circuit_breaker()
+            )
         return _DEFAULT_ROUTER
 
 
@@ -1585,3 +1652,4 @@ def reset_default_ai_router() -> None:
     global _DEFAULT_ROUTER
     with _DEFAULT_ROUTER_LOCK:
         _DEFAULT_ROUTER = None
+    reset_shared_ai_circuit_breaker()

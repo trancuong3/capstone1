@@ -23,6 +23,29 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function PictureDescriptionPage() {
-  return <PictureDescriptionScreen />;
+interface PictureDescriptionPageProps {
+  readonly searchParams?: Promise<{
+    childId?: string | string[];
+    bookId?: string | string[];
+    pageId?: string | string[];
+  }>;
+}
+
+function firstQueryValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function PictureDescriptionPage({
+  searchParams,
+}: PictureDescriptionPageProps = {}) {
+  const query = searchParams ? await searchParams : {};
+  return (
+    <PictureDescriptionScreen
+      initialBookId={firstQueryValue(query.bookId)}
+      initialChildId={firstQueryValue(query.childId)}
+      initialPageId={firstQueryValue(query.pageId)}
+    />
+  );
 }

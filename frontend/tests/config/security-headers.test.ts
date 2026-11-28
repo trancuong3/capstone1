@@ -18,30 +18,47 @@ describe("Next.js HTTP security headers", () => {
     vi.resetModules();
   });
 
-  it("emits baseline security headers and CSP compatible with Supabase Storage, WebAudio/AudioWorklet blobs, and OAuth", async () => {
+  it("emits baseline security headers, static asset caching, HSTS in non-dev, and CSP compatible with Supabase Storage, WebAudio/AudioWorklet blobs, and OAuth", async () => {
+    vi.stubEnv("NODE_ENV", "production");
     process.env.NEXT_PUBLIC_API_URL = "https://api.viread.example.org";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://proj.supabase.co";
     vi.resetModules();
 
     const { default: nextConfig } = await import("@/next.config");
     const rules = (await nextConfig.headers?.()) ?? [];
-    expect(rules).toHaveLength(2);
-    expect(rules[0]?.source).toBe("/wasm/:path*");
-    const wasmHeaders = new Map(rules[0]?.headers.map((h) => [h.key, h.value]));
-    expect(wasmHeaders.get("Cache-Control")).toBe(
+    const bySource = new Map(
+      rules.map((rule) => [
+        rule.source,
+        new Map(rule.headers.map((h) => [h.key, h.value])),
+      ]),
+    );
+
+    expect(bySource.get("/wasm/:path*")?.get("Cache-Control")).toBe(
       "public, max-age=31536000, immutable",
     );
-
-    expect(rules[1]?.source).toBe("/:path*");
-    const map = new Map(rules[1]?.headers.map((h) => [h.key, h.value]));
-    expect(map.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(map.get("X-Frame-Options")).toBe("DENY");
-    expect(map.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
-    expect(map.get("Permissions-Policy")).toBe(
-      "camera=(self), microphone=(self)",
+    expect(bySource.get("/images/:path*")?.get("Cache-Control")).toBe(
+      "public, max-age=86400, stale-while-revalidate=604800",
+    );
+    expect(bySource.get("/audio/:path*")?.get("Cache-Control")).toBe(
+      "public, max-age=86400, stale-while-revalidate=604800",
+    );
+    expect(bySource.get("/workers/:path*")?.get("Cache-Control")).toBe(
+      "public, max-age=3600, stale-while-revalidate=86400",
     );
 
-    const csp = map.get("Content-Security-Policy") ?? "";
+    const map = bySource.get("/:path*");
+    expect(map).toBeDefined();
+    expect(map?.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(map?.get("X-Frame-Options")).toBe("DENY");
+    expect(map?.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    expect(map?.get("Permissions-Policy")).toBe(
+      "camera=(self), microphone=(self)",
+    );
+    expect(map?.get("Strict-Transport-Security")).toBe(
+      "max-age=63072000; includeSubDomains; preload",
+    );
+
+    const csp = map?.get("Content-Security-Policy") ?? "";
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
@@ -57,6 +74,17 @@ describe("Next.js HTTP security headers", () => {
     expect(csp).toContain("https://*.supabase.co");
     expect(csp).toContain("https://huggingface.co");
     expect(csp).toContain("https://*.hf.co");
+  });
+
+  it("omits Strict-Transport-Security in development mode", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.resetModules();
+    const { default: devConfig } = await import("@/next.config");
+    const rules = (await devConfig.headers?.()) ?? [];
+    const pageRule = rules.find((rule) => rule.source === "/:path*");
+    expect(
+      pageRule?.headers.find((h) => h.key === "Strict-Transport-Security"),
+    ).toBeUndefined();
   });
 
   it.each([
@@ -105,12 +133,22 @@ describe("Next.js HTTP security headers", () => {
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "1");
     vi.resetModules();
     const { default: prodConfig } = await import("@/next.config");
-    expect(prodConfig.experimental).toBeUndefined();
+    expect(prodConfig.experimental?.devMemoryThresholdRestart).toBeUndefined();
+    expect(prodConfig.experimental?.serverComponentsHmrCache).toBeUndefined();
+    expect(prodConfig.experimental?.webpackMemoryOptimizations).toBeUndefined();
 
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "");
     vi.resetModules();
     const { default: normalDevConfig } = await import("@/next.config");
-    expect(normalDevConfig.experimental).toBeUndefined();
+    expect(
+      normalDevConfig.experimental?.devMemoryThresholdRestart,
+    ).toBeUndefined();
+    expect(
+      normalDevConfig.experimental?.serverComponentsHmrCache,
+    ).toBeUndefined();
+    expect(
+      normalDevConfig.experimental?.webpackMemoryOptimizations,
+    ).toBeUndefined();
   });
 });

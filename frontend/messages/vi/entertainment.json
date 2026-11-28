@@ -28,6 +28,8 @@
     "defaultRecommendationReason": "Mỗi trò chơi đều kết nối nhẹ nhàng với sách bé đang đọc để giúp bé nhớ từ lâu hơn mà không hề áp lực.",
     "focusDifficultWordsLabel": "Từ bé đang ôn nhẹ:",
     "playSuggestedCta": "Chơi gợi ý ngay",
+    "magicQuestCta": "✨ Nhiệm vụ Phép Thuật 60s (Ôn từ ngay)",
+    "magicQuestNoBookHint": "Chưa có sách khớp từ khó? Cú Mèo dệt cuộn chuyện 60 giây chơi xong tự xóa ngay!",
     "onboardingRegionAria": "Hướng dẫn làm quen khu vực Giải trí",
     "onboardingCounter": "Hướng dẫn nhanh ({current}/{total})",
     "onboardingStep1Title": "1. Chọn góc chơi bé thích",
@@ -57,7 +59,8 @@
     "memoryCta": "Khám phá trí nhớ",
     "breakReminderTitle": "Nhịp nghỉ mắt khỏe mạnh:",
     "defaultBreakReminder": "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh và tiếp thu tự nhiên.",
-    "recommendationLoadError": "Không thể tải gợi ý học tập lúc này."
+    "recommendationLoadError": "Không thể tải gợi ý học tập lúc này.",
+    "karaokeMagicChantCta": "✨ Đồng dao phép thuật 80 BPM"
   },
   "karaoke": {
     "title": "Karaoke thiếu nhi",
@@ -332,6 +335,49 @@
       },
       "lyricsOnlyFallbackGuidance": "Thiết bị chưa kích hoạt bộ phân tích âm thanh Web Audio, nên lần này hệ thống chỉ chấm lời hát.",
       "mildSpeakerBleedGuidance": "Có một ít tiếng nhạc loa lọt vào micro. Bé đeo tai nghe sẽ giúp điểm cao độ và nhịp điệu chính xác hơn nữa!"
+    },
+    "magicChant": {
+      "libraryBadge": "✨ Tức thì · Hát xong tự xóa",
+      "libraryCardTitle": "✨ Đồng Dao Phép Thuật 80 BPM · Vỗ Nhịp & Đọc Từ Cần Ôn (Hát xong tự xóa)",
+      "libraryCardDesc": "Chưa có bài hát phù hợp? Cú Mèo dệt vè đồng dao 80 BPM từ chữ bé cần ôn!",
+      "libraryOpenCta": "Mở Đồng Dao Phép Thuật",
+      "loadingTitle": "Cú Mèo đang gõ phách dệt đồng dao cho bé…",
+      "loadingStage1": "Chọn từ cần ôn nhẹ…",
+      "loadingStage2": "Gieo vần đồng dao 80 BPM…",
+      "errorTitle": "Cuộn đồng dao đang tạm nghỉ một chút",
+      "errorBody": "Ba mẹ và bé hãy bấm Thử lại để mở bài đồng dao mới nhé.",
+      "expiredNotice": "Bài đồng dao trước đã tan biến sau 15 phút — Cú Mèo vừa dệt bài mới cho bé!",
+      "lineBadge": "Câu đồng dao {current}/{total}",
+      "step1ClapPrompt": "Bước 1: Chạm trống vỗ đủ {beats} nhịp phách gỗ!",
+      "step2SpeakPrompt": "Bước 2: Đọc vang chữ «{word}» theo nhịp nhé!",
+      "step2NoMicPrompt": "Bước 2: Nghe đồng dao và hoàn thành câu nhé!",
+      "listenLineBtn": "Nghe đồng dao",
+      "clapBeatBtn": "Vỗ nhịp phách ({current}/{total})",
+      "speakWordBtn": "Đọc vang «{word}»",
+      "stopListeningBtn": "Đã đọc xong",
+      "listenWordSlowBtn": "Nghe mẫu chậm",
+      "listeningStatus": "Cú Mèo đang lắng nghe giọng bé…",
+      "evaluatingStatus": "Đang chấm nhịp giọng đọc của bé…",
+      "unclearVoiceRetry": "Mình chưa nghe rõ — bé đưa micro gần hơn rồi đọc lại «{word}» nhé! (Không mất lượt)",
+      "strike1Gentle": "Gần đúng rồi! Nghe chậm chữ «{word}» (0.88×) rồi thử lại nhé!",
+      "strike2Phonics": "Cùng đánh vần chữ «{word}» từng bước nhé!",
+      "strike3RescueReady": "Cú Mèo tiếp sức đây! Chạm nút Tiếp Sức để giữ nhịp sao nhé!",
+      "owlRescueBtn": "🦉 Cú Mèo Tiếp Sức",
+      "finishNoMicBtn": "✨ Vỗ nhịp & Nghe xong câu",
+      "toggleNoMicOn": "Chế độ Không Micro: Vỗ nhịp & Nghe đồng dao",
+      "toggleNoMicOff": "Chơi không cần Micro",
+      "micDeniedFallbackNotice": "Thiết bị chưa mở micro — Cú Mèo đã bật Chế độ Không Micro: Vỗ nhịp & Nghe đồng dao cho bé!",
+      "spokenPraise": "Tuyệt vời! Bé đọc vang «{word}» rất đúng nhịp!",
+      "rescuePraise": "Hoan hô tinh thần chăm chỉ! Ngôi sao nhịp điệu đã sáng lên!",
+      "noMicPraise": "Giỏi lắm! Bé đã vỗ nhịp và nghe trọn chữ «{word}»!",
+      "nextLineBtn": "Câu đồng dao tiếp theo",
+      "openFinaleBtn": "Mở Cuộn Đồng Dao Tỏa Sáng",
+      "finaleEyebrow": "Cuộn Đồng Dao Đã Thắp Sáng",
+      "listenFullChantBtn": "Nghe trọn bài đồng dao",
+      "dissolveBtn": "✨ Thả khúc đồng dao về bầu trời sao",
+      "dissolvedBadge": "Đã xóa sạch đồng dao tạm · Giữ lại tiến bộ từ vựng",
+      "playAnotherBtn": "Dệt bài đồng dao mới",
+      "backToLibraryBtn": "Về thư viện bài hát"
     }
   },
   "pictureDescription": {
@@ -538,7 +584,11 @@
       "who": "Có ai / con gì?",
       "action": "Đang làm gì?",
       "where": "Ở đâu / màu gì?"
-    }
+    },
+    "emptyBookPagesBridgeCta": "✨ Chọn ngay Tranh Chủ Đề mang theo từ cần ôn",
+    "ephemeralFocusBarTitle": "✨ Thẻ Từ Thử Thách Của Cú Mèo (Chơi xong tự xóa)",
+    "ephemeralFocusBarHint": "Chạm thẻ để nghe phát âm (0.9×) — bé thử đưa 1–2 từ này vào câu chuyện nhé!",
+    "studioIllustrationBadge": "Minh họa sạch chữ"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Chưa phát lặp được. Hãy bấm nghe câu để thử lại.",

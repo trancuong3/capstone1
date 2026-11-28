@@ -56,16 +56,31 @@ class ManagementConflict(Exception):
         self.reason = reason
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def completed_metric(sessions, metric: str, now: datetime | None = None, starts_at: datetime | None = None, ends_at: datetime | None = None) -> int:
     """Count valid sessions or unique reading time within the requested cycle."""
-    now = now or datetime.now(timezone.utc)
+    from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    starts_utc = _as_utc(starts_at) if starts_at is not None else None
+    ends_utc = _as_utc(ends_at) if ends_at is not None else None
+    max_span = timedelta(minutes=MAX_SESSION_MINUTES)
     valid = []
     for session in sessions:
-        started, ended = session.StartedAt, session.EndedAt
-        if session.State not in ("COMPLETED", "FINISHED") or started is None or ended is None or ended < started or ended > now:
+        started_raw, ended_raw = session.StartedAt, session.EndedAt
+        if session.State not in ("COMPLETED", "FINISHED") or started_raw is None or ended_raw is None:
             continue
-        clipped_start = max(started, starts_at) if starts_at is not None else started
-        clipped_end = min(ended, ends_at) if ends_at is not None else ended
+        started, ended = _as_utc(started_raw), _as_utc(ended_raw)
+        if ended < started or ended > now_utc:
+            continue
+        bounded_end = min(ended, started + max_span)
+        clipped_start = max(started, starts_utc) if starts_utc is not None else started
+        clipped_end = min(bounded_end, ends_utc) if ends_utc is not None else bounded_end
         if clipped_end <= clipped_start:
             continue
         valid.append((clipped_start, clipped_end))
@@ -77,7 +92,7 @@ def completed_metric(sessions, metric: str, now: datetime | None = None, starts_
 
 def goal_cycle_window(goal: ReadingGoal, now: datetime):
     zone = ZoneInfo(goal.Timezone)
-    today = now.astimezone(zone).date()
+    today = _as_utc(now).astimezone(zone).date()
     start = today if goal.Period == "DAILY" else today - timedelta(days=today.weekday())
     end = start + timedelta(days=1 if goal.Period == "DAILY" else 7)
     if today < goal.StartsOn or (goal.EndsOn is not None and today > goal.EndsOn):
@@ -93,7 +108,7 @@ def goal_cycle_window(goal: ReadingGoal, now: datetime):
 
 def plan_week_window(plan: ReadingPlan, now: datetime):
     zone = ZoneInfo(plan.Timezone)
-    today = now.astimezone(zone).date()
+    today = _as_utc(now).astimezone(zone).date()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=7)
     first_day = max(week_start, plan.StartsOn)
@@ -111,20 +126,23 @@ def plan_week_window(plan: ReadingPlan, now: datetime):
 
 
 def union_duration_seconds(intervals: list[tuple[datetime, datetime]]) -> float:
-    total = 0.0
+    total = timedelta(0)
     current_start: datetime | None = None
     current_end: datetime | None = None
-    for start, end in sorted(intervals):
+    normalized = [(_as_utc(start), _as_utc(end)) for start, end in intervals]
+    for start, end in sorted(normalized):
+        if end <= start:
+            continue
         if current_start is None or current_end is None:
             current_start, current_end = start, end
         elif start > current_end:
-            total += (current_end - current_start).total_seconds()
+            total += current_end - current_start
             current_start, current_end = start, end
         elif end > current_end:
             current_end = end
     if current_start is not None and current_end is not None:
-        total += (current_end - current_start).total_seconds()
-    return total
+        total += current_end - current_start
+    return total.total_seconds()
 
 
 class ReadingManagementService:
@@ -154,7 +172,7 @@ class ReadingManagementService:
     async def list_goals(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
-        now = now or datetime.now(timezone.utc)
+        now_utc = _as_utc(now) if now is not None else datetime.now(timezone.utc)
         goals = await self.repository.goals(child_id)
         if not goals:
             return []
@@ -167,9 +185,9 @@ class ReadingManagementService:
             for goal in goals:
                 if goal.Status in ("COMPLETED", "ENDED"):
                     continue
-                cycles = goal_cycles(goal, now)
+                cycles = goal_cycles(goal, now_utc)
                 if cycles:
-                    reference = reference_now(goal.EndsOn, goal.Timezone, now)
+                    reference = reference_now(goal.EndsOn, goal.Timezone, now_utc)
                     upper = min(cycles[-1].ends_at, reference + timedelta(microseconds=1))
                     if upper > cycles[0].starts_at:
                         windows.append((cycles[0].starts_at, upper))
@@ -183,7 +201,7 @@ class ReadingManagementService:
                 preloaded_sessions = []
 
         return [
-            await self.goal_dict(goal, now, preloaded_sessions=preloaded_sessions)
+            await self.goal_dict(goal, now_utc, preloaded_sessions=preloaded_sessions)
             for goal in goals
         ]
 
@@ -199,16 +217,17 @@ class ReadingManagementService:
         An expired goal keeps showing its final cycle's result (never a bogus 0%), and
         ``streak_cycles`` counts consecutive cycles that reached the target.
         """
-        phase = item_phase(goal.Status, goal.StartsOn, goal.EndsOn, goal.Timezone, now)
+        now_utc = _as_utc(now)
+        phase = item_phase(goal.Status, goal.StartsOn, goal.EndsOn, goal.Timezone, now_utc)
         value = 0
         streak = 0
         cycle_first = cycle_last = None
         if goal.Status in ("COMPLETED", "ENDED"):
             value = goal.CompletedValue or 0
         else:
-            cycles = goal_cycles(goal, now)
+            cycles = goal_cycles(goal, now_utc)
             if cycles:
-                reference = reference_now(goal.EndsOn, goal.Timezone, now)
+                reference = reference_now(goal.EndsOn, goal.Timezone, now_utc)
                 upper = min(cycles[-1].ends_at, reference + timedelta(microseconds=1))
                 if preloaded_sessions is not None:
                     window_start = cycles[0].starts_at
@@ -216,9 +235,9 @@ class ReadingManagementService:
                         s
                         for s in preloaded_sessions
                         if s.EndedAt is not None
-                        and window_start <= s.EndedAt < upper
+                        and window_start <= _as_utc(s.EndedAt) < upper
                         and s.StartedAt is not None
-                        and s.StartedAt < upper
+                        and _as_utc(s.StartedAt) < upper
                     ]
                 else:
                     sessions = await self.repository.completed_sessions(
@@ -227,7 +246,7 @@ class ReadingManagementService:
 
                 def value_of(cycle) -> int:
                     return completed_metric(
-                        sessions, goal.Metric, now, cycle.starts_at, min(cycle.ends_at, upper)
+                        sessions, goal.Metric, now_utc, cycle.starts_at, min(cycle.ends_at, upper)
                     )
 
                 value = value_of(cycles[-1])
@@ -248,8 +267,8 @@ class ReadingManagementService:
     async def create_goal(self, actor_id: UUID, payload: ReadingGoalCreate, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
-        now = now or datetime.now(timezone.utc)
-        if payload.ends_on is not None and payload.ends_on < local_date(now, payload.timezone):
+        now_utc = _as_utc(now) if now is not None else datetime.now(timezone.utc)
+        if payload.ends_on is not None and payload.ends_on < local_date(now_utc, payload.timezone):
             raise ManagementConflict("GOAL_ALREADY_EXPIRED")
         # Two live goals measuring the same thing per period would contradict each other.
         for existing in await self.repository.goals(payload.child_id):
@@ -331,12 +350,15 @@ class ReadingManagementService:
         preloaded_sessions=None,
         preloaded_books: dict[UUID, Book] | None = None,
     ):
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
         zone = ZoneInfo(plan.Timezone)
-        phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
+        now_utc = _as_utc(now)
+        phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now_utc)
         # Once the plan has ended, keep showing its final week instead of an empty one.
-        reference = reference_now(plan.EndsOn, plan.Timezone, now)
+        reference = reference_now(plan.EndsOn, plan.Timezone, now_utc)
         starts_at, ends_at, scheduled_dates = plan_week_window(plan, reference)
-        today = local_date(now, plan.Timezone)
+        today = local_date(now_utc, plan.Timezone)
         intervals_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
         if scheduled_dates or phase == "RUNNING":
             if preloaded_sessions is not None:
@@ -345,22 +367,32 @@ class ReadingManagementService:
                     for s in preloaded_sessions
                     if s.StartedAt is not None
                     and s.EndedAt is not None
-                    and starts_at <= s.StartedAt < ends_at
-                    and s.EndedAt <= now
-                    and (plan.BookId is None or s.BookId == plan.BookId)
+                    and starts_at <= _as_utc(s.StartedAt) < ends_at
+                    and _as_utc(s.EndedAt) <= now_utc
+                    and (plan.BookId is None or getattr(s, "BookId", None) == plan.BookId)
                 ]
             else:
                 sessions = await self.repository.completed_plan_sessions(
-                    plan.ChildId, starts_at, ends_at, now, plan.BookId
+                    plan.ChildId, starts_at, ends_at, now_utc, plan.BookId
                 )
+            max_span = timedelta(minutes=MAX_SESSION_MINUTES)
             for session in sessions:
-                if session.StartedAt is not None and session.EndedAt is not None:
-                    session_day = session.StartedAt.astimezone(zone).date()
-                    day_start, day_end = local_day_bounds(session_day, plan.Timezone)
-                    interval_start = max(session.StartedAt, day_start)
-                    interval_end = min(session.EndedAt, day_end)
-                    if interval_end > interval_start:
-                        intervals_by_date.setdefault(session_day, []).append((interval_start, interval_end))
+                if session.StartedAt is None or session.EndedAt is None:
+                    continue
+                state = getattr(session, "State", None)
+                if state is not None and state not in ("COMPLETED", "FINISHED"):
+                    continue
+                started = _as_utc(session.StartedAt)
+                ended = _as_utc(session.EndedAt)
+                if ended <= started or ended > now_utc or not (starts_at <= started < ends_at):
+                    continue
+                bounded_end = min(ended, started + max_span)
+                session_day = started.astimezone(zone).date()
+                day_start, day_end = local_day_bounds(session_day, plan.Timezone)
+                interval_start = max(started, day_start)
+                interval_end = min(bounded_end, day_end)
+                if interval_end > interval_start:
+                    intervals_by_date.setdefault(session_day, []).append((interval_start, interval_end))
         completed_dates = {
             scheduled_date for scheduled_date in scheduled_dates
             if union_duration_seconds(intervals_by_date.get(scheduled_date, [])) >= plan.TargetMinutes * 60
@@ -407,7 +439,7 @@ class ReadingManagementService:
     async def list_plans(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
-        now = now or datetime.now(timezone.utc)
+        now_utc = _as_utc(now) if now is not None else datetime.now(timezone.utc)
         plans = await self.repository.plans(child_id)
         if not plans:
             return []
@@ -422,8 +454,8 @@ class ReadingManagementService:
             for plan in plans:
                 if plan.BookId is not None:
                     book_ids.add(plan.BookId)
-                phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
-                reference = reference_now(plan.EndsOn, plan.Timezone, now)
+                phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now_utc)
+                reference = reference_now(plan.EndsOn, plan.Timezone, now_utc)
                 starts_at, ends_at, scheduled_dates = plan_week_window(plan, reference)
                 if (scheduled_dates or phase == "RUNNING") and ends_at > starts_at:
                     windows.append((starts_at, ends_at))
@@ -432,7 +464,7 @@ class ReadingManagementService:
                     child_id,
                     min(w[0] for w in windows),
                     max(w[1] for w in windows),
-                    now,
+                    now_utc,
                     book_id=None,
                 )
             else:
@@ -454,7 +486,7 @@ class ReadingManagementService:
         return [
             await self.plan_dict(
                 plan,
-                now,
+                now_utc,
                 actor_id=actor_id,
                 preloaded_sessions=preloaded_sessions,
                 preloaded_books=preloaded_books,
@@ -467,7 +499,7 @@ class ReadingManagementService:
         weekdays: list[int], starts_on: date, ends_on: date | None, timezone_name: str, now: datetime,
         *, check_expiry: bool = True,
     ) -> None:
-        if check_expiry and ends_on is not None and ends_on < local_date(now, timezone_name):
+        if check_expiry and ends_on is not None and ends_on < local_date(_as_utc(now), timezone_name):
             raise ManagementConflict("PLAN_ALREADY_EXPIRED")
         if not has_scheduled_day(weekdays, starts_on, ends_on):
             raise ManagementConflict("PLAN_NO_SCHEDULED_DAY")
@@ -475,9 +507,10 @@ class ReadingManagementService:
     async def create_plan(self, actor_id: UUID, payload: ReadingPlanCreate, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
+        now_utc = _as_utc(now) if now is not None else datetime.now(timezone.utc)
         self.check_plan_schedule(
             payload.weekdays, payload.starts_on, payload.ends_on, payload.timezone,
-            now or datetime.now(timezone.utc),
+            now_utc,
         )
         if payload.book_id is not None and await self._repo_eligible_book(payload.book_id, actor_id) is None:
             if await self._repo_book(payload.book_id, actor_id) is None:
@@ -686,8 +719,9 @@ class ReadingManagementService:
     async def due_reminders(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
+        now_utc = _as_utc(now) if now is not None else datetime.now(timezone.utc)
         result = []
-        for occurrence, reminder in await self.repository.due_occurrences(child_id, now or datetime.now(timezone.utc)):
+        for occurrence, reminder in await self.repository.due_occurrences(child_id, now_utc):
             result.append({"id": occurrence.Id, "reminder_id": occurrence.ReminderId,
                 "scheduled_local_date": occurrence.ScheduledLocalDate, "scheduled_for": occurrence.ScheduledFor,
                 "status": occurrence.Status, "acknowledged_at": occurrence.AcknowledgedAt,

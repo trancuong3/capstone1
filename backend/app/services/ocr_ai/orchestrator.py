@@ -7,6 +7,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 from app.diagnostic_logging import log_diagnostic
+from app.services.ai_capability_router import (
+    CircuitBreakerRegistry,
+    CircuitState,
+    get_shared_ai_circuit_breaker,
+)
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text, reconstruct_ocr_text
 from app.services.admin_ocr_local import (
     LocalCorrectionError,
@@ -23,6 +28,12 @@ from app.services.ocr_ai.exceptions import (
 from app.services.ocr_ai.gemini_provider import GeminiOcrProvider
 from app.services.ocr_ai.groq_provider import GroqOcrProvider
 from app.services.ocr_ai.ollama_provider import OllamaOcrProvider
+from app.services.ocr_ai.runtime import (
+    classify_ocr_provider_error,
+    is_cloud_family,
+    provider_circuit_key,
+    quota_circuit_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -41,9 +52,15 @@ class OcrCorrectionOrchestrator:
         config: OcrCorrectionConfig,
         *,
         providers: Sequence[OcrCorrectionProvider] | None = None,
+        circuit_breaker: CircuitBreakerRegistry | None = None,
     ) -> None:
         self.config = config
         self._owns_providers = providers is None
+        self._circuit_breaker: CircuitBreakerRegistry | None = (
+            circuit_breaker
+            if circuit_breaker is not None
+            else (get_shared_ai_circuit_breaker() if providers is None else None)
+        )
         self.providers = tuple(providers) if providers is not None else self._providers()
         if config.cloud_enabled:
             for provider, configured in (
@@ -128,6 +145,8 @@ class OcrCorrectionOrchestrator:
         async def run() -> str:
             corrected_by_chunk: dict[int, tuple[str, ...]] = {}
             disabled_families: set[str] = set()
+            disabled_providers: set[str] = set()
+            healthy_providers: set[str] = set()
             for chunk in plan.chunks:
                 try:
                     crop = await asyncio.to_thread(
@@ -142,6 +161,8 @@ class OcrCorrectionOrchestrator:
                     chunk=chunk,
                     crop=crop,
                     disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
+                    healthy_providers=healthy_providers,
                     deadline=deadline,
                     on_provider_event=on_provider_event,
                     on_uncertain_tokens=on_uncertain_tokens,
@@ -177,15 +198,18 @@ class OcrCorrectionOrchestrator:
         *,
         provider: OcrCorrectionProvider,
         disabled_families: set[str],
+        disabled_providers: set[str] | None = None,
         deadline: float | None,
     ) -> float | None:
         if deadline is None or self._is_local_provider(provider):
             return None
+        skipped_providers = disabled_providers or set()
         current_index = self.providers.index(provider)
         remaining_after = [
             candidate
             for candidate in self.providers[current_index:]
             if candidate.family not in disabled_families
+            and candidate.name not in skipped_providers
         ]
         has_local_fallback = any(
             self._is_local_provider(candidate) for candidate in remaining_after
@@ -211,8 +235,13 @@ class OcrCorrectionOrchestrator:
 
     async def _correct_chunk(
         self, *, chunk_id, chunk, crop, disabled_families, deadline=None,
+        disabled_providers=None, healthy_providers=None,
         on_provider_event=None, on_uncertain_tokens=None,
     ):
+        if disabled_providers is None:
+            disabled_providers = set()
+        if healthy_providers is None:
+            healthy_providers = set()
         attempted = False
         has_valid_response = False
         has_valid_cloud_response = False
@@ -220,7 +249,7 @@ class OcrCorrectionOrchestrator:
         unresolved_indices = set(range(chunk.expected_word_count))
         request_chunk = chunk
         for provider in self.providers:
-            if provider.family in disabled_families:
+            if provider.name in disabled_providers or provider.family in disabled_families:
                 continue
             is_local = self._is_local_provider(provider)
             # Uncertainty is not provider unavailability. Once a cloud model
@@ -228,11 +257,49 @@ class OcrCorrectionOrchestrator:
             # Admin review after the remaining cloud providers are tried.
             if is_local and has_valid_cloud_response:
                 continue
+            cb = self._circuit_breaker
+            provider_key: str | None = None
+            quota_key: str | None = None
+            prov_probe_acquired = False
+            quota_probe_acquired = False
+            if cb is not None and not is_local and is_cloud_family(provider.family):
+                provider_key = provider_circuit_key(provider.name)
+                quota_key = quota_circuit_key(provider.family)
+                if quota_key is not None:
+                    quota_allowed, quota_state = cb.allow_request(quota_key)
+                    if not quota_allowed:
+                        log_diagnostic(
+                            logger,
+                            logging.INFO,
+                            event="ocr_provider_circuit_skipped",
+                            stage="chunk_correction",
+                            provider=provider.name,
+                            quota_group=quota_key,
+                            circuit_state=quota_state.value,
+                            chunk_id=chunk_id,
+                        )
+                        continue
+                    quota_probe_acquired = quota_state == CircuitState.HALF_OPEN
+                prov_allowed, prov_state = cb.allow_request(provider_key)
+                if not prov_allowed:
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+                    log_diagnostic(
+                        logger,
+                        logging.INFO,
+                        event="ocr_provider_circuit_skipped",
+                        stage="chunk_correction",
+                        provider=provider.name,
+                        circuit_state=prov_state.value,
+                        chunk_id=chunk_id,
+                    )
+                    continue
+                prov_probe_acquired = prov_state == CircuitState.HALF_OPEN
             attempted = True
             started = time.perf_counter()
             attempt_number = sum(
                 1 for prior in self.providers[: self.providers.index(provider)]
-                if prior.family not in disabled_families
+                if prior.family not in disabled_families and prior.name not in disabled_providers
             )
             log_diagnostic(
                 logger,
@@ -258,6 +325,7 @@ class OcrCorrectionOrchestrator:
                 cloud_timeout = self._cloud_attempt_timeout(
                     provider=provider,
                     disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
                     deadline=deadline,
                 )
                 if cloud_timeout is not None and cloud_timeout <= 0:
@@ -285,8 +353,43 @@ class OcrCorrectionOrchestrator:
                 else:
                     result = await coro
             except OcrProviderError as exc:
+                if cb is not None and provider_key is not None:
+                    kind, trips_quota = classify_ocr_provider_error(
+                        exc.code, exc.upstream_status_code
+                    )
+                    if kind is not None:
+                        cb.record_failure(
+                            provider_key,
+                            kind=kind,
+                            http_status=exc.upstream_status_code,
+                            limit_zero=exc.limit_zero,
+                            retry_after_seconds=exc.retry_after_seconds,
+                        )
+                        prov_probe_acquired = False
+                        if trips_quota and quota_key is not None:
+                            cb.record_failure(
+                                quota_key,
+                                kind=kind,
+                                http_status=exc.upstream_status_code,
+                                limit_zero=exc.limit_zero,
+                                retry_after_seconds=exc.retry_after_seconds,
+                            )
+                            quota_probe_acquired = False
                 if exc.disables_family:
-                    disabled_families.add(provider.family)
+                    is_family_wide_error = (
+                        exc.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}
+                        or exc.upstream_status_code in {401, 403, 429}
+                    )
+                    has_healthy_sibling = any(
+                        candidate.family == provider.family
+                        and candidate.name != provider.name
+                        and candidate.name in healthy_providers
+                        for candidate in self.providers
+                    )
+                    if has_healthy_sibling and not is_family_wide_error:
+                        disabled_providers.add(provider.name)
+                    else:
+                        disabled_families.add(provider.family)
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 self._emit_provider_event(
                     on_provider_event,
@@ -301,6 +404,7 @@ class OcrCorrectionOrchestrator:
                 )
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -336,6 +440,7 @@ class OcrCorrectionOrchestrator:
                 )
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -352,7 +457,18 @@ class OcrCorrectionOrchestrator:
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
                 continue
+            finally:
+                if cb is not None:
+                    if prov_probe_acquired and provider_key is not None:
+                        cb.release_half_open_probe(provider_key)
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+            if cb is not None and provider_key is not None:
+                cb.record_success(provider_key)
+                if quota_key is not None:
+                    cb.record_success(quota_key)
             has_valid_response = True
+            healthy_providers.add(provider.name)
             if not is_local:
                 has_valid_cloud_response = True
             uncertain = set(result.uncertain_word_indices)
@@ -374,6 +490,7 @@ class OcrCorrectionOrchestrator:
                 request_chunk = self._chunk_with_words(chunk, working_words)
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -490,11 +607,12 @@ class OcrCorrectionOrchestrator:
 
     def _next_provider_name(
         self, current: OcrCorrectionProvider, disabled_families: set[str],
-        *, skip_local: bool = False,
+        *, disabled_providers: set[str] | None = None, skip_local: bool = False,
     ) -> str:
+        skipped_providers = disabled_providers or set()
         current_index = self.providers.index(current)
         for provider in self.providers[current_index + 1 :]:
-            if provider.family not in disabled_families:
+            if provider.family not in disabled_families and provider.name not in skipped_providers:
                 if skip_local and (
                     provider.family == "ollama"
                     or provider.name.lower().startswith("ollama")

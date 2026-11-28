@@ -73,7 +73,7 @@ const variantClassNames: Record<ButtonVariant, string> = {
 const sizeClassNames: Record<ButtonSize, string> = {
   default: "min-h-14 px-4 py-2 text-button",
   compact: "min-h-12 px-4 py-2.5 text-label leading-5",
-  admin: "min-h-10 px-3 py-1.5 text-sm leading-5",
+  admin: "min-h-10 px-3 py-1.5 text-sm leading-5 sm:whitespace-nowrap",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

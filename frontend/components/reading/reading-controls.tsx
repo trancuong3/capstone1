@@ -25,7 +25,7 @@ interface ReadingControlsProps {
 }
 
 const dockButtonClass =
-  "min-h-12! min-w-0 flex-col gap-0.5! px-1! py-1.5! text-[11px]! leading-tight! sm:min-h-11! sm:px-1.5! sm:text-xs! sm:leading-snug! lg:min-h-14! lg:flex-row lg:gap-2! lg:px-3! lg:py-2! lg:text-button!";
+  "min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-11 lg:flex-row lg:gap-1.5 lg:px-2.5 lg:py-1.5 lg:text-sm";
 
 export function ReadingControls({
   audioLevel,
@@ -54,29 +54,26 @@ export function ReadingControls({
         aria-label={t("controls.toolbarAria")}
         data-reading-controls
         className={cn(
-          "grid items-stretch gap-1 sm:gap-2 lg:gap-3",
+          "grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3",
           retryMode
             ? voiceSettings
-              ? "grid-cols-5 sm:grid-cols-5"
-              : "grid-cols-4 sm:grid-cols-4"
+              ? "sm:grid-cols-5"
+              : "sm:grid-cols-4"
             : voiceSettings
-              ? "grid-cols-5 sm:grid-cols-6"
-              : "grid-cols-5 sm:grid-cols-5",
+              ? "sm:grid-cols-6"
+              : "sm:grid-cols-5",
         )}
       >
         <Button
           aria-label={t("controls.pauseAria")}
-          className={cn(dockButtonClass, "order-1 sm:order-none")}
+          className={dockButtonClass}
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
           size="compact"
           variant="quiet"
         >
-          <Pause
-            aria-hidden="true"
-            className="size-4.5 shrink-0 sm:size-5 lg:size-6"
-          />
-          <span className="max-w-full truncate text-center sm:whitespace-normal sm:break-words">
+          <Pause aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
+          <span className="max-w-full text-center whitespace-normal break-words">
             {t("controls.pause")}
           </span>
         </Button>
@@ -89,7 +86,7 @@ export function ReadingControls({
                 ? t("controls.sampleWordAria")
                 : t("controls.samplePageAria")
           }
-          className={cn(dockButtonClass, "order-2 sm:order-none")}
+          className={dockButtonClass}
           disabled={disabled}
           onClick={onReadSample}
           size="compact"
@@ -98,16 +95,13 @@ export function ReadingControls({
           {isPlayingSample ? (
             <VolumeX
               aria-hidden="true"
-              className="size-4.5 shrink-0 text-primary sm:size-5 lg:size-6"
+              className="size-5 shrink-0 text-primary lg:size-6"
             />
           ) : (
-            <Volume2
-              aria-hidden="true"
-              className="size-4.5 shrink-0 sm:size-5 lg:size-6"
-            />
+            <Volume2 aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
           )}
 
-          <span className="max-w-full truncate text-center sm:whitespace-normal sm:break-words">
+          <span className="max-w-full text-center whitespace-normal break-words">
             {isPlayingSample
               ? t("controls.stopSample")
               : retryMode
@@ -116,11 +110,7 @@ export function ReadingControls({
           </span>
         </Button>
 
-        {voiceSettings ? (
-          <div className="order-4 flex min-w-0 sm:order-none [&>button]:min-h-12! [&>button]:w-full [&>button]:gap-0.5! [&>button]:px-1! [&>button]:py-1.5! [&>button]:text-[11px]! [&>button]:leading-tight! sm:[&>button]:min-h-11! sm:[&>button]:px-1.5! sm:[&>button]:py-1.5! sm:[&>button]:text-xs! lg:[&>button]:min-h-14! lg:[&>button]:gap-2! lg:[&>button]:px-3! lg:[&>button]:py-2! lg:[&>button]:text-button!">
-            {voiceSettings}
-          </div>
-        ) : null}
+        {voiceSettings}
 
         <Button
           aria-label={
@@ -130,10 +120,7 @@ export function ReadingControls({
                 ? t("controls.enableMicAria")
                 : t("controls.startChildReadAria")
           }
-          className={cn(
-            dockButtonClass,
-            "order-3 rounded-xl font-extrabold shadow-sm ring-2 ring-primary/20 sm:order-none sm:rounded-control sm:shadow-none sm:ring-0",
-          )}
+          className={cn(dockButtonClass, "font-extrabold")}
           disabled={disabled}
           onClick={onToggleListening}
           size="compact"
@@ -160,7 +147,7 @@ export function ReadingControls({
             <Mic aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
           )}
 
-          <span className="max-w-full truncate text-center sm:whitespace-normal sm:break-words">
+          <span className="max-w-full text-center whitespace-normal break-words">
             {isListening
               ? t("controls.stopMic")
               : retryMode
@@ -172,12 +159,7 @@ export function ReadingControls({
         {!retryMode && (
           <Button
             aria-label={t("controls.choosePageAria")}
-            className={cn(
-              dockButtonClass,
-              voiceSettings
-                ? "hidden! sm:inline-flex! sm:order-none"
-                : "order-4 sm:order-none",
-            )}
+            className={dockButtonClass}
             disabled={disabled || !onChoosePage}
             onClick={onChoosePage}
             size="compact"
@@ -185,9 +167,9 @@ export function ReadingControls({
           >
             <BookOpen
               aria-hidden="true"
-              className="size-4.5 shrink-0 sm:size-5 lg:size-6"
+              className="size-5 shrink-0 lg:size-6"
             />
-            <span className="max-w-full truncate text-center sm:whitespace-normal sm:break-words">
+            <span className="max-w-full text-center whitespace-normal break-words">
               {t("controls.choosePage")}
             </span>
           </Button>
@@ -199,17 +181,18 @@ export function ReadingControls({
               ? t("controls.finishRetryAria")
               : t("controls.finishSessionAria")
           }
-          className={cn(dockButtonClass, "order-5 sm:order-none")}
+          className={cn(
+            dockButtonClass,
+            (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
+              "col-span-2 sm:col-span-1",
+          )}
           disabled={finishDisabled}
           onClick={onFinish}
           size="compact"
           variant="secondary"
         >
-          <Check
-            aria-hidden="true"
-            className="size-4.5 shrink-0 sm:size-5 lg:size-6"
-          />
-          <span className="max-w-full truncate text-center sm:whitespace-normal sm:break-words">
+          <Check aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
+          <span className="max-w-full text-center whitespace-normal break-words">
             {retryMode ? t("controls.finishRetry") : t("controls.done")}
           </span>
         </Button>

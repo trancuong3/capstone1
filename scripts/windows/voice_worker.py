@@ -21,10 +21,12 @@ import hmac
 import io
 import json
 import logging
+import math
 import os
 import re
 import struct
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -201,7 +203,11 @@ TTS_CACHE_DIR = Path(
         "VIREAD_VOICE_TTS_CACHE_DIR", str(VOICE_RUNTIME_ROOT / "tts-cache")
     )
 )
-TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    TTS_CACHE_DIR = Path(tempfile.gettempdir()) / "viread-voice-tts-cache"
+    TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TTS_CACHE_MAX_BYTES = max(
     1024 * 1024,
     int(os.environ.get("VIREAD_VOICE_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024))),
@@ -211,7 +217,7 @@ _TTS_DISK_CACHE_LOCK = threading.Lock()
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
 QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_QUEUE_WAIT_SECONDS", "25.0"))
-STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "15.0"))
+STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "3.0"))
 TTS_MEM_CACHE_MAX_ENTRIES = 128
 _TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 # Precompute 60Hz high-pass SOS filter once instead of solving filter design per STT call.
@@ -409,9 +415,75 @@ class PhonicsSynthesisRequest(BaseModel):
     audio_format: Literal["wav", "mp3", "ogg"] | None = None
 
 
+def _ensure_bpe_vocab(model_dir: Path) -> Path | None:
+    """Ensure `bpe.vocab` exists alongside `bpe.model` using SentencePiece when available."""
+    vocab_path = model_dir / "bpe.vocab"
+    try:
+        if vocab_path.is_file() and vocab_path.stat().st_size > 0:
+            return vocab_path
+    except OSError:
+        pass
+    bpe_model = model_dir / "bpe.model"
+    if not bpe_model.is_file():
+        return None
+    try:
+        import sentencepiece as spm  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        sp = spm.SentencePieceProcessor()
+        sp.load(str(bpe_model))
+        lines = [
+            f"{sp.id_to_piece(i)}\t{sp.get_score(i)}\n"
+            for i in range(sp.get_piece_size())
+        ]
+        _atomic_write_bytes(vocab_path, "".join(lines).encode("utf-8"))
+        return vocab_path
+    except Exception as exc:
+        logger.warning("bpe_vocab_export_failed error_type=%s", type(exc).__name__)
+        return None
+
+
+def _parse_stt_hotwords(raw_keyterms: list[str] | str | None) -> list[str]:
+    if not raw_keyterms:
+        return []
+    candidates: list[str] = []
+    if isinstance(raw_keyterms, str):
+        stripped = raw_keyterms.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    candidates = [str(item) for item in parsed if isinstance(item, str)]
+            except Exception:
+                candidates = []
+        if not candidates:
+            candidates = re.split(r"[\n,;]+", stripped)
+    else:
+        candidates = [str(item) for item in raw_keyterms if isinstance(item, str)]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        term = unicodedata.normalize("NFC", raw).strip()[:80]
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= 30:
+            break
+    return out
+
+
 class VoiceRuntimeEngine:
     def __init__(self) -> None:
         self.stt_recognizer: Any | None = None
+        self.stt_bpe_vocab_active: bool = False
         self.tts_engine: Any | None = None
         self.tts_engine_fp32: Any | None = None
         self.tts_engine_int8: Any | None = None
@@ -419,6 +491,8 @@ class VoiceRuntimeEngine:
         self.stt_semaphore = asyncio.Semaphore(2)
         self.tts_semaphore = asyncio.Semaphore(1)
         self._load_lock = asyncio.Lock()
+        self._stt_load_lock = asyncio.Lock()
+        self._tts_load_lock = asyncio.Lock()
         self.active_stt_jobs = 0
         self.active_tts_jobs = 0
         self.tts_waiters = 0
@@ -455,7 +529,7 @@ class VoiceRuntimeEngine:
         assert self.tts_engine is not None
         return self.tts_engine, "fp32"
 
-    def load_models_sync(self) -> None:
+    def load_stt_sync(self) -> None:
         if self.stt_recognizer is None:
             encoder_path = SHERPA_MODEL_DIR / "encoder.int8.onnx"
             if not encoder_path.is_file():
@@ -471,25 +545,36 @@ class VoiceRuntimeEngine:
                     f"Missing Sherpa-ONNX Vietnamese STT model at {SHERPA_MODEL_DIR}"
                 )
             t0 = time.perf_counter()
+            bpe_vocab_path = _ensure_bpe_vocab(SHERPA_MODEL_DIR)
+            transducer_kwargs: dict[str, Any] = {
+                "encoder": str(encoder_path),
+                "decoder": str(decoder_path),
+                "joiner": str(joiner_path),
+                "tokens": str(SHERPA_MODEL_DIR / "tokens.txt"),
+                "num_threads": 4,
+                "sample_rate": 16000,
+                "feature_dim": 80,
+                "decoding_method": "modified_beam_search",
+                "max_active_paths": 4,
+                "blank_penalty": 0.0,
+            }
+            if bpe_vocab_path is not None:
+                transducer_kwargs["modeling_unit"] = "bpe"
+                transducer_kwargs["bpe_vocab"] = str(bpe_vocab_path)
+                transducer_kwargs["hotwords_score"] = 1.2
             self.stt_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-                encoder=str(encoder_path),
-                decoder=str(decoder_path),
-                joiner=str(joiner_path),
-                tokens=str(SHERPA_MODEL_DIR / "tokens.txt"),
-                num_threads=4,
-                sample_rate=16000,
-                feature_dim=80,
-                decoding_method="modified_beam_search",
-                max_active_paths=4,
-                blank_penalty=0.0,
+                **transducer_kwargs
             )
+            self.stt_bpe_vocab_active = bpe_vocab_path is not None
             logger.info(
-                "Loaded STT (%s, mode=%s) in %.2fs",
+                "Loaded STT (%s, mode=%s, bpe_vocab=%s) in %.2fs",
                 STT_MODEL_VERSION,
                 STT_MODE,
+                self.stt_bpe_vocab_active,
                 time.perf_counter() - t0,
             )
 
+    def load_tts_sync(self) -> None:
         need_fp32 = TTS_PRECISION in ("hybrid", "fp32") and self.tts_engine_fp32 is None
         need_int8 = TTS_PRECISION in ("hybrid", "int8") and self.tts_engine_int8 is None
         if need_fp32:
@@ -568,6 +653,10 @@ class VoiceRuntimeEngine:
                 )
                 self.word_fp32_tts_engine = None
 
+    def load_models_sync(self) -> None:
+        self.load_stt_sync()
+        self.load_tts_sync()
+
     def get_tts_engine_for_mode(self, *, crisp: bool) -> tuple[Any, str]:
         if crisp and TTS_HYBRID_WORD_FP32:
             if self.word_fp32_tts_engine is not None:
@@ -576,13 +665,39 @@ class VoiceRuntimeEngine:
                 return self.tts_engine, "fp32"
         return self.tts_engine, TTS_PRECISION
 
+    async def ensure_stt_loaded(self) -> None:
+        if "ensure_loaded" in self.__dict__:
+            await self.ensure_loaded()
+            return
+        if self.stt_recognizer is not None:
+            return
+        async with self._stt_load_lock:
+            if self.stt_recognizer is not None:
+                return
+            await asyncio.to_thread(self.load_stt_sync)
+
+    async def ensure_tts_loaded(self) -> None:
+        if "ensure_loaded" in self.__dict__:
+            await self.ensure_loaded()
+            return
+        if self.tts_engine is not None:
+            return
+        async with self._tts_load_lock:
+            if self.tts_engine is not None:
+                return
+            await asyncio.to_thread(self.load_tts_sync)
+
     async def ensure_loaded(self) -> None:
         if self.stt_recognizer is not None and self.tts_engine is not None:
             return
         async with self._load_lock:
             if self.stt_recognizer is not None and self.tts_engine is not None:
                 return
-            await asyncio.to_thread(self.load_models_sync)
+            if "load_models_sync" in self.__dict__:
+                await asyncio.to_thread(self.load_models_sync)
+                return
+            await self.ensure_stt_loaded()
+            await self.ensure_tts_loaded()
 
 
 _PREWARM_COACHING_PHRASES: tuple[str, ...] = (
@@ -641,7 +756,10 @@ runtime = VoiceRuntimeEngine()
 
 async def _ensure_capability_loaded(capability: Literal["tts", "stt"]) -> None:
     try:
-        await runtime.ensure_loaded()
+        if capability == "stt":
+            await runtime.ensure_stt_loaded()
+        else:
+            await runtime.ensure_tts_loaded()
     except Exception as exc:
         logger.error("worker_model_load_failed capability=%s error_type=%s", capability, type(exc).__name__)
         code = "LOCAL_TTS_UNAVAILABLE" if capability == "tts" else "LOCAL_STT_UNAVAILABLE"
@@ -1078,24 +1196,43 @@ def encode_audio_bytes_for_media_type(
         return wav_bytes, "audio/wav"
 
 
+def _sniff_magic_audio_format(raw_bytes: bytes) -> str | None:
+    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WAVE":
+        return "wav"
+    if raw_bytes.startswith(b"fLaC"):
+        return "flac"
+    if raw_bytes.startswith(b"\x1a\x45\xdf\xa3"):
+        return "webm"
+    if raw_bytes.startswith(b"OggS"):
+        return "ogg_opus" if b"OpusHead" in raw_bytes[:96] else "ogg"
+    if len(raw_bytes) >= 12 and raw_bytes[4:8] == b"ftyp":
+        return "mp4"
+    if raw_bytes.startswith(b"ID3") or (
+        len(raw_bytes) >= 2 and raw_bytes[0] == 0xFF and (raw_bytes[1] & 0xE0) == 0xE0
+    ):
+        return "mp3"
+    return None
+
+
 def _guess_av_format_hints(
     raw_bytes: bytes,
     *,
     filename: str = "",
     content_type: str = "",
 ) -> list[str | None]:
-    hints: list[str | None] = [None]
     candidates: list[str] = []
-
-    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WAVE":
+    magic = _sniff_magic_audio_format(raw_bytes)
+    if magic == "wav":
         candidates.append("wav")
-    elif raw_bytes.startswith(b"OggS"):
+    elif magic == "flac":
+        candidates.append("flac")
+    elif magic in ("ogg", "ogg_opus"):
         candidates.append("ogg")
-    elif raw_bytes.startswith(b"\x1a\x45\xdf\xa3"):
+    elif magic == "webm":
         candidates.extend(["webm", "matroska"])
-    elif len(raw_bytes) >= 12 and raw_bytes[4:8] == b"ftyp":
+    elif magic == "mp4":
         candidates.extend(["mp4", "mov"])
-    elif raw_bytes.startswith(b"ID3") or (len(raw_bytes) >= 2 and raw_bytes[0] == 0xFF and (raw_bytes[1] & 0xE0) == 0xE0):
+    elif magic == "mp3":
         candidates.append("mp3")
 
     lower_name = (filename or "").lower()
@@ -1115,9 +1252,12 @@ def _guess_av_format_hints(
         if lower_name.endswith(ext) or ext.lstrip(".") in lower_ct:
             candidates.append(fmt)
 
+    hints: list[str | None] = []
     for c in candidates:
         if c not in hints:
             hints.append(c)
+    # Keep auto-probe (None) as fallback after explicit magic/extension hints.
+    hints.append(None)
     return hints
 
 
@@ -1130,20 +1270,30 @@ def decode_audio_bytes_to_16k_mono(
     if not raw_bytes:
         raise ValueError("Empty audio file")
 
-    # Fast path for WAV / FLAC / OGG Vorbis supported by libsndfile
-    try:
-        wav, sr = sf.read(io.BytesIO(raw_bytes), dtype="float32", always_2d=False)
-        arr = np.asarray(wav, dtype=np.float32)
-        if arr.ndim > 1:
-            arr = arr.mean(axis=1)
-        if arr.size > 0 and sr > 0:
-            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-            if sr != 16000:
-                arr = librosa.resample(arr, orig_sr=sr, target_sr=16000)
-            arr = np.clip(arr, -1.0, 1.0).astype(np.float32)
-            return arr, float(len(arr) / 16000.0)
-    except Exception:
-        pass
+    magic = _sniff_magic_audio_format(raw_bytes)
+    # Fast path for WAV / FLAC / non-Opus OGG supported by libsndfile.
+    # Skip doomed sf.read() attempts on browser WebM/Opus, MP4/M4A, MP3, and Ogg Opus containers.
+    try_sndfile = magic in ("wav", "flac", "ogg") or (
+        magic is None
+        and not any(
+            marker in (filename or "").lower() or marker in (content_type or "").lower()
+            for marker in ("webm", "opus", "mp4", "m4a", "aac", "mp3", "mpeg")
+        )
+    )
+    if try_sndfile:
+        try:
+            wav, sr = sf.read(io.BytesIO(raw_bytes), dtype="float32", always_2d=False)
+            arr = np.asarray(wav, dtype=np.float32)
+            if arr.ndim > 1:
+                arr = arr.mean(axis=1)
+            if arr.size > 0 and sr > 0:
+                arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                if sr != 16000:
+                    arr = librosa.resample(arr, orig_sr=sr, target_sr=16000)
+                arr = np.clip(arr, -1.0, 1.0).astype(np.float32)
+                return arr, float(len(arr) / 16000.0)
+        except Exception:
+            pass
 
     # Container path (.webm / .ogg Opus / .mp4 / .m4a / .aac / .mp3 / .wav) via PyAV
     last_exc: Exception | None = None
@@ -1243,14 +1393,28 @@ def build_stt_words_from_sherpa(
     duration_s: float,
     *,
     audio_16k: np.ndarray | None = None,
+    ys_log_probs: list[float] | tuple[float, ...] | None = None,
 ) -> list[dict[str, Any]]:
     words: list[dict[str, Any]] = []
     cur_text = ""
     cur_start: float | None = None
     cur_last_tok: float = 0.0
+    cur_logprobs: list[float] = []
+
+    def _safe_word_logprob(logprobs: list[float]) -> float | None:
+        if not logprobs:
+            return None
+        return round(sum(logprobs), 4)
 
     for idx, raw_tok in enumerate(tokens):
         ts = float(timestamps[idx]) if idx < len(timestamps) else cur_last_tok
+        tok_lp: float | None = None
+        if ys_log_probs is not None and idx < len(ys_log_probs):
+            raw_lp = ys_log_probs[idx]
+            if isinstance(raw_lp, (int, float)) and not isinstance(raw_lp, bool):
+                lp_val = float(raw_lp)
+                if math.isfinite(lp_val):
+                    tok_lp = lp_val
         starts_new = raw_tok.startswith(" ") or raw_tok.startswith("▁")
         piece = raw_tok.replace("▁", " ").strip()
         if not piece:
@@ -1266,16 +1430,20 @@ def build_stt_words_from_sherpa(
                     "start": round(w_start, 3),
                     "end": round(max(w_start + 0.04, w_end), 3),
                     "type": "word",
+                    "logprob": _safe_word_logprob(cur_logprobs),
                 }
             )
             cur_text = piece
             cur_start = ts
             cur_last_tok = ts
+            cur_logprobs = [tok_lp] if tok_lp is not None else []
         else:
             if cur_start is None:
                 cur_start = ts
             cur_text += piece
             cur_last_tok = max(cur_last_tok, ts)
+            if tok_lp is not None:
+                cur_logprobs.append(tok_lp)
 
     if cur_text:
         w_start = max(0.0, cur_start or 0.0)
@@ -1288,6 +1456,7 @@ def build_stt_words_from_sherpa(
                 "start": round(w_start, 3),
                 "end": round(max(w_start, w_end), 3),
                 "type": "word",
+                "logprob": _safe_word_logprob(cur_logprobs),
             }
         )
     return words
@@ -1317,6 +1486,9 @@ def _check_tts_audio_quality(
     """Fast local Sherpa STT self-check to catch trailing hallucinations, stutters, or swallowed choice labels."""
     if runtime.stt_recognizer is None or wav_float32.size < 400:
         return True, "skipped", ""
+    # Never steal CPU or stt_semaphore from active child STT requests.
+    if runtime.active_stt_jobs > 0 or runtime.stt_semaphore.locked():
+        return True, "stt_busy_skipped", ""
     expected_tokens = _tokenize_stt_check(expected_spoken)
     if not expected_tokens:
         return True, "empty_expected", ""
@@ -1336,15 +1508,42 @@ def _check_tts_audio_quality(
 
     acquired_async_sem = False
     if event_loop is not None and event_loop.is_running():
+        handoff_lock = threading.Lock()
+        abandoned = threading.Event()
+        permit_held = False
+
+        async def _try_acquire_idle_stt() -> bool:
+            nonlocal permit_held
+            if abandoned.is_set() or runtime.active_stt_jobs > 0 or runtime.stt_semaphore.locked():
+                return False
+            try:
+                await asyncio.wait_for(runtime.stt_semaphore.acquire(), timeout=0.01)
+            except (asyncio.TimeoutError, TimeoutError, asyncio.CancelledError):
+                return False
+            with handoff_lock:
+                if abandoned.is_set() or runtime.active_stt_jobs > 0:
+                    runtime.stt_semaphore.release()
+                    return False
+                permit_held = True
+                return True
+
+        fut = None
         try:
-            fut = asyncio.run_coroutine_threadsafe(
-                asyncio.wait_for(runtime.stt_semaphore.acquire(), timeout=10.0),
-                event_loop,
-            )
-            fut.result(timeout=11.0)
-            acquired_async_sem = True
-            runtime.active_stt_jobs += 1
+            fut = asyncio.run_coroutine_threadsafe(_try_acquire_idle_stt(), event_loop)
+            acquired_async_sem = bool(fut.result(timeout=0.1))
         except Exception:
+            should_release = False
+            with handoff_lock:
+                abandoned.set()
+                if permit_held:
+                    permit_held = False
+                    should_release = True
+            if fut is not None:
+                fut.cancel()
+            if should_release:
+                event_loop.call_soon_threadsafe(runtime.stt_semaphore.release)
+            return True, "stt_busy_skipped", ""
+        if not acquired_async_sem:
             return True, "stt_busy_skipped", ""
     try:
         stt_text, _words, _ms = decode_stt_window_sync(
@@ -1354,7 +1553,6 @@ def _check_tts_audio_quality(
         )
     finally:
         if acquired_async_sem and event_loop is not None:
-            runtime.active_stt_jobs = max(0, runtime.active_stt_jobs - 1)
             event_loop.call_soon_threadsafe(runtime.stt_semaphore.release)
 
     stt_tokens = _tokenize_stt_check(stt_text)
@@ -2130,37 +2328,112 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest, request: Request) -> di
         runtime.tts_semaphore.release()
 
 
-def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
-    """Apply DC offset removal, 60Hz high-pass filter, and gentle child-voice AGC."""
+def _speech_window_from_frame_rms(
+    frame_rms: np.ndarray,
+    total_samples: int,
+    *,
+    frame_len: int = 320,
+    sample_rate: float = 16000.0,
+) -> tuple[float, float, float]:
+    n_frames = int(frame_rms.size)
+    if n_frames == 0:
+        return 0.0, 0.0, 0.0
+    max_rms = float(np.max(frame_rms))
+    full_dur = float(total_samples / sample_rate)
+    if max_rms < 0.002:
+        return 0.0, full_dur, full_dur
+    thresh = max(0.004, max_rms * 0.15)
+    active = np.flatnonzero(frame_rms >= thresh)
+    if active.size == 0:
+        return 0.0, full_dur, full_dur
+    first_idx = int(active[0])
+    last_idx = int(active[-1])
+    voiced_s = float(((last_idx - first_idx + 1) * frame_len) / sample_rate)
+    lead_s = float((first_idx * frame_len) / sample_rate)
+    tail_s = float((max(0, n_frames - 1 - last_idx) * frame_len) / sample_rate)
+    return voiced_s, lead_s, tail_s
+
+
+def _preprocess_audio_for_stt_with_stats(
+    samples16: np.ndarray,
+) -> tuple[np.ndarray, float, tuple[float, float, float]]:
+    """Preprocess 16kHz audio and return (arr, pre_trimmed_lead_s, (voiced_s, lead_s, tail_s)) in one RMS pass."""
     arr = samples16.astype(np.float32, copy=True)
     if arr.size == 0:
-        return arr
+        return arr, 0.0, (0.0, 0.0, 0.0)
     arr = arr - float(np.mean(arr))
     if arr.size > 32:
         arr = scipy_signal.sosfilt(_HIGHPASS_60HZ_SOS, arr).astype(np.float32)
 
+    sr = 16000
     frame_len = 320
     n_frames = arr.size // frame_len
+    start_sample = 0
+    post_frame_rms: np.ndarray | None = None
     if n_frames > 0:
         frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
         frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
-        max_frame_rms = float(np.max(frame_rms))
-        active_thresh = max(0.002, max_frame_rms * 0.2)
-        active_frames = frame_rms[frame_rms >= active_thresh]
-        rms = (
-            float(np.sqrt(np.mean(active_frames * active_frames)))
-            if active_frames.size > 0
-            else float(np.sqrt(np.mean(arr * arr)))
-        )
+        sorted_desc = np.sort(frame_rms)[::-1]
+        ref_rms = float(sorted_desc[min(1, sorted_desc.size - 1)])
+        active_thresh = max(0.002, ref_rms * 0.15)
+        active_indices = np.flatnonzero(frame_rms >= active_thresh)
+        if active_indices.size > 0:
+            first_idx = int(active_indices[0])
+            last_idx = int(active_indices[-1])
+            lead_samples = first_idx * frame_len
+            last_active_end = min(arr.size, (last_idx + 1) * frame_len)
+            trail_samples = arr.size - last_active_end
+            max_dead_samples = int(sr * 0.35)
+            lead_keep = int(sr * 0.18)
+            trail_keep = int(sr * 0.22)
+            start_sample = (
+                max(0, lead_samples - lead_keep)
+                if lead_samples > max_dead_samples
+                else 0
+            )
+            end_sample = (
+                min(arr.size, last_active_end + trail_keep)
+                if trail_samples > max_dead_samples
+                else arr.size
+            )
+            if end_sample > start_sample:
+                arr = arr[start_sample:end_sample]
+                start_frame = start_sample // frame_len
+                end_frame = min(n_frames, end_sample // frame_len)
+                post_frame_rms = frame_rms[start_frame:end_frame]
+            else:
+                start_sample = 0
+                post_frame_rms = frame_rms
+            voiced_frames = frame_rms[active_indices]
+            rms = float(np.percentile(voiced_frames, 90))
+        else:
+            post_frame_rms = frame_rms
+            rms = float(np.sqrt(np.mean(arr * arr)))
     else:
         rms = float(np.sqrt(np.mean(arr * arr)))
-    peak = float(np.max(np.abs(arr)))
-    if rms > 0.0004 and peak > 0.0015:
-        gain_rms = 0.08 / rms
-        gain_peak = 0.92 / peak
-        gain = min(15.0, gain_rms, gain_peak)
+
+    gain_applied = False
+    peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
+    if 0.0004 < rms < 0.065 and peak > 0.0015:
+        gain = min(15.0, 0.08 / rms)
         if gain > 1.0:
-            arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
+            scaled = arr * gain
+            arr = (0.95 * np.tanh(scaled / 0.95)).astype(np.float32)
+            gain_applied = True
+
+    pre_trimmed_lead_s = float(start_sample / float(sr))
+    if not gain_applied and post_frame_rms is not None:
+        window_stats = _speech_window_from_frame_rms(
+            post_frame_rms, arr.size, frame_len=frame_len, sample_rate=float(sr)
+        )
+    else:
+        window_stats = analyze_speech_window_s(arr, sample_rate=sr)
+    return arr, pre_trimmed_lead_s, window_stats
+
+
+def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
+    """Apply DC removal, 60Hz HPF, dead-air trim (>350ms -> 180ms/220ms), voiced p90 AGC, and tanh soft-limiter."""
+    arr, _pre_trimmed_lead_s, _stats = _preprocess_audio_for_stt_with_stats(samples16)
     return arr
 
 
@@ -2178,20 +2451,9 @@ def analyze_speech_window_s(
         return 0.0, 0.0, 0.0
     frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
     frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
-    max_rms = float(np.max(frame_rms))
-    full_dur = float(arr.size / sr)
-    if max_rms < 0.002:
-        return 0.0, full_dur, full_dur
-    thresh = max(0.004, max_rms * 0.15)
-    active = np.flatnonzero(frame_rms >= thresh)
-    if active.size == 0:
-        return 0.0, full_dur, full_dur
-    first_idx = int(active[0])
-    last_idx = int(active[-1])
-    voiced_s = float(((last_idx - first_idx + 1) * frame_len) / sr)
-    lead_s = float((first_idx * frame_len) / sr)
-    tail_s = float((max(0, n_frames - 1 - last_idx) * frame_len) / sr)
-    return voiced_s, lead_s, tail_s
+    return _speech_window_from_frame_rms(
+        frame_rms, arr.size, frame_len=frame_len, sample_rate=sr
+    )
 
 
 def estimate_voiced_duration_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
@@ -2218,6 +2480,7 @@ def decode_stt_window_sync(
     voiced_duration_ms: float | None = None,
     cap_lead_silence: bool = True,
     cap_trail_silence: bool = True,
+    keyterms: list[str] | str | None = None,
 ) -> tuple[str, list[dict[str, Any]], float]:
     """Decode one 16kHz float32 audio window using Sherpa-ONNX Zipformer."""
     assert runtime.stt_recognizer is not None
@@ -2227,9 +2490,8 @@ def decode_stt_window_sync(
     if float(np.max(np.abs(samples16))) <= 0.0008:
         return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
-    arr = preprocess_audio_for_stt(samples16)
-    estimated_voiced_s, existing_lead_s, existing_tail_s = analyze_speech_window_s(
-        arr, sample_rate=16000
+    arr, pre_trimmed_lead_s, (estimated_voiced_s, existing_lead_s, existing_tail_s) = (
+        _preprocess_audio_for_stt_with_stats(samples16)
     )
     # Never decode filtered silence (e.g. 20-50Hz desk rumble removed by 60Hz HPF)
     # even if unfiltered client VAD reported a non-zero voiced_duration_ms.
@@ -2243,7 +2505,7 @@ def decode_stt_window_sync(
         else estimated_voiced_s
     )
     target_lead_s = max(0.0, float(lead_pad_s))
-    trimmed_lead_s = 0.0
+    trimmed_lead_s = pre_trimmed_lead_s
     arr_for_decode = arr
     if cap_lead_silence:
         # Avoid double-stacking leading silence (e.g. 0.45s pre-roll + 0.18s pad -> 0.63s),
@@ -2252,7 +2514,7 @@ def decode_stt_window_sync(
             trim_samples = int((existing_lead_s - target_lead_s) * 16000)
             if 0 < trim_samples < arr_for_decode.size:
                 arr_for_decode = arr_for_decode[trim_samples:]
-                trimmed_lead_s = trim_samples / 16000.0
+                trimmed_lead_s += trim_samples / 16000.0
             effective_lead_s = 0.0
         else:
             effective_lead_s = max(0.0, target_lead_s - existing_lead_s)
@@ -2277,7 +2539,16 @@ def decode_stt_window_sync(
             np.zeros(int(16000 * effective_trail_pad), dtype=np.float32),
         ]
     )
-    stream = runtime.stt_recognizer.create_stream()
+    hotwords_list = _parse_stt_hotwords(keyterms)
+    stream = None
+    if hotwords_list and getattr(runtime, "stt_bpe_vocab_active", False):
+        hotwords_str = "/".join(hotwords_list)
+        try:
+            stream = runtime.stt_recognizer.create_stream(hotwords=hotwords_str)
+        except Exception:
+            stream = None
+    if stream is None:
+        stream = runtime.stt_recognizer.create_stream()
     stream.accept_waveform(16000, padded)
     runtime.stt_recognizer.decode_stream(stream)
     res = stream.result
@@ -2285,11 +2556,18 @@ def decode_stt_window_sync(
     adjusted_timestamps = [
         max(0.0, float(t) + trimmed_lead_s - effective_lead_s) for t in list(res.timestamps)
     ]
+    raw_ys_log_probs = getattr(res, "ys_log_probs", None)
+    ys_log_probs = (
+        list(raw_ys_log_probs)
+        if isinstance(raw_ys_log_probs, (list, tuple))
+        else None
+    )
     words = build_stt_words_from_sherpa(
         list(res.tokens),
         adjusted_timestamps,
         duration_s,
         audio_16k=arr,
+        ys_log_probs=ys_log_probs,
     )
     return txt, words, (time.perf_counter() - t_d0) * 1000.0
 
@@ -2300,6 +2578,7 @@ async def post_stt(
     response: Response,
     audio_file: UploadFile = File(...),
     language: str = Form(default="vi"),
+    keyterms: str = Form(default=""),
     source: str = Form(default=""),
     session_id: str = Form(default=""),
     turn_id: str = Form(default=""),
@@ -2335,6 +2614,68 @@ async def post_stt(
         my_interim_seq = _INTERIM_COUNTER
         _LATEST_INTERIM_SEQ_BY_SESSION[session_key] = my_interim_seq
 
+    def _empty_superseded_payload() -> dict[str, Any]:
+        return {
+            "text": "",
+            "words": [],
+            "language_code": "vi",
+            "language_probability": None,
+            "duration_seconds": 0.0,
+            "provider": "local",
+            "model_version": STT_MODEL_VERSION,
+            "fallback_used": False,
+            "superseded": True,
+        }
+
+    if await request.is_disconnected() or (
+        is_interim
+        and session_key
+        and my_interim_seq < _LATEST_INTERIM_SEQ_BY_SESSION.get(session_key, 0)
+    ):
+        return _empty_superseded_payload()
+
+    # Decode container/audio bytes OUTSIDE stt_semaphore so decode I/O never blocks Sherpa inference slots.
+    try:
+        samples16, duration_s = await asyncio.to_thread(
+            decode_audio_bytes_to_16k_mono,
+            raw,
+            filename=audio_file.filename or "",
+            content_type=audio_file.content_type or "",
+        )
+    except Exception as exc:
+        logger.warning(
+            "stt_decode_failed audio_bytes=%d error_type=%s",
+            len(raw),
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "STT_INVALID_AUDIO",
+                "message": "Định dạng âm thanh không đọc được.",
+            },
+        ) from exc
+
+    if samples16.size < 400:
+        logger.info("stt_short_audio audio_bytes=%d duration_s=%.3f", len(raw), duration_s)
+        return {
+            "text": "",
+            "words": [],
+            "language_code": "vi",
+            "language_probability": None,
+            "duration_seconds": round(duration_s, 3),
+            "provider": "local",
+            "model_version": STT_MODEL_VERSION,
+            "fallback_used": False,
+        }
+
+    if await request.is_disconnected() or (
+        is_interim
+        and session_key
+        and my_interim_seq < _LATEST_INTERIM_SEQ_BY_SESSION.get(session_key, 0)
+    ):
+        return _empty_superseded_payload()
+
     t_q0 = time.perf_counter()
     try:
         await asyncio.wait_for(
@@ -2353,55 +2694,12 @@ async def post_stt(
 
     runtime.active_stt_jobs += 1
     try:
-        if is_interim:
-            if await request.is_disconnected() or (
-                session_key
-                and my_interim_seq < _LATEST_INTERIM_SEQ_BY_SESSION.get(session_key, 0)
-            ):
-                return {
-                    "text": "",
-                    "words": [],
-                    "language_code": "vi",
-                    "language_probability": None,
-                    "duration_seconds": 0.0,
-                    "provider": "local",
-                    "model_version": STT_MODEL_VERSION,
-                    "fallback_used": False,
-                    "superseded": True,
-                }
-        try:
-            samples16, duration_s = await asyncio.to_thread(
-                decode_audio_bytes_to_16k_mono,
-                raw,
-                filename=audio_file.filename or "",
-                content_type=audio_file.content_type or "",
-            )
-        except Exception as exc:
-            logger.warning(
-                "stt_decode_failed audio_bytes=%d error_type=%s",
-                len(raw),
-                type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "STT_INVALID_AUDIO",
-                    "message": "Định dạng âm thanh không đọc được.",
-                },
-            ) from exc
-
-        if samples16.size < 400:
-            logger.info("stt_short_audio audio_bytes=%d duration_s=%.3f", len(raw), duration_s)
-            return {
-                "text": "",
-                "words": [],
-                "language_code": "vi",
-                "language_probability": None,
-                "duration_seconds": round(duration_s, 3),
-                "provider": "local",
-                "model_version": STT_MODEL_VERSION,
-                "fallback_used": False,
-            }
+        if await request.is_disconnected() or (
+            is_interim
+            and session_key
+            and my_interim_seq < _LATEST_INTERIM_SEQ_BY_SESSION.get(session_key, 0)
+        ):
+            return _empty_superseded_payload()
 
         text_out, words_out, decode_ms = await asyncio.to_thread(
             decode_stt_window_sync,
@@ -2410,6 +2708,7 @@ async def post_stt(
             trail_pad_s=0.35,
             voiced_duration_ms=voiced_duration_ms,
             cap_lead_silence=True,
+            keyterms=keyterms,
         )
         total_ms = (time.perf_counter() - t_req_start) * 1000.0
         response.headers["X-STT-Queue-Ms"] = f"{queue_ms:.2f}"
@@ -2436,7 +2735,7 @@ _WS_MAX_ACTIVE_WINDOW_SAMPLES = int(_WS_TARGET_SR * 1.7)
 _WS_ADVANCE_TRIGGER_SAMPLES = int(_WS_TARGET_SR * 1.35)
 _WS_ACOUSTIC_OVERLAP_SAMPLES = int(_WS_TARGET_SR * 0.24)
 _WS_INTERIM_MIN_SPEECH_SAMPLES = int(_WS_TARGET_SR * 0.12)
-_WS_INTERIM_STEP_SAMPLES = int(_WS_TARGET_SR * 0.12)
+_WS_INTERIM_STEP_SAMPLES = int(_WS_TARGET_SR * 0.28)
 _WS_SILENCE_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.42)
 _WS_MIN_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.12)
 _WS_CLIENT_VAD_MAX_SAMPLES = int(_WS_TARGET_SR * 18.0)
@@ -2843,9 +3142,9 @@ class _WsSttSession:
         active_samples = self.seg_total_samples - self.silence_samples
         delta_samples = self.seg_total_samples - self.last_interim_sample
         is_pause_trigger = (
-            self.silence_samples >= int(_WS_TARGET_SR * 0.06)
+            self.silence_samples >= int(_WS_TARGET_SR * 0.12)
             and active_samples >= _WS_INTERIM_MIN_SPEECH_SAMPLES
-            and delta_samples >= int(_WS_TARGET_SR * 0.06)
+            and delta_samples >= int(_WS_TARGET_SR * 0.14)
         )
         is_step_trigger = (
             active_samples >= _WS_INTERIM_MIN_SPEECH_SAMPLES
@@ -2878,7 +3177,7 @@ async def stt_stream(websocket: WebSocket) -> None:
         await websocket.close(code=4503)
         return
 
-    await runtime.ensure_loaded()
+    await runtime.ensure_stt_loaded()
     session = _WsSttSession()
 
     async def _decode_and_emit_loop() -> None:
@@ -2986,7 +3285,12 @@ async def stt_stream(websocket: WebSocket) -> None:
             if session.stopped:
                 break
 
-            # 2. Decode latest rolling interim (coalesced; stale interims superseded automatically)
+            # 2. Decode latest rolling interim (coalesced; stale interims superseded automatically).
+            # Always prioritize pending finalized flushes ahead of rolling interim decodes.
+            if session.pending_flushes:
+                session.decode_event.set()
+                continue
+
             target_seq = session.latest_interim_seq
             if (
                 target_seq > session.last_decoded_interim_seq
@@ -3008,6 +3312,10 @@ async def stt_stream(websocket: WebSocket) -> None:
                 await runtime.stt_semaphore.acquire()
                 runtime.active_stt_jobs += 1
                 try:
+                    if session.pending_flushes or not session.in_speech or session.segment_id != seg_id:
+                        if session.pending_flushes:
+                            session.decode_event.set()
+                        continue
                     _txt, win_words, decode_ms = await asyncio.to_thread(
                         decode_stt_window_sync,
                         win_audio,

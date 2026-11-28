@@ -4,6 +4,12 @@ import { ServiceError } from "@/lib/api/service-error";
 import type { SpeechService } from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
 import {
+  acquireUnlockedAudioElement,
+  getWarmAudioContext,
+  resetAndroidAudioUnlockForTest,
+  unlockAudioNow,
+} from "@/lib/reading/android-audio-unlock";
+import {
   isTechnicalSttUnavailabilityError,
   LocalSegmentSpeechRecognition,
   resetLocalSttEmergencyStateForTests,
@@ -12,14 +18,11 @@ import {
 import {
   AndroidNativeSpeechRecognition,
   getAndroidSpeechCapabilities,
-  getPostTtsMicSettleMs,
   isAndroidNativeSpeechAvailable,
-  notifyAndroidWebAudioEnded,
   openAndroidTtsInstallSettings,
   resetAndroidNativeSpeechBridgeForTests,
   speakWithAndroidNativeTts,
   stopAndroidNativeTts,
-  waitForPostTtsMicSettle,
   type ViReadNativeSpeechPort,
 } from "@/lib/reading/native-speech-bridge";
 import { resetVoiceLockAndPolicyForTests } from "@/lib/reading/session-voice-lock";
@@ -57,6 +60,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetAndroidNativeSpeechBridgeForTests();
+  resetAndroidAudioUnlockForTest();
   resetVoiceLockAndPolicyForTests();
   resetSpeechPreferencesCache();
   resetVoiceEngineStatus();
@@ -66,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetAndroidNativeSpeechBridgeForTests();
+  resetAndroidAudioUnlockForTest();
   installAndroidPort(undefined);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -218,6 +223,106 @@ describe("Android Native Speech Bridge Client (window.ViReadNativeSpeech)", () =
     expect(finals[0].onsetAt).toBe(rec.onsetAt);
     expect(errors).toEqual([]);
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses hasMaleViVoice/hasFemaleViVoice in capabilities and invokes onready on stt_ready", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    const capPromise = getAndroidSpeechCapabilities();
+    const reqId = String(port.sent[0].requestId);
+    port.emit({
+      type: "capabilities",
+      requestId: reqId,
+      ttsAvailable: true,
+      viVoicesCount: 2,
+      hasMaleViVoice: true,
+      hasFemaleViVoice: true,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+
+    await expect(capPromise).resolves.toEqual({
+      ttsAvailable: true,
+      viVoicesCount: 2,
+      hasMaleViVoice: true,
+      hasFemaleViVoice: true,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+
+    const rec = new AndroidNativeSpeechRecognition();
+    const onReady = vi.fn();
+    rec.onready = onReady;
+    expect(rec.ready).toBe(false);
+
+    rec.start();
+    const sttReqId = String(port.sent[1].requestId);
+    port.emit({ type: "stt_ready", requestId: sttReqId });
+    expect(rec.ready).toBe(true);
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    rec.abort();
+    expect(rec.ready).toBe(false);
+  });
+
+  it("keeps a persistent warm AudioContext and prevents silent unlock probe cleanup from interrupting active playback", async () => {
+    const closeSpy = vi.fn(async () => undefined);
+    const resumeSpy = vi.fn(async function (this: { state: string }) {
+      this.state = "running";
+    });
+    class FakeAudioContext {
+      state = "suspended";
+      resume = resumeSpy;
+      close = closeSpy;
+    }
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    let resolveProbePlay!: () => void;
+    const pauseSpy = vi.fn();
+    const origCreateElement = document.createElement.bind(document);
+    let createdAudio: HTMLAudioElement | null = null;
+    vi.spyOn(document, "createElement").mockImplementation(((
+      tagName: string,
+    ) => {
+      const el = origCreateElement(tagName);
+      if (tagName.toLowerCase() === "audio") {
+        const audioEl = el as HTMLAudioElement;
+        createdAudio = audioEl;
+        audioEl.pause = pauseSpy;
+        audioEl.play = vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveProbePlay = resolve;
+            }),
+        );
+      }
+      return el;
+    }) as typeof document.createElement);
+
+    unlockAudioNow();
+
+    const warmCtx = getWarmAudioContext();
+    expect(warmCtx).toBeInstanceOf(FakeAudioContext);
+    expect(resumeSpy).toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    // Acquire sharedAudioElement BEFORE silent probe resolves (simulating immediate tap -> TTS)
+    const borrowed = acquireUnlockedAudioElement();
+    expect(borrowed).not.toBeNull();
+    borrowed!.audio.src = "blob:real-tts-audio";
+    borrowed!.audio.muted = false;
+
+    // Resolving the earlier silent probe must NOT pause or blank the active playback!
+    resolveProbePlay();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(createdAudio).not.toBeNull();
+    expect(borrowed!.audio.src).toContain("blob:real-tts-audio");
+
+    borrowed!.release();
   });
 });
 
@@ -420,116 +525,5 @@ describe("Deterministic 0-VND TTS & STT Routing", () => {
     expect(shouldPreferAndroidNativeStt()).toBe(true);
 
     rec.abort();
-  });
-
-  it("passes optional gender in speak command and parses viMaleVoicesCount / viFemaleVoicesCount in capabilities", async () => {
-    const port = new FakeAndroidSpeechPort();
-    installAndroidPort(port);
-
-    const capsPromise = getAndroidSpeechCapabilities({ forceRefresh: true });
-    const capReqId = String(port.sent[0].requestId);
-    port.emit({
-      type: "capabilities",
-      requestId: capReqId,
-      ttsAvailable: true,
-      viVoicesCount: 5,
-      viMaleVoicesCount: 2,
-      viFemaleVoicesCount: 3,
-      sttAvailable: true,
-      onDeviceSttAvailable: true,
-      platform: "android-webview",
-    });
-    const caps = await capsPromise;
-    expect(caps).toEqual({
-      ttsAvailable: true,
-      viVoicesCount: 5,
-      viMaleVoicesCount: 2,
-      viFemaleVoicesCount: 3,
-      sttAvailable: true,
-      onDeviceSttAvailable: true,
-      platform: "android-webview",
-    });
-
-    const speakMale = speakWithAndroidNativeTts("Xin chào", {
-      rate: 0.9,
-      gender: "male",
-    });
-    const maleCmd = port.sent.find((m) => m.action === "speak");
-    expect(maleCmd).toMatchObject({
-      action: "speak",
-      text: "Xin chào",
-      rate: 0.9,
-      gender: "male",
-    });
-    port.emit({ type: "tts_done", requestId: String(maleCmd?.requestId) });
-    await speakMale;
-
-    const speakDefault = speakWithAndroidNativeTts("Chào con");
-    const defaultCmd = port.sent.filter((m) => m.action === "speak")[1];
-    expect(defaultCmd).not.toHaveProperty("gender");
-    port.emit({ type: "tts_done", requestId: String(defaultCmd?.requestId) });
-    await speakDefault;
-  });
-
-  it("dispatches notifyAudioEnded when Android bridge is present and is a no-op when absent", () => {
-    notifyAndroidWebAudioEnded();
-
-    const port = new FakeAndroidSpeechPort();
-    installAndroidPort(port);
-    notifyAndroidWebAudioEnded();
-    expect(port.sent).toHaveLength(1);
-    expect(port.sent[0]).toMatchObject({
-      action: "notifyAudioEnded",
-    });
-    expect(typeof port.sent[0].requestId).toBe("string");
-  });
-
-  it("computes post-TTS mic settle delay (180ms Android, 80ms desktop, 0ms jsdom) and supports cancellation", async () => {
-    const originalUa = navigator.userAgent;
-    try {
-      // Plain jsdom without bridge -> 0ms
-      expect(getPostTtsMicSettleMs()).toBe(0);
-
-      // Android native bridge -> 180ms
-      installAndroidPort(new FakeAndroidSpeechPort());
-      expect(getPostTtsMicSettleMs()).toBe(180);
-
-      // Desktop browser UA -> 80ms
-      delete (window as unknown as { ViReadNativeSpeech?: unknown })
-        .ViReadNativeSpeech;
-      Object.defineProperty(navigator, "userAgent", {
-        configurable: true,
-        value:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0",
-      });
-      expect(getPostTtsMicSettleMs()).toBe(80);
-
-      // Android UA without bridge -> 180ms
-      Object.defineProperty(navigator, "userAgent", {
-        configurable: true,
-        value:
-          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Mobile Safari/537.36",
-      });
-      expect(getPostTtsMicSettleMs()).toBe(180);
-
-      // Cancelable settle wait
-      vi.useFakeTimers();
-      let cancelled = false;
-      const activeWait = waitForPostTtsMicSettle(() => cancelled, 180);
-      await vi.advanceTimersByTimeAsync(180);
-      expect(await activeWait).toBe(true);
-
-      const cancelledWait = waitForPostTtsMicSettle(() => cancelled, 180);
-      await vi.advanceTimersByTimeAsync(90);
-      cancelled = true;
-      await vi.advanceTimersByTimeAsync(90);
-      expect(await cancelledWait).toBe(false);
-    } finally {
-      vi.useRealTimers();
-      Object.defineProperty(navigator, "userAgent", {
-        configurable: true,
-        value: originalUa,
-      });
-    }
   });
 });

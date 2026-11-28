@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -36,6 +37,7 @@ from app.services.ocr_evidence import (
 from app.services.viread_vietocr_v2_preprocessing import preprocess_line_array
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
 
 # The Windows setup script keeps the pinned Vietnamese model inside this
 # checkout instead of writing into Program Files. Tesseract expects the parent
@@ -53,7 +55,32 @@ import cv2
 import numpy as np
 import requests
 from PIL import Image
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
+try:
+    from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
+except ModuleNotFoundError:
+    SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or None
+    _supabase_secret_key = (os.getenv("SUPABASE_SECRET_KEY") or "").strip() or None
+    _supabase_service_role_key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip() or None
+    SUPABASE_ADMIN_KEY = _supabase_secret_key or _supabase_service_role_key
+
+    def _is_supabase_jwt_key(api_key: str | None) -> bool:
+        """Return True only when the key looks like a legacy 3-part JWT rather than sb_secret_*."""
+        clean = (api_key or "").strip()
+        return clean.count(".") == 2 and not clean.startswith("sb_")
+
+    def supabase_admin_headers(
+        api_key: str | None = None,
+        *,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Build Supabase Storage/PostgREST headers without requiring app.database in Zero-DB workers."""
+        key = ((api_key if api_key is not None else SUPABASE_ADMIN_KEY) or "").strip()
+        headers: dict[str, str] = {"apikey": key}
+        if _is_supabase_jwt_key(key):
+            headers["Authorization"] = f"Bearer {key}"
+        if extra:
+            headers.update(extra)
+        return headers
 
 # Optional/worker-only OCR dependencies are imported lazily so light web deploys
 # (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
@@ -161,7 +188,23 @@ from app.services.ocr_text_utils import (
 
 from unittest.mock import NonCallableMock
 
-from app.services.ocr_executor import get_ocr_executor
+try:
+    from app.services.ocr_executor import get_ocr_executor
+except ModuleNotFoundError:
+    from concurrent.futures import ThreadPoolExecutor
+
+    _fallback_executor_lock = threading.Lock()
+    _fallback_ocr_executor: ThreadPoolExecutor | None = None
+
+    def get_ocr_executor() -> ThreadPoolExecutor:
+        global _fallback_ocr_executor
+        with _fallback_executor_lock:
+            if _fallback_ocr_executor is None:
+                _fallback_ocr_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="viread-ocr",
+                )
+            return _fallback_ocr_executor
 
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
@@ -726,44 +769,69 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     load_fallback_reason: str | None = None
     with _engine_lock:
         if not _ocr_dependencies_loaded:
-            _ocr_dependencies_loaded = True
-            try:
-                import torch as torch_runtime
-                torch = torch_runtime
-            except Exception as exc:
-                torch = None
-                _vietocr_import_status = "not_installed"
-                _vietocr_import_error = type(exc).__name__
-            try:
-                from paddleocr import PaddleOCR as paddle_runtime
-                PaddleOCR = paddle_runtime
+            if torch is None:
+                try:
+                    import torch as torch_runtime
+                    torch = torch_runtime
+                except Exception as exc:
+                    torch = None
+                    try:
+                        package_version("torch")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                    _vietocr_import_error = type(exc).__name__
+            if PaddleOCR is None:
+                os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
+                if "lmdb.cffi" in sys.modules or (
+                    "lmdb" in sys.modules and "lmdb.cpython" not in sys.modules
+                ):
+                    for _lmdb_mod in ("lmdb", "lmdb.cffi", "lmdb.cpython"):
+                        sys.modules.pop(_lmdb_mod, None)
+                try:
+                    from paddleocr import PaddleOCR as paddle_runtime
+                    PaddleOCR = paddle_runtime
+                    _paddle_import_status = "success"
+                    _paddle_import_error = None
+                except Exception as exc:
+                    PaddleOCR = None
+                    try:
+                        package_version("paddleocr")
+                    except PackageNotFoundError:
+                        _paddle_import_status = "not_installed"
+                        _paddle_import_error = None
+                    else:
+                        _paddle_import_status = "not_initialized"
+                        _paddle_import_error = type(exc).__name__
+            elif _paddle_import_status not in ("success", "not_installed"):
                 _paddle_import_status = "success"
                 _paddle_import_error = None
-            except Exception as exc:
-                PaddleOCR = None
+            if Cfg is None or Predictor is None:
                 try:
-                    package_version("paddleocr")
-                except PackageNotFoundError:
-                    _paddle_import_status = "not_installed"
-                else:
-                    _paddle_import_status = "not_initialized"
-                    _paddle_import_error = type(exc).__name__
-            try:
-                from vietocr.tool.config import Cfg as vietocr_config
-                from vietocr.tool.predictor import Predictor as vietocr_predictor
-                _install_safe_vietocr_downloaders()
-                Cfg, Predictor = vietocr_config, vietocr_predictor
+                    from vietocr.tool.config import Cfg as vietocr_config
+                    from vietocr.tool.predictor import Predictor as vietocr_predictor
+                    _install_safe_vietocr_downloaders()
+                    Cfg, Predictor = vietocr_config, vietocr_predictor
+                    _vietocr_import_status = "success"
+                    _vietocr_import_error = None
+                except Exception as exc:
+                    Cfg = Predictor = None
+                    try:
+                        package_version("vietocr")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                        _vietocr_import_error = None
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                        _vietocr_import_error = type(exc).__name__
+            elif _vietocr_import_status not in ("success", "not_installed"):
                 _vietocr_import_status = "success"
                 _vietocr_import_error = None
-            except Exception as exc:
-                Cfg = Predictor = None
-                try:
-                    package_version("vietocr")
-                except PackageNotFoundError:
-                    _vietocr_import_status = "not_installed"
-                else:
-                    _vietocr_import_status = "not_initialized"
-                    _vietocr_import_error = type(exc).__name__
+            _ocr_dependencies_loaded = (
+                _paddle_import_status in ("success", "not_installed")
+                and _vietocr_import_status in ("success", "not_installed")
+            )
 
         if _paddle_engine is None:
             if PaddleOCR is None:

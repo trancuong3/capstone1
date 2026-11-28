@@ -72,12 +72,12 @@ const AUDIO_QUALITY_PROFILES: Record<AudioQualityMode, AudioQualityProfile> = {
   "short-word": {
     calibrationWindowMs: 60,
     minDurationMs: 160,
-    minSpeechDurationMs: 60,
+    minSpeechDurationMs: 40,
     minPeakRms: 0.003,
-    candidateOnsetMs: 50,
+    candidateOnsetMs: 40,
     hangoverMs: 220,
     onsetFloor: 0.0022,
-    onsetMultiplier: 2.4,
+    onsetMultiplier: 1.8,
     offsetFloor: 0.0012,
     offsetMultiplier: 1.4,
   },
@@ -97,6 +97,7 @@ export class AudioQualityMonitor {
   private maxRms = 0;
   private minRms = Number.POSITIVE_INFINITY;
   private stationaryLoudMs = 0;
+  private shortWordStationaryMs = 0;
   private lastRms = 0;
   /** Sliding 300ms window of recent frames for sustained clipping detection. */
   private readonly clipWindow: Array<{
@@ -133,13 +134,14 @@ export class AudioQualityMonitor {
     let peak = 0;
     let clippedSamples = 0;
     for (const sample of samples) {
-      if (!Number.isFinite(sample) || Math.abs(sample) > 1) {
+      if (!Number.isFinite(sample)) {
         this.invalid = true;
         continue;
       }
-      sum += sample * sample;
-      peak = Math.max(peak, Math.abs(sample));
-      if (Math.abs(sample) >= 0.99) clippedSamples++;
+      const clampedAbs = Math.min(1, Math.abs(sample));
+      sum += clampedAbs * clampedAbs;
+      peak = Math.max(peak, clampedAbs);
+      if (clampedAbs >= 0.99) clippedSamples++;
     }
     const frameClipped = clippedSamples / samples.length > 0.05;
     this.clipWindow.push({
@@ -173,19 +175,22 @@ export class AudioQualityMonitor {
     this.frames++;
     this.maxRms = Math.max(this.maxRms, rms);
     this.minRms = Math.min(this.minRms, rms);
-    if (
-      this.mode === "child-passage" &&
-      rms >= 0.02 &&
+    const isSteadyFrame =
       this.frames > 1 &&
       this.lastRms > 0 &&
-      Math.abs(rms - this.lastRms) / Math.max(rms, this.lastRms) < 0.15
-    ) {
+      Math.abs(rms - this.lastRms) / Math.max(rms, this.lastRms) < 0.15;
+    if (this.mode === "child-passage" && rms >= 0.02 && isSteadyFrame) {
       this.stationaryLoudMs += elapsed;
     } else if (
       rms < 0.02 ||
       this.maxRms / Math.max(this.minRms, 1e-6) >= 1.35
     ) {
       this.stationaryLoudMs = 0;
+    }
+    if (this.mode === "short-word" && rms >= 0.008 && isSteadyFrame) {
+      this.shortWordStationaryMs += elapsed;
+    } else {
+      this.shortWordStationaryMs = 0;
     }
     this.lastRms = rms;
     const durationMs = Math.max(0, nowMs - this.startedAt);
@@ -195,12 +200,24 @@ export class AudioQualityMonitor {
     // Continuous fan noise is not automatically treated as speech, while early child
     // speech on frame 1 in short-word / child-passage must not poison noiseFloor.
     let noise = this.snapshot.noiseFloor;
-    const isStationaryFanNoise =
+    const isChildPassageFanNoise =
       this.mode === "child-passage" &&
       this.stationaryLoudMs >= 1000 &&
       this.maxRms / Math.max(this.minRms, 1e-6) < 1.35;
+    const isShortWordFanNoise =
+      this.mode === "short-word" &&
+      this.shortWordStationaryMs >= 650 &&
+      this.maxRms / Math.max(this.minRms, 1e-6) < 1.35;
+    const isShortWordPostSpeechFanHum =
+      this.mode === "short-word" &&
+      this.snapshot.isSpeaking &&
+      this.shortWordStationaryMs >= 350 &&
+      rms <= this.maxRms * 0.65;
+    const isStationaryFanNoise = isChildPassageFanNoise || isShortWordFanNoise;
     if (isStationaryFanNoise) {
       noise = rms;
+    } else if (isShortWordPostSpeechFanHum) {
+      noise += 0.25 * (rms - noise);
     } else if (this.frames === 1) {
       noise = protectEarlySpeech ? Math.min(rms, 0.008) : rms;
     } else if (
@@ -267,7 +284,11 @@ export class AudioQualityMonitor {
         status = "SPEECH_DETECTED";
       else status = "BACKGROUND_NOISE";
     }
-    return { ...this.snapshot, status };
+    return {
+      ...this.snapshot,
+      clipped: this.invalid ? false : this.snapshot.clipped,
+      status,
+    };
   }
 }
 
@@ -288,15 +309,23 @@ export function hasUnusableAudio(quality?: AudioQualitySnapshot): boolean {
 /**
  * Trong luyện đọc từ ngắn, giọng đọc nhỏ ("LOW_VOLUME") hoặc nền ồn nhẹ
  * ("BACKGROUND_NOISE") vẫn mang đầy đủ âm vị tiếng Việt để gửi lên STT.
- * Chỉ chặn âm thanh rỗng, câm hoàn toàn, quá ngắn hoặc bị vỡ tiếng.
+ * Âm thanh bị clipping nhẹ vẫn được gửi lên STT miễn là có đủ thời lượng tiếng nói.
+ * Chỉ chặn âm thanh rỗng, câm hoàn toàn, quá ngắn hoặc mẫu dữ liệu lỗi (NaN/Infinity).
  */
 export function hasShortWordBlockingAudioIssue(
   quality?: AudioQualitySnapshot,
 ): boolean {
-  return (
-    quality !== undefined &&
-    ["NO_AUDIO", "SILENCE", "AUDIO_TOO_SHORT", "INVALID_AUDIO"].includes(
-      quality.status,
-    )
+  if (quality === undefined) return false;
+  if (
+    quality.status === "INVALID_AUDIO" &&
+    quality.clipped &&
+    Number.isFinite(quality.rms) &&
+    quality.speechDurationMs >=
+      AUDIO_QUALITY_PROFILES["short-word"].minSpeechDurationMs
+  ) {
+    return false;
+  }
+  return ["NO_AUDIO", "SILENCE", "AUDIO_TOO_SHORT", "INVALID_AUDIO"].includes(
+    quality.status,
   );
 }

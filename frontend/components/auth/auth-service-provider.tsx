@@ -15,8 +15,17 @@ import {
   type AuthService,
 } from "@/lib/api/auth-service";
 import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
+import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import {
+  broadcastActorSwitch,
+  clearGlobalTasksMemoryCache,
+} from "@/lib/api/global-tasks-service";
+import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
+import { clearStoredScanJobIds } from "@/lib/cache/scan-job-storage";
 import { clearPersistedSelectedChild } from "@/lib/cache/selected-child-storage";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
+import { registerOfflineServiceWorker } from "@/lib/offline/register-offline-sw";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
 import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 
@@ -86,8 +95,21 @@ export function AuthServiceProvider({
 
       const nextUserId = session?.user?.id ?? null;
       if (event === "SIGNED_OUT" || !nextUserId) {
+        const previousUserId = lastUserIdRef.current;
+        const hadPreviousUser = previousUserId !== null;
+        void wipeOfflineAccountData({
+          parentAccountId: previousUserId,
+          reason: event === "SIGNED_OUT" ? "logout" : "auth_clear",
+        }).catch(() => undefined);
         clearUserCache();
         clearPersistedSelectedChild();
+        clearStoredScanJobIds();
+        clearGlobalTasksMemoryCache();
+        clearPrivateMediaMemoryCache();
+        resetApiReadCacheForActorSwitch();
+        if (hadPreviousUser || event === "SIGNED_OUT") {
+          broadcastActorSwitch();
+        }
         lastUserIdRef.current = null;
         if (event === "SIGNED_OUT") {
           dispatchI18nAuthSync({ userId: null, preferredLocale: null });
@@ -96,11 +118,22 @@ export function AuthServiceProvider({
         lastUserIdRef.current &&
         lastUserIdRef.current !== nextUserId
       ) {
+        void wipeOfflineAccountData({
+          parentAccountId: lastUserIdRef.current,
+          reason: "account_switch",
+        }).catch(() => undefined);
         clearUserCache(lastUserIdRef.current);
         clearPersistedSelectedChild(nextUserId);
+        clearStoredScanJobIds(nextUserId);
+        clearGlobalTasksMemoryCache();
+        clearPrivateMediaMemoryCache();
+        resetApiReadCacheForActorSwitch();
+        broadcastActorSwitch();
         lastUserIdRef.current = nextUserId;
+        void registerOfflineServiceWorker();
       } else {
         lastUserIdRef.current = nextUserId;
+        void registerOfflineServiceWorker();
       }
 
       setRuntime((current) => ({

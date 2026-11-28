@@ -3,51 +3,69 @@
 import {
   BarChart3,
   BookMarked,
-  CalendarClock,
   Check,
   ChevronDown,
-  CircleHelp,
   Gamepad2,
-  History,
   LayoutDashboard,
-  LogOut,
-  Settings,
-  UserRound,
+  Lock,
+  ShieldCheck,
   UsersRound,
   Volume2,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
 import { ButtonSizeContext } from "@/components/common/button";
-import {
-  ProfileAvatar,
-  resolveDisplayName,
-} from "@/components/common/profile-avatar";
+import { resolveDisplayName } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
-import { LanguageSelector } from "@/components/i18n/language-selector";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
+import { ParentAccountDropdown } from "@/components/layout/parent-account-dropdown";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
 import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
+import {
+  ParentPinModal,
+  type ParentPinModalMode,
+} from "@/components/security/parent-pin-modal";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
-import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
+import { createFamilyPedagogyService } from "@/lib/api/family-pedagogy-service";
+import { clearAndroidScheduledReminders } from "@/lib/reading/native-reminder-bridge";
+import {
+  clearAllOfflineReadingPacks,
+  clearOfflineReadingPacksForUser,
+  listPendingOfflineSessions,
+  subscribeOfflinePackChanges,
+  syncPendingOfflineSessions,
+} from "@/lib/offline/offline-reading-pack";
+import {
+  clearChildModeLockForUser,
+  isChildModeLockedForUser,
+  isParentProtectedRoute,
+  setChildModeLockedForUser,
+  subscribeChildModeLock,
+} from "@/lib/security/child-mode-lock";
+import {
+  broadcastActorSwitch,
+  clearGlobalTasksMemoryCache,
+} from "@/lib/api/global-tasks-service";
 import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
+import { clearStoredScanJobIds } from "@/lib/cache/scan-job-storage";
 import {
   clearUserCache,
   DEFAULT_USER_CACHE_TTL_MS,
@@ -56,6 +74,12 @@ import {
   sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
+import {
+  hydrateTeacherVoiceFromChildProfile,
+  resetTeacherVoiceForActorSwitch,
+} from "@/lib/reading/session-voice-lock";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
+import { installOfflineOutboxReconnectAutoDrain } from "@/lib/offline/offline-session-outbox";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
@@ -81,24 +105,14 @@ const navigationItemsConfig = [
     labelKey: "navigation.parent.reports",
   },
   {
-    href: "/reading-management",
-    icon: CalendarClock,
-    labelKey: "navigation.parent.readingManagement",
-  },
-  {
-    href: "/sessions",
-    icon: History,
-    labelKey: "navigation.parent.sessions",
+    href: "/reports/difficult-words",
+    icon: Volume2,
+    labelKey: "navigation.parent.difficultWords",
   },
   {
     href: "/entertainment",
     icon: Gamepad2,
     labelKey: "navigation.parent.entertainment",
-  },
-  {
-    href: "/reports/difficult-words",
-    icon: Volume2,
-    labelKey: "navigation.parent.difficultWords",
   },
 ] as const;
 
@@ -151,8 +165,6 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const activeNavigationRef = useRef<HTMLAnchorElement>(null);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
-  const avatarButtonRef = useRef<HTMLButtonElement>(null);
   const childSwitcherRef = useRef<HTMLDivElement>(null);
   const previousUserIdRef = useRef<string | undefined>(undefined);
 
@@ -165,10 +177,6 @@ export function AppShell({ children }: AppShellProps) {
     null,
   );
   const [fetchedChildren, setFetchedChildren] = useState<ChildProfileDTO[]>([]);
-  const [accountMenu, setAccountMenu] = useState<{
-    isOpen: boolean;
-    pathname: string;
-  }>({ isOpen: false, pathname: "" });
   const [childSwitcherOpenForPath, setChildSwitcherOpenForPath] = useState<
     string | null
   >(null);
@@ -204,8 +212,12 @@ export function AppShell({ children }: AppShellProps) {
     );
   }, [availableChildren, selectedChildId, validatedSelectedChild]);
 
-  const isAccountMenuVisible =
-    accountMenu.isOpen && accountMenu.pathname === pathname;
+  useEffect(() => {
+    if (selectedChild) {
+      hydrateTeacherVoiceFromChildProfile(selectedChild);
+    }
+  }, [selectedChild]);
+
   const isChildSwitcherVisible = childSwitcherOpenForPath === pathname;
   const isMobileImmersive =
     immersiveEventState.active && immersiveEventState.pathname === pathname;
@@ -332,40 +344,6 @@ export function AppShell({ children }: AppShellProps) {
   }, [cachedSummary?.profile, pathname]);
 
   useEffect(() => {
-    if (!isAccountMenuVisible) return;
-    accountMenuRef.current
-      ?.querySelector<HTMLElement>('[role="menuitem"]')
-      ?.focus();
-  }, [isAccountMenuVisible]);
-
-  useEffect(() => {
-    if (!isAccountMenuVisible) return;
-
-    function closeOnOutsidePointer(event: PointerEvent) {
-      if (
-        event.target instanceof Node &&
-        !accountMenuRef.current?.contains(event.target)
-      ) {
-        setAccountMenu((current) => ({ ...current, isOpen: false }));
-      }
-    }
-
-    function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setAccountMenu((current) => ({ ...current, isOpen: false }));
-        avatarButtonRef.current?.focus();
-      }
-    }
-
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [isAccountMenuVisible]);
-
-  useEffect(() => {
     if (!isChildSwitcherVisible) return;
 
     function closeOnOutsidePointer(event: PointerEvent) {
@@ -397,28 +375,151 @@ export function AppShell({ children }: AppShellProps) {
     const prevId = previousUserIdRef.current;
     if (prevId !== undefined && prevId !== user?.id) {
       resetApiReadCacheForActorSwitch();
+      resetTeacherVoiceForActorSwitch();
       clearUserCache(prevId);
+      clearChildModeLockForUser(prevId);
+      void clearAndroidScheduledReminders();
+      void clearOfflineReadingPacksForUser(prevId);
+      clearStoredScanJobIds(user?.id ?? null);
       if (!user?.id) {
         clearUserCache();
+        void clearAllOfflineReadingPacks();
       }
+      broadcastActorSwitch();
     }
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!userId) return;
+    let disposed = false;
+    const flushIfPendingOnline = async () => {
+      if (
+        disposed ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        return;
+      }
+      const pending = await listPendingOfflineSessions(userId);
+      if (!disposed && pending.length > 0) {
+        await syncPendingOfflineSessions(userId);
+      }
+    };
+    const onOnline = () => {
+      void flushIfPendingOnline();
+    };
+    window.addEventListener("online", onOnline);
+    const unsub = subscribeOfflinePackChanges(() => {
+      // Only auto-flush when online and local outbox has queued items
+      void flushIfPendingOnline();
+    });
+    void flushIfPendingOnline();
+    return () => {
+      disposed = true;
+      window.removeEventListener("online", onOnline);
+      unsub();
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    return installOfflineOutboxReconnectAutoDrain(() => ({
+      parentAccountId: userId,
+      childProfileId: selectedChildId,
+    }));
+  }, [selectedChildId, userId]);
+
+  const familyPedagogyService = useMemo(
+    () => createFamilyPedagogyService(),
+    [],
+  );
+  const [pinState, setPinState] = useState<{
+    readonly userId: string;
+    readonly hasPin: boolean;
+  } | null>(null);
+  const hasParentPin = Boolean(
+    userId && pinState?.userId === userId && pinState.hasPin,
+  );
+  const [pinModalMode, setPinModalMode] = useState<ParentPinModalMode | null>(
+    null,
+  );
+  const getLockSnapshot = useCallback(
+    () => isChildModeLockedForUser(userId),
+    [userId],
+  );
+  const isChildModeLocked = useSyncExternalStore(
+    subscribeChildModeLock,
+    getLockSnapshot,
+    () => false,
+  );
+  const isProtectedByChildLock =
+    isChildModeLocked && isParentProtectedRoute(pathname);
+
+  const handleChildModeToggle = useCallback(() => {
+    if (!userId) return;
+    if (isChildModeLocked) {
+      setPinModalMode("unlock");
+      return;
+    }
+    if (hasParentPin) {
+      setChildModeLockedForUser(userId, true);
+      if (isParentProtectedRoute(pathname)) {
+        router.push("/dashboard");
+      }
+      return;
+    }
+    const targetUserId = userId;
+    void familyPedagogyService
+      .getPinStatus()
+      .then((statusRes) => {
+        setPinState({ userId: targetUserId, hasPin: statusRes.has_pin });
+        if (statusRes.has_pin) {
+          setChildModeLockedForUser(targetUserId, true);
+          if (isParentProtectedRoute(pathname)) {
+            router.push("/dashboard");
+          }
+        } else {
+          setPinModalMode("setup");
+        }
+      })
+      .catch(() => {
+        setPinModalMode("setup");
+      });
+  }, [
+    familyPedagogyService,
+    hasParentPin,
+    isChildModeLocked,
+    pathname,
+    router,
+    userId,
+  ]);
+
   async function handleSignOut() {
     if (isSigningOut) return;
+    if (isChildModeLocked) {
+      setPinModalMode("unlock");
+      return;
+    }
 
     setHasSignOutError(false);
     setIsSigningOut(true);
 
     try {
+      void wipeOfflineAccountData({
+        parentAccountId: userId,
+        reason: "logout",
+      }).catch(() => undefined);
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
+      clearChildModeLockForUser(userId);
+      void clearAndroidScheduledReminders();
+      void clearAllOfflineReadingPacks();
+      clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
+      resetTeacherVoiceForActorSwitch();
       clearUserCache();
+      broadcastActorSwitch();
       await authService.signOut();
       dispatchI18nAuthSync({ userId: null, preferredLocale: null });
-      setAccountMenu((current) => ({ ...current, isOpen: false }));
       router.replace("/login");
       router.refresh();
     } catch {
@@ -428,42 +529,10 @@ export function AppShell({ children }: AppShellProps) {
     }
   }
 
-  function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      return;
-    }
-
-    const items = accountMenuRef.current?.querySelectorAll<HTMLElement>(
-      '[role="menuitem"]:not([disabled])',
-    );
-    if (!items?.length) return;
-
-    event.preventDefault();
-    const currentIndex = Array.from(items).indexOf(
-      document.activeElement as HTMLElement,
-    );
-    const nextIndex =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? items.length - 1
-          : event.key === "ArrowDown"
-            ? currentIndex < 0
-              ? 0
-              : (currentIndex + 1) % items.length
-            : currentIndex < 0
-              ? items.length - 1
-              : (currentIndex - 1 + items.length) % items.length;
-
-    items[nextIndex]?.focus();
-  }
-
-  const taskActorId = user?.id ?? null;
-  const taskActorRole = taskActorId
-    ? profile?.role === "admin"
-      ? "admin"
-      : "parent"
-    : null;
+  // AppShell is strictly the Parent portal. Never escalate its AI Task Center
+  // to "admin" even if the signed-in account holds an admin role.
+  const taskActorId = userId;
+  const taskActorRole = taskActorId ? ("parent" as const) : null;
 
   if (isReadingRoute) {
     return (
@@ -500,9 +569,14 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const autoSyncStudioTasks =
-    pathname.startsWith("/my-books") ||
-    pathname.startsWith("/book-scanner") ||
-    pathname.startsWith("/studio/tasks");
+    Boolean(taskActorId) &&
+    !isChildOnboarding &&
+    (pathname.startsWith("/studio") ||
+      pathname.startsWith("/my-books") ||
+      pathname.startsWith("/books") ||
+      pathname.startsWith("/library") ||
+      pathname.startsWith("/book-scanner") ||
+      pathname.startsWith("/scan"));
 
   return (
     <AiTaskCenterProvider
@@ -599,6 +673,9 @@ export function AppShell({ children }: AppShellProps) {
                                   onClick={() => {
                                     appStore.selectChild(child.id);
                                     appStore.setValidatedSelectedChild(child);
+                                    hydrateTeacherVoiceFromChildProfile(child, {
+                                      force: true,
+                                    });
                                     setChildSwitcherOpenForPath(null);
                                   }}
                                   role="option"
@@ -656,7 +733,7 @@ export function AppShell({ children }: AppShellProps) {
                     )}
                   </div>
 
-                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
+                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1.5 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
                     {navigationItemsConfig.map(
                       ({ href, icon: Icon, labelKey }) => {
                         const isActive = isAppShellNavItemActive(
@@ -668,19 +745,13 @@ export function AppShell({ children }: AppShellProps) {
                           <Link
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
-                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-1.5 xl:px-2 xl:text-label 2xl:gap-2 2xl:px-3",
+                              "flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-control px-2.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:text-sm xl:h-11 xl:gap-2 xl:px-3 xl:text-[15px]",
                               isActive
                                 ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
                                 : "bg-white hover:bg-canvas",
                             )}
                             href={href}
                             key={href}
-                            onClick={() =>
-                              setAccountMenu((current) => ({
-                                ...current,
-                                isOpen: false,
-                              }))
-                            }
                             ref={isActive ? activeNavigationRef : undefined}
                           >
                             <Icon
@@ -701,212 +772,65 @@ export function AppShell({ children }: AppShellProps) {
                 <span className="flex-1" />
               )}
 
-              <div className="hidden shrink-0 xl:block">
-                <LanguageSelector variant="compact" />
-              </div>
+              {!isChildOnboarding && userId ? (
+                <button
+                  aria-pressed={isChildModeLocked}
+                  className={cn(
+                    "inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isChildModeLocked
+                      ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+                      : "border-border bg-canvas/80 text-ink hover:bg-sky/60",
+                  )}
+                  data-testid="child-mode-lock-toggle"
+                  onClick={handleChildModeToggle}
+                  title={
+                    isChildModeLocked
+                      ? t("parent.childModePin.lockedTooltip")
+                      : t("parent.childModePin.unlockedTooltip")
+                  }
+                  type="button"
+                >
+                  {isChildModeLocked ? (
+                    <Lock
+                      aria-hidden="true"
+                      className="size-3.5 text-emerald-700"
+                    />
+                  ) : (
+                    <ShieldCheck
+                      aria-hidden="true"
+                      className="size-3.5 text-primary"
+                    />
+                  )}
+                  <span className="hidden sm:inline">
+                    {isChildModeLocked
+                      ? t("parent.childModePin.lockedPill")
+                      : t("parent.childModePin.unlockedPill")}
+                  </span>
+                </button>
+              ) : null}
 
-              {!isChildOnboarding ? (
+              {!isChildOnboarding && !isChildModeLocked ? (
                 <GlobalTaskCenter
-                  className="shrink-0"
                   hideOnPaths={["/children/new"]}
-                  variant="header-pill"
+                  variant="drawer-only"
                 />
               ) : null}
 
-              <div className="relative shrink-0" ref={accountMenuRef}>
-                <button
-                  aria-controls="parent-account-menu"
-                  aria-expanded={isAccountMenuVisible}
-                  aria-haspopup="menu"
-                  aria-label={
-                    isAccountMenuVisible
-                      ? t("navigation.accountMenu.closeAria")
-                      : t("navigation.accountMenu.openAria")
-                  }
-                  className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-                  onClick={() => {
-                    setChildSwitcherOpenForPath(null);
-                    if (isAccountMenuVisible) {
-                      setAccountMenu((current) => ({
-                        ...current,
-                        isOpen: false,
-                      }));
-                    } else {
-                      setAccountMenu({ isOpen: true, pathname });
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowDown" && !isAccountMenuVisible) {
-                      event.preventDefault();
-                      setAccountMenu({ isOpen: true, pathname });
-                    }
-                  }}
-                  ref={avatarButtonRef}
-                  type="button"
-                >
-                  <ProfileAvatar
-                    ariaLabel={t("accessibility.accountAvatar")}
-                    displayName={displayName}
-                    imageUrl={profile?.avatar_url}
-                    size="sm"
-                  />
-                </button>
-                <div
-                  aria-label={t("navigation.accountMenu.shortMenuAria")}
-                  className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
-                  hidden={!isAccountMenuVisible}
-                  id="parent-account-menu"
-                  onKeyDown={handleMenuKeyDown}
-                  role="menu"
-                >
-                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
-                    <ProfileAvatar
-                      ariaLabel={t("accessibility.accountAvatar")}
-                      displayName={displayName}
-                      imageUrl={profile?.avatar_url}
-                      size="lg"
-                    />
-                    <p className="max-w-full break-words text-label font-semibold text-ink">
-                      {displayName ??
-                        t("navigation.accountMenu.defaultAccountLabel")}
-                    </p>
-                    {resolvedRoleLabel ? (
-                      <p className="text-sm font-semibold text-primary">
-                        {resolvedRoleLabel}
-                      </p>
-                    ) : null}
-                    {email ? (
-                      <p className="max-w-full break-all text-sm text-muted">
-                        {email}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="my-2 border-t border-border" />
-                  <Link
-                    aria-current={
-                      routeIsActive(pathname, "/profile") ? "page" : undefined
-                    }
-                    className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                      routeIsActive(pathname, "/profile")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
-                    )}
-                    href="/profile"
-                    onClick={() =>
-                      setAccountMenu((current) => ({
-                        ...current,
-                        isOpen: false,
-                      }))
-                    }
-                    role="menuitem"
-                    tabIndex={isAccountMenuVisible ? 0 : -1}
-                  >
-                    <UserRound aria-hidden="true" className="size-5" />
-                    {t("navigation.parent.parentProfile")}
-                  </Link>
-                  <Link
-                    aria-current={
-                      routeIsActive(pathname, "/children") ? "page" : undefined
-                    }
-                    className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                      routeIsActive(pathname, "/children")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
-                    )}
-                    href="/children"
-                    onClick={() =>
-                      setAccountMenu((current) => ({
-                        ...current,
-                        isOpen: false,
-                      }))
-                    }
-                    role="menuitem"
-                    tabIndex={isAccountMenuVisible ? 0 : -1}
-                  >
-                    <UsersRound aria-hidden="true" className="size-5" />
-                    {t("navigation.parent.children")}
-                  </Link>
-
-                  <div className="my-2 border-t border-border" />
-                  <Link
-                    aria-current={
-                      routeIsActive(pathname, "/settings") ? "page" : undefined
-                    }
-                    className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                      routeIsActive(pathname, "/settings")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
-                    )}
-                    href="/settings"
-                    onClick={() =>
-                      setAccountMenu((current) => ({
-                        ...current,
-                        isOpen: false,
-                      }))
-                    }
-                    role="menuitem"
-                    tabIndex={isAccountMenuVisible ? 0 : -1}
-                  >
-                    <Settings aria-hidden="true" className="size-5" />
-                    {t("navigation.parent.settings")}
-                  </Link>
-                  <Link
-                    aria-current={
-                      routeIsActive(pathname, "/help-support")
-                        ? "page"
-                        : undefined
-                    }
-                    className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                      routeIsActive(pathname, "/help-support")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
-                    )}
-                    href="/help-support"
-                    onClick={() =>
-                      setAccountMenu((current) => ({
-                        ...current,
-                        isOpen: false,
-                      }))
-                    }
-                    role="menuitem"
-                    tabIndex={isAccountMenuVisible ? 0 : -1}
-                  >
-                    <CircleHelp aria-hidden="true" className="size-5" />
-                    {t("navigation.parent.helpSupport")}
-                  </Link>
-
-                  <div className="my-2 border-t border-border" />
-                  <div className="px-1 py-1">
-                    <p className="px-2 pb-1 text-xs font-semibold text-muted">
-                      {t("common.languageSelector.label")}
-                    </p>
-                    <LanguageSelector variant="menu" />
-                  </div>
-
-                  <div className="my-2 border-t border-border" />
-                  <button
-                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-start text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
-                    disabled={isSigningOut}
-                    onClick={() => void handleSignOut()}
-                    role="menuitem"
-                    tabIndex={isAccountMenuVisible ? 0 : -1}
-                    type="button"
-                  >
-                    <LogOut
-                      aria-hidden="true"
-                      className="size-5 viread-rtl-flip"
-                    />
-                    {isSigningOut
-                      ? t("auth.session.signingOut")
-                      : t("auth.session.signOut")}
-                  </button>
-                </div>
-              </div>
+              <ParentAccountDropdown
+                appStore={appStore}
+                availableChildren={availableChildren}
+                avatarUrl={profile?.avatar_url}
+                displayName={displayName}
+                email={email}
+                hideAiTasks={isChildOnboarding}
+                isSigningOut={isSigningOut}
+                onBeforeOpen={() => setChildSwitcherOpenForPath(null)}
+                onSignOut={handleSignOut}
+                pathname={pathname}
+                roleLabel={resolvedRoleLabel}
+                selectedChild={selectedChild}
+                userId={userId}
+              />
             </div>
           </nav>
           {hasSignOutError ? (
@@ -936,9 +860,76 @@ export function AppShell({ children }: AppShellProps) {
           )}
         >
           <ButtonSizeContext.Provider value="compact">
-            {children}
+            {isProtectedByChildLock ? (
+              <section
+                className="mx-auto my-8 max-w-md space-y-4 rounded-card border border-primary/25 bg-cream p-6 text-center shadow-2xs"
+                data-testid="child-mode-route-guard"
+              >
+                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-white text-primary shadow-2xs">
+                  <Lock aria-hidden="true" className="size-6" />
+                </div>
+                <h1 className="text-xl font-extrabold text-ink">
+                  {t("parent.childModePin.routeGuardTitle")}
+                </h1>
+                <p className="text-sm text-muted">
+                  {t("parent.childModePin.routeGuardDesc")}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <button
+                    className="inline-flex min-h-10 items-center justify-center rounded-control border border-border bg-white px-4 py-2 text-sm font-bold text-ink hover:bg-sky/50"
+                    onClick={() => router.push("/dashboard")}
+                    type="button"
+                  >
+                    {t("parent.childModePin.backToChildDesk")}
+                  </button>
+                  <button
+                    className="inline-flex min-h-10 items-center justify-center rounded-control bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover"
+                    data-testid="child-mode-guard-unlock-btn"
+                    onClick={() => setPinModalMode("unlock")}
+                    type="button"
+                  >
+                    {t("parent.childModePin.unlockButton")}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              children
+            )}
           </ButtonSizeContext.Provider>
         </main>
+
+        <ParentPinModal
+          hasExistingPin={hasParentPin}
+          isOpen={pinModalMode !== null || isProtectedByChildLock}
+          mode={isProtectedByChildLock ? "unlock" : (pinModalMode ?? "setup")}
+          onClose={() => {
+            setPinModalMode(null);
+            if (isProtectedByChildLock) {
+              router.push("/dashboard");
+            }
+          }}
+          onPinConfigured={() => {
+            if (userId) {
+              setPinState({ userId, hasPin: true });
+            }
+            setChildModeLockedForUser(userId, true);
+            setPinModalMode(null);
+            if (isParentProtectedRoute(pathname)) {
+              router.push("/dashboard");
+            }
+          }}
+          onPinRemoved={() => {
+            if (userId) {
+              setPinState({ userId, hasPin: false });
+            }
+            setChildModeLockedForUser(userId, false);
+            setPinModalMode(null);
+          }}
+          onPinVerified={() => {
+            setChildModeLockedForUser(userId, false);
+            setPinModalMode(null);
+          }}
+        />
 
         <SiteFooter className="hidden lg:block" variant="parent" />
 

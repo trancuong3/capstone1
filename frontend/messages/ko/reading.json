@@ -130,7 +130,7 @@
     "loadingBook": "책 정보 불러오는 중...",
     "bookUnavailableTitle": "아직 준비되지 않은 도서입니다",
     "bookNotFoundTitle": "도서를 찾을 수 없습니다",
-    "bookUnavailableDesc": "이 도서는 아이가 읽을 수 있는 ACTIVE 및 VERIFIED 콘텐츠가 아직 없습니다.",
+    "bookUnavailableDesc": "이 책에는 아직 아이가 읽을 수 있는 내용이 준비되지 않았습니다.",
     "bookNotFoundDesc": "도서가 존재하지 않거나 현재 도서관에 없습니다.",
     "backToLibrary": "도서관으로 돌아가기",
     "loadErrorTitle": "책 정보를 불러올 수 없습니다",
@@ -138,9 +138,9 @@
     "micReady": "마이크 준비 완료",
     "micGranted": "마이크 권한 허용됨",
     "rangeSummary": "읽기 범위: {start}–{end} 페이지",
-    "ocrMatchSummary": "OCR 페이지 확인: {page} 페이지 · 신뢰도 {percent}%",
+    "ocrMatchSummary": "인식된 페이지: {page}쪽 · 신뢰도 {percent}%",
     "matchedPageMissingTitle": "인식된 페이지를 찾을 수 없습니다",
-    "matchedPageMissingDesc": "OCR 페이지가 책의 유효한 페이지 목록에 없습니다. ViRead가 자동으로 페이지를 넘기지 않습니다.",
+    "matchedPageMissingDesc": "인식된 페이지가 이 책의 유효한 페이지 목록에 없습니다. ViRead가 다른 페이지로 자동 전환하지 않습니다.",
     "invalidRangeTitle": "유효하지 않은 페이지 범위",
     "invalidRangeDesc": "책 상세 정보로 돌아가 시작 페이지, 끝 페이지 또는 연속 범위를 다시 선택해 주세요.",
     "micCheckSectionTitle": "마이크 확인",
@@ -173,7 +173,16 @@
       "unsupported": "브라우저에서 자동 상태를 제공하지 않습니다. 아래 버튼을 사용하여 마이크를 직접 확인해 주세요.",
       "no_device": "장치에서 마이크를 찾을 수 없습니다. 마이크를 연결하고 다시 시도해 주세요.",
       "device_busy": "다른 앱에서 마이크를 사용 중입니다. 해당 앱을 종료하고 다시 시도해 주세요.",
-      "error": "마이크를 확인할 수 없습니다. HTTPS 또는 localhost를 사용하고 다시 시도해 주세요."
+      "error": "마이크를 확인할 수 없습니다. 보안 연결과 브라우저 설정을 확인한 후 다시 시도해 주세요."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "간격 반복 단어 복습 (1·3·7일)",
+      "starterEyebrow": "독서 전 가벼운 워밍업",
+      "title": "워밍업 짧은 이야기",
+      "listenStory": "이야기 듣기",
+      "stopListen": "정지",
+      "refreshStory": "새 워밍업 이야기",
+      "focusWordsLabel": "오늘 담긴 연습 단어"
     }
   },
   "ready": {
@@ -260,7 +269,7 @@
     "referencePageAlt": "{page}페이지 참고 이미지",
     "scrollToCurrentWord": "읽고 있는 단어 정보",
     "currentWordPrefix": "현재 단어: ",
-    "overlayAria": "바운딩 박스를 통해 현재 단어 강조 표시",
+    "overlayAria": "현재 읽고 있는 단어 강조 영역",
     "readingModeSwitcherAria": "책 페이지 읽기 모드",
     "readingModeIllustrated": "삽화 함께 보기",
     "readingModeIllustratedTitle": "글자가 없는 삽화와 읽기 본문을 함께 봅니다",
@@ -313,7 +322,8 @@
     "listenPhonics": "파닉스 듣기",
     "listeningRetry": "아이의 음성을 듣는 중…",
     "readAgain": "다시 읽기",
-    "stepsAria": "파닉스 단계"
+    "stepsAria": "파닉스 단계",
+    "autoHideHint": "철자 안내 완료 · 글자가 잘 보이도록 곧 닫혀요…"
   },
   "companion": {
     "teacherFemaleTitle": "AI 선생님",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "시범 음절 분해 · 어구 이어 읽기",
     "quickFixTitle": "칭찬 · 스스로 빠르게 고쳤어요!",
     "phonicsWinTitle": "칭찬 · 음절 분해를 아주 잘했어요!",
-    "overcameWordTitle": "환호 · 어려운 단어를 극복했어요!"
+    "overcameWordTitle": "환호 · 어려운 단어를 극복했어요!",
+    "dismissAria": "선생님 안내 숨기기"
   },
   "tutor": {
     "title": "이 단어는 어떻게 읽을까요?",
@@ -417,7 +428,7 @@
     "practicedWordsLabel": "이번 세션에서",
     "collapseDetails": "접기",
     "viewSpokenWords": "아이가 읽은 단어 보기",
-    "sttResultsTitle": "음성 인식 결과 (STT)",
+    "sttResultsTitle": "아이 음성 인식 결과",
     "recognizedWordsBadge": "{count}개 단어 인식됨",
     "unassessedOnlyLabel": "인식된 단어입니다. 정확도를 평가하기에는 데이터가 부족하거나 주의가 필요합니다:",
     "correctWordsTitle": "아이가 성공적으로 읽은 단어 목록 ({count}개):",
@@ -439,7 +450,7 @@
     "versionLoadError": "읽은 버전의 페이지 내용을 불러올 수 없습니다.",
     "pageLoadError": "페이지 내용을 불러올 수 없습니다.",
     "loadingAria": "읽기 내용 로딩 중",
-    "verifiedContentTitle": "확인된 페이지 내용",
+    "verifiedContentTitle": "책 페이지 내용",
     "legendAria": "대조 색상 범례",
     "recordedTranscriptLabel": "녹음된 음성",
     "notRecorded": "기록되지 않음",
@@ -459,5 +470,38 @@
     "keepTrying": "천천히 한 음절씩 명확하게 읽어보세요.",
     "wordsRead": "{count, plural, =0 {읽은 단어 없음} other {단어 #개 읽음}}"
   },
-  "learningContentNotice": "올바른 철자를 유지하기 위해 베트남어 읽기 콘텐츠는 항상 왼쪽에서 오른쪽으로 표시됩니다."
+  "learningContentNotice": "올바른 철자를 유지하기 위해 베트남어 읽기 콘텐츠는 항상 왼쪽에서 오른쪽으로 표시됩니다.",
+  "pageKinds": {
+    "TEXT_ONLY": "본문",
+    "TEXT_AND_IMAGE": "삽화 동화",
+    "IMAGE_PRIMARY": "그림 중심",
+    "COMIC": "만화 / 대화",
+    "POEM": "어린이 동시",
+    "EXERCISE": "연습 활동",
+    "MULTI_COLUMN": "다단 구성",
+    "TEXT_OVER_IMAGE": "그림 위 글자",
+    "LOW_QUALITY": "검토 필요"
+  },
+  "duet": {
+    "toggleLabel": "부모·아이 번갈아 읽기",
+    "toggleActive": "번갈아 읽기 켜짐",
+    "parentTurnBadge": "부모님이 먼저 읽는 차례",
+    "childTurnBadge": "이제 아이가 읽을 차례예요!",
+    "listenParentSample": "이 차례 예시 듣기",
+    "completeParentTurn": "부모 읽기 완료 — 아이 차례로",
+    "turnCounter": "차례 {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "이 페이지 그림과 문장 탐험하기",
+    "subtitle": "방금 읽은 책 페이지로 어휘와 문장 감각을 이어서 키워 보세요.",
+    "pictureCta": "책 페이지 그림 묘사",
+    "shooterCta": "책 페이지 문장 맞추기"
+  },
+  "lucBat": {
+    "toggleLabel": "륙밧(6-8조) 시 운율 가이드",
+    "toggleActive": "륙밧 운율 켜짐",
+    "coupletBadge": "6-8 연구 {count}쌍",
+    "beatGuide": "박자 끊어 읽기 2/2/2(6음절) · 2/2/2/2(8음절)",
+    "rhymePairLabel": "6번째 음절 운율 짝: \"{sixthLuc}\" <-> \"{sixthBat}\""
+  }
 }

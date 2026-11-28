@@ -15,6 +15,7 @@ from app.schemas.picture_description import (
     PictureSessionRead,
     PictureSessionSummaryRead,
     SourceType,
+    TeacherGender,
     TeachingMode,
     _normalize_target_words,
 )
@@ -51,10 +52,19 @@ def _service(db: AsyncSession) -> PictureDescriptionService:
 @router.get("/catalog", response_model=PictureCatalogRead)
 async def get_picture_catalog(
     child_id: UUID = Query(...),
+    book_id: UUID | None = Query(default=None),
+    book_page_id: UUID | None = Query(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _service(db).get_catalog(actor_id, child_id)
+    safe_book_id = book_id if isinstance(book_id, UUID) else None
+    safe_page_id = book_page_id if isinstance(book_page_id, UUID) else None
+    return await _service(db).get_catalog(
+        actor_id,
+        child_id,
+        book_id=safe_book_id,
+        book_page_id=safe_page_id,
+    )
 
 
 @router.get("/sessions", response_model=list[PictureSessionSummaryRead])
@@ -71,36 +81,56 @@ async def create_picture_session(
     child_id: UUID = Form(...),
     source_type: SourceType = Form(...),
     sample_key: str | None = Form(default=None),
+    book_id: UUID | None = Form(default=None),
     book_page_id: UUID | None = Form(default=None),
     teaching_mode: TeachingMode = Form(default="OBSERVE"),
     target_words: str | None = Form(default=None),
     refresh_ai_guide: bool = Form(default=False),
+    teacher_gender: TeacherGender | None = Form(default=None),
     image: UploadFile | None = File(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_sample_key = sample_key if isinstance(sample_key, str) else None
+    resolved_book_page_id = book_page_id if isinstance(book_page_id, UUID) else None
+    resolved_mode: TeachingMode = (
+        teaching_mode if isinstance(teaching_mode, str) else "OBSERVE"
+    )
+    resolved_target_words = target_words if isinstance(target_words, str) else None
+    resolved_refresh = refresh_ai_guide if isinstance(refresh_ai_guide, bool) else False
+    resolved_image = (
+        image if image is not None and not isinstance(image, bool) and hasattr(image, "read") else None
+    )
+
     upload_bytes: bytes | None = None
-    if image is not None:
+    if resolved_image is not None:
         try:
-            upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+            upload_bytes = await resolved_image.read(MAX_UPLOAD_BYTES + 1)
         finally:
-            await image.close()
+            await resolved_image.close()
         if len(upload_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="INVALID_IMAGE",
             )
 
+    safe_teacher_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
+    safe_book_id = book_id if isinstance(book_id, UUID) else None
+    extra_kwargs = {"book_id": safe_book_id} if safe_book_id is not None else {}
     return await _service(db).create_session(
         actor_id,
         child_id=child_id,
         source_type=source_type,
-        sample_key=sample_key,
-        book_page_id=book_page_id,
+        sample_key=resolved_sample_key,
+        book_page_id=resolved_book_page_id,
         upload_bytes=upload_bytes,
-        teaching_mode=teaching_mode,
-        target_words=_parse_target_words_form(target_words),
-        refresh_ai_guide=refresh_ai_guide,
+        teaching_mode=resolved_mode,
+        target_words=_parse_target_words_form(resolved_target_words),
+        refresh_ai_guide=resolved_refresh,
+        teacher_gender=safe_teacher_gender,
+        **extra_kwargs,
     )
 
 

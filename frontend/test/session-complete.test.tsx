@@ -1,8 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SessionComplete } from "@/components/reading/session-complete";
+import * as comparisonService from "@/lib/api/comparison-service";
 import {
   childFixture,
   TEST_SESSION_ID,
@@ -48,7 +49,7 @@ describe("SessionComplete component", () => {
     expect(screen.getByTestId("spoken-words-container")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: "Kết quả nhận diện giọng nói của bé (STT)",
+        name: "Kết quả nhận diện giọng đọc của bé",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("3 từ nhận diện")).toBeInTheDocument();
@@ -195,5 +196,113 @@ describe("SessionComplete component", () => {
     expect(
       screen.queryByRole("link", { name: /Chơi game/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders at most one ReadingAssessmentSummary when both completion summary and saved session reports include assessment", async () => {
+    const assessment = {
+      first_pass_correct: 12,
+      first_pass_incorrect: 2,
+      self_corrected_words: 1,
+      unresolved_words: 1,
+      retry_attempts: 2,
+      skipped_after_retry_limit: 0,
+      recognition_uncertain: 0,
+    };
+    const spy = vi
+      .spyOn(comparisonService, "getSessionReports")
+      .mockResolvedValueOnce({
+        session_id: TEST_SESSION_ID,
+        total: 0,
+        assessment,
+        reports: [],
+      });
+
+    try {
+      render(
+        <SessionComplete
+          booksHref="/books"
+          bookId={TEST_SESSION_ID}
+          child={childFixture}
+          sessionId={TEST_SESSION_ID}
+          summary={{
+            ...baseSummary,
+            correct_words: ["mèo", "nhỏ"],
+            mispronounced_words: ["đang"],
+            skipped_words: [],
+            score: 67,
+            assessment,
+          }}
+        />,
+      );
+
+      expect(
+        await screen.findByText(
+          "Buổi đọc này chưa có báo cáo đối chiếu được lưu.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getAllByRole("region", {
+          name: "Kết quả lượt đầu và luyện lại",
+        }),
+      ).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("paginates long spoken word lists and transcripts inside spoken-words-container", async () => {
+    const user = userEvent.setup();
+    const spokenWords = Array.from({ length: 30 }, (_, idx) => `từ-${idx + 1}`);
+    const transcripts = Array.from(
+      { length: 7 },
+      (_, idx) => `Câu bé đọc số ${idx + 1}`,
+    );
+
+    render(
+      <SessionComplete
+        booksHref="/books"
+        bookId={TEST_SESSION_ID}
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          duration_minutes: 8,
+          pages_explored: 4,
+          practiced_words: 30,
+          spoken_words: spokenWords,
+          transcripts,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /30 từ/i }));
+
+    expect(screen.getByText("từ-1")).toBeInTheDocument();
+    expect(screen.getByText("từ-24")).toBeInTheDocument();
+    expect(screen.queryByText("từ-25")).not.toBeInTheDocument();
+
+    const wordsNav = screen.getByRole("navigation", {
+      name: "Kết quả nhận diện giọng đọc của bé",
+    });
+    await user.click(
+      Array.from(wordsNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText("từ-25")).toBeInTheDocument();
+    expect(screen.getByText("từ-30")).toBeInTheDocument();
+    expect(screen.queryByText("từ-1")).not.toBeInTheDocument();
+
+    expect(screen.getByText(/Câu bé đọc số 5/)).toBeInTheDocument();
+    expect(screen.queryByText(/Câu bé đọc số 6/)).not.toBeInTheDocument();
+    const transcriptsNav = screen.getByRole("navigation", {
+      name: "Câu nhận diện từ microphone:",
+    });
+    await user.click(
+      Array.from(transcriptsNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText(/Câu bé đọc số 6/)).toBeInTheDocument();
+    expect(screen.getByText(/Câu bé đọc số 7/)).toBeInTheDocument();
   });
 });

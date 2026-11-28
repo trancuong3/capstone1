@@ -1,13 +1,22 @@
 "use client";
 
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import type { ProgressReportDTO } from "@/types/reports";
 
 interface ProgressChartProps {
   readonly report: ProgressReportDTO;
+  readonly horizontal?: boolean;
+  readonly showSubtitle?: boolean;
+  readonly className?: string;
 }
 
-export function ProgressChart({ report }: ProgressChartProps) {
+export function ProgressChart({
+  report,
+  horizontal = false,
+  showSubtitle = false,
+  className,
+}: ProgressChartProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reports");
   const rows = [
@@ -40,27 +49,43 @@ export function ProgressChart({ report }: ProgressChartProps) {
   return (
     <section
       aria-labelledby="reading-evidence-title"
-      className="rounded-card border border-border bg-white p-5 sm:p-6"
+      className={cn(
+        "flex flex-col rounded-card border border-border bg-white p-3",
+        className,
+      )}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2
-          className="text-xl font-extrabold text-ink"
+          className="text-sm font-extrabold text-ink sm:text-base"
           id="reading-evidence-title"
         >
           {t("overview.chart.title")}
         </h2>
-        <span className="text-xs font-semibold text-muted">
+        <span className="text-[11px] font-semibold text-muted">
           {t("overview.chart.unitLabel")}
         </span>
       </div>
-      <p className="mt-1 text-sm text-muted">{t("overview.chart.subtitle")}</p>
+      {showSubtitle ? (
+        <p className="mt-1 text-xs leading-snug text-muted">
+          {t("overview.chart.subtitle")}
+        </p>
+      ) : null}
 
       {allMissing ? (
-        <p className="mt-5 rounded-control border border-dashed border-border bg-canvas px-4 py-5 text-sm font-semibold text-muted">
+        <p className="mt-2 rounded-control bg-canvas/70 px-3 py-2 text-xs font-semibold text-muted">
           {t("overview.chart.empty")}
         </p>
       ) : (
-        <ul aria-hidden="true" className="mt-5 space-y-4">
+        <ul
+          aria-hidden="true"
+          className={
+            horizontal
+              ? "mt-2 grid gap-3 md:grid-cols-3"
+              : showSubtitle
+                ? "mt-3 flex flex-1 flex-col justify-between gap-3 py-1"
+                : "mt-2 space-y-2"
+          }
+        >
           {rows.map((row) => {
             const hasValue = row.value !== null;
             const widthPercent =
@@ -68,15 +93,15 @@ export function ProgressChart({ report }: ProgressChartProps) {
                 ? Math.max(6, Math.round((row.value / maxValue) * 100))
                 : 0;
             return (
-              <li className="space-y-1.5" key={row.label}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm font-bold text-ink">
+              <li className="space-y-1" key={row.label}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-bold text-ink">
                     {row.label}
                   </span>
                   <span
                     className={
                       hasValue
-                        ? "text-sm font-extrabold tabular-nums text-ink"
+                        ? "text-xs font-extrabold tabular-nums text-ink"
                         : "text-xs font-semibold text-muted"
                     }
                   >
@@ -86,7 +111,7 @@ export function ProgressChart({ report }: ProgressChartProps) {
                         })
                       : t("overview.chart.noData")}
                     {hasValue && row.rate !== null ? (
-                      <span className="ms-1.5 font-semibold text-muted">
+                      <span className="ms-1 font-semibold text-muted">
                         ({row.rate.toFixed(1)}%)
                       </span>
                     ) : null}
@@ -95,8 +120,8 @@ export function ProgressChart({ report }: ProgressChartProps) {
                 <div
                   className={
                     hasValue
-                      ? "h-2.5 w-full overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
-                      : "h-2.5 w-full rounded-full border border-dashed border-border bg-canvas/60"
+                      ? "h-1.5 w-full overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
+                      : "h-1.5 w-full rounded-full border border-dashed border-border bg-canvas/60"
                   }
                 >
                   {widthPercent > 0 ? (

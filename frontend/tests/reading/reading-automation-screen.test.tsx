@@ -437,7 +437,6 @@ describe("automatic reading flow on the reading screen", () => {
       expect.arrayContaining([
         ["Cô đọc mẫu cho con nhé.", { coaching: true }],
         ["nhỏ", { wordSample: true }],
-        ["nhỏ", { wordSample: true, speedScale: 0.8 }],
         ["nhỏ đang"],
       ]),
     );
@@ -542,7 +541,7 @@ describe("automatic reading flow on the reading screen", () => {
     );
   });
 
-  it("completes the final page in range cleanly, saves once, and keeps the microphone closed", async () => {
+  it("AUTO-READ-01: completes the final page in range cleanly, saves once, runs prepareInitialReading, and keeps the microphone closed", async () => {
     const finalProgress: ReadingSessionPageProgressDTO = {
       ...pageProgressFixture,
       current_page_id: pageFive.page_id,
@@ -592,10 +591,19 @@ describe("automatic reading flow on the reading screen", () => {
         pageFive.page_id,
       ),
     );
+    // Auto-runs prepareInitialReading() -> finish() -> transitions to SessionComplete with 0 extra clicks
     await waitFor(() =>
-      expect(screen.getByRole("button", MIC_BUTTON)).toBeInTheDocument(),
+      expect(services.readingService.finish).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+      ),
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(
+      await screen.findByRole(
+        "heading",
+        { name: /Buổi đọc đã hoàn thành/i },
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
     expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
       1,
     );
@@ -818,5 +826,184 @@ describe("automatic reading flow on the reading screen", () => {
     });
     expect(word("Bé")).not.toHaveClass("bg-red-200");
     expect(word("Bé")).not.toHaveClass(SUCCESS);
+  });
+
+  it("AUTO-READ-02: autoAdvance=false responds to voice 'sang trang', 'dừng lại' (I1 0 mic/TTS auto-run), and 'đọc tiếp'", async () => {
+    setAutomationPreferences({ autoAdvance: false });
+    const recognition = await startWithFakeClock();
+
+    // Reading page 4 completely does not auto-turn when autoAdvance=false
+    act(() => recognition.say("Bé mèo nhỏ đang"));
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    expect(services.readingService.completeCurrentPage).not.toHaveBeenCalled();
+
+    // Voice "sang trang" turns to page 5
+    const recCountBeforeTurn = AutoRecognition.instances.length;
+    act(() => recognition.say("sang trang"));
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(screen.getByLabelText("Trang sách 5")).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(AutoRecognition.instances.length).toBeGreaterThan(
+      recCountBeforeTurn,
+    );
+
+    // Voice "đọc tiếp" while active triggers RESUME without breaking flow
+    act(() => lastRecognition().say("đọc tiếp"));
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+
+    // Voice "dừng lại" pauses and obeys I1 invariant (0 mic/TTS auto-run for 120s)
+    const startsBeforeStop = speechRecorderMock.start.mock.calls.length;
+    speechPlayerMock.play.mockClear();
+    act(() => lastRecognition().say("dừng lại"));
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(
+      screen.getByRole("dialog", { name: "Bé đang nghỉ một chút" }),
+    ).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(speechRecorderMock.start.mock.calls.length).toBe(startsBeforeStop);
+    expect(speechPlayerMock.play).not.toHaveBeenCalled();
+  });
+
+  it("AUTO-READ-03: offline during page save keeps transcript and 'online' triggers idempotent single retry to turn page", async () => {
+    const completedProgress = {
+      ...pageProgressFixture,
+      completed_pages: 1,
+      pages: [
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED" as const,
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        pageProgressFixture.pages[1],
+      ],
+    };
+    services.readingService.completeCurrentPage
+      .mockRejectedValueOnce(new Error("Network offline"))
+      .mockResolvedValueOnce(completedProgress);
+
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(await screen.findByRole("button", MIC_BUTTON));
+
+    // Page save fails while going offline -> keeps transcript & stays on page 4
+    act(() => {
+      lastRecognition().say("Bé mèo nhỏ đang");
+    });
+    await screen.findByText(/Chưa lưu được trang này/i);
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(screen.getByLabelText("Trang sách 4")).toBeInTheDocument();
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      1,
+    );
+
+    // Come back online -> ReadingAutomationRuntime triggers single idempotent retry and turns to page 5!
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await screen.findByLabelText("Trang sách 5");
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      2,
+    );
+  });
+
+  it("AUTO-READ-01 (retryPrompt & quiz): end of last page opens retryPrompt when misread word exists, or transitions to ComprehensionQuestion when quiz exists", async () => {
+    const finalProgress: ReadingSessionPageProgressDTO = {
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: pageFive.page_number,
+      current_index: 1,
+      completed_pages: 1,
+      pages: [
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        {
+          ...pageProgressFixture.pages[1],
+          status: "IN_PROGRESS",
+        },
+      ],
+    };
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(pageFive);
+    (
+      services.readingService.getPageProgress as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(finalProgress);
+    services.readingService.completeCurrentPage.mockResolvedValue({
+      ...finalProgress,
+      completed_pages: 2,
+      pages: [
+        finalProgress.pages[0],
+        {
+          ...finalProgress.pages[1],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:01:00Z",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    const { unmount } = renderReading("reading");
+    await user.click(await screen.findByRole("button", MIC_BUTTON));
+    // Skip "mèo" -> creates retry candidate, then read "nhỏ đang" to finish last page
+    act(() => lastRecognition().say("Bé nhỏ đang"));
+
+    await waitFor(() =>
+      expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+        1,
+      ),
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Mình đọc lại những từ này nhé?",
+      }),
+    ).toBeInTheDocument();
+    unmount();
+
+    // Variant B: Fluent last page + comprehension question available -> transitions directly to ComprehensionQuestion
+    (
+      services.comprehensionService as unknown as {
+        prepareQuestions: ReturnType<typeof vi.fn>;
+        getQuestion: ReturnType<typeof vi.fn>;
+      }
+    ).prepareQuestions = vi.fn().mockResolvedValue(1);
+    (
+      services.comprehensionService.getQuestion as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      question: {
+        id: "80000000-0000-4000-8000-000000000001",
+        type: "FACTUAL",
+        prompt: "Bạn nào thích ăn cá?",
+        page_revision_id: pageFive.page_revision_id,
+        source_span: {
+          start_word_index: 0,
+          end_word_index_exclusive: 2,
+          sentence_index: 0,
+        },
+        difficulty: 1,
+        answered: false,
+      },
+      choices: [
+        { id: "A", label: "Con mèo", value: "Con mèo" },
+        { id: "B", label: "Con vịt", value: "Con vịt" },
+        { id: "C", label: "Con gà", value: "Con gà" },
+      ],
+      position: 1,
+      total: 1,
+      progress_label: "Câu 1/1",
+    });
+    renderReading("reading");
+    await user.click(await screen.findByRole("button", MIC_BUTTON));
+    act(() => lastRecognition().say("Bé mèo nhỏ đang"));
+    expect(
+      await screen.findByText("Bạn nào thích ăn cá?", {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
   });
 });

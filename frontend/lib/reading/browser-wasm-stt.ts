@@ -765,16 +765,23 @@ export class BrowserWasmSttClient {
       if (!this.readyPromise) {
         this.ready = false;
         // Keep shared init independent of individual caller aborts so a TTS pause
-        // never cancels an in-flight 34MB model download for the next utterance.
-        this.readyPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
+        // or bounded caller initTimeoutMs never cancels an in-flight 34MB model
+        // download for the next utterance.
+        const initPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
           .then(() => {
             this.ready = true;
           })
           .catch((err) => {
             this.ready = false;
-            this.readyPromise = null;
+            if (this.readyPromise === initPromise) {
+              this.readyPromise = null;
+            }
             throw err;
           });
+        // Prevent unhandled rejection if every waiting caller timed out/aborted early
+        // while still propagating errors to active awaiters.
+        initPromise.catch(() => undefined);
+        this.readyPromise = initPromise;
       }
       await raceWithSignalAndTimeout(this.readyPromise, {
         signal,
@@ -796,15 +803,21 @@ export class BrowserWasmSttClient {
       onProgress?: (event: WasmSttProgressEvent) => void;
     } = {},
   ): Promise<BrowserWasmDecodeResult> {
+    if (options.signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     const decodeTimeoutMs = options.timeoutMs ?? 15_000;
     // Separate cold model init/download budget from per-utterance decode timeout
-    // so a 4s interim timeout never aborts/trips fallback during initial WASM startup!
+    // so a caller-bounded initTimeoutMs rejects promptly while background warmup continues.
     const initTimeoutMs =
       options.initTimeoutMs ?? Math.max(decodeTimeoutMs, 60_000);
     await this.init(options.signal, {
       timeoutMs: initTimeoutMs,
       onProgress: options.onProgress,
     });
+    if (options.signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     const copy = new Float32Array(samples16k);
     return this.postRequest<BrowserWasmDecodeResult>(
       {
@@ -827,6 +840,7 @@ export class BrowserWasmSttClient {
     options: {
       signal?: AbortSignal;
       timeoutMs?: number;
+      initTimeoutMs?: number;
       voicedDurationMs?: number;
       onProgress?: (event: WasmSttProgressEvent) => void;
     } = {},
@@ -841,6 +855,7 @@ export class BrowserWasmSttClient {
     return this.transcribeSamples(samples16k, {
       signal: options.signal,
       timeoutMs: options.timeoutMs,
+      initTimeoutMs: options.initTimeoutMs,
       sampleRate: 16_000,
       voicedDurationMs: options.voicedDurationMs,
       onProgress: options.onProgress,

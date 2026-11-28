@@ -165,6 +165,9 @@ class DriveSelfTestResult:
     is_private: bool
     quota: StorageQuotaStatus | None
     detail: str
+    permanent_delete: bool | None = None
+    delete_mode: str | None = None
+    warning: str | None = None
 
 
 class GoogleDriveTrainingStore(TrainingArtifactStore):

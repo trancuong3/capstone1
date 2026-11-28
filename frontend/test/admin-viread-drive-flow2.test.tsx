@@ -213,35 +213,39 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     // Overview & Runtime tab is selected by default
     await waitFor(() => {
-      expect(screen.getByText(/FALLBACK_TO_ORIGINAL/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Đang dùng mô hình dự phòng/),
+      ).toBeInTheDocument();
     });
-    expect(screen.getByText(/Cảnh báo lệch model/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cảnh báo lệch mô hình/i)).toBeInTheDocument();
 
     // Outbox error/blocked and AI-only skipped breakdown shown
     expect(screen.getByText(/1 lỗi\/chặn/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/3 sự kiện AI-only đã bỏ qua an toàn/i),
+      screen.getByText(/3 mục chưa qua duyệt thủ công đã được bỏ qua an toàn/i),
     ).toBeInTheDocument();
 
-    // Switch to Google Drive tab
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    // Switch to Cloud Storage tab
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
     await waitFor(() => {
       expect(
-        screen.getByText(/Lưu trữ Luồng 2 · Google Drive \(0 VNĐ\)/i),
+        screen.getByText(/Kho lưu trữ dữ liệu huấn luyện đám mây/i),
       ).toBeInTheDocument();
     });
 
     // Drive connection + least-privilege scope + dedicated path + quota
     expect(screen.getByText("admin-drive@example.com")).toBeInTheDocument();
-    expect(screen.getByText(/drive\.file \(tối thiểu\)/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Quyền truy cập thư mục ứng dụng/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("MyDrive/ViRead/OCR-Training/Flow2-Admin-Verified"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Còn trống: 12\.00 GiB/i)).toBeInTheDocument();
 
-    // Switch to Flow 2 tab and verify PILOT benchmark never exposes Production Approve
+    // Switch to Training & Evaluation tab and verify PILOT benchmark never exposes Production Approve
     await user.click(
-      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
     );
     expect(
       screen.queryByRole("button", { name: /Phê duyệt model/i }),
@@ -254,10 +258,10 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Google Drive/i }),
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
 
     await waitFor(() => {
       expect(
@@ -278,8 +282,9 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
     await waitFor(() => {
       expect(mockService.runDriveSelfTest).toHaveBeenCalledTimes(1);
       expect(
-        screen.getByText(/_selftest\/selftest-123\.txt/),
+        screen.getByText(/Kết quả kiểm tra đọc\/ghi kho lưu trữ/i),
       ).toBeInTheDocument();
+      expect(screen.queryByText(/_selftest/)).not.toBeInTheDocument();
     });
 
     // Disconnect uses an accessible alertdialog modal (no globalThis.confirm)
@@ -325,16 +330,18 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Google Drive/i }),
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/Token bị thu hồi/i)).toBeInTheDocument();
     });
     expect(
-      screen.getByText(/Google đã thu hồi refresh token/i),
+      screen.getByText(
+        /Quyền truy cập kho lưu trữ đã hết hạn hoặc bị thu hồi/i,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Kiểm thử Upload \/ Đọc \/ Xóa/i }),
@@ -378,11 +385,11 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
       ).toBeInTheDocument();
     });
     await user.click(
-      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
     );
 
     await waitFor(() => {
@@ -421,10 +428,10 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Google Drive/i }),
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
 
     await waitFor(() => {
       expect(
@@ -440,15 +447,13 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       }),
     );
 
-    const urlInput = screen.getByPlaceholderText(
-      /https:\/\/script\.google\.com\/macros\/s\/\.\.\.\/exec/i,
-    );
+    const urlInput = screen.getByPlaceholderText(/https:\/\/\.\.\./i);
     await user.type(
       urlInput,
       "https://script.google.com/macros/s/AKfycbzViReadBridgeTestDeployment0123456789/exec",
     );
     await user.click(
-      screen.getByRole("button", { name: /Xác minh & Lưu kết nối Bridge/i }),
+      screen.getByRole("button", { name: /Xác minh & Lưu kết nối cầu nối/i }),
     );
 
     await waitFor(() => {
@@ -495,27 +500,27 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Google Drive/i }),
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
 
     await waitFor(() => {
       expect(
         screen.getByRole("button", {
-          name: /Kết nối Google Drive for Desktop \(0 thẻ\)/i,
+          name: /Kết nối thư mục đồng bộ/i,
         }),
       ).toBeInTheDocument();
     });
 
     await user.click(
       screen.getByRole("button", {
-        name: /Kết nối Google Drive for Desktop \(0 thẻ\)/i,
+        name: /Kết nối thư mục đồng bộ/i,
       }),
     );
     await user.click(
       screen.getByRole("button", {
-        name: /Xác minh & Lưu kết nối Drive Desktop/i,
+        name: /Xác minh & Lưu kết nối thư mục/i,
       }),
     );
 
@@ -582,11 +587,11 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
       ).toBeInTheDocument();
     });
     await user.click(
-      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
     );
 
     await waitFor(() => {
@@ -604,13 +609,51 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await user.click(
       screen.getByRole("button", {
-        name: /Tạo snapshot & Xếp hàng train Luồng 2/i,
+        name: /Tạo đợt dữ liệu & Xếp hàng huấn luyện/i,
       }),
     );
     await waitFor(() => {
       expect(mockService.triggerFlow2).toHaveBeenCalledTimes(1);
       expect(
-        screen.getByText(/141 train \/ 83 validation/i),
+        screen.getByText(/141 huấn luyện \/ 83 kiểm tra/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows trash fallback warning when GAS health check reports advanced_drive_enabled=false", async () => {
+    mockService.checkDriveHealth = vi.fn().mockResolvedValue({
+      ...connectedDriveStatus,
+      connection_mode: "apps_script_bridge",
+      oauth_scope: "apps_script_bridge",
+      advanced_drive_enabled: false,
+      delete_mode: "trash_fallback",
+      warnings: [
+        "Apps Script Advanced Drive Service (Drive API) chưa được bật.",
+      ],
+    });
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Kiểm tra kết nối/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Kiểm tra kết nối/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Cảnh báo xóa tạm thời \(Google Drive Trash Fallback\)/i,
+        ),
       ).toBeInTheDocument();
     });
   });

@@ -190,4 +190,25 @@ describe("check-i18n audit script", () => {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("never duplicates the root layout brand suffix inside books.myBooks page titles", () => {
+    const localeDirs = fs
+      .readdirSync(frontendMessagesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "features")
+      .map((entry) => entry.name);
+
+    expect(localeDirs.length).toBeGreaterThanOrEqual(11);
+    for (const locale of localeDirs) {
+      const booksJson = JSON.parse(
+        fs.readFileSync(
+          path.join(frontendMessagesDir, locale, "books.json"),
+          "utf8",
+        ),
+      ) as { myBooks?: { pageTitle?: string; detailPageTitle?: string } };
+      expect(booksJson.myBooks?.pageTitle).toBeTruthy();
+      expect(booksJson.myBooks?.pageTitle).not.toMatch(/\|\s*ViRead\s*$/);
+      expect(booksJson.myBooks?.detailPageTitle).toBeTruthy();
+      expect(booksJson.myBooks?.detailPageTitle).not.toMatch(/\|\s*ViRead\s*$/);
+    }
+  });
 });

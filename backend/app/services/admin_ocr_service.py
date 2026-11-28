@@ -351,6 +351,20 @@ def classify_word_evidence(
     return "green"
 
 
+def _sanitize_upload_file_name(raw_name: object, *, max_len: int = 180) -> str | None:
+    if not isinstance(raw_name, str):
+        return None
+    stripped = raw_name.strip().replace("\\", "/")
+    if not stripped:
+        return None
+    base = PurePath(stripped).name.strip()
+    if not base or base in {".", ".."}:
+        return None
+    cleaned = "".join(ch for ch in base if ch.isprintable() and ch not in "\r\n\t\x00")
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:max_len] or None
+
+
 class AdminOcrService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -1547,6 +1561,7 @@ class AdminOcrService:
             ).encode("utf-8")
         ).hexdigest()
         checkpoints = {
+            "tracking_mode": "remote_ocr_batch",
             "file_name": file_name,
             "source_format": source_format,
             "total_source_pages": safe_total,
@@ -1573,6 +1588,7 @@ class AdminOcrService:
                     progress_unit="trang" if safe_total > 0 else None,
                     initial_checkpoints=checkpoints,
                 )
+                job.Stage = "OCR"
             await self.db.commit()
             if created:
                 notify_smart_studio_worker()
@@ -4283,6 +4299,7 @@ class AdminOcrService:
         *,
         upload_id: UUID | None = None,
     ) -> dict[str, object]:
+        upload_file_name = _sanitize_upload_file_name(getattr(file, "filename", None))
         try:
             await self.require_admin(actor_id)
             await self._rollback_if_possible()
@@ -4299,7 +4316,12 @@ class AdminOcrService:
                 if existing_job.ImageSha256 != image_digest:
                     raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
                 worker_online = await job_service.has_online_worker()
-                return OcrInferenceJobService.serialize_job(existing_job, worker_online=worker_online)
+                positions = await job_service._safe_queue_positions([existing_job.Id])
+                return OcrInferenceJobService.serialize_job(
+                    existing_job,
+                    worker_online=worker_online,
+                    queue_position=positions.get(existing_job.Id),
+                )
 
         page_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
@@ -4321,6 +4343,7 @@ class AdminOcrService:
             ProcessingMeta={
                 "storage": "supabase",
                 "image_sha256": image_digest,
+                **({"file_name": upload_file_name} if upload_file_name else {}),
                 **({"upload_id": str(upload_id)} if upload_id else {}),
             },
         )
@@ -4345,6 +4368,7 @@ class AdminOcrService:
                 processing_meta={
                     "upload_id": str(upload_id) if upload_id else None,
                     "expected_page_image_path": object_path,
+                    **({"file_name": upload_file_name} if upload_file_name else {}),
                 },
             )
             await self.db.commit()
@@ -4357,7 +4381,12 @@ class AdminOcrService:
                     started_at=time.perf_counter(),
                 )
             worker_online = await job_service.has_online_worker()
-            return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
+            positions = await job_service._safe_queue_positions([job.Id])
+            return OcrInferenceJobService.serialize_job(
+                job,
+                worker_online=worker_online,
+                queue_position=positions.get(job.Id),
+            )
         except Exception:
             await self.db.rollback()
             await self._abort_page_upload(
@@ -4392,8 +4421,10 @@ class AdminOcrService:
             await self._close_upload_file(file)
         job_service = OcrInferenceJobService(self.db)
         job_ids: list[str] = []
+        created_page_ids: list[str] = []
         serialized_jobs: list[dict[str, object]] = []
         total_source_pages = 0
+        resolved_file_name: str | None = None
 
         try:
             with iter_rasterized_spooled_document(spooled) as (
@@ -4402,6 +4433,9 @@ class AdminOcrService:
                 source_sha256,
                 page_iter,
             ):
+                doc_file_name = _sanitize_upload_file_name(_file_name or getattr(file, "filename", None))
+                resolved_file_name = _file_name
+
                 def _next_page(it):
                     return next(it, None)
 
@@ -4429,6 +4463,8 @@ class AdminOcrService:
                                         detail="Upload identity already belongs to a different image",
                                     )
                                 job_ids.append(str(existing_job.Id))
+                                if existing_job.PageId is not None:
+                                    created_page_ids.append(str(existing_job.PageId))
                                 serialized_jobs.append(OcrInferenceJobService.serialize_job(existing_job))
                                 continue
 
@@ -4455,6 +4491,7 @@ class AdminOcrService:
                                 "storage": "supabase",
                                 "image_sha256": image_digest,
                                 "source_page": page_item.source_page,
+                                **({"file_name": doc_file_name} if doc_file_name else {}),
                                 **({"upload_id": str(page_upload_id)} if page_upload_id else {}),
                             },
                         )
@@ -4482,6 +4519,7 @@ class AdminOcrService:
                                     "upload_id": str(page_upload_id) if page_upload_id else None,
                                     "source_page": page_item.source_page,
                                     "expected_page_image_path": object_path,
+                                    **({"file_name": doc_file_name} if doc_file_name else {}),
                                 },
                             )
                             await self.db.commit()
@@ -4494,6 +4532,8 @@ class AdminOcrService:
                                     started_at=time.perf_counter(),
                                 )
                             job_ids.append(str(job.Id))
+                            if job.PageId is not None:
+                                created_page_ids.append(str(job.PageId))
                             serialized_jobs.append(OcrInferenceJobService.serialize_job(job))
                         except Exception:
                             await self.db.rollback()
@@ -4511,9 +4551,34 @@ class AdminOcrService:
         finally:
             spooled.close()
 
+        batch_tracking = (
+            await self.dispatch_batch_book_import_job(
+                actor_id,
+                book_id,
+                total_pages=total_source_pages,
+                file_name=resolved_file_name,
+                source_format=source_format,
+                ocr_job_ids=job_ids,
+                page_ids=created_page_ids,
+                idempotency_key=f"batch-doc:{book_id}:{upload_id}" if upload_id is not None else None,
+            )
+            if job_ids
+            else None
+        )
+
         worker_online = await job_service.has_online_worker()
+        queued_uuids = [
+            UUID(str(item["id"]))
+            for item in serialized_jobs
+            if str(item.get("status") or "").upper() in ("QUEUED", "FAILED_RETRYABLE")
+        ]
+        positions = await job_service._safe_queue_positions(queued_uuids)
         for item in serialized_jobs:
             item["worker_online"] = worker_online
+            if str(item.get("status") or "").upper() in ("QUEUED", "FAILED_RETRYABLE"):
+                pos = positions.get(UUID(str(item["id"])))
+                if pos is not None:
+                    item["queue_position"] = pos
         return {
             "book_id": str(book_id),
             "source_format": source_format,
@@ -4522,6 +4587,11 @@ class AdminOcrService:
             "queued_count": len(job_ids),
             "worker_online": worker_online,
             "jobs": serialized_jobs,
+            **(
+                {"smart_studio_job_id": batch_tracking["smart_studio_job_id"]}
+                if isinstance(batch_tracking, dict) and batch_tracking.get("smart_studio_job_id")
+                else {}
+            ),
         }
 
     async def enqueue_reprocess_job(self, actor_id: UUID, page_id: UUID) -> dict[str, object]:
@@ -4583,7 +4653,12 @@ class AdminOcrService:
         )
         await self.db.commit()
         worker_online = await job_service.has_online_worker()
-        return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
+        positions = await job_service._safe_queue_positions([job.Id])
+        return OcrInferenceJobService.serialize_job(
+            job,
+            worker_online=worker_online,
+            queue_position=positions.get(job.Id),
+        )
 
     async def enqueue_reupload_ocr_job(
         self,
@@ -4593,6 +4668,7 @@ class AdminOcrService:
         *,
         upload_id: UUID | None = None,
     ) -> dict[str, object]:
+        upload_file_name = _sanitize_upload_file_name(getattr(file, "filename", None))
         try:
             await self.require_admin(actor_id)
             probe = await self.repo.page(page_id)
@@ -4633,7 +4709,12 @@ class AdminOcrService:
                 if existing_job.ImageSha256 != image_digest:
                     raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
                 worker_online = await job_service.has_online_worker()
-                return OcrInferenceJobService.serialize_job(existing_job, worker_online=worker_online)
+                positions = await job_service._safe_queue_positions([existing_job.Id])
+                return OcrInferenceJobService.serialize_job(
+                    existing_job,
+                    worker_online=worker_online,
+                    queue_position=positions.get(existing_job.Id),
+                )
             await self._rollback_if_possible()
 
         await run_in_threadpool(upload_object, object_path, data, content_type)
@@ -4656,6 +4737,7 @@ class AdminOcrService:
                 processing_meta={
                     "upload_id": str(upload_id) if upload_id else None,
                     "expected_page_image_path": previous_image_path,
+                    **({"file_name": upload_file_name} if upload_file_name else {}),
                 },
             )
             await self.db.commit()
@@ -4668,7 +4750,12 @@ class AdminOcrService:
                     started_at=time.perf_counter(),
                 )
             worker_online = await job_service.has_online_worker()
-            return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
+            positions = await job_service._safe_queue_positions([job.Id])
+            return OcrInferenceJobService.serialize_job(
+                job,
+                worker_online=worker_online,
+                queue_position=positions.get(job.Id),
+            )
         except Exception:
             await self._rollback_if_possible()
             await self._cleanup_uploaded_object(

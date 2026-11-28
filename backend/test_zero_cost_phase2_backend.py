@@ -6,10 +6,12 @@ import io
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -42,6 +44,7 @@ from app.api.routes.voice import (  # noqa: E402
 )
 from app.diagnostic_logging import log_diagnostic  # noqa: E402
 from app.models import TtsAudioCacheEntry  # noqa: E402
+from app.services.worker_telemetry import clear_worker_telemetry  # noqa: E402
 from app.providers.local_voice_provider import (  # noqa: E402
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
@@ -305,13 +308,15 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         env["SUPABASE_URL"] = "https://x.supabase.co"
         env["SUPABASE_KEY"] = "test-key"
         env.pop("DATABASE_FORCE_NULL_POOL", None)
+        env.pop("DATABASE_CONCURRENCY_LIMIT", None)
         code_bounded = (
             "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
             "from sqlalchemy.pool import AsyncAdaptedQueuePool;"
             "from app.database import session;"
             "assert isinstance(session.engine.pool, AsyncAdaptedQueuePool), type(session.engine.pool);"
             "assert session.engine.pool.size() == 4, session.engine.pool.size();"
-            "assert session.engine.pool._max_overflow == 4, session.engine.pool._max_overflow;"
+            "assert session.engine.pool._max_overflow == 12, session.engine.pool._max_overflow;"
+            "assert session.engine.pool.size() + session.engine.pool._max_overflow == session.DATABASE_CONCURRENCY_LIMIT;"
             "assert session.engine.pool._timeout >= 10.0, session.engine.pool._timeout;"
             "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
             "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
@@ -423,7 +428,16 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         private_book = uuid4()
         private_page = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        @contextmanager
+        def _longpath_tempdir():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                try:
+                    yield d
+                finally:
+                    if os.name == "nt":
+                        shutil.rmtree(f"\\\\?\\{Path(d).resolve()}", ignore_errors=True)
+
+        with _longpath_tempdir() as tmpdir:
             repo = _InMemoryTtsRepo(
                 books={
                     catalog_book: {
@@ -749,6 +763,7 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
             inv_mock.assert_awaited_once_with(admin_repo.db, book_id=book_id, commit=True)
 
     async def test_admin_health_15_plus_subsystems_and_audio_cache_summary(self) -> None:
+        clear_worker_telemetry()
         self.assertEqual(derive_operational_state(status="HEALTHY"), "Healthy")
         self.assertEqual(derive_operational_state(status="HEALTHY", queue_depth=3), "Queued")
         self.assertEqual(derive_operational_state(status="DEGRADED", detail_status="disabled"), "Offline")
@@ -1303,7 +1318,16 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         private_book = uuid4()
         private_page = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        @contextmanager
+        def _longpath_tempdir():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                try:
+                    yield d
+                finally:
+                    if os.name == "nt":
+                        shutil.rmtree(f"\\\\?\\{Path(d).resolve()}", ignore_errors=True)
+
+        with _longpath_tempdir() as tmpdir:
             repo = _InMemoryTtsRepo(
                 books={
                     catalog_book: {

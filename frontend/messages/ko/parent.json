@@ -189,7 +189,7 @@
     "submitFeedback": "의견 보내기",
     "charCount": "{count}/{max}",
     "privacyNote": "이 정보는 지원 요청을 처리하는 데 사용됩니다. 의견 내용에 비밀번호나 OTP를 포함하지 마세요.",
-    "sentSuccessDetail": "학부모님의 의견이 접수되었습니다. 업데이트 사항이 있을 경우 연락처 이메일로 답변해 드립니다.",
+    "sentSuccessDetail": "ViRead가 의견을 접수했습니다. 업데이트가 있을 때 연락처 이메일로 답변드리겠습니다.",
     "submitError": "의견을 전송하지 못했습니다. 나중에 다시 시도해 주세요.",
     "categories": {
       "technical_issue": "기술적 오류 보고",
@@ -220,8 +220,8 @@
         "title": "도서 및 인식",
         "q1": "도서는 어떻게 선택하나요?",
         "a1": "도서 카탈로그를 열고 제공되는 도서 중 하나를 선택한 후 화면의 안내에 따라 시작하세요.",
-        "q2": "OCR 내용이 정확하지 않은 경우 어떻게 해야 하나요?",
-        "a2": "이 페이지에서 피드백을 제출하실 수 있으며, 도서명, 문제가 발생한 페이지 번호 및 잘못 인식된 내용을 구체적으로 적어 주세요. OCR 내용은 독서 활동에 사용하기 전에 검토되어야 합니다."
+        "q2": "책 페이지에서 인식된 내용이 정확하지 않으면 어떻게 해야 하나요?",
+        "a2": "이 페이지에서 책 제목, 페이지 번호, 부정확한 내용을 적어 보내주시면 ViRead 팀이 확인 후 업데이트합니다."
       },
       "reading": {
         "title": "독서 세션",
@@ -233,5 +233,73 @@
         "a3": "진행도 섹션에서 리포트를 보거나 기록 섹션에서 저장된 독서 세션을 확인할 수 있습니다."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "전체 기능 음성 동기화",
+    "title": "AI 여선생님 / 남선생님 선택",
+    "subtitle": "선택한 목소리는 책 읽기 · 철자 연습 · 어려운 단어 · 독해 · 게임 전체에 동일하게 적용됩니다.",
+    "savedForChild": "{alias} 프로필에 저장됨",
+    "previewButton": "목소리 미리듣기",
+    "stopPreviewButton": "미리듣기 중지",
+    "personaGroupAria": "AI 여선생님 또는 AI 남선생님 선택",
+    "femaleTitle": "AI 여선생님",
+    "femaleDesc": "부드럽고 따뜻한 여성 목소리",
+    "maleTitle": "AI 남선생님",
+    "maleDesc": "차분하고 표현력 있는 남성 목소리",
+    "selectedBadge": "선택됨",
+    "regionLabel": "지역 억양",
+    "voiceListLabel": "세부 목소리",
+    "voiceListAria": "선택한 선생님과 지역의 목소리 목록",
+    "policyLabel": "음성 엔진 모드",
+    "policyAria": "음성 엔진 모드 선택",
+    "policyLocalOnly": "이 기기만 사용",
+    "policyOnlineBackup": "이 기기 + 온라인 예비",
+    "workerOfflineHint": "로컬 음성 워커가 꺼져 있습니다. 미리 준비되지 않은 책 문장과 게임 음성을 들으려면 “이 기기 + 온라인 예비”를 켜 주세요."
+  },
+  "childModePin": {
+    "lockedPill": "아이 보호모드 켜짐",
+    "unlockedPill": "아이 보호잠금",
+    "lockedTooltip": "아이 안전 모드가 켜져 있습니다 — 부모 PIN을 입력해 해제하세요",
+    "unlockedTooltip": "4자리 부모 PIN으로 아이가 설정/관리 화면에 잘못 들어가는 것을 방지합니다",
+    "setupTitle": "아이 보호모드 4자리 PIN 설정",
+    "manageTitle": "아이 보호모드 PIN 변경",
+    "unlockTitle": "부모 PIN 입력 후 잠금 해제",
+    "setupDesc": "4자리 PIN은 아이가 책을 읽는 동안 설정, 개인 도서 및 프로필 관리를 안전하게 보호합니다.",
+    "unlockDesc": "이 화면은 부모 전용입니다. 계속하려면 4자리 PIN을 입력해 주세요.",
+    "currentPinLabel": "현재 PIN",
+    "newPinLabel": "새 4자리 PIN",
+    "enterPinLabel": "부모 4자리 PIN",
+    "autoEnableCheckbox": "이 계정에 아이 보호모드 기본 설정 기억하기",
+    "invalidFormat": "PIN은 숫자 4자리여야 합니다 (0-9).",
+    "currentPinRequired": "현재 4자리 PIN을 입력해 주세요.",
+    "wrongPinRemaining": "PIN이 일치하지 않습니다. 5분 일시 잠금 전 {remaining}회 남았습니다.",
+    "requestFailed": "지금은 PIN을 확인하거나 저장할 수 없습니다. 다시 시도해 주세요.",
+    "removePinButton": "PIN 삭제",
+    "cancelButton": "취소",
+    "saveAndLockButton": "PIN 저장 및 잠금",
+    "unlockButton": "부모 모드 열기",
+    "routeGuardTitle": "아이 안전 모드가 작동 중입니다",
+    "routeGuardDesc": "이 관리 화면은 부모 전용입니다. 독서 책상으로 돌아가거나 부모 PIN을 입력해 주세요.",
+    "backToChildDesk": "독서 책상으로 돌아가기"
+  },
+  "passport": {
+    "tabGroupAria": "가족 책장과 독서 여권 탭 전환",
+    "deskTabLabel": "책장",
+    "passportTabLabel": "독서 여권",
+    "stampsSummary": "독서 여권 · 스탬프 {unlocked}/{total}",
+    "streakBadge": "{days}일 연속 따뜻한 독서",
+    "encouragementTitle": "부모님 응원 음성 메시지 (5~10초)",
+    "encouragementPrivacyHint": "부모님이 녹음한 짧은 응원 음성만 비공개 저장소에 보관하며, 어린이 음성은 절대 저장하지 않습니다.",
+    "playEncouragement": "부모님 응원 듣기",
+    "stopEncouragement": "정지",
+    "deleteEncouragement": "음성 메시지 삭제",
+    "recordButton": "응원 녹음하기",
+    "stopRecordButton": "정지 및 저장",
+    "defaultEncouragementTitle": "{alias}에게 보내는 응원 메시지",
+    "encouragementPlayError": "지금은 응원 음성을 재생할 수 없습니다.",
+    "micUnsupported": "현재 브라우저에서는 녹음을 지원하지 않습니다.",
+    "micDenied": "짧은 응원 메시지를 녹음하려면 마이크 권한을 허용해 주세요.",
+    "clipTooLarge": "녹음은 10초 이내(최대 256 KB)여야 합니다.",
+    "uploadFailed": "응원 음성을 저장하지 못했습니다. 다시 시도해 주세요."
   }
 }

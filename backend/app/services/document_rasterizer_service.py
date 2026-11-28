@@ -1296,6 +1296,8 @@ def iter_rasterized_spooled_document(
         header_bytes=spooled.header_bytes,
     )
     temp_pdf_path: Path | None = None
+    page_iter: Iterator[RasterizedDocumentPage] | None = None
+    bounded_iter: Iterator[RasterizedDocumentPage] | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
@@ -1314,20 +1316,43 @@ def iter_rasterized_spooled_document(
 
         def _bounded_iter() -> Iterator[RasterizedDocumentPage]:
             count = 0
-            for page in page_iter:
-                count += 1
-                if count > MAX_DOCUMENT_PAGES:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Document exceeds the 30-page limit per upload",
-                    )
-                yield page
+            try:
+                assert page_iter is not None
+                for page in page_iter:
+                    count += 1
+                    if count > MAX_DOCUMENT_PAGES:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Document exceeds the 30-page limit per upload",
+                        )
+                    yield page
+            finally:
+                close_inner = getattr(page_iter, "close", None)
+                if callable(close_inner):
+                    close_inner()
 
-        yield clean_name, detected, spooled.source_sha256, _bounded_iter()
+        bounded_iter = _bounded_iter()
+        yield clean_name, detected, spooled.source_sha256, bounded_iter
     finally:
+        for it in (bounded_iter, page_iter):
+            close_fn = getattr(it, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    pass
+        it = None
+        bounded_iter = None
+        page_iter = None
         if temp_pdf_path is not None:
             try:
                 temp_pdf_path.unlink(missing_ok=True)
+            except PermissionError:
+                gc.collect()
+                try:
+                    temp_pdf_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

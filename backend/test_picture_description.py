@@ -787,8 +787,8 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         import os
         from unittest.mock import patch
 
-        self.assertEqual(DEFAULT_PRIMARY_MODEL, "gemini-3.5-flash-lite")
-        self.assertEqual(DEFAULT_FALLBACK_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(DEFAULT_PRIMARY_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(DEFAULT_FALLBACK_MODEL, "gemini-3.5-flash-lite")
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 15)
         self.assertEqual(_guide_schema()["type"], "object")
         self.assertEqual(_evaluation_schema()["type"], "object")
@@ -809,8 +809,8 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         ):
             get_picture_ai_config.cache_clear()
             cfg = get_picture_ai_config()
-            self.assertEqual(cfg.primary_model, "gemini-3.5-flash-lite")
-            self.assertEqual(cfg.fallback_model, "gemini-3.1-flash-lite")
+            self.assertEqual(cfg.primary_model, "gemini-3.1-flash-lite")
+            self.assertEqual(cfg.fallback_model, "gemini-3.5-flash-lite")
             self.assertEqual(cfg.groq_model, "qwen/qwen3.8-27b")
             self.assertEqual(cfg.groq_api_key, "groq-key-1")
 
@@ -818,7 +818,7 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {
                 "GEMINI_API_KEY": "g-key-2",
-                "PICTURE_DESC_GEMINI_MODEL": "gemini-3.1-flash-lite",
+                "PICTURE_DESC_GEMINI_MODEL": "gemini-3.5-flash-lite",
                 "PICTURE_DESC_GEMINI_FALLBACK_MODEL": "",
                 "GEMINI_OCR_FALLBACK_MODEL": "",
             },
@@ -826,8 +826,8 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         ):
             cfg2 = get_picture_ai_config()
             self.assertEqual(cfg2.api_key, "g-key-2")
-            self.assertEqual(cfg2.primary_model, "gemini-3.1-flash-lite")
-            self.assertEqual(cfg2.fallback_model, "gemini-3.5-flash-lite")
+            self.assertEqual(cfg2.primary_model, "gemini-3.5-flash-lite")
+            self.assertEqual(cfg2.fallback_model, "gemini-3.1-flash-lite")
 
     async def test_analyze_picture_falls_back_to_groq_when_gemini_times_out(self):
         endpoints_hit: list[str] = []

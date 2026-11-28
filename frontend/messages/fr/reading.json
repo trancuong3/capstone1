@@ -130,7 +130,7 @@
     "loadingBook": "Chargement des informations du livre…",
     "bookUnavailableTitle": "Livre non disponible pour le moment",
     "bookNotFoundTitle": "Livre introuvable",
-    "bookUnavailableDesc": "Ce livre ne contient pas encore de contenu ACTIF et VÉRIFIÉ pour la lecture de l'enfant.",
+    "bookUnavailableDesc": "Ce livre n'a pas encore de contenu prêt à lire.",
     "bookNotFoundDesc": "Le livre n'existe pas ou n'est pas présent dans la bibliothèque actuelle.",
     "backToLibrary": "Retour à la bibliothèque",
     "loadErrorTitle": "Impossible de charger les informations du livre",
@@ -138,9 +138,9 @@
     "micReady": "Le microphone est prêt",
     "micGranted": "Autorisation du microphone accordée",
     "rangeSummary": "Plage de lecture : Pages {start}–{end}",
-    "ocrMatchSummary": "Page OCR confirmée : Page {page} · Confiance {percent}%",
+    "ocrMatchSummary": "Page reconnue : Page {page} · Confiance {percent}%",
     "matchedPageMissingTitle": "Page reconnue introuvable",
-    "matchedPageMissingDesc": "La page OCR ne figure pas dans la liste des pages valides du livre. ViRead ne changera pas de page automatiquement.",
+    "matchedPageMissingDesc": "La page reconnue ne figure pas dans les pages valides du livre. ViRead ne changera pas de page automatiquement.",
     "invalidRangeTitle": "Plage non valide",
     "invalidRangeDesc": "Veuillez retourner aux détails du livre et resélectionner la page de début, la page de fin ou une plage continue.",
     "micCheckSectionTitle": "Vérifier le microphone",
@@ -173,7 +173,16 @@
       "unsupported": "Le navigateur ne fournit pas de statut automatique. Vous pouvez toujours vérifier le microphone avec le bouton ci-dessous.",
       "no_device": "Aucun microphone trouvé sur l'appareil. Veuillez connecter un microphone et réessayer.",
       "device_busy": "Le microphone est utilisé par une autre application. Veuillez la fermer et réessayer.",
-      "error": "Impossible de vérifier le microphone. Veuillez utiliser HTTPS ou localhost et réessayer."
+      "error": "Impossible de vérifier le microphone. Vérifiez la connexion sécurisée et les paramètres du navigateur puis réessayez."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "Révision espacée des mots (1-3-7 jours)",
+      "starterEyebrow": "Échauffement doux de lecture",
+      "title": "Mini-histoire d'échauffement",
+      "listenStory": "Écouter l'histoire",
+      "stopListen": "Arrêter",
+      "refreshStory": "Actualiser la mini-histoire",
+      "focusWordsLabel": "Mots intégrés aujourd'hui"
     }
   },
   "ready": {
@@ -260,7 +269,7 @@
     "referencePageAlt": "Image de référence pour la page {page}",
     "scrollToCurrentWord": "À propos du mot en cours de lecture",
     "currentWordPrefix": "Mot actuel : ",
-    "overlayAria": "Surligner le mot actuel via la zone de délimitation",
+    "overlayAria": "Zone de mise en évidence du mot actuel",
     "readingModeSwitcherAria": "Mode de lecture de la page",
     "readingModeIllustrated": "Avec illustration",
     "readingModeIllustratedTitle": "Afficher une illustration sans texte avec le texte de lecture",
@@ -313,7 +322,8 @@
     "listenPhonics": "Écouter le découpage syllabique",
     "listeningRetry": "Écoute de l'enfant…",
     "readAgain": "Relire",
-    "stepsAria": "Étapes d'épellation"
+    "stepsAria": "Étapes d'épellation",
+    "autoHideHint": "Épellation terminée · Masquage pour mieux lire le texte…"
   },
   "companion": {
     "teacherFemaleTitle": "Professeur IA",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "Exemple de phonétique · Lire le groupe de mots",
     "quickFixTitle": "Encouragement · Auto-correction très rapide !",
     "phonicsWinTitle": "Encouragement · Excellent travail de décodage !",
-    "overcameWordTitle": "Bravo · Tu as maîtrisé un mot difficile !"
+    "overcameWordTitle": "Bravo · Tu as maîtrisé un mot difficile !",
+    "dismissAria": "Masquer le message"
   },
   "tutor": {
     "title": "Comment lit-on ce mot ?",
@@ -417,7 +428,7 @@
     "practicedWordsLabel": "dans cette session",
     "collapseDetails": "Réduire",
     "viewSpokenWords": "Voir les mots lus",
-    "sttResultsTitle": "Résultats de la reconnaissance vocale (STT)",
+    "sttResultsTitle": "Résultats de reconnaissance vocale de l'enfant",
     "recognizedWordsBadge": "{count} mots reconnus",
     "unassessedOnlyLabel": "Mots reconnus ; données insuffisantes pour l'évaluation ou nécessitant une attention :",
     "correctWordsTitle": "Liste des mots lus avec succès ({count} mots) :",
@@ -439,7 +450,7 @@
     "versionLoadError": "Impossible de charger le contenu de la version de page lue.",
     "pageLoadError": "Impossible de charger le contenu de la page.",
     "loadingAria": "Chargement du contenu de lecture",
-    "verifiedContentTitle": "Contenu de page vérifié",
+    "verifiedContentTitle": "Contenu de la page du livre",
     "legendAria": "Légende des couleurs",
     "recordedTranscriptLabel": "Discours enregistré",
     "notRecorded": "Non enregistré",
@@ -459,5 +470,38 @@
     "keepTrying": "Essaie de lire lentement et clairement, mon petit.",
     "wordsRead": "{count, plural, =0 {Aucun mot lu} other {(#) mots lus}}"
   },
-  "learningContentNotice": "Le contenu des livres et les exercices de lecture en vietnamien s'affichent toujours de gauche à droite afin de préserver l'orthographe correcte."
+  "learningContentNotice": "Le contenu des livres et les exercices de lecture en vietnamien s'affichent toujours de gauche à droite afin de préserver l'orthographe correcte.",
+  "pageKinds": {
+    "TEXT_ONLY": "Texte",
+    "TEXT_AND_IMAGE": "Histoire illustrée",
+    "IMAGE_PRIMARY": "Page illustrée",
+    "COMIC": "BD / Dialogue",
+    "POEM": "Poème enfantin",
+    "EXERCISE": "Page d’exercice",
+    "MULTI_COLUMN": "Multi-colonnes",
+    "TEXT_OVER_IMAGE": "Texte sur illustration",
+    "LOW_QUALITY": "À vérifier"
+  },
+  "duet": {
+    "toggleLabel": "Lecture en duo",
+    "toggleActive": "Mode duo actif",
+    "parentTurnBadge": "Tour du parent",
+    "childTurnBadge": "À ton tour de lire !",
+    "listenParentSample": "Écouter le modèle",
+    "completeParentTurn": "Lu — Au tour de l’enfant",
+    "turnCounter": "Tour {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Explorer l’illustration et les phrases",
+    "subtitle": "Enrichissez le vocabulaire et les phrases à partir de la page lue.",
+    "pictureCta": "Décrire l’illustration",
+    "shooterCta": "Construire les phrases"
+  },
+  "lucBat": {
+    "toggleLabel": "Cadence poetique Luc Bat 6-8",
+    "toggleActive": "Cadence Luc Bat active",
+    "coupletBadge": "{count} distique(s) (6-8)",
+    "beatGuide": "Rythme 2/2/2 (vers de 6) · 2/2/2/2 (vers de 8)",
+    "rhymePairLabel": "Rime interne 6e syllabe : \"{sixthLuc}\" <-> \"{sixthBat}\""
+  }
 }

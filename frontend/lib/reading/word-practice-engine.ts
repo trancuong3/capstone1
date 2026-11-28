@@ -19,16 +19,25 @@ import {
   getBrowserWasmSttClient,
 } from "@/lib/reading/browser-wasm-stt";
 import {
+  getVoiceEngineHealthForRouting,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
+  recordSttEngineUsage,
+} from "@/lib/reading/voice-engine-status";
+import {
   hasHighConfidenceKeytermResult,
   hasUsableBrowserConfidence,
   hasUsableTranscript,
 } from "@/lib/reading/recognition-evidence";
 import {
+  buildContrastiveKeyterms,
   classifyPracticePhraseTranscript,
   stripNonSpeechAnnotations,
   type RetryRecognitionStatus,
 } from "@/lib/reading/retry-word-recognition";
 import type { SpeechService } from "@/lib/api/speech-service";
+
+export const SHORT_WORD_CONTEXT_RETRY_THRESHOLD = 1;
 
 export type WordPracticeState =
   | "IDLE"
@@ -46,10 +55,10 @@ export const SHORT_WORD_CAPTURE_CONFIG = {
   mode: "short-word" as const,
   pollIntervalMs: 120,
   acousticSettleMs: 140,
-  minCaptureMs: 800,
-  postSpeechSilenceMs: 800,
-  noSpeechTimeoutMs: 4500,
-  maxCaptureMs: 6500,
+  minCaptureMs: 600,
+  postSpeechSilenceMs: 550,
+  noSpeechTimeoutMs: 3_500,
+  maxCaptureMs: 4_800,
   softSpeechRmsThreshold: 0.015,
   maxAutoRetries: 2,
   maxSilenceStreak: 2,
@@ -59,9 +68,9 @@ export const SHORT_WORD_CAPTURE_CONFIG = {
 
 export const PHRASE_CAPTURE_CONFIG = {
   ...SHORT_WORD_CAPTURE_CONFIG,
-  minCaptureMs: 1400,
-  postSpeechSilenceMs: 1200,
-  maxCaptureMs: 11_000,
+  minCaptureMs: 1_000,
+  postSpeechSilenceMs: 750,
+  maxCaptureMs: 8_500,
 };
 
 export type ShortWordFailureLabel =
@@ -140,6 +149,7 @@ export interface ShortWordSpeechActivityInput {
   readonly hasLiveBrowserSpeech: boolean;
   readonly speechObserved?: boolean;
   readonly previousSpeechDurationMs?: number;
+  readonly consecutiveEnergyPolls?: number;
 }
 
 export function hasShortWordSpeechActivity(
@@ -151,18 +161,65 @@ export function hasShortWordSpeechActivity(
       ? input.audioLevel / 500
       : input.audioLevel;
   const speechDurationMs = input.quality?.speechDurationMs ?? 0;
-  const initialBurstOnset = !input.speechObserved && speechDurationMs >= 50;
+  const noiseFloor = input.quality?.noiseFloor ?? 0;
+  const initialBurstOnset = !input.speechObserved && speechDurationMs >= 40;
   const speechDurationGrew =
     input.previousSpeechDurationMs !== undefined &&
     speechDurationMs > input.previousSpeechDurationMs;
+  const relativeEnergyThreshold = input.speechObserved
+    ? Math.max(0.012, noiseFloor * 2.2)
+    : Math.max(0.008, noiseFloor * 1.8);
+  const hasRelativeEnergy =
+    liveRms >= relativeEnergyThreshold &&
+    (Boolean(input.speechObserved) ||
+      (input.consecutiveEnergyPolls ?? 0) >= 2 ||
+      speechDurationMs >= 40);
   return (
     input.hasLiveBrowserSpeech ||
     input.isSpeakingNow ||
     Boolean(input.quality?.isSpeaking) ||
-    liveRms >= SHORT_WORD_CAPTURE_CONFIG.softSpeechRmsThreshold ||
     initialBurstOnset ||
-    speechDurationGrew
+    speechDurationGrew ||
+    hasRelativeEnergy
   );
+}
+
+export interface ShortWordKeytermPass2Input {
+  readonly status: RetryRecognitionStatus | "ENGINE_ERROR";
+  readonly audioQuality?: AudioQualitySnapshot;
+  readonly transcript?: string | null;
+  readonly browserStatus?: RetryRecognitionStatus | null;
+  readonly hasNonSpeechTagOnly?: boolean;
+}
+
+export function shouldAttemptShortWordKeytermPass2({
+  status,
+  audioQuality,
+  transcript,
+  browserStatus,
+  hasNonSpeechTagOnly,
+}: ShortWordKeytermPass2Input): boolean {
+  const nonSpeechOnly =
+    hasNonSpeechTagOnly ??
+    Boolean(
+      transcript &&
+      transcript.trim() &&
+      !stripNonSpeechAnnotations(transcript).trim(),
+    );
+  if (nonSpeechOnly) return false;
+  if (status === "INCORRECT" && browserStatus === "CORRECT") {
+    return true;
+  }
+  if (status !== "NOT_RECOGNIZED" && status !== "UNCERTAIN") {
+    return false;
+  }
+  if (audioQuality?.status === "SPEECH_DETECTED") {
+    return true;
+  }
+  if (browserStatus === "CORRECT") {
+    return true;
+  }
+  return status === "UNCERTAIN";
 }
 
 export type ShortWordEvaluationSource =
@@ -177,11 +234,13 @@ export interface ShortWordEvaluationParams {
   readonly expectedWord: string;
   readonly contextPhrase?: string | null;
   readonly audioBlob: Blob | null;
+  readonly pcm16k?: Float32Array | null;
   readonly audioQuality?: AudioQualitySnapshot;
   readonly browserTranscript?: string | null;
   readonly browserConfidence?: number;
   readonly speechService: Pick<SpeechService, "transcribe">;
   readonly filename?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface ShortWordEvaluationResult {
@@ -202,11 +261,13 @@ export async function evaluateRecordedShortWord({
   expectedWord,
   contextPhrase,
   audioBlob,
+  pcm16k,
   audioQuality,
   browserTranscript,
   browserConfidence,
   speechService,
   filename = "retry-word.webm",
+  signal,
 }: ShortWordEvaluationParams): Promise<ShortWordEvaluationResult> {
   const startedAt =
     typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -258,10 +319,73 @@ export async function evaluateRecordedShortWord({
     };
   }
 
+  const freshHealth = getVoiceEngineHealthForRouting();
+  const permanentlyUnconfigured =
+    isPermanentlyHostedLocalUnconfigured(freshHealth);
+  const localSttUnavailable =
+    permanentlyUnconfigured ||
+    (freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready));
+  const canUseWasm = detectBrowserWasmSttSupport().supported;
+  let triedWasmFirst = false;
+
+  const runBoundedWasmDecode = () => {
+    const client = getBrowserWasmSttClient();
+    if (pcm16k && pcm16k.length > 0) {
+      return client.transcribeSamples(pcm16k, {
+        signal,
+        initTimeoutMs: 4_000,
+        timeoutMs: 8_000,
+        voicedDurationMs: audioQuality?.speechDurationMs,
+      });
+    }
+    return client.transcribeBlob(audioBlob, {
+      signal,
+      initTimeoutMs: 4_000,
+      timeoutMs: 8_000,
+      voicedDurationMs: audioQuality?.speechDurationMs,
+    });
+  };
+
+  // Strict Offline-First STT priority: when Local Worker STT is known unavailable,
+  // try On-Device Offline Browser WASM BEFORE falling back to Cloud backend STT.
+  if (localSttUnavailable && canUseWasm) {
+    triedWasmFirst = true;
+    try {
+      const wasmResult = await runBoundedWasmDecode();
+      const wasmText = wasmResult.text.normalize("NFC").trim();
+      if (wasmText) {
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed:
+            !permanentlyUnconfigured && freshHealth?.local.configured !== false,
+          fallbackReason:
+            permanentlyUnconfigured || freshHealth?.local.configured === false
+              ? null
+              : "LOCAL_STT_UNAVAILABLE",
+        });
+        const wasmStatus = classifyPracticePhraseTranscript(
+          expectedWord,
+          wasmText,
+          { contextPhrase },
+        );
+        return {
+          status: wasmStatus,
+          source: "BROWSER_WASM",
+          transcript: wasmText,
+          sttDurationMs: elapsedMs(),
+        };
+      }
+    } catch {
+      // Fall through cleanly to backend / browser fallback when WASM fails.
+    }
+  }
+
   try {
     const firstPass = await speechService.transcribe(audioBlob, {
       filename,
       languageCode: "vi",
+      signal,
     });
     const firstText = firstPass.text.trim();
     const strippedFirst = stripNonSpeechAnnotations(firstText);
@@ -284,21 +408,41 @@ export async function evaluateRecordedShortWord({
       };
     }
 
+    const firstPassProvider =
+      typeof (firstPass as { provider?: unknown }).provider === "string"
+        ? String((firstPass as { provider?: unknown }).provider).toLowerCase()
+        : "";
+    const skipPass2ForUnavailableOrWasm =
+      permanentlyUnconfigured ||
+      localSttUnavailable ||
+      triedWasmFirst ||
+      firstPassProvider === "wasm" ||
+      firstPassProvider === "browser_wasm";
     const shouldTryKeytermPass =
-      firstStatus === "UNCERTAIN" ||
-      (firstStatus === "NOT_RECOGNIZED" && !hasNonSpeechTagOnly) ||
-      (firstStatus === "INCORRECT" && browserStatus === "CORRECT");
+      !skipPass2ForUnavailableOrWasm &&
+      shouldAttemptShortWordKeytermPass2({
+        status: firstStatus,
+        audioQuality,
+        transcript: firstText,
+        browserStatus,
+        hasNonSpeechTagOnly,
+      });
 
     if (shouldTryKeytermPass) {
       try {
         const secondPass = await speechService.transcribe(audioBlob, {
           filename,
           languageCode: "vi",
-          keyterms: [expectedWord],
+          keyterms: buildContrastiveKeyterms(expectedWord, contextPhrase),
+          signal,
         });
         const secondText = secondPass.text.trim();
         const corroborated = browserStatus === "CORRECT";
-        const highConf = hasHighConfidenceKeytermResult(secondPass);
+        const highConf = hasHighConfidenceKeytermResult(
+          secondPass,
+          expectedWord,
+          browserStatus,
+        );
         if (hasUsableTranscript(secondPass) && (corroborated || highConf)) {
           return {
             status: classifyPracticePhraseTranscript(expectedWord, secondText, {
@@ -332,16 +476,17 @@ export async function evaluateRecordedShortWord({
       transcript: firstText || null,
       sttDurationMs: elapsedMs(),
     };
-  } catch {
-    if (detectBrowserWasmSttSupport().supported) {
+  } catch (err) {
+    const errText =
+      typeof err === "object" && err !== null
+        ? `${String((err as { code?: unknown }).code ?? "")} ${String((err as { providerCode?: unknown }).providerCode ?? "")} ${err instanceof Error ? err.message : ""}`
+        : "";
+    if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+      markHostedLocalUnconfigured();
+    }
+    if (!triedWasmFirst && canUseWasm) {
       try {
-        const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
-          audioBlob,
-          {
-            timeoutMs: 12_000,
-            voicedDurationMs: audioQuality?.speechDurationMs,
-          },
-        );
+        const wasmResult = await runBoundedWasmDecode();
         const wasmText = wasmResult.text.normalize("NFC").trim();
         const wasmStatus = classifyPracticePhraseTranscript(
           expectedWord,

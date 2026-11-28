@@ -132,7 +132,7 @@ class BookQualityFindingRead(BaseModel):
     excerpt_end: int
     suggested_correction: str | None
     explanation: str
-    detection_source: Literal["RULE", "OLLAMA_TEXT"]
+    detection_source: Literal["RULE", "OLLAMA_TEXT", "CLOUD_AI"]
     model_name: str | None
     confidence: float | None
     status: BookQualityFindingStatus
@@ -190,6 +190,7 @@ class BookQualityScanRead(BaseModel):
     failed_pages: int
     ai_completed_pages: int
     ai_unavailable_pages: int
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     error_summary: str | None
     started_at: datetime | None
     completed_at: datetime | None
@@ -206,6 +207,22 @@ class BookQualityReportAdminPage(BaseModel):
     summary: dict[str, int]
     limit: int
     offset: int
+
+
+class BookReadabilityRead(BaseModel):
+    syllable_count: int = 0
+    sentence_count: int = 0
+    avg_syllables_per_sentence: float = 0.0
+    complex_phonics_ratio: float = 0.0
+    multisyllable_ratio: float = 0.0
+    decodable_syllable_ratio: float = 0.0
+    estimated_grade_band: Literal["GRADE_1", "GRADE_2", "GRADE_3", "GRADE_4_5", "UNRATED"] = "UNRATED"
+    estimated_min_grade: int = 1
+    estimated_max_grade: int = 5
+    grade_match_status: Literal["MATCHED", "TOO_HARD", "TOO_EASY", "UNRATED"] = "UNRATED"
+    phonics_readiness_score: float = 0.0
+    sample_complex_syllables: list[str] = Field(default_factory=list)
+    explanation_vi: str = ""
 
 
 class BookQualityBookSummary(BaseModel):
@@ -258,6 +275,7 @@ class BookApprovalAssessment(BaseModel):
     publication_source: Literal["AUTO_APPROVAL", "ADMIN_APPROVAL"] | None = None
     rights_confirmed: bool = False
     blockers: list[str] = Field(default_factory=list)
+    readability: BookReadabilityRead | None = None
 
 
 BookQualityBookSummary.model_rebuild()
@@ -391,3 +409,37 @@ class BookQualityBookDecisionRead(BaseModel):
     book_id: UUID
     assessment: BookApprovalAssessment
     decision_history: list[dict] = Field(default_factory=list)
+
+
+class AdminOcrHardSampleItemRead(BaseModel):
+    book_id: UUID
+    book_title: str
+    visibility_scope: Literal["CATALOG", "PARENT_PRIVATE"]
+    training_rights_basis: str
+    page_id: UUID
+    page_number: int = Field(ge=1)
+    page_revision_id: UUID
+    line_index: int = Field(ge=0)
+    word_id: UUID
+    word_index: int = Field(ge=0)
+    word_text: str
+    line_text: str
+    ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    retry_fail_count: int = Field(default=0, ge=0)
+    comparison_mismatch_count: int = Field(default=0, ge=0)
+    distinct_session_count: int = Field(default=0, ge=0)
+    hard_sample_score: float = Field(ge=0.0, le=100.0)
+    recommended_action: Literal[
+        "PRIORITIZE_FLOW2_CROP_REVIEW",
+        "INSPECT_CATALOG_PAGE_OCR",
+        "MONITOR_PHONICS_VS_OCR",
+    ]
+
+
+class AdminOcrHardSampleRadarResponse(BaseModel):
+    generated_at: datetime
+    total_candidates: int = Field(ge=0)
+    catalog_count: int = Field(ge=0)
+    consented_private_count: int = Field(ge=0)
+    privacy_policy_version: str = "FLOW2_OPT_IN_STRICT_V1"
+    items: list[AdminOcrHardSampleItemRead] = Field(default_factory=list)

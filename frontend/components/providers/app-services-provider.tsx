@@ -9,7 +9,10 @@ import {
 } from "react";
 
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
-import { setApiReadCacheActorScope } from "@/lib/api/read-cache";
+import {
+  setApiReadCacheActorScope,
+  setApiReadCacheEnabled,
+} from "@/lib/api/read-cache";
 
 import type { BookService } from "@/lib/api/book-service";
 import type { BookContentReportService } from "@/lib/api/book-content-report-service";
@@ -114,6 +117,9 @@ export function AppServicesProvider({
   const authRuntime = useContext(AuthRuntimeContext);
 
   useLayoutEffect(() => {
+    if (typeof window !== "undefined" && process.env.NODE_ENV !== "test") {
+      setApiReadCacheEnabled(true);
+    }
     setApiReadCacheActorScope(authRuntime?.session?.user?.id ?? null);
   }, [authRuntime?.session?.user?.id]);
 

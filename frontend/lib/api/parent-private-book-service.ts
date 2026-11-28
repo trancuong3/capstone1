@@ -15,7 +15,9 @@ import {
   parentPrivateBookDetailSchema,
   parentPrivateBookPageSchema,
   parentPrivateBookSummarySchema,
+  parentStoryweaverResponseSchema,
   parentSubmitPagesResponseSchema,
+  saveScanToMyBooksResponseSchema,
   type AdminFlow2CandidateDecisionResponseDTO,
   type AdminFlow2CandidatePageDTO,
   type AdminUserBookDecisionResponseDTO,
@@ -33,9 +35,33 @@ import {
   type ParentPrivateBookDetailDTO,
   type ParentPrivateBookPageDTO,
   type ParentPrivateBookSummaryDTO,
+  type ParentStoryweaverInput,
+  type ParentStoryweaverResponseDTO,
   type ParentSubmitPagesResponseDTO,
+  type SaveScanToMyBooksResponseDTO,
+  type ScanSaveMode,
   type SourceUsageType,
 } from "@/types/parent-private-book";
+
+export interface SaveScanToMyBooksInput {
+  readonly image: File;
+  readonly fileName?: string;
+  readonly ocr_text: string;
+  readonly mode: ScanSaveMode;
+  readonly title?: string | null;
+  readonly grade_level?: number | null;
+  readonly target_book_id?: string | null;
+  readonly words?: ReadonlyArray<{
+    readonly word_index?: number;
+    readonly line_index?: number;
+    readonly text: string;
+    readonly normalized_text?: string;
+    readonly bbox?: readonly [number, number, number, number];
+    readonly ocr_confidence?: number | null;
+  }> | null;
+  readonly source_type?: SourceUsageType;
+  readonly source_note?: string | null;
+}
 
 export interface CreateParentPrivateBookInput {
   readonly title: string;
@@ -180,6 +206,14 @@ export interface ParentPrivateBookService {
     submissionId: string,
     input: AddPrivatePageInput,
   ): Promise<ParentAddPageResponseDTO>;
+  saveFromScan?(
+    input: SaveScanToMyBooksInput,
+    signal?: AbortSignal,
+  ): Promise<SaveScanToMyBooksResponseDTO>;
+  createStoryweaverBook?(
+    input: ParentStoryweaverInput,
+    signal?: AbortSignal,
+  ): Promise<ParentStoryweaverResponseDTO>;
   getOcrContribution?(bookId: string): Promise<ParentOcrContributionStateDTO>;
   updateOcrContribution?(
     bookId: string,
@@ -243,6 +277,25 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
           source_note: input.source_note?.trim() || null,
         },
       }),
+    createStoryweaverBook: (input, signal) =>
+      requestApi(
+        "/books/my-books/storyweaver",
+        parentStoryweaverResponseSchema,
+        signal,
+        {
+          method: "POST",
+          timeoutMs: 60_000,
+          body: {
+            child_id: input.child_id ?? null,
+            title: input.title?.trim() || null,
+            theme: input.theme.trim(),
+            page_count: input.page_count,
+            target_grade: input.target_grade ?? null,
+            style_mode: input.style_mode,
+            custom_words: input.custom_words ? [...input.custom_words] : [],
+          },
+        },
+      ),
     update: (bookId, input) => {
       const body: Record<string, unknown> = {};
       if (input.title !== undefined) body.title = input.title.trim();
@@ -396,6 +449,43 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "POST", body: input },
       ),
+    saveFromScan: (input, signal) => {
+      const form = new FormData();
+      form.append(
+        "image",
+        input.image,
+        input.fileName || input.image.name || "scan-page.jpg",
+      );
+      form.append("ocr_text", input.ocr_text);
+      form.append("mode", input.mode);
+      if (input.title?.trim()) {
+        form.append("title", input.title.trim());
+      }
+      if (
+        typeof input.grade_level === "number" &&
+        Number.isFinite(input.grade_level)
+      ) {
+        form.append("grade_level", String(Math.trunc(input.grade_level)));
+      }
+      if (input.target_book_id?.trim()) {
+        form.append("target_book_id", input.target_book_id.trim());
+      }
+      if (input.words && input.words.length > 0) {
+        form.append("words_json", JSON.stringify(input.words));
+      }
+      if (input.source_type) {
+        form.append("source_type", input.source_type);
+      }
+      if (input.source_note?.trim()) {
+        form.append("source_note", input.source_note.trim());
+      }
+      return requestApi(
+        "/books/my-books/from-scan",
+        saveScanToMyBooksResponseSchema,
+        signal,
+        { method: "POST", body: form },
+      );
+    },
     getOcrContribution: (bookId) =>
       requestApi(
         `/books/my-books/${encodeURIComponent(bookId)}/ocr-contribution`,

@@ -35,6 +35,8 @@ class SentenceShooterBookRead(BaseModel):
     min_grade: int = Field(ge=1, le=5)
     max_grade: int = Field(ge=1, le=5)
     available_rounds: int = Field(ge=1)
+    difficult_word_count: int = Field(default=0, ge=0)
+    matched_difficult_words: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +44,7 @@ class SentenceShooterBookRead(BaseModel):
 class SentenceShooterSessionCreate(BaseModel):
     child_id: UUID
     book_id: UUID
+    book_page_id: UUID | None = None
     difficulty: Difficulty
     total_rounds: int = Field(default=3, ge=1, le=5)
     learning_mode: LearningMode = "WORD_ORDER"

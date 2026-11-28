@@ -43,6 +43,8 @@ from app.providers.local_voice_provider import (
     resolve_local_stt_mode,
 )
 from app.schemas.voice import (
+    PhonicsAnalyzeRequest,
+    PhonicsAnalyzeResponse,
     PhonicsSpeechRead,
     PhonicsSpeechRequest,
     PhonicsStepTimingRead,
@@ -52,6 +54,7 @@ from app.schemas.voice import (
     TextToSpeechRequest,
     VoiceProviderMode,
 )
+from app.services.phonics_ai_service import analyze_phonics_with_ai
 from app.services.rate_limiter import rate_limit
 from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 
@@ -238,6 +241,31 @@ def _accepts_db_kwarg(fn: Any) -> bool:
     return _accepts_kwarg(fn, "db")
 
 
+def lookup_voice_gender(candidate_voice_id: str | None) -> str | None:
+    """Resolve explicit male/female gender from local, Google, or ElevenLabs voice IDs."""
+    if not candidate_voice_id:
+        return None
+    clean = str(candidate_voice_id).strip()
+    if not clean:
+        return None
+    for item in STATIC_LOCAL_VOICES:
+        if item.get("voice_id") == clean:
+            return str(item.get("gender") or "female")
+    g_meta = GOOGLE_VOICE_BY_ID.get(clean)
+    if g_meta is not None:
+        return str(g_meta.get("gender") or "female")
+    male_elevenlabs = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+    if male_elevenlabs and clean == male_elevenlabs:
+        return "male"
+    female_elevenlabs = os.getenv("ELEVENLABS_FEMALE_VOICE_ID", "").strip()
+    if female_elevenlabs and clean == female_elevenlabs:
+        return "female"
+    lowered = clean.lower()
+    if "male" in lowered and "female" not in lowered:
+        return "male"
+    return None
+
+
 def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
     cache_hit = bool(getattr(speech_or_audio, "cache_hit", False))
     cache_scope = getattr(speech_or_audio, "cache_scope", None)
@@ -341,15 +369,11 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
-    voice_gender = "female"
-    for item in STATIC_LOCAL_VOICES:
-        if item.get("voice_id") == audio.resolved_voice_id:
-            voice_gender = str(item.get("gender") or "female")
-            break
-    else:
-        g_meta = GOOGLE_VOICE_BY_ID.get(audio.resolved_voice_id)
-        if g_meta is not None:
-            voice_gender = str(g_meta.get("gender") or "female")
+    voice_gender = (
+        lookup_voice_gender(audio.resolved_voice_id)
+        or lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
 
     cache_headers = _tts_cache_headers(audio)
     headers = {
@@ -423,6 +447,11 @@ async def phonics_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    response.headers["X-Voice-Gender"] = (
+        lookup_voice_gender(speech.resolved_voice_id)
+        or lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
     fallback_reason = getattr(speech, "fallback_reason", None)
     if getattr(speech, "used_fallback_voice", False) and fallback_reason:
         response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
@@ -445,6 +474,28 @@ async def phonics_text_to_speech(
         region=speech.region,
         model_version=speech.model_version,
         cached_speed=getattr(speech, "cached_speed", None),
+    )
+
+
+@router.post("/phonics/analyze", response_model=PhonicsAnalyzeResponse)
+async def analyze_phonics_endpoint(
+    payload: PhonicsAnalyzeRequest,
+    response: Response,
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit(
+            "voice_phonics_analyze",
+            default_max=30,
+            default_window=60.0,
+            actor_dependency=require_active_profile_id,
+        )
+    ),
+) -> PhonicsAnalyzeResponse:
+    """Analyze a word/phrase with AI when static Grade-1 Vietnamese phonics rules do not cover it."""
+    response.headers["Cache-Control"] = "no-store"
+    return await analyze_phonics_with_ai(
+        payload.text,
+        context_phrase=payload.context_phrase,
     )
 
 
@@ -514,15 +565,23 @@ async def speech_to_text(
     )
 
     try:
-        transcription = await get_voice_orchestrator().transcribe(
-            audio=audio,
-            filename=file.filename or "recording.webm",
-            content_type=content_type,
-            language_code=language_code,
-            keyterms=validated_keyterms,
-            actor_id=actor_id,
-            policy=policy,
+        transcription = await asyncio.wait_for(
+            get_voice_orchestrator().transcribe(
+                audio=audio,
+                filename=file.filename or "recording.webm",
+                content_type=content_type,
+                language_code=language_code,
+                keyterms=validated_keyterms,
+                actor_id=actor_id,
+                policy=policy,
+            ),
+            timeout=_STT_REQUEST_TIMEOUT_SECONDS,
         )
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={"code": "STT_TIMEOUT"},
+        ) from None
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
@@ -599,6 +658,9 @@ async def _verify_ws_parent_id(
     return await _verify_ws_active_profile(actor_id)
 
 
+_STT_REQUEST_TIMEOUT_SECONDS = 14.0
+
+
 def open_local_stt_ws(url: str, headers: dict[str, str]):
     """Open an upstream WebSocket connection to the local voice worker."""
     return websockets.connect(
@@ -610,6 +672,9 @@ def open_local_stt_ws(url: str, headers: dict[str, str]):
         close_timeout=2.0,
         max_size=4 * 1024 * 1024,
     )
+
+
+_ORIGINAL_OPEN_LOCAL_STT_WS = open_local_stt_ws
 
 
 _WS_MAX_TEXT_BYTES = 64 * 1024
@@ -756,6 +821,22 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
                 }
             )
             await websocket.close(code=1013)
+        except Exception:
+            pass
+        return
+
+    is_circuit_open_fn = getattr(orchestrator.local, "is_circuit_open", None)
+    if callable(is_circuit_open_fn) and is_circuit_open_fn():
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "LOCAL_STT_UNAVAILABLE",
+                    "message": "Local voice worker is temporarily unavailable.",
+                    "retryable": True,
+                }
+            )
+            await websocket.close(code=4503)
         except Exception:
             pass
         return
@@ -936,6 +1017,10 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
         return
     except Exception as exc:
         logger.warning("stt_stream_worker_unavailable type=%s", type(exc).__name__)
+        if open_local_stt_ws is _ORIGINAL_OPEN_LOCAL_STT_WS:
+            trip_fn = getattr(orchestrator.local, "trip_connect_circuit", None)
+            if callable(trip_fn):
+                trip_fn("LOCAL_VOICE_UNAVAILABLE")
         orchestrator.local._schedule_background_recovery()
         try:
             await websocket.send_json(

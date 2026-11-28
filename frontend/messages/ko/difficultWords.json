@@ -13,7 +13,7 @@
     "noChildDescription": "프로필을 생성하고 읽기를 시작하여 시스템에 증거를 남기세요.",
     "createChildAction": "아이 프로필 생성",
     "unsupportedTitle": "데이터 보충 대기 중",
-    "unsupportedDescription": "현재 형식으로 제공할 수 있는 데이터가 없습니다. 샘플 데이터가 없습니다.",
+    "unsupportedDescription": "이 항목의 데이터가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "retry": "재시도",
     "manageChildren": "자녀 프로필 관리",
     "notFoundTitle": "데이터를 찾을 수 없음",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "선택한 연습 상태와 일치하는 단어가 없습니다.",
     "viewAllWords": "모든 단어 보기 ({count})",
     "paginationAria": "연습할 단어 도서 그룹 페이지네이션",
-    "paginationItemLabel": "권"
+    "paginationItemLabel": "권",
+    "statTotal": "전체 단어",
+    "statCompleted": "정확히 읽음",
+    "statRemaining": "복습 필요",
+    "quickMastered": "익힘 완료",
+    "quickNeedsMoreFull": "추가 복습"
   },
   "bookCard": {
     "gradeSingle": "{grade}학년",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "다시 읽지 않음",
     "badgeNeedsMore": "연습 필요",
     "badgeInProgress": "연습 중",
-    "badgeCompleted": "정확히 읽음"
+    "badgeCompleted": "정확히 읽음",
+    "showMoreWords": "+{count}개 더 보기",
+    "showFewerWords": "접기",
+    "tagMispronounced": "오독 {count}",
+    "tagOmitted": "생략 {count}",
+    "tagRepeated": "반복 {count}"
   },
   "item": {
     "notPracticed": "연습 전",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "이 기기에서 베트남어 발음 샘플을 재생할 수 없습니다. 부모님과 함께 읽어보세요.",
     "phonicsLockedBusy": "파닉스 음성을 불러올 수 없습니다. 화면의 단계를 확인하고 '다시 시도'를 눌러주세요.",
     "evaluationTimeoutError": "확인 시간이 예상보다 길어지고 있습니다. 방금 녹음한 내용을 다시 보내주세요.",
-    "evaluationSaveError": "서버에 결과를 저장하지 못했습니다. 아이의 녹음은 유지되니 '결과 저장'을 눌러주세요.",
+    "evaluationSaveError": "결과를 아직 저장하지 못했습니다. 아이의 녹음은 유지되었으니 결과 저장을 눌러 다시 시도하세요.",
     "micPermissionError": "브라우저 마이크 권한이 없습니다. 브라우저 설정에서 마이크 권한을 허용한 후 다시 시도해주세요.",
     "micNotFoundError": "기기에서 마이크를 찾을 수 없습니다. 마이크 연결 상태를 확인해주세요.",
     "micUnsupportedError": "현재 브라우저는 직접 녹음을 지원하지 않습니다.",
@@ -162,5 +172,25 @@
   "runtime": {
     "practiceOpened": "\"{word}\" 단어의 #{attempt}번째 연습을 시작했습니다.",
     "unknownBookSource": "책 출처가 지정되지 않았습니다"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "60초 발음 워밍업",
+    "title": "최소대립쌍 연습실 & 성조 거울",
+    "subtitle": "{alias} 어린이가 헷갈리기 쉬운 성조와 첫소리·끝소리를 듣고 구분하도록 돕습니다.",
+    "openButton": "60초 연습 열기",
+    "collapseButton": "접기",
+    "unavailableHint": "지금은 최소대립쌍 연습을 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    "pairCounter": "단어 쌍 {current}/{total}",
+    "listenWord": "듣기",
+    "speakWord": "읽어보기",
+    "listening": "듣는 중...",
+    "spokenMatch": "참 잘했어요! 목표 단어를 또렷하게 발음했어요!",
+    "spokenContrast": "\"{heard}\"와 비슷하게 들렸어요. 예시 음성을 듣고 천천히 다시 읽어 보세요!",
+    "spokenRetry": "소리가 잘 들리지 않았어요. 마이크에 가까이 대고 천천히 읽어 보세요!",
+    "earChallengeButton": "귀 기울이기 퀴즈",
+    "earCorrect": "정답이에요! 아주 잘 들었어요!",
+    "earRetry": "아까워요! 한 번 더 들어 볼까요?",
+    "nextPairButton": "다음 쌍",
+    "nonClinicalDisclaimer": "음성 인식 기록에 기반한 읽기 연습 안내이며 의학적·언어치료적 진단이 아닙니다."
   }
 }

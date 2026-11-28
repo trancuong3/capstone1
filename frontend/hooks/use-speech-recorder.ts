@@ -39,7 +39,9 @@ const preferredMimeTypes = PREFERRED_RECORDER_MIME_TYPES;
 
 const MAX_RECORDING_BYTES = 20 * 1024 * 1024;
 const MAX_RECORDING_MS = 5 * 60 * 1000;
-const AUDIO_LEVEL_UI_INTERVAL_MS = 80;
+const STOP_TIMEOUT_MS = 3000;
+const AUDIO_LEVEL_UI_INTERVAL_MS = 200;
+const AUDIO_LEVEL_UI_DELTA = 4;
 
 function microphoneConstraints(): MediaStreamConstraints {
   const supported = navigator.mediaDevices.getSupportedConstraints?.();
@@ -370,7 +372,19 @@ export function useSpeechRecorder(
             audioContextRef.current = ctx;
 
             if (ctx.state === "suspended") {
-              void ctx.resume().catch(() => undefined);
+              await Promise.race([
+                ctx.resume().catch(() => undefined),
+                new Promise<void>((resolve) => {
+                  setTimeout(resolve, 150);
+                }),
+              ]);
+              if (
+                generation !== streamGenerationRef.current ||
+                recorderRef.current !== recorder ||
+                !isRecordingRef.current
+              ) {
+                return;
+              }
             }
 
             const source = ctx.createMediaStreamSource(stream);
@@ -395,10 +409,15 @@ export function useSpeechRecorder(
                 const quality = qualityRef.current.addFrame(dataArray, now);
                 const nextLevel = Math.min(100, Math.round(quality.rms * 500));
                 audioLevelRef.current = nextLevel;
+                const levelDelta = Math.abs(nextLevel - lastUiLevel);
+                const crossedZero =
+                  (nextLevel === 0 && lastUiLevel !== 0) ||
+                  (lastUiLevel <= 0 && nextLevel > 0);
                 if (
                   lastUiLevel !== nextLevel &&
-                  (now - lastUiLevelAt >= AUDIO_LEVEL_UI_INTERVAL_MS ||
-                    (nextLevel === 0 && lastUiLevel !== 0))
+                  (crossedZero ||
+                    (now - lastUiLevelAt >= AUDIO_LEVEL_UI_INTERVAL_MS &&
+                      levelDelta >= AUDIO_LEVEL_UI_DELTA))
                 ) {
                   lastUiLevel = nextLevel;
                   lastUiLevelAt = now;
@@ -508,7 +527,7 @@ export function useSpeechRecorder(
     stopTimerRef.current = setTimeout(() => {
       if (recorderRef.current === recorder)
         finish(null, new Error("Microphone stop timed out."));
-    }, 3000);
+    }, STOP_TIMEOUT_MS);
     recorder.onstop = () => {
       if (recorderRef.current !== recorder) return;
       const finalBlob = chunksRef.current.length

@@ -11,8 +11,28 @@ from typing import Any
 
 import httpx
 
+from app.services.ai_capability_router import (
+    CircuitBreakerRegistry,
+    CircuitState,
+    get_shared_ai_circuit_breaker,
+)
+from app.services.cloud_ai_defaults import (
+    extract_gemini_text,
+    gemini_thinking_config,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError
+from app.services.ocr_ai.runtime import (
+    classify_ocr_provider_error,
+    detect_limit_zero,
+    get_shared_ocr_ai_http_client,
+    is_cloud_family,
+    parse_retry_after_seconds,
+    provider_circuit_key,
+    quota_circuit_key,
+)
 
 
 TARGET = "GRADE_1_TO_5"
@@ -417,10 +437,23 @@ def _validate_result(value: object, *, source: str, source_offset: int) -> tuple
 class ChildSafetyOrchestrator:
     """Text-only safety adapter using the existing Gemini, Groq, and Ollama config."""
 
-    def __init__(self, config: OcrCorrectionConfig, *, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        config: OcrCorrectionConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        circuit_breaker: CircuitBreakerRegistry | None = None,
+    ):
         self.config = config
         self.transport = transport
+        self._explicit_circuit_breaker = circuit_breaker is not None
+        self._circuit_breaker: CircuitBreakerRegistry | None = (
+            circuit_breaker
+            if circuit_breaker is not None
+            else (get_shared_ai_circuit_breaker() if transport is None else None)
+        )
         self._active_client: httpx.AsyncClient | None = None
+        self._active_attempt_timeout: float | None = None
         self.providers: list[SafetyProvider] = []
         if config.gemini_enabled:
             self.providers.extend([
@@ -442,6 +475,8 @@ class ChildSafetyOrchestrator:
         normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
+        if not self.providers:
+            raise ChildSafetyError("NO_AI_PROVIDER_CONFIGURED", [])
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )
@@ -457,60 +492,85 @@ class ChildSafetyOrchestrator:
         deadline = (time.monotonic() + total_timeout) if total_timeout > 0 else None
         events: list[dict[str, Any]] = []
         disabled_families: set[str] = set()
+        disabled_providers: set[str] = set()
+        healthy_providers: set[str] = set()
         aggregated_suitability = "SUITABLE"
         candidate_hash = content_hash(text)
         deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
         completed_chunks = 0
-        async with httpx.AsyncClient(
-            trust_env=False,
-            follow_redirects=False,
-            transport=self.transport,
-        ) as shared_client:
-            self._active_client = shared_client
-            try:
-                for chunk_index, (offset, chunk_text) in enumerate(chunks):
-                    if deadline is not None and time.monotonic() >= deadline:
-                        raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
-                    response = await self._analyze_chunk(
-                        chunk_text,
-                        events,
-                        chunk_index,
-                        disabled_families=disabled_families,
-                        deadline=deadline,
+
+        async def _run_chunks() -> None:
+            nonlocal aggregated_suitability, completed_chunks
+            for chunk_index, (offset, chunk_text) in enumerate(chunks):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
+                response = await self._analyze_chunk(
+                    chunk_text,
+                    events,
+                    chunk_index,
+                    disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
+                    healthy_providers=healthy_providers,
+                    deadline=deadline,
+                )
+                suitability, findings = response
+                completed_chunks += 1
+                if _SUITABILITY_ORDER[suitability] > _SUITABILITY_ORDER[aggregated_suitability]:
+                    aggregated_suitability = suitability
+                for finding in findings:
+                    min_suitability = _SEVERITY_MIN_SUITABILITY.get(
+                        str(finding.get("severity") or "").upper()
                     )
-                    suitability, findings = response
-                    completed_chunks += 1
-                    if _SUITABILITY_ORDER[suitability] > _SUITABILITY_ORDER[aggregated_suitability]:
-                        aggregated_suitability = suitability
-                    for finding in findings:
-                        min_suitability = _SEVERITY_MIN_SUITABILITY.get(
-                            str(finding.get("severity") or "").upper()
-                        )
-                        if (
-                            min_suitability is not None
-                            and _SUITABILITY_ORDER[min_suitability]
-                            > _SUITABILITY_ORDER[aggregated_suitability]
-                        ):
-                            aggregated_suitability = min_suitability
-                        finding["evidence_start"] += offset
-                        finding["evidence_end"] += offset
-                        canonical_start = finding["evidence_start"]
-                        canonical_end = finding["evidence_end"]
-                        raw_start = normalized_spans[canonical_start][0]
-                        raw_end = normalized_spans[canonical_end - 1][1]
-                        finding["evidence_start"] = raw_start
-                        finding["evidence_end"] = raw_end
-                        finding["evidence_text"] = text[raw_start:raw_end]
-                        finding["content_hash"] = candidate_hash
-                        key = (
-                            raw_start,
-                            raw_end,
-                            finding["category"],
-                            candidate_hash,
-                        )
-                        deduped.setdefault(key, finding)
+                    if (
+                        min_suitability is not None
+                        and _SUITABILITY_ORDER[min_suitability]
+                        > _SUITABILITY_ORDER[aggregated_suitability]
+                    ):
+                        aggregated_suitability = min_suitability
+                    finding["evidence_start"] += offset
+                    finding["evidence_end"] += offset
+                    canonical_start = finding["evidence_start"]
+                    canonical_end = finding["evidence_end"]
+                    raw_start = normalized_spans[canonical_start][0]
+                    raw_end = normalized_spans[canonical_end - 1][1]
+                    finding["evidence_start"] = raw_start
+                    finding["evidence_end"] = raw_end
+                    finding["evidence_text"] = text[raw_start:raw_end]
+                    finding["content_hash"] = candidate_hash
+                    key = (
+                        raw_start,
+                        raw_end,
+                        finding["category"],
+                        candidate_hash,
+                    )
+                    deduped.setdefault(key, finding)
+
+        async def _run_with_timeout() -> None:
+            if deadline is not None:
+                try:
+                    await asyncio.wait_for(_run_chunks(), timeout=total_timeout)
+                except asyncio.TimeoutError as exc:
+                    raise ChildSafetyError("DOCUMENT_TIMEOUT", events) from exc
+            else:
+                await _run_chunks()
+
+        if self.transport is None:
+            self._active_client = get_shared_ocr_ai_http_client()
+            try:
+                await _run_with_timeout()
             finally:
                 self._active_client = None
+        else:
+            async with httpx.AsyncClient(
+                trust_env=False,
+                follow_redirects=False,
+                transport=self.transport,
+            ) as shared_client:
+                self._active_client = shared_client
+                try:
+                    await _run_with_timeout()
+                finally:
+                    self._active_client = None
         findings = list(deduped.values())
         for finding in findings:
             finding["finding_id"] = hashlib.sha256(
@@ -530,6 +590,46 @@ class ChildSafetyOrchestrator:
             "image_safety_status": "UNASSESSED_NO_VISION_MODEL",
         }
 
+    def _provider_timeout_budget(
+        self,
+        *,
+        provider: SafetyProvider,
+        disabled_families: set[str],
+        disabled_providers: set[str] | None = None,
+        deadline: float | None,
+    ) -> float:
+        if provider.family == "ollama":
+            return float(self.config.local.timeout_seconds)
+        base_timeout = float(self.config.cloud_timeout_seconds)
+        if deadline is None:
+            return base_timeout
+        skipped_providers = disabled_providers or set()
+        current_index = self.providers.index(provider)
+        remaining_after = [
+            candidate
+            for candidate in self.providers[current_index:]
+            if candidate.family not in disabled_families
+            and candidate.name not in skipped_providers
+        ]
+        has_local_fallback = any(
+            candidate.family == "ollama" for candidate in remaining_after
+        )
+        if not has_local_fallback:
+            return base_timeout
+        remaining_cloud = [
+            candidate for candidate in remaining_after if candidate.family != "ollama"
+        ]
+        total_timeout = float(getattr(self.config, "total_timeout_seconds", 0) or 0)
+        local_timeout = float(self.config.local.timeout_seconds)
+        local_reserve = (
+            local_timeout if total_timeout > local_timeout else total_timeout * 0.5
+        )
+        cloud_remaining = (deadline - local_reserve) - time.monotonic()
+        if cloud_remaining <= 0:
+            return 0.0
+        per_provider_share = cloud_remaining / max(1, len(remaining_cloud))
+        return min(base_timeout, per_provider_share)
+
     async def _analyze_chunk(
         self,
         source: str,
@@ -537,26 +637,61 @@ class ChildSafetyOrchestrator:
         chunk_id: int,
         *,
         disabled_families: set[str] | None = None,
+        disabled_providers: set[str] | None = None,
+        healthy_providers: set[str] | None = None,
         deadline: float | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
         if disabled_families is None:
             disabled_families = set()
+        if disabled_providers is None:
+            disabled_providers = set()
+        if healthy_providers is None:
+            healthy_providers = set()
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )
+        cb = (
+            self._circuit_breaker
+            if (self._explicit_circuit_breaker or "_request" not in self.__dict__)
+            else None
+        )
+        attempted = False
+        skipped_by_circuit = False
         for provider in self.providers:
-            if provider.family in disabled_families:
+            if provider.name in disabled_providers or provider.family in disabled_families:
                 continue
             if deadline is not None and time.monotonic() >= deadline:
                 raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
+            provider_key: str | None = None
+            quota_key: str | None = None
+            prov_probe_acquired = False
+            quota_probe_acquired = False
+            if cb is not None and is_cloud_family(provider.family):
+                provider_key = provider_circuit_key(provider.name)
+                quota_key = quota_circuit_key(provider.family)
+                if quota_key is not None:
+                    quota_allowed, quota_state = cb.allow_request(quota_key)
+                    if not quota_allowed:
+                        skipped_by_circuit = True
+                        continue
+                    quota_probe_acquired = quota_state == CircuitState.HALF_OPEN
+                prov_allowed, prov_state = cb.allow_request(provider_key)
+                if not prov_allowed:
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+                    skipped_by_circuit = True
+                    continue
+                prov_probe_acquired = prov_state == CircuitState.HALF_OPEN
+            attempted = True
             started = time.perf_counter()
             output_mode = self._output_mode(provider)
             retry_count = 0
-            provider_timeout = float(
-                self.config.local.timeout_seconds
-                if provider.family == "ollama"
-                else self.config.cloud_timeout_seconds
+            provider_timeout = self._provider_timeout_budget(
+                provider=provider,
+                disabled_families=disabled_families,
+                disabled_providers=disabled_providers,
+                deadline=deadline,
             )
             sub_chunks = (
                 _chunks(
@@ -568,7 +703,11 @@ class ChildSafetyOrchestrator:
                 else [(0, source)]
             )
             hit_document_deadline = False
+            retry_after_seconds: float | None = None
+            limit_zero = False
             try:
+                if provider_timeout <= 0:
+                    raise httpx.TimeoutException("Cloud safety budget reserved for local fallback")
                 combined_suitability = "SUITABLE"
                 combined_findings: list[dict[str, Any]] = []
                 last_status_code: int | None = None
@@ -587,18 +726,26 @@ class ChildSafetyOrchestrator:
                         if deadline is not None
                         else provider_timeout
                     )
+                    wait_started = time.monotonic()
+                    self._active_attempt_timeout = attempt_timeout
                     try:
                         result, status_code, output_mode, sub_retries = await asyncio.wait_for(
                             self._request(provider, sub_text),
                             timeout=attempt_timeout,
                         )
                     except asyncio.TimeoutError:
+                        elapsed_wait = time.monotonic() - wait_started
                         if deadline is not None and (
                             time.monotonic() >= deadline
-                            or remaining <= provider_timeout
+                            or (
+                                remaining <= provider_timeout
+                                and elapsed_wait >= max(0.0, attempt_timeout - 0.05)
+                            )
                         ):
                             hit_document_deadline = True
                         raise
+                    finally:
+                        self._active_attempt_timeout = None
                     last_status_code = status_code
                     total_retries += sub_retries
                     sub_suitability, sub_findings = _validate_result(
@@ -611,6 +758,21 @@ class ChildSafetyOrchestrator:
                         combined_suitability = sub_suitability
                     combined_findings.extend(sub_findings)
                 retry_count = total_retries
+                if cb is not None and provider_key is not None:
+                    cb.record_success(provider_key)
+                    prov_probe_acquired = False
+                    if quota_key is not None:
+                        cb.record_success(quota_key)
+                        quota_probe_acquired = False
+                if self.transport is None and provider.family in {"google", "groq"}:
+                    record_cloud_ai_outcome(
+                        "child_safety",
+                        "gemini" if provider.family == "google" else "groq",
+                        provider.model,
+                        ok=True,
+                        http_status=last_status_code or 200,
+                    )
+                healthy_providers.add(provider.name)
                 events.append(self._event(
                     provider, chunk_id, True, last_status_code, None, started,
                     output_mode=output_mode, retry_count=retry_count,
@@ -638,6 +800,8 @@ class ChildSafetyOrchestrator:
             except ChildSafetyError as exc:
                 code, status_code = exc.code, None
                 status_code = getattr(exc, "status_code", status_code)
+                retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+                limit_zero = bool(getattr(exc, "limit_zero", False))
                 output_mode = exc.output_mode or output_mode
                 retry_count = exc.retry_count
             except Exception as exc:
@@ -651,6 +815,39 @@ class ChildSafetyOrchestrator:
                     else "SYSTEM_ERROR"
                 )
                 status_code = getattr(exc, "status_code", None)
+            finally:
+                if cb is not None:
+                    if prov_probe_acquired and provider_key is not None:
+                        cb.release_half_open_probe(provider_key)
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+            if cb is not None and provider_key is not None:
+                kind, trips_quota = classify_ocr_provider_error(code, status_code)
+                if kind is not None:
+                    cb.record_failure(
+                        provider_key,
+                        kind=kind,
+                        http_status=status_code,
+                        limit_zero=limit_zero,
+                        retry_after_seconds=retry_after_seconds,
+                    )
+                    if trips_quota and quota_key is not None:
+                        cb.record_failure(
+                            quota_key,
+                            kind=kind,
+                            http_status=status_code,
+                            limit_zero=limit_zero,
+                            retry_after_seconds=retry_after_seconds,
+                        )
+            if self.transport is None and provider.family in {"google", "groq"}:
+                record_cloud_ai_outcome(
+                    "child_safety",
+                    "gemini" if provider.family == "google" else "groq",
+                    provider.model,
+                    ok=False,
+                    error_code=code,
+                    http_status=status_code,
+                )
             errors.append(code)
             events.append(self._event(
                 provider, chunk_id, False, status_code, code, started,
@@ -663,7 +860,22 @@ class ChildSafetyOrchestrator:
                 or (isinstance(status_code, int) and status_code >= 500)
                 or code in {"PROVIDER_TIMEOUT", "PROVIDER_NETWORK"}
             ):
-                disabled_families.add(provider.family)
+                is_family_wide_error = status_code in {401, 403, 429} or code in {
+                    "PROVIDER_AUTHENTICATION",
+                    "PROVIDER_QUOTA",
+                }
+                has_healthy_sibling = any(
+                    candidate.family == provider.family
+                    and candidate.name != provider.name
+                    and candidate.name in healthy_providers
+                    for candidate in self.providers
+                )
+                if has_healthy_sibling and not is_family_wide_error:
+                    disabled_providers.add(provider.name)
+                else:
+                    disabled_families.add(provider.family)
+        if not attempted and skipped_by_circuit:
+            raise ChildSafetyError("ALL_PROVIDERS_SKIPPED", events)
         raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)
 
     @staticmethod
@@ -701,17 +913,22 @@ class ChildSafetyOrchestrator:
         self, provider: SafetyProvider, source: str
     ) -> tuple[object, int, str, int]:
         request_data = json.dumps({"untrusted_ocr_text": source}, ensure_ascii=False)
+        thinking_cfg: dict[str, str] | None = None
         if provider.family == "google":
             if not self.config.gemini_api_key:
                 raise ChildSafetyError("MISSING_CREDENTIAL", [])
+            generation_config: dict[str, Any] = {
+                "temperature": 0,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": _OUTPUT_SCHEMA,
+            }
+            thinking_cfg = gemini_thinking_config(provider.model)
+            if thinking_cfg is not None:
+                generation_config["thinkingConfig"] = thinking_cfg
             payload = {
                 "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
                 "contents": [{"role": "user", "parts": [{"text": request_data}]}],
-                "generationConfig": {
-                    "temperature": 0,
-                    "responseMimeType": "application/json",
-                    "responseJsonSchema": _OUTPUT_SCHEMA,
-                },
+                "generationConfig": generation_config,
             }
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{provider.model}:generateContent"
             headers = {"x-goog-api-key": self.config.gemini_api_key}
@@ -744,7 +961,13 @@ class ChildSafetyOrchestrator:
             }
             url = self.config.local.base_url.rstrip("/") + "/api/chat"
             headers = {}
-        timeout = self.config.local.timeout_seconds if provider.family == "ollama" else self.config.cloud_timeout_seconds
+        timeout = float(
+            self.config.local.timeout_seconds
+            if provider.family == "ollama"
+            else self.config.cloud_timeout_seconds
+        )
+        if self._active_attempt_timeout is not None and self._active_attempt_timeout > 0:
+            timeout = min(timeout, float(self._active_attempt_timeout))
         req_timeout = httpx.Timeout(timeout)
         output_mode = self._output_mode(provider)
         retry_count = 0
@@ -754,6 +977,12 @@ class ChildSafetyOrchestrator:
             resp = await active_client.post(
                 url, headers=headers, json=payload, timeout=req_timeout
             )
+            if provider.family == "google" and resp.status_code == 400 and thinking_cfg is not None:
+                payload["generationConfig"].pop("thinkingConfig", None)
+                resp = await active_client.post(
+                    url, headers=headers, json=payload, timeout=req_timeout
+                )
+                retry_count = 1
             # Older Ollama servers may reject JSON Schema in `format`. Retry
             # once in JSON mode with the explicit field/enum contract; the
             # application validator remains authoritative.
@@ -794,15 +1023,13 @@ class ChildSafetyOrchestrator:
                 error_code, [], output_mode=output_mode, retry_count=retry_count
             )
             error.status_code = status_code  # type: ignore[attr-defined]
+            error.retry_after_seconds = parse_retry_after_seconds(response.headers.get("retry-after"))  # type: ignore[attr-defined]
+            error.limit_zero = detect_limit_zero(response)  # type: ignore[attr-defined]
             raise error
         try:
             payload = response.json()
             if provider.family == "google":
-                candidates = payload.get("candidates") if isinstance(payload, dict) else None
-                candidate = candidates[0] if isinstance(candidates, list) and candidates else None
-                content = candidate.get("content") if isinstance(candidate, dict) else None
-                parts = content.get("parts") if isinstance(content, dict) else None
-                content = parts[0].get("text") if isinstance(parts, list) and parts else None
+                content = extract_gemini_text(payload)
             elif provider.family == "groq":
                 choices = payload.get("choices") if isinstance(payload, dict) else None
                 choice = choices[0] if isinstance(choices, list) and choices else None
@@ -813,7 +1040,10 @@ class ChildSafetyOrchestrator:
                 content = message.get("content") if isinstance(message, dict) else None
             if not isinstance(content, str):
                 raise ValueError
-            result = json.loads(content)
+            cleaned_content = strip_think_tags(content)
+            if not cleaned_content:
+                raise ValueError
+            result = json.loads(cleaned_content)
         except (AttributeError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ChildSafetyError(
                 "INVALID_JSON", [], output_mode=output_mode, retry_count=retry_count

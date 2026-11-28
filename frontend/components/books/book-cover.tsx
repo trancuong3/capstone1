@@ -328,12 +328,20 @@ export function BookCover({
       >
         <div
           className="h-full w-3 shrink-0"
+          data-cover-part="spine"
           style={{ backgroundColor: palette.spine }}
         />
-        <div className="flex min-w-0 flex-1 flex-col justify-between p-4">
-          <div className="flex items-center justify-between gap-2">
+        <div
+          className="flex min-w-0 flex-1 flex-col justify-between p-4"
+          data-cover-part="body"
+        >
+          <div
+            className="flex items-center justify-between gap-2"
+            data-cover-part="header"
+          >
             <span
               className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+              data-cover-part="grade"
               style={{
                 backgroundColor: palette.badgeBg,
                 color: palette.accent,
@@ -343,6 +351,7 @@ export function BookCover({
             </span>
             <span
               className="inline-flex size-8 items-center justify-center rounded-full text-xs font-black tracking-tight"
+              data-cover-part="monogram"
               style={{
                 backgroundColor: palette.badgeBg,
                 color: palette.accent,
@@ -352,7 +361,7 @@ export function BookCover({
             </span>
           </div>
 
-          <div className="my-auto py-1">
+          <div className="my-auto py-1" data-cover-part="title-block">
             <p className="line-clamp-3 break-words font-extrabold leading-snug text-lg">
               {displayTitle}
             </p>
@@ -366,7 +375,10 @@ export function BookCover({
             ) : null}
           </div>
 
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold opacity-75">
+          <div
+            className="flex items-center gap-1.5 text-[11px] font-semibold opacity-75"
+            data-cover-part="footer"
+          >
             <BookOpen aria-hidden="true" className="size-3.5 shrink-0" />
             <span>ViRead</span>
           </div>

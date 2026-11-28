@@ -38,7 +38,7 @@ function detectMobileViewport(): boolean {
   return window.innerWidth > 0 && window.innerWidth < 640;
 }
 
-function normalizeSearchToken(value: string): string {
+export function normalizeSearchToken(value: string): string {
   return value
     .trim()
     .toLowerCase()

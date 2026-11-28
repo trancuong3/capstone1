@@ -40,6 +40,7 @@ from app.providers.local_voice_provider import (
 from app.services.voice_orchestrator import (
     VoiceOrchestrator,
     VoicePolicyContext,
+    build_contrastive_vietnamese_keyterms,
     clear_voice_orchestrator_caches,
 )
 
@@ -69,6 +70,8 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
 
 class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
         reset_google_cooldowns()
         clear_voice_orchestrator_caches()
         self._orig_voice_factory = voice_routes.get_voice_orchestrator
@@ -77,6 +80,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
     def tearDown(self) -> None:
         voice_routes.get_voice_orchestrator = self._orig_voice_factory
         studio_routes.get_voice_orchestrator = self._orig_studio_factory
+        self._env_patch.stop()
 
     def test_healthy_local_stt_and_tts_make_zero_google_calls(self) -> None:
         local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
@@ -841,6 +845,188 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         )
         self.assertTrue(fb.used_fallback_voice)
 
+    def test_contrastive_keyterms_and_local_google_logprob_propagation(self) -> None:
+        import asyncio
+        import json
+        import math
+
+        co_terms = build_contrastive_vietnamese_keyterms(["có"])
+        self.assertLessEqual(len(co_terms), 14)
+        for tone_pair in ("có", "co", "cò", "cỏ", "cõ", "cọ"):
+            self.assertIn(tone_pair, co_terms)
+
+        mot_terms = build_contrastive_vietnamese_keyterms(["một"])
+        self.assertIn("một", mot_terms)
+        self.assertIn("mốt", mot_terms)
+        self.assertIn("mộc", mot_terms)
+        self.assertIn("mộp", mot_terms)
+        self.assertLessEqual(len(mot_terms), 14)
+
+        hom_terms = build_contrastive_vietnamese_keyterms(["hôm"])
+        self.assertIn("hôn", hom_terms)
+        self.assertIn("hông", hom_terms)
+
+        dua_terms = build_contrastive_vietnamese_keyterms(["đứa"])
+        self.assertIn("dứa", dua_terms)
+
+        # VoiceOrchestrator passes contrastive keyterms into both local and google transcribe,
+        # and keeps keyterms=None when none are supplied.
+        captured_local: list[dict] = []
+        captured_google: list[dict] = []
+
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+
+        async def _fake_local_transcribe(**kwargs):
+            captured_local.append(kwargs)
+            return LocalTranscription(
+                text="có",
+                language_code="vi",
+                language_probability=None,
+                words=[{"text": "có", "start": 0.0, "end": 0.25, "logprob": -0.35}],
+            )
+
+        local.transcribe = _fake_local_transcribe  # type: ignore[method-assign]
+        google = GoogleCloudVoiceProvider(stt_api_key="test-google-key")
+
+        async def _fake_google_transcribe(**kwargs):
+            captured_google.append(kwargs)
+            return LocalTranscription(
+                text="có",
+                language_code="vi",
+                language_probability=0.92,
+                words=[{"text": "có", "start": 0.0, "end": 0.25, "logprob": math.log(0.92)}],
+                provider="google",
+                fallback_used=True,
+            )
+
+        google.transcribe = _fake_google_transcribe  # type: ignore[method-assign]
+        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+
+        asyncio.run(
+            orch.transcribe(
+                audio=b"wav",
+                filename="a.wav",
+                content_type="audio/wav",
+                keyterms=["có"],
+            )
+        )
+        self.assertEqual(captured_local[-1]["keyterms"], co_terms)
+
+        # Fallback path forwards contrastive keyterms to Google
+        local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_STT_UNAVAILABLE")
+        )
+        asyncio.run(
+            orch.transcribe(
+                audio=b"wav",
+                filename="b.wav",
+                content_type="audio/wav",
+                keyterms=["có"],
+                policy=VoicePolicyContext(
+                    provider_mode="local_with_google_fallback",
+                    allow_google_stt=True,
+                ),
+            )
+        )
+        self.assertEqual(captured_google[-1]["keyterms"], co_terms)
+
+        # LocalVoiceProvider forwards keyterms in multipart form & maps logprob
+        posted_data: list[dict] = []
+
+        class _LocalWorkerClient:
+            is_closed = False
+
+            async def post(self, _url, **kwargs):
+                posted_data.append(kwargs.get("data") or {})
+                return httpx.Response(
+                    200,
+                    json={
+                        "text": "có",
+                        "language_code": "vi",
+                        "words": [
+                            {"text": "có", "start": 0.05, "end": 0.30, "logprob": -0.42},
+                            {"text": "nhé", "start": 0.31, "end": 0.50},
+                        ],
+                    },
+                )
+
+        real_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        real_local._client = _LocalWorkerClient()  # type: ignore[assignment]
+        local_tx = asyncio.run(
+            real_local.transcribe(
+                audio=b"RIFF-wav",
+                filename="c.wav",
+                content_type="audio/wav",
+                keyterms=co_terms,
+            )
+        )
+        self.assertEqual(json.loads(posted_data[-1]["keyterms"]), co_terms)
+        self.assertEqual(local_tx.words[0]["logprob"], -0.42)
+        self.assertIsNone(local_tx.words[1]["logprob"])
+
+        # GoogleCloudVoiceProvider sets boost=8.0, maxAlternatives=3, and maps positive confidence to logprob
+        google_payloads: list[dict] = []
+
+        class _GoogleHttpClient:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, _url, **kwargs):
+                google_payloads.append(kwargs.get("json") or {})
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "alternatives": [
+                                    {
+                                        "transcript": "có",
+                                        "confidence": 0.9,
+                                        "words": [
+                                            {"word": "có", "startTime": "0.1s", "endTime": "0.3s"}
+                                        ],
+                                    }
+                                ]
+                            },
+                            {
+                                "alternatives": [
+                                    {
+                                        "transcript": "nhé",
+                                        "confidence": 0.0,
+                                        "words": [
+                                            {"word": "nhé", "startTime": "0.3s", "endTime": "0.5s"}
+                                        ],
+                                    }
+                                ]
+                            },
+                        ]
+                    },
+                )
+
+        real_google = GoogleCloudVoiceProvider(stt_api_key="test-key")
+        with patch(
+            "app.providers.google_voice_provider.httpx.AsyncClient", _GoogleHttpClient
+        ):
+            g_tx = asyncio.run(
+                real_google.transcribe(
+                    audio=b"webm",
+                    filename="c.webm",
+                    content_type="audio/webm",
+                    keyterms=co_terms,
+                )
+            )
+        cfg = google_payloads[-1]["config"]
+        self.assertEqual(cfg["maxAlternatives"], 3)
+        self.assertEqual(cfg["speechContexts"], [{"phrases": co_terms, "boost": 8.0}])
+        self.assertAlmostEqual(g_tx.words[0]["logprob"], math.log(0.9), places=6)
+        self.assertIsNone(g_tx.words[1]["logprob"])
+
     def test_elevenlabs_serves_tts_timed_phonics_and_stt_when_local_offline(self) -> None:
         from app.providers.elevenlabs_voice_provider import (
             ElevenLabsVoiceProvider,
@@ -1051,6 +1237,109 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         el.transcribe.assert_not_called()
         google.synthesize.assert_not_called()
         google.transcribe.assert_not_called()
+
+    def test_elevenlabs_fallback_preserves_male_central_metadata_and_never_poisons_local_cache(
+        self,
+    ) -> None:
+        from app.providers.elevenlabs_voice_provider import (
+            ElevenLabsVoiceProvider,
+            SynthesizedAudio,
+        )
+        from app.services.tts_audio_cache_service import TtsAudioCacheService
+
+        down_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        down_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_timed = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+
+        fake_mp3 = b"\xff\xfb\x90\x00" + (b"\x00" * 3996)
+        el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+        el.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=SynthesizedAudio(
+                content=fake_mp3,
+                content_type="audio/mpeg",
+                resolved_voice_id="el_male_voice_central_test",
+                used_fallback_voice=False,
+            )
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="", tts_api_key="")
+        orch = VoiceOrchestrator(
+            local_provider=down_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"ELEVENLABS_MALE_VOICE_ID": "el_male_voice_central_test"},
+        ), patch.object(
+            TtsAudioCacheService,
+            "lookup_cached_audio",
+            AsyncMock(return_value=None),
+        ), patch.object(
+            TtsAudioCacheService,
+            "schedule_store_cached_audio",
+        ) as mock_store_cache:
+            with _make_app(orch) as client:
+                tts_resp = client.post(
+                    "/voice/text-to-speech",
+                    json={
+                        "text": "Thầy đọc mẫu cho con nghe nhé.",
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.9,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(tts_resp.status_code, 200)
+                self.assertEqual(tts_resp.headers["x-voice-provider"], "elevenlabs")
+                self.assertEqual(tts_resp.headers["x-voice-gender"], "male")
+                self.assertEqual(tts_resp.headers["x-voice-region"], "central")
+
+                timed_resp = client.post(
+                    "/voice/text-to-speech/timed",
+                    json={
+                        "words": ["Chào", "con"],
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.9,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(timed_resp.status_code, 200)
+                timed_json = timed_resp.json()
+                self.assertEqual(timed_json["provider"], "elevenlabs")
+                self.assertEqual(timed_json["region"], "central")
+
+                phonics_resp = client.post(
+                    "/voice/text-to-speech/phonics",
+                    json={
+                        "steps": [
+                            {"id": "rhyme", "spoken_text": "ô, tờ, ốt.", "pause_after_ms": 200},
+                            {"id": "whole", "spoken_text": "mốt.", "pause_after_ms": 200},
+                        ],
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.85,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(phonics_resp.status_code, 200)
+                phonics_json = phonics_resp.json()
+                self.assertEqual(phonics_json["provider"], "elevenlabs")
+                self.assertEqual(phonics_json["region"], "central")
+
+            # CRITICAL: ElevenLabs fallback audio must NEVER be stored under local_* cache keys!
+            mock_store_cache.assert_not_called()
 
     def test_get_status_reports_elevenlabs_configuration_and_cooldown(self) -> None:
         import asyncio

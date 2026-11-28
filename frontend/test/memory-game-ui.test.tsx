@@ -354,6 +354,29 @@ function createFetchResponder() {
     if (path === `/profiles/children/${TEST_CHILD_ID}`) {
       return Response.json(childFixture);
     }
+    if (path === "/voice/status") {
+      return Response.json({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          available: true,
+          stt_ready: true,
+          tts_ready: true,
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
+    }
+    if (path === "/voice/text-to-speech") {
+      return Response.json(
+        { detail: { code: "LOCAL_TTS_UNAVAILABLE" } },
+        { status: 503 },
+      );
+    }
     if (path === "/games/memory/themes") {
       return Response.json(sampleCatalog);
     }
@@ -686,6 +709,67 @@ describe("MemoryGameScreen", () => {
       },
     );
 
+    const ttsRequests: Array<Record<string, unknown>> = [];
+    const audioPlaySpy = vi.fn();
+    const baseResponder = createFetchResponder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/voice/text-to-speech") {
+          ttsRequests.push(
+            JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          );
+          return new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x00]), {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "X-ViRead-TTS-Provider": "local-piper",
+              "X-ViRead-Voice-Id": "vi-vn-female-north",
+            },
+          });
+        }
+        return baseResponder(url, init);
+      }),
+    );
+
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:memory-tts-test");
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+
+    class FakeAudio {
+      src: string;
+      volume = 1;
+      muted = false;
+      currentTime = 0;
+      duration = 1.2;
+      defaultPlaybackRate = 1;
+      playbackRate = 1;
+      preservesPitch = true;
+      private listeners = new Map<string, Set<() => void>>();
+      constructor(src = "") {
+        this.src = src;
+      }
+      addEventListener(event: string, cb: () => void) {
+        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+        this.listeners.get(event)!.add(cb);
+      }
+      removeEventListener(event: string, cb: () => void) {
+        this.listeners.get(event)?.delete(cb);
+      }
+      pause = vi.fn();
+      load = vi.fn();
+      play = vi.fn(async () => {
+        audioPlaySpy();
+        this.listeners.get("playing")?.forEach((cb) => cb());
+        this.listeners.get("ended")?.forEach((cb) => cb());
+      });
+    }
+    vi.stubGlobal("Audio", FakeAudio);
+
     const user = userEvent.setup();
     renderScreen();
 
@@ -703,10 +787,19 @@ describe("MemoryGameScreen", () => {
     expect(cancelTtsSpy).toHaveBeenCalled();
     expect(startSpy).toHaveBeenCalledTimes(1);
 
-    // 2. Click "Nghe hướng dẫn" -> MUST immediately abort active mic BEFORE speaking TTS!
+    // 2. Click "Nghe hướng dẫn" -> MUST immediately abort active mic BEFORE speaking via unified TtsPlayback (never raw window.speechSynthesis.speak)!
     await user.click(screen.getByRole("button", { name: /Nghe hướng dẫn/i }));
     expect(abortSpy).toHaveBeenCalledTimes(1);
-    expect(speakTtsSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      const promptRequests = ttsRequests.filter(
+        (req) => req.text !== "Đến lượt con đọc nhé.",
+      );
+      expect(promptRequests).toHaveLength(1);
+      expect(audioPlaySpy).toHaveBeenCalledTimes(1);
+    });
+    expect(speakTtsSpy).not.toHaveBeenCalled();
+    createObjectUrlSpy.mockRestore();
+    revokeObjectUrlSpy.mockRestore();
   });
 
   it("supports 3-second gentle Supported Peek during Recall and hides again automatically", async () => {
@@ -736,5 +829,65 @@ describe("MemoryGameScreen", () => {
     expect(screen.getByTestId("recall-stage")).toHaveTextContent(
       "Bức tranh mở lại 3 giây",
     );
+  });
+
+  it("paginates recent history at 6 per page when more than 6 sessions exist", async () => {
+    const validThemeKeys = [
+      "sunny_garden",
+      "happy_classroom",
+      "mid_autumn_yard",
+      "seaside_morning",
+      "countryside_pond",
+      "friendly_market",
+    ] as const;
+    const manyHistory = Array.from({ length: 8 }, (_, index) => ({
+      id: `44000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      child_id: TEST_CHILD_ID,
+      child_grade: 2,
+      theme_key: validThemeKeys[index % validThemeKeys.length]!,
+      theme_name_vi: `Lịch sử trí nhớ ${index + 1}`,
+      difficulty_level: 2,
+      timer_mode: "30S" as const,
+      timer_seconds: 30,
+      recall_mode: "GUIDED_RECALL" as const,
+      status: "COMPLETED" as const,
+      hints_used: 0,
+      peek_count: 0,
+      best_factual_score: 80,
+      best_creative_score: 85,
+      stars: 3,
+      attempts_count: 2,
+      object_count: 5,
+      created_at: "2026-11-25T10:00:00Z",
+      updated_at: "2026-11-25T10:02:00Z",
+    }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === `/profiles/children/${TEST_CHILD_ID}`)
+          return Response.json(childFixture);
+        if (path === "/games/memory/themes")
+          return Response.json(sampleCatalog);
+        if (path === "/games/memory/sessions")
+          return Response.json(manyHistory);
+        throw new Error(`Unexpected path ${path}`);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    expect(await screen.findByText("Lịch sử trí nhớ 1")).toBeInTheDocument();
+    expect(screen.getByText("Lịch sử trí nhớ 6")).toBeInTheDocument();
+    expect(screen.queryByText("Lịch sử trí nhớ 7")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(await screen.findByText("Lịch sử trí nhớ 7")).toBeInTheDocument();
+    expect(screen.getByText("Lịch sử trí nhớ 8")).toBeInTheDocument();
+    expect(screen.queryByText("Lịch sử trí nhớ 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 2 / 2")).toBeInTheDocument();
   });
 });

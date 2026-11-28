@@ -1,22 +1,22 @@
 import { z, type ZodType } from "zod";
 
+import { requestApi, type RequestApiOptions } from "@/lib/api/api-client";
+import { ServiceError } from "@/lib/api/service-error";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   ChildProfileCreateDTO,
   ChildProfileDTO,
   ChildProfilePatchDTO,
 } from "@/types/child";
-import {
-  getBrowserAccessToken,
-  invalidateBrowserTokenCache,
-} from "@/lib/api/browser-auth";
-import {
-  invalidateApiReadCache,
-  runCoalescedApiGet,
-} from "@/lib/api/read-cache";
-import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
-import { clearUserCache } from "@/lib/cache/user-query-cache";
-import { translateRuntime } from "@/lib/i18n/runtime";
-import { getApiBaseUrl } from "@/lib/supabase/config";
+
+export interface ChildVoicePreferencesPayload {
+  readonly voice_id: string;
+  readonly gender: "female" | "male";
+  readonly region: "north" | "central" | "south";
+  readonly speed: number;
+  readonly updated_at?: number;
+}
 
 export interface ChildService {
   list(): Promise<ChildProfileDTO[]>;
@@ -26,29 +26,14 @@ export interface ChildService {
     childId: string,
     request: ChildProfilePatchDTO,
   ): Promise<ChildProfileDTO>;
+  updateVoicePreferences?(
+    childId: string,
+    payload: ChildVoicePreferencesPayload,
+  ): Promise<ChildProfileDTO>;
   uploadAvatar(childId: string, file: File): Promise<ChildProfileDTO>;
   removeAvatar(childId: string): Promise<ChildProfileDTO>;
   delete(childId: string): Promise<void>;
 }
-
-const DEFAULT_CHILD_ERROR_MESSAGE =
-  "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.";
-
-// Only deliberately authored backend codes/details may map to user-facing copy.
-const SAFE_CHILD_BACKEND_MESSAGES: Readonly<Record<string, string>> = {
-  "Unsupported upload format; use JPEG, PNG, or WebP":
-    "Định dạng ảnh chưa hỗ trợ. Ba mẹ hãy chọn ảnh PNG, JPG hoặc WEBP nhé.",
-  "Image exceeds the 12 MB limit":
-    "Ảnh tải lên vượt quá giới hạn dung lượng cho phép.",
-  "Image decoding failed": "Không đọc được tệp ảnh tải lên. Hãy chọn ảnh khác.",
-  "Image dimensions are invalid": "Kích thước ảnh đại diện chưa hợp lệ.",
-  INVALID_IMAGE:
-    "Ảnh tải lên chưa hợp lệ. Ba mẹ hãy chọn ảnh PNG, JPG hoặc WEBP nhé.",
-  DATABASE_OPERATION_FAILED:
-    "Hệ thống dữ liệu đang gặp sự cố tạm thời. Ba mẹ vui lòng thử lại sau.",
-  AUTH_PROVIDER_UNAVAILABLE:
-    "Dịch vụ xác thực đang tạm thời gián đoạn. Ba mẹ vui lòng thử lại sau.",
-};
 
 const childProfileSchema = z.object({
   id: z.string().min(1),
@@ -61,221 +46,48 @@ const childProfileSchema = z.object({
 });
 
 const childProfileListSchema = z.array(childProfileSchema);
+const emptyMutationSchema = z.void();
 
-function mapErrorCode(status: number): ServiceErrorCode {
-  if (status === 401) {
-    return "AUTH_REQUIRED";
-  }
-
-  if (status === 403) {
-    return "FORBIDDEN";
-  }
-
-  if (status === 404) {
-    return "RESOURCE_NOT_FOUND";
-  }
-
-  if (status === 422) {
-    return "VALIDATION_ERROR";
-  }
-
-  return "NETWORK_ERROR";
-}
-
-function safeStatusMessage(status: number): string {
-  switch (status) {
-    case 401:
-      return "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.";
-    case 403:
-      return "Ba mẹ không có quyền thực hiện thao tác trên hồ sơ bé này.";
-    case 404:
-      return "Không tìm thấy hồ sơ bé được yêu cầu.";
-    case 422:
-      return "Thông tin hồ sơ bé chưa hợp lệ. Ba mẹ vui lòng kiểm tra lại.";
-    default:
-      return DEFAULT_CHILD_ERROR_MESSAGE;
-  }
-}
-
-async function resolveSafeErrorMessage(response: Response): Promise<string> {
-  try {
-    const payload: unknown = await response.clone().json();
-    if (typeof payload === "object" && payload !== null) {
-      if ("detail" in payload) {
-        if (typeof payload.detail === "string") {
-          const translated = SAFE_CHILD_BACKEND_MESSAGES[payload.detail];
-          if (translated) return translated;
-        } else if (
-          typeof payload.detail === "object" &&
-          payload.detail !== null &&
-          "code" in payload.detail &&
-          typeof payload.detail.code === "string"
-        ) {
-          const translated = SAFE_CHILD_BACKEND_MESSAGES[payload.detail.code];
-          if (translated) return translated;
-        }
-      }
-      if ("code" in payload && typeof payload.code === "string") {
-        const translated = SAFE_CHILD_BACKEND_MESSAGES[payload.code];
-        if (translated) return translated;
-      }
-    }
-  } catch {
-    // Non-JSON error bodies must never be reflected to the UI.
-  }
-
-  return safeStatusMessage(response.status);
-}
-
-async function createHttpError(response: Response): Promise<ServiceError> {
-  const message = await resolveSafeErrorMessage(response);
-  return new ServiceError({
-    code: mapErrorCode(response.status),
-    message,
-    status: response.status,
-    request_id: response.headers.get("x-request-id") ?? "",
-    retryable: response.status >= 500,
-  });
-}
-
-function unauthorizedError(): ServiceError {
-  return new ServiceError({
-    code: "AUTH_REQUIRED",
-    message: "Authentication required.",
-    status: 401,
-    request_id: "",
-    retryable: false,
-  });
-}
-
-async function resolveChildAccessToken(): Promise<string> {
-  return getBrowserAccessToken({
-    onUnauthorized: unauthorizedError,
-  });
-}
-
-async function request<T>(
+async function requestChildApi<T>(
   path: string,
-  schema: ZodType<T> | null,
-  init?: RequestInit,
+  schema: ZodType<T>,
+  options?: RequestApiOptions,
 ): Promise<T> {
-  if (!path.startsWith("/") || path.startsWith("//")) {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: DEFAULT_CHILD_ERROR_MESSAGE,
-      status: 0,
-      request_id: "",
-      retryable: false,
-    });
-  }
-
-  let token: string;
-
   try {
-    token = await resolveChildAccessToken();
+    return await requestApi(path, schema, undefined, options);
   } catch (error) {
-    if (error instanceof ServiceError) {
-      throw error;
+    if (
+      error instanceof ServiceError &&
+      error.message === translateRuntime("errors.generic")
+    ) {
+      throw new ServiceError({
+        code: error.code,
+        message:
+          error.status === 401
+            ? translateRuntime("errors.clientRuntime.sessionExpiredParent")
+            : translateRuntime("errors.clientRuntime.genericParentRetry"),
+        status: error.status,
+        request_id: error.request_id,
+        retryable: error.retryable,
+      });
     }
-
-    throw unauthorizedError();
+    throw error;
   }
+}
 
-  const method = (init?.method ?? "GET").toUpperCase();
-  const execute = async (signal?: AbortSignal): Promise<T> => {
-    const headers = new Headers({
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    });
-    if (typeof init?.body === "string") {
-      headers.set("Content-Type", "application/json");
-    }
-
-    let response: Response;
-
-    try {
-      response = await fetch(`${getApiBaseUrl()}${path}`, {
-        ...init,
-        headers: {
-          ...Object.fromEntries(headers.entries()),
-          ...(init?.headers ?? {}),
-        },
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: signal ?? init?.signal,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: 0,
-        request_id: "",
-        retryable: true,
-      });
-    }
-
-    const requestId = response.headers.get("x-request-id") ?? "";
-    if (!response.ok) {
-      if (response.status === 401) {
-        invalidateBrowserTokenCache();
-        invalidateApiReadCache();
-      }
-      throw await createHttpError(response);
-    }
-
-    if (response.status === 204 || schema === null) {
-      return undefined as T;
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
-
-    const parsed = schema.safeParse(payload);
-    if (!parsed.success) {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: DEFAULT_CHILD_ERROR_MESSAGE,
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
-
-    return parsed.data;
-  };
-
-  if (method !== "GET") {
-    invalidateApiReadCache();
+async function runChildMutation<T>(operation: () => Promise<T>): Promise<T> {
+  clearUserCache();
+  try {
+    return await operation();
+  } finally {
     clearUserCache();
-    try {
-      return await execute();
-    } finally {
-      invalidateApiReadCache();
-      clearUserCache();
-    }
   }
-
-  return runCoalescedApiGet(path, token, undefined, (sharedSignal) =>
-    execute(sharedSignal),
-  );
 }
 
 export function createChildService(): ChildService {
   return {
     async list(): Promise<ChildProfileDTO[]> {
-      return request("/profiles/children", childProfileListSchema);
+      return requestChildApi("/profiles/children", childProfileListSchema);
     },
 
     async create(requestBody: ChildProfileCreateDTO): Promise<ChildProfileDTO> {
@@ -288,14 +100,16 @@ export function createChildService(): ChildService {
         body.settings = requestBody.settings;
       }
 
-      return request("/profiles/children", childProfileSchema, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      return runChildMutation(() =>
+        requestChildApi("/profiles/children", childProfileSchema, {
+          method: "POST",
+          body,
+        }),
+      );
     },
 
     async get(childId: string): Promise<ChildProfileDTO> {
-      return request(
+      return requestChildApi(
         `/profiles/children/${encodeURIComponent(childId)}`,
         childProfileSchema,
       );
@@ -305,44 +119,66 @@ export function createChildService(): ChildService {
       childId: string,
       requestBody: ChildProfilePatchDTO,
     ): Promise<ChildProfileDTO> {
-      return request(
-        `/profiles/children/${encodeURIComponent(childId)}`,
-        childProfileSchema,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            alias: requestBody.alias,
-            grade: requestBody.grade,
-          }),
-        },
+      return runChildMutation(() =>
+        requestChildApi(
+          `/profiles/children/${encodeURIComponent(childId)}`,
+          childProfileSchema,
+          {
+            method: "PUT",
+            body: {
+              alias: requestBody.alias,
+              grade: requestBody.grade,
+            },
+          },
+        ),
+      );
+    },
+
+    async updateVoicePreferences(
+      childId: string,
+      payload: ChildVoicePreferencesPayload,
+    ): Promise<ChildProfileDTO> {
+      return runChildMutation(() =>
+        requestChildApi(
+          `/profiles/children/${encodeURIComponent(childId)}/voice-preferences`,
+          childProfileSchema,
+          {
+            method: "PATCH",
+            body: payload,
+          },
+        ),
       );
     },
 
     async delete(childId: string): Promise<void> {
-      await request<void>(
-        `/profiles/children/${encodeURIComponent(childId)}`,
-        null,
-        {
-          method: "DELETE",
-        },
+      await runChildMutation(() =>
+        requestChildApi(
+          `/profiles/children/${encodeURIComponent(childId)}`,
+          emptyMutationSchema,
+          { method: "DELETE" },
+        ),
       );
     },
 
     async uploadAvatar(childId: string, file: File): Promise<ChildProfileDTO> {
       const body = new FormData();
       body.append("file", file);
-      return request(
-        `/profiles/children/${encodeURIComponent(childId)}/avatar`,
-        childProfileSchema,
-        { method: "POST", body },
+      return runChildMutation(() =>
+        requestChildApi(
+          `/profiles/children/${encodeURIComponent(childId)}/avatar`,
+          childProfileSchema,
+          { method: "POST", body },
+        ),
       );
     },
 
     async removeAvatar(childId: string): Promise<ChildProfileDTO> {
-      return request(
-        `/profiles/children/${encodeURIComponent(childId)}/avatar`,
-        childProfileSchema,
-        { method: "DELETE" },
+      return runChildMutation(() =>
+        requestChildApi(
+          `/profiles/children/${encodeURIComponent(childId)}/avatar`,
+          childProfileSchema,
+          { method: "DELETE" },
+        ),
       );
     },
   };

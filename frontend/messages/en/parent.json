@@ -189,7 +189,7 @@
     "submitFeedback": "Send feedback",
     "charCount": "{count}/{max}",
     "privacyNote": "This email will be used to process your request. Do not include passwords or OTPs.",
-    "sentSuccessDetail": "Your feedback has been received. ViRead will use this email to provide updates.",
+    "sentSuccessDetail": "ViRead has received your feedback. We will use your contact email to reply with updates.",
     "submitError": "Failed to send feedback. Please try again later.",
     "categories": {
       "technical_issue": "Report a technical issue",
@@ -220,8 +220,8 @@
         "title": "Books and recognition",
         "q1": "How do I select a book?",
         "a1": "Open the book catalog, select a book, and follow the on-screen instructions to begin.",
-        "q2": "What should I do if the OCR content is incorrect?",
-        "a2": "Parents can submit feedback on this page. Please specify the book title, page number, and describe the inaccurate recognition. OCR content must be verified before use in reading sessions."
+        "q2": "What should I do if recognized page text is inaccurate?",
+        "a2": "You can submit feedback on this page with the book title, page number, and a description of the inaccurate text so ViRead can review and update it."
       },
       "reading": {
         "title": "Reading session",
@@ -233,5 +233,73 @@
         "a3": "Open the Progress section to view reports or the History section to see saved reading sessions."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "System-wide voice sync",
+    "title": "Choose Female or Male AI Teacher",
+    "subtitle": "Your chosen teacher voice stays in sync across Reading · Phonics · Mistake Replay · Comprehension · Games.",
+    "savedForChild": "Saved for {alias}",
+    "previewButton": "Preview voice",
+    "stopPreviewButton": "Stop preview",
+    "personaGroupAria": "Choose Female AI Teacher or Male AI Teacher",
+    "femaleTitle": "Female AI Teacher",
+    "femaleDesc": "Gentle, warm female voice",
+    "maleTitle": "Male AI Teacher",
+    "maleDesc": "Warm, expressive male voice",
+    "selectedBadge": "Selected",
+    "regionLabel": "Accent region",
+    "voiceListLabel": "Specific voice",
+    "voiceListAria": "Voices matching selected teacher and region",
+    "policyLabel": "Voice engine mode",
+    "policyAria": "Choose voice engine mode",
+    "policyLocalOnly": "This device only",
+    "policyOnlineBackup": "This device + Online backup",
+    "workerOfflineHint": "The local voice worker is offline. Turn on “This device + Online backup” so your child can hear uncached book sentences and game audio."
+  },
+  "childModePin": {
+    "lockedPill": "Child Mode On",
+    "unlockedPill": "Child Lock",
+    "lockedTooltip": "Child-Safe Mode is active — click to enter Parent PIN and unlock",
+    "unlockedTooltip": "Enable a 4-digit Parent PIN so children cannot open parent settings by accident",
+    "setupTitle": "Set 4-Digit Child-Safe Mode PIN",
+    "manageTitle": "Update Child-Safe Mode PIN",
+    "unlockTitle": "Enter Parent PIN to Unlock",
+    "setupDesc": "A 4-digit PIN keeps parent settings, private books, and profile management protected while your child reads.",
+    "unlockDesc": "This section is for parents. Enter your 4-digit PIN to continue.",
+    "currentPinLabel": "Current PIN",
+    "newPinLabel": "New 4-digit PIN",
+    "enterPinLabel": "Parent 4-digit PIN",
+    "autoEnableCheckbox": "Remember Child-Safe Mode preference for this account",
+    "invalidFormat": "PIN must be exactly 4 digits (0-9).",
+    "currentPinRequired": "Please enter your current 4-digit PIN.",
+    "wrongPinRemaining": "Incorrect PIN. {remaining} attempts remaining before a 5-minute cooldown.",
+    "requestFailed": "Could not verify or save PIN right now. Please try again.",
+    "removePinButton": "Remove PIN",
+    "cancelButton": "Cancel",
+    "saveAndLockButton": "Save PIN & Lock",
+    "unlockButton": "Unlock Parent Mode",
+    "routeGuardTitle": "Child-Safe Mode Is Active",
+    "routeGuardDesc": "This management page is reserved for parents. Return to the reading desk or enter the Parent PIN.",
+    "backToChildDesk": "Back to reading desk"
+  },
+  "passport": {
+    "tabGroupAria": "Switch between Family Bookshelf and Reading Passport",
+    "deskTabLabel": "Bookshelf",
+    "passportTabLabel": "Reading Passport",
+    "stampsSummary": "Reading Passport · {unlocked}/{total} stamps",
+    "streakBadge": "{days}-day reading streak",
+    "encouragementTitle": "Parent Voice Encouragement (5-10s)",
+    "encouragementPrivacyHint": "Stores only short parent-recorded clips in private storage; child voice audio is never stored.",
+    "playEncouragement": "Play parent note",
+    "stopEncouragement": "Stop",
+    "deleteEncouragement": "Delete voice note",
+    "recordButton": "Record note for child",
+    "stopRecordButton": "Stop & Save",
+    "defaultEncouragementTitle": "Encouragement note for {alias}",
+    "encouragementPlayError": "Could not play the encouragement clip right now.",
+    "micUnsupported": "Audio recording is not supported in this browser.",
+    "micDenied": "Please allow microphone access to record a short parent note.",
+    "clipTooLarge": "Voice clip must be under 10 seconds (max 256 KB).",
+    "uploadFailed": "Could not save the voice note right now. Please try again."
   }
 }

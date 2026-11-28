@@ -327,18 +327,29 @@ class BookAssetsRepository:
         await self.db.flush()
         return covers
 
-    async def mark_inflight_cover_jobs_stale(self, book_id: UUID) -> int:
-        """Mark pending/running COVER_GENERATE jobs STALE so late AI covers never overwrite user uploads."""
+    async def mark_inflight_cover_jobs_stale(
+        self,
+        book_id: UUID,
+        *,
+        actor_role: str | None = None,
+        actor_id: UUID | None = None,
+    ) -> int:
+        """Mark pending/running COVER_GENERATE jobs STALE scoped to portal/actor so roles never clobber each other."""
         now = datetime.now(timezone.utc)
         try:
             async with self.db.begin_nested():
+                criteria = [
+                    SmartStudioJob.BookId == book_id,
+                    SmartStudioJob.JobType == "COVER_GENERATE",
+                    SmartStudioJob.Status.in_(INFLIGHT_JOB_STATUSES),
+                ]
+                if actor_role is not None:
+                    criteria.append(SmartStudioJob.ActorRole == actor_role)
+                if actor_id is not None:
+                    criteria.append(SmartStudioJob.ActorId == actor_id)
                 result = await self.db.execute(
                     update(SmartStudioJob)
-                    .where(
-                        SmartStudioJob.BookId == book_id,
-                        SmartStudioJob.JobType == "COVER_GENERATE",
-                        SmartStudioJob.Status.in_(INFLIGHT_JOB_STATUSES),
-                    )
+                    .where(*criteria)
                     .values(
                         Status="STALE",
                         Stage="SUPERSEDED_BY_USER_UPLOAD",

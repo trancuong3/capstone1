@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import os
 import re
 import unicodedata
+import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,12 @@ from urllib.parse import quote
 import httpx
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_ASYNC_CLIENT = httpx.AsyncClient
+DEFAULT_STT_TIMEOUT_SECONDS = 9.0
+DEFAULT_STT_CONNECT_TIMEOUT_SECONDS = 4.0
+_LOOP_CLIENTS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, httpx.AsyncClient
+] = weakref.WeakKeyDictionary()
 
 # Load backend/.env using this file's location, not the current terminal directory.
 _BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -42,6 +49,41 @@ VIETNAMESE_TTS_MODELS = {
 }
 SHORT_TTS_CACHE_MAX_ENTRIES = 32
 SHORT_TTS_CACHE_MAX_BYTES = 8 * 1024 * 1024
+CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES = 16
+CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def is_constrained_web_runtime() -> bool:
+    """Detect 512 MiB Render / remote-worker web deployments where memory headroom is tight."""
+    render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+    return render or disable_heavy or remote_ocr
+
+
+def _resolve_short_tts_cache_limits() -> tuple[int, int]:
+    constrained = is_constrained_web_runtime()
+    default_bytes = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES if constrained else SHORT_TTS_CACHE_MAX_BYTES
+    )
+    max_entries = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES
+        if constrained
+        else SHORT_TTS_CACHE_MAX_ENTRIES
+    )
+    raw = (os.getenv("VIREAD_ELEVENLABS_SHORT_CACHE_MAX_BYTES") or "").strip()
+    if raw:
+        try:
+            max_bytes = max(0, min(32 * 1024 * 1024, int(raw)))
+            return max_bytes, max_entries
+        except ValueError:
+            pass
+    return default_bytes, max_entries
 
 
 class VoiceProviderError(Exception):
@@ -365,10 +407,22 @@ class ElevenLabsVoiceProvider:
             words=words,
         )
 
-    def _resolve_effective_voice(self, requested_voice_id: str | None) -> tuple[str, bool]:
+    def _resolve_effective_voice(
+        self,
+        requested_voice_id: str | None,
+        *,
+        allow_default_fallback: bool = True,
+        expected_gender: str | None = None,
+    ) -> tuple[str, bool]:
         requested = self._voice_id(requested_voice_id)
         fp = self._key_fingerprint or ""
+        if (expected_gender or "").strip().lower() == "male":
+            if (fp, requested) in _unavailable_voices:
+                raise VoiceProviderUnavailable()
+            return requested, False
         if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
+            if not allow_default_fallback:
+                raise VoiceProviderUnavailable()
             return DEFAULT_VOICE_ID, True
         return requested, False
 
@@ -379,8 +433,9 @@ class ElevenLabsVoiceProvider:
     @staticmethod
     def _short_cache_put(cache_key: str, item: SynthesizedAudio) -> None:
         global _short_tts_cache_bytes
+        max_bytes, max_entries = _resolve_short_tts_cache_limits()
         size = len(item.content)
-        if size > SHORT_TTS_CACHE_MAX_BYTES // 2:
+        if max_bytes <= 0 or max_entries <= 0 or size > max_bytes // 2:
             return
         previous = _short_tts_cache.pop(cache_key, None)
         if previous is not None:
@@ -388,8 +443,8 @@ class ElevenLabsVoiceProvider:
         _short_tts_cache[cache_key] = item
         _short_tts_cache_bytes += size
         while _short_tts_cache and (
-            len(_short_tts_cache) > SHORT_TTS_CACHE_MAX_ENTRIES
-            or _short_tts_cache_bytes > SHORT_TTS_CACHE_MAX_BYTES
+            len(_short_tts_cache) > max_entries
+            or _short_tts_cache_bytes > max_bytes
         ):
             _, evicted = _short_tts_cache.popitem(last=False)
             _short_tts_cache_bytes -= len(evicted.content)
@@ -430,6 +485,8 @@ class ElevenLabsVoiceProvider:
         text: str,
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        allow_default_fallback: bool = True,
+        expected_gender: str | None = None,
     ) -> SynthesizedAudio:
         headers = self._headers()
         configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
@@ -441,11 +498,22 @@ class ElevenLabsVoiceProvider:
         settings = self._tts_voice_settings(model_id, speed)
         normalized_speed = settings["speed"]
         fp = self._key_fingerprint or ""
+        is_male_persona = (expected_gender or "").strip().lower() == "male"
 
-        voice_id, used_fallback = self._resolve_effective_voice(requested_voice_id)
+        male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+        block_default_fallback = (
+            not allow_default_fallback
+            or is_male_persona
+            or (bool(male_voice_id) and requested_voice_id == male_voice_id)
+        )
+        voice_id, used_fallback = self._resolve_effective_voice(
+            requested_voice_id,
+            allow_default_fallback=not block_default_fallback,
+            expected_gender=expected_gender,
+        )
         candidates = (
             [(voice_id, used_fallback)]
-            if voice_id == DEFAULT_VOICE_ID
+            if (voice_id == DEFAULT_VOICE_ID or block_default_fallback)
             else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
         )
 
@@ -485,14 +553,19 @@ class ElevenLabsVoiceProvider:
                     if (
                         response.status_code in {402, 404}
                         and candidate_voice != DEFAULT_VOICE_ID
-                        and idx + 1 < len(candidates)
                     ):
+                        self._mark_voice_unavailable(candidate_voice)
+                        if idx + 1 < len(candidates):
+                            logger.warning(
+                                "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                                response.status_code,
+                            )
+                            continue
                         logger.warning(
-                            "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                            "ElevenLabs male voice unavailable (status=%s); refusing female default fallback",
                             response.status_code,
                         )
-                        self._mark_voice_unavailable(candidate_voice)
-                        continue
+                        raise VoiceProviderUnavailable()
                     if response.is_error:
                         raise self._tts_error_from_response(response)
 
@@ -539,6 +612,9 @@ class ElevenLabsVoiceProvider:
         words: list[str],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
+        region: str = "north",
+        allow_default_fallback: bool = True,
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalTimedSpeech,
@@ -555,6 +631,8 @@ class ElevenLabsVoiceProvider:
             text=normalized_passage,
             requested_voice_id=requested_voice_id,
             speed=speed,
+            allow_default_fallback=allow_default_fallback,
+            expected_gender=expected_gender,
         )
         duration = self._estimate_mp3_duration_seconds(audio.content)
         projected = project_chunk_spans_to_surface_words(
@@ -576,7 +654,7 @@ class ElevenLabsVoiceProvider:
             duration_seconds=duration,
             words=timed_words,
             resolved_voice_id=audio.resolved_voice_id or self.get_configured_voice_id(),
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,
@@ -588,6 +666,9 @@ class ElevenLabsVoiceProvider:
         steps: list[dict[str, Any]],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
+        region: str = "north",
+        allow_default_fallback: bool = True,
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalPhonicsSpeech,
@@ -608,6 +689,8 @@ class ElevenLabsVoiceProvider:
                 text=spoken,
                 requested_voice_id=requested_voice_id,
                 speed=speed,
+                allow_default_fallback=allow_default_fallback,
+                expected_gender=expected_gender,
             )
 
         synthesized_steps = await asyncio.gather(*(_synth_step(step) for step in steps))
@@ -642,11 +725,45 @@ class ElevenLabsVoiceProvider:
             duration_seconds=total_duration,
             step_timings=timings,
             resolved_voice_id=resolved_voice,
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,
         )
+
+    @staticmethod
+    def _get_pooled_client() -> httpx.AsyncClient | None:
+        """Return a per-event-loop pooled client unless httpx.AsyncClient was monkeypatched."""
+        if httpx.AsyncClient is not _ORIGINAL_ASYNC_CLIENT:
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        client = _LOOP_CLIENTS.get(loop)
+        if client is not None and not getattr(client, "is_closed", False):
+            return client
+        client = _ORIGINAL_ASYNC_CLIENT(
+            limits=httpx.Limits(
+                max_connections=16,
+                max_keepalive_connections=8,
+                keepalive_expiry=30.0,
+            ),
+        )
+        _LOOP_CLIENTS[loop] = client
+        return client
+
+    async def aclose(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        client = _LOOP_CLIENTS.pop(loop, None)
+        if client is not None and not getattr(client, "is_closed", False):
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
     async def transcribe(
         self,
@@ -656,6 +773,8 @@ class ElevenLabsVoiceProvider:
         content_type: str,
         language_code: str | None = None,
         keyterms: list[str] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> Transcription:
         form: dict[str, str | list[str]] = {
             "model_id": "scribe_v2",
@@ -692,59 +811,83 @@ class ElevenLabsVoiceProvider:
             "scribe_v2",
         )
 
-        try:
-            timeout = httpx.Timeout(90.0, connect=10.0)
-            # Use HTTPX's default network configuration to avoid forcing a local address.
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = None
-                # Retry only explicit provider 5xx responses once. Do not retry
-                # quota, authentication, permission, rate-limit or ambiguous
-                # timeout failures because a completed STT request may consume usage.
-                for attempt in range(2):
-                    response = await client.post(
-                        f"{ELEVENLABS_API_BASE_URL}/speech-to-text",
-                        headers={**self._headers(), "Accept": "application/json"},
-                        data=form,
-                        files={"file": (filename, audio, content_type)},
-                    )
-                    if response.status_code < 500 or attempt == 1:
-                        break
+        read_timeout = (
+            DEFAULT_STT_TIMEOUT_SECONDS if timeout is None else max(1.0, float(timeout))
+        )
+        req_timeout = httpx.Timeout(
+            read_timeout,
+            connect=min(DEFAULT_STT_CONNECT_TIMEOUT_SECONDS, read_timeout),
+        )
+        retry_limit = 1 if max_retries is None else max(0, int(max_retries))
 
-                    try:
-                        retry_payload = response.json()
-                    except ValueError:
-                        retry_payload = None
-                    retry_code, retry_status, retry_message = (
-                        self._provider_error_fields(retry_payload)
+        async def _send_stt_attempts(
+            client: Any, *, pass_timeout: bool
+        ) -> httpx.Response:
+            resp: httpx.Response | None = None
+            post_kwargs: dict[str, Any] = {
+                "headers": {**self._headers(), "Accept": "application/json"},
+                "data": form,
+                "files": {"file": (filename, audio, content_type)},
+            }
+            if pass_timeout:
+                post_kwargs["timeout"] = req_timeout
+            # Retry only explicit provider 5xx responses within retry_limit. Do not retry
+            # quota, authentication, permission, rate-limit or ambiguous
+            # timeout failures because a completed STT request may consume usage.
+            for attempt in range(retry_limit + 1):
+                resp = await client.post(
+                    f"{ELEVENLABS_API_BASE_URL}/speech-to-text",
+                    **post_kwargs,
+                )
+                if resp.status_code < 500 or attempt >= retry_limit:
+                    break
+
+                try:
+                    retry_payload = resp.json()
+                except ValueError:
+                    retry_payload = None
+                retry_code, retry_status, retry_message = (
+                    self._provider_error_fields(retry_payload)
+                )
+                retry_classification = " ".join(
+                    value or ""
+                    for value in (retry_code, retry_status, retry_message)
+                ).lower()
+                definitive_failure = any(
+                    marker in retry_classification
+                    for marker in (
+                        "quota",
+                        "credit",
+                        "subscription_limit",
+                        "usage_limit",
+                        "invalid_api_key",
+                        "authentication",
+                        "permission",
+                        "authoriz",
+                        "model_access_denied",
+                        "feature_not_available",
+                        "forbidden",
+                        "terms",
+                        "rate_limit",
+                        "concurr",
+                        "invalid_audio",
+                        "unsupported_audio",
                     )
-                    retry_classification = " ".join(
-                        value or ""
-                        for value in (retry_code, retry_status, retry_message)
-                    ).lower()
-                    definitive_failure = any(
-                        marker in retry_classification
-                        for marker in (
-                            "quota",
-                            "credit",
-                            "subscription_limit",
-                            "usage_limit",
-                            "invalid_api_key",
-                            "authentication",
-                            "permission",
-                            "authoriz",
-                            "model_access_denied",
-                            "feature_not_available",
-                            "forbidden",
-                            "terms",
-                            "rate_limit",
-                            "concurr",
-                            "invalid_audio",
-                            "unsupported_audio",
-                        )
-                    )
-                    if definitive_failure:
-                        break
-                    await asyncio.sleep(0.25 * (2**attempt))
+                )
+                if definitive_failure:
+                    break
+                await asyncio.sleep(0.25 * (2**attempt))
+            assert resp is not None
+            return resp
+
+        try:
+            pooled = self._get_pooled_client()
+            if pooled is not None:
+                response = await _send_stt_attempts(pooled, pass_timeout=True)
+            else:
+                # Use HTTPX's default network configuration (or test-patched AsyncClient).
+                async with httpx.AsyncClient(timeout=req_timeout) as client:
+                    response = await _send_stt_attempts(client, pass_timeout=False)
         except httpx.TimeoutException as error:
             logger.warning(
                 "ElevenLabs STT request timed out: error_type=%s request_id=unavailable",

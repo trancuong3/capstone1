@@ -65,7 +65,7 @@ PRIORITY_RETRY = 60
 
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_MAX_ATTEMPTS = 3
-DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 45
+DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 75
 ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 OCR_PIPELINE_VERSION = "hybrid_ocr_v2"
 ADMIN_JOB_KINDS = (
@@ -451,10 +451,18 @@ _TRANSIENT_POST_OCR_ERROR_CODES = {
 
 
 def _is_transient_post_ocr_error(exc: Exception) -> bool:
+    from app.services.ocr_ai.exceptions import OcrConfigurationError
+
     if isinstance(exc, OcrConfigurationError):
         return False
     code = str(getattr(exc, "code", "") or "").upper()
-    if code == "NO_AI_PROVIDER_CONFIGURED":
+    if code in {
+        "NO_AI_PROVIDER_CONFIGURED",
+        "ALL_PROVIDERS_SKIPPED",
+        "PROVIDER_AUTHENTICATION",
+        "MODEL_UNAVAILABLE",
+        "INVALID_AI_CONFIGURATION",
+    }:
         return False
     status_code = getattr(exc, "status_code", None)
     if code in _TRANSIENT_POST_OCR_ERROR_CODES:
@@ -1558,6 +1566,87 @@ class OcrInferenceJobService:
             )
         return persisted
 
+    @staticmethod
+    def _is_single_ocr_engine_ready(info: Any) -> bool:
+        if not isinstance(info, dict):
+            return False
+        if info.get("error"):
+            return False
+        status_upper = str(info.get("status") or "").strip().upper()
+        if status_upper in {"UNAVAILABLE", "FAILED"}:
+            return False
+        detail = str(info.get("detail_status") or "").strip().lower()
+        verified = info.get("inference_verified") is True
+        raw_loaded = info.get("loaded")
+        loaded = raw_loaded is True
+        if verified:
+            return True
+        if raw_loaded is False:
+            return False
+        unready_details = {"failed", "unavailable", "not_installed", "installed", "disabled"}
+        if detail in unready_details:
+            return False
+        if loaded:
+            return True
+        ready_statuses = {"loaded", "inference_verified", "healthy"}
+        return detail in ready_statuses
+
+    @classmethod
+    def _worker_has_ready_engine(cls, raw_engines: Any) -> bool:
+        """Match collect_remote_ocr_health(): require every present primary neural engine to be ready."""
+        if not isinstance(raw_engines, dict) or not raw_engines:
+            return True
+        primary_ids = ("paddleocr", "vietocr")
+        if any(eng_id in raw_engines for eng_id in primary_ids):
+            for eng_id in primary_ids:
+                if eng_id in raw_engines and not cls._is_single_ocr_engine_ready(raw_engines.get(eng_id)):
+                    return False
+            return True
+        return any(
+            cls._is_single_ocr_engine_ready(info)
+            for info in raw_engines.values()
+            if isinstance(info, dict)
+        )
+
+    async def _is_worker_blocked_by_heartbeat(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+    ) -> bool:
+        try:
+            workers = await self.repo.list_worker_heartbeats(limit=50, now=now)
+        except TypeError:
+            if isinstance(self.db, AsyncSession):
+                raise
+            return False
+        if not isinstance(workers, list):
+            return False
+        ttl = timedelta(seconds=worker_heartbeat_ttl_seconds())
+        for worker in workers:
+            if getattr(worker, "WorkerId", None) != worker_id:
+                continue
+            hb_at = getattr(worker, "LastHeartbeatAt", None)
+            if not isinstance(hb_at, datetime):
+                continue
+            normalized_hb_at = (
+                hb_at if hb_at.tzinfo is not None else hb_at.replace(tzinfo=timezone.utc)
+            )
+            if (now - normalized_hb_at) > ttl:
+                return False
+            status_upper = str(getattr(worker, "Status", "") or "").strip().upper()
+            if status_upper in {"DEGRADED", "STARTING", "OFFLINE"}:
+                return True
+            raw_engines = getattr(worker, "Engines", None)
+            if (
+                isinstance(raw_engines, dict)
+                and raw_engines
+                and not self._worker_has_ready_engine(raw_engines)
+            ):
+                return True
+            return False
+        return False
+
     async def has_online_worker(self) -> bool:
         was_in_tx = _session_in_transaction(self.db)
         now = datetime.now(timezone.utc)
@@ -1571,7 +1660,12 @@ class OcrInferenceJobService:
                 if worker.LastHeartbeatAt.tzinfo is not None
                 else worker.LastHeartbeatAt.replace(tzinfo=timezone.utc)
             )
-            if (now - hb_at) <= ttl and str(worker.Status or "").upper() in {"IDLE", "BUSY"}:
+            status_upper = str(worker.Status or "").upper()
+            if (
+                (now - hb_at) <= ttl
+                and status_upper in {"IDLE", "BUSY"}
+                and self._worker_has_ready_engine(getattr(worker, "Engines", None))
+            ):
                 await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
                 return True
 
@@ -1588,11 +1682,11 @@ class OcrInferenceJobService:
         cache_valid, cached_probe = peek_cached_remote_ocr_worker_health()
         if cache_valid:
             await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
-            return bool(cached_probe and cached_probe.get("online"))
+            return bool(cached_probe and cached_probe.get("online") and cached_probe.get("ready", True))
 
         await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
         probe = await probe_configured_remote_ocr_worker_health()
-        return bool(probe and probe.get("online"))
+        return bool(probe and probe.get("online") and probe.get("ready", True))
 
     async def cancel_for_page(self, page_id: UUID, *, reason: str) -> int:
         return await self.repo.cancel_open_for_page(page_id, reason=reason)
@@ -1742,6 +1836,10 @@ class OcrInferenceJobService:
             last_error=_sanitize_error_message(last_error),
         )
         await self.db.commit()
+        if normalized_status in {"OFFLINE", "IDLE", "BUSY", "DEGRADED", "STARTING"}:
+            from app.services.remote_ocr_wakeup import invalidate_remote_ocr_health_cache
+
+            invalidate_remote_ocr_health_cache()
         return row
 
     async def _build_source_descriptor_async(
@@ -1779,6 +1877,10 @@ class OcrInferenceJobService:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc)
+        clean_worker_id = worker_id.strip()[:120]
+        if await self._is_worker_blocked_by_heartbeat(worker_id=clean_worker_id, now=now):
+            await self.db.rollback()
+            return None
         bounded_lease = max(30, min(600, int(lease_seconds)))
         dead_lettered = await self.repo.dead_letter_exhausted_expired_leases(now=now)
         for expired_job in dead_lettered:
@@ -1789,7 +1891,7 @@ class OcrInferenceJobService:
             )
 
         job = await self.repo.claim_next_job(
-            worker_id=worker_id.strip()[:120],
+            worker_id=clean_worker_id,
             lease_seconds=bounded_lease,
             now=now,
         )
@@ -2862,11 +2964,28 @@ class OcrInferenceJobService:
             )
         return payload, actual_sha
 
-    async def get_job_status_payload(self, job_id: UUID) -> dict[str, Any]:
+    async def _safe_queue_positions(self, job_ids: list[UUID]) -> dict[UUID, int]:
+        if not job_ids:
+            return {}
+        get_positions = getattr(self.repo, "get_queue_positions", None)
+        if not callable(get_positions):
+            return {}
+        try:
+            return dict(await get_positions(job_ids))
+        except Exception:
+            return {}
+
+    async def get_job_status_payload(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
-        if str(job.Status or "").upper() == "QUEUED":
+        status_upper = str(job.Status or "").upper()
+        if status_upper == "QUEUED":
             from app.services.remote_ocr_wakeup import (
                 maybe_nudge_ocr_wakeup_for_stale_queued_job,
             )
@@ -2877,10 +2996,26 @@ class OcrInferenceJobService:
                 reason="admin_poll_nudge",
             )
         worker_online = await self.has_online_worker()
-        return self.serialize_job(job, worker_online=worker_online)
+        queue_position: int | None = None
+        if status_upper in ("QUEUED", "FAILED_RETRYABLE"):
+            positions = await self._safe_queue_positions([job.Id])
+            queue_position = positions.get(job.Id)
+        return self.serialize_job(
+            job,
+            worker_online=worker_online,
+            queue_position=queue_position,
+        )
 
-    async def list_book_jobs_payload(self, book_id: UUID, *, limit: int = 200) -> list[dict[str, Any]]:
+    async def list_book_jobs_payload(
+        self,
+        book_id: UUID,
+        *,
+        limit: int = 200,
+        admin_only: bool = False,
+    ) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_book(book_id, limit=limit)
+        if admin_only:
+            rows = [row for row in rows if row.JobKind in ADMIN_JOB_KINDS]
         queued_row = next(
             (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
             None,
@@ -2896,14 +3031,35 @@ class OcrInferenceJobService:
                 reason="admin_book_poll_nudge",
             )
         worker_online = await self.has_online_worker()
-        return [self.serialize_job(row, worker_online=worker_online) for row in rows]
+        queued_ids = [
+            row.Id
+            for row in rows
+            if str(row.Status or "").upper() in ("QUEUED", "FAILED_RETRYABLE")
+        ]
+        positions = await self._safe_queue_positions(queued_ids)
+        return [
+            self.serialize_job(
+                row,
+                worker_online=worker_online,
+                queue_position=positions.get(row.Id),
+            )
+            for row in rows
+        ]
 
-    async def retry_job(self, job_id: UUID) -> dict[str, Any]:
+    async def retry_job(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status in ACTIVE_JOB_STATUSES:
-            serialized_active = self.serialize_job(job)
+            positions = await self._safe_queue_positions([job.Id])
+            serialized_active = self.serialize_job(job, queue_position=positions.get(job.Id))
             await self.db.rollback()
             return serialized_active
         if job.Status == "SUCCEEDED":
@@ -2935,7 +3091,8 @@ class OcrInferenceJobService:
             reason="retry_job",
             session_factory_check_enabled=APP_ENVIRONMENT != "test",
         )
-        return self.serialize_job(job)
+        positions = await self._safe_queue_positions([job.Id])
+        return self.serialize_job(job, queue_position=positions.get(job.Id))
 
     async def _cleanup_local_scan_temp_object(self, job: OcrInferenceJob) -> None:
         image_path = str(getattr(job, "ImagePath", "") or "")
@@ -2956,9 +3113,17 @@ class OcrInferenceJobService:
         except Exception:
             pass
 
-    async def cancel_job(self, job_id: UUID, *, reason: str = "ADMIN_CANCELLED") -> dict[str, Any]:
+    async def cancel_job(
+        self,
+        job_id: UUID,
+        *,
+        reason: str = "ADMIN_CANCELLED",
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status not in ("SUCCEEDED", "CANCELLED"):
             now = datetime.now(timezone.utc)
@@ -2967,9 +3132,68 @@ class OcrInferenceJobService:
             job.LeaseExpiresAt = None
             job.CompletedAt = now
             job.UpdatedAt = now
+
+            cleanup_path: str | None = None
+            cleanup_bucket: str | None = None
+            if job.JobKind == JOB_KIND_ADMIN_UPLOAD and job.PageId is not None:
+                page = await self.db.scalar(
+                    select(BookPage)
+                    .where(BookPage.Id == job.PageId)
+                    .with_for_update()
+                )
+                if (
+                    page is not None
+                    and page.LifecycleStatus == "PROCESSING"
+                    and page.CurrentVerifiedRevisionId is None
+                ):
+                    page.LifecycleStatus = "RETIRED"
+                    page_meta = dict(page.ProcessingMeta or {})
+                    page_meta["cancelled_job_id"] = str(job.Id)
+                    page_meta["cancelled_reason"] = job.CancelledReason
+                    page.ProcessingMeta = page_meta
+
+                    candidate_path = str(page.ImagePath or job.ImagePath or "").strip()
+                    if candidate_path:
+                        other_page_id = await self.db.scalar(
+                            select(BookPage.Id)
+                            .where(
+                                BookPage.Id != page.Id,
+                                BookPage.ImagePath == candidate_path,
+                                BookPage.LifecycleStatus != "RETIRED",
+                            )
+                            .limit(1)
+                        )
+                        other_job_id = await self.db.scalar(
+                            select(OcrInferenceJob.Id)
+                            .where(
+                                OcrInferenceJob.Id != job.Id,
+                                OcrInferenceJob.ImagePath == candidate_path,
+                                OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES),
+                            )
+                            .limit(1)
+                        )
+                        if other_page_id is None and other_job_id is None:
+                            cleanup_path = candidate_path
+                            cleanup_bucket = getattr(job, "ImageBucket", None)
+
             await self.db.commit()
             if job.JobKind == JOB_KIND_LOCAL_SCAN:
                 await self._cleanup_local_scan_temp_object(job)
+            elif cleanup_path:
+                try:
+                    if cleanup_bucket:
+                        await asyncio.to_thread(
+                            storage_service.delete_object,
+                            cleanup_path,
+                            bucket_name=cleanup_bucket,
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            storage_service.delete_object,
+                            cleanup_path,
+                        )
+                except Exception:
+                    pass
         else:
             await self.db.rollback()
         return self.serialize_job(job)
@@ -2979,16 +3203,44 @@ class OcrInferenceJobService:
         job: OcrInferenceJob,
         *,
         worker_online: bool | None = None,
+        queue_position: int | None = None,
     ) -> dict[str, Any]:
+        proc_meta = job.ProcessingMeta if isinstance(job.ProcessingMeta, dict) else {}
+        raw_file_name = proc_meta.get("file_name")
+        file_name = (
+            str(raw_file_name).strip()[:180]
+            if isinstance(raw_file_name, str) and raw_file_name.strip()
+            else None
+        )
+        status_upper = str(job.Status or "").upper()
+        from app.services.ai_task_progress import (
+            compute_ocr_job_progress,
+            extract_ocr_worker_phase,
+        )
+
+        worker_phase = extract_ocr_worker_phase(proc_meta)
+        progress_pct, _progress_mode = compute_ocr_job_progress(
+            status=job.Status,
+            worker_phase=worker_phase,
+            worker_online=worker_online,
+        )
         payload: dict[str, Any] = {
             "id": str(job.Id),
             "job_kind": job.JobKind,
             "status": job.Status,
-            "priority": int(job.Priority),
+            "worker_phase": worker_phase,
+            "progress_pct": progress_pct,
+            "priority": int(job.Priority or 50),
             "book_id": str(job.BookId) if job.BookId else None,
             "page_id": str(job.PageId) if job.PageId else None,
             "revision_id": str(job.RevisionId) if job.RevisionId else None,
             "submission_id": str(job.SubmissionId) if job.SubmissionId else None,
+            "file_name": file_name,
+            "queue_position": (
+                int(queue_position)
+                if queue_position is not None and status_upper in ("QUEUED", "FAILED_RETRYABLE")
+                else None
+            ),
             "worker_id": job.WorkerId,
             "fencing_token": int(job.FencingToken or 0),
             "attempt_count": int(job.AttemptCount or 0),

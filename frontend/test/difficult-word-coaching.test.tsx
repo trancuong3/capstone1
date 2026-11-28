@@ -169,7 +169,7 @@ describe("hands-free word coaching", () => {
     ["INCORRECT", "INCORRECT"],
     ["UNCERTAIN", "UNCERTAIN"],
   ] as const)(
-    "uses the book phrase after two %s results and advances on %s",
+    "uses the book phrase after one %s result and advances on %s",
     async (initialStatus, status) => {
       const target = {
         ...word,
@@ -179,7 +179,6 @@ describe("hands-free word coaching", () => {
       const selectWord = vi.fn();
       evaluate
         .mockResolvedValueOnce(result(initialStatus, "mốt"))
-        .mockResolvedValueOnce(result(initialStatus, "mốt"))
         .mockResolvedValueOnce(
           result(
             status,
@@ -187,7 +186,6 @@ describe("hands-free word coaching", () => {
           ),
         );
       await start(undefined, target, selectWord, [target, next]);
-      await say("mốt");
       expect(screen.queryByText("một bông hoa", { exact: true })).toBeNull();
       await say("mốt");
       expect(screen.getByText("một bông hoa", { exact: true })).toBeVisible();
@@ -200,7 +198,7 @@ describe("hands-free word coaching", () => {
       }
       await tick(SHORT_WORD_CAPTURE_CONFIG.autoAdvanceCorrectMs + 30);
       expect(selectWord).toHaveBeenCalledWith("có", { autoStart: true });
-      expect(evaluate).toHaveBeenCalledTimes(3);
+      expect(evaluate).toHaveBeenCalledTimes(2);
     },
   );
 

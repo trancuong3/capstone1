@@ -34,7 +34,7 @@
     "currentInvalid": "目前密碼不正確。",
     "changeError": "無法變更密碼。請檢查您的網路連線並重試。",
     "noEmailForRecovery": "帳號中沒有可發送密碼重設連結的電子郵件地址。",
-    "recoverySent": "Supabase Auth 已收到密碼重設連結請求。請檢查您的收件匣與垃圾郵件資料夾。",
+    "recoverySent": "帳號系統已收到寄送密碼設定連結的請求。請檢查您的收件匣與垃圾郵件資料夾。",
     "recoveryError": "無法發送密碼重設連結。請稍後再試。",
     "showFieldAria": "顯示 {label}",
     "hideFieldAria": "隱藏 {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "顯示語言",
     "description": "選擇導覽介面與設定的語言。越南語書籍內容將保持不變。",
-    "learningContentNote": "變更語言僅會影響導覽列、按鈕與設定。越南語書籍、OCR、語音辨識 (STT) 與語音朗讀 (TTS) 將維持越南語。"
+    "learningContentNote": "更改語言僅更新導覽列、按鈕與設定。越南語書籍、頁面辨識、語音辨識與示範朗讀仍維持越南語。"
   }
 }

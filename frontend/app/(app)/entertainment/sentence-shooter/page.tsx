@@ -27,8 +27,12 @@ export async function generateMetadata(): Promise<Metadata> {
 interface SentenceShooterPageProps {
   searchParams: Promise<{
     book_id?: string | string[];
+    bookId?: string | string[];
+    pageId?: string | string[];
+    childId?: string | string[];
     reading_session_id?: string | string[];
     source?: string | string[];
+    mode?: string | string[];
   }>;
 }
 
@@ -47,10 +51,19 @@ export default async function SentenceShooterPage({
     z.uuid().safeParse(candidateSessionId).success
       ? candidateSessionId
       : undefined;
+  const initialMode =
+    firstValue(query.mode) === "magic-quest" ? "magic-quest" : undefined;
+  const candidatePageId = firstValue(query.pageId);
+  const initialPageId =
+    candidatePageId && z.uuid().safeParse(candidatePageId).success
+      ? candidatePageId
+      : undefined;
 
   return (
     <SentenceShooterScreen
-      initialBookId={firstValue(query.book_id)}
+      initialBookId={firstValue(query.bookId) ?? firstValue(query.book_id)}
+      initialMode={initialMode}
+      initialPageId={initialPageId}
       readingSessionId={readingSessionId}
     />
   );

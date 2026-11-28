@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.config import APP_ENVIRONMENT
 from app.models import Profile
 
-_ROLE_TTL_SECONDS = max(0.0, float(os.getenv("VIREAD_ROLE_CACHE_TTL_SECONDS", "10.0")))
+_ROLE_TTL_SECONDS = max(0.0, float(os.getenv("VIREAD_ROLE_CACHE_TTL_SECONDS", "60.0")))
 _MAX_CACHE_ENTRIES = 2048
 _lock = threading.Lock()
 _role_cache: dict[UUID, tuple[float, str | None]] = {}

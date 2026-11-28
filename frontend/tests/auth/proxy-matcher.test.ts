@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { config } from "@/proxy";
 
 describe("auth proxy matcher", () => {
-  it.each(["/dashboard", "/admin/books", "/login", "/reset-password"])(
+  it.each(["/", "/dashboard", "/admin/books", "/login", "/reset-password"])(
     "matches application route %s",
     (url) => {
       expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
@@ -18,6 +18,8 @@ describe("auth proxy matcher", () => {
     "/_next/image",
     "/cover.png",
     "/api/cron/parent-emails",
+    "/api/parent-email-relay",
+    "/api/parent-email-relay/extra",
     "/wasm/sherpa/sherpa-onnx-wasm-main-vad-asr.wasm",
     "/workers/sherpa-stt-worker.js",
     "/audio/word-samples/thuc-nang.wav",

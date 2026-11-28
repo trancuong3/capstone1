@@ -239,7 +239,13 @@ class SentenceShooterService:
         return list(groups.values())
 
     @staticmethod
-    def _book_read(book: Book, available_rounds: int) -> SentenceShooterBookRead:
+    def _book_read(
+        book: Book,
+        available_rounds: int,
+        *,
+        matched_difficult_words: list[str] | None = None,
+    ) -> SentenceShooterBookRead:
+        cleaned_matched = list(matched_difficult_words or [])[:8]
         return SentenceShooterBookRead(
             id=book.Id,
             name=book.Name,
@@ -248,6 +254,8 @@ class SentenceShooterService:
             min_grade=book.MinGrade,
             max_grade=book.MaxGrade,
             available_rounds=available_rounds,
+            difficult_word_count=len(cleaned_matched),
+            matched_difficult_words=cleaned_matched,
         )
 
     def _sentences(
@@ -274,19 +282,39 @@ class SentenceShooterService:
         return candidates
 
     @staticmethod
-    def _matched_difficult_words(
+    def _matched_difficult_words_and_indices(
         sentence: ExtractedSentence,
-        focus_set: set[str],
-    ) -> list[str]:
+        focus_set: set[str] | list[str],
+    ) -> tuple[list[str], set[int]]:
         if not focus_set:
-            return []
+            return [], set()
+        from app.services.active_weak_words import match_focus_words_in_tokens
+
+        token_texts = [token.text for token in sentence.tokens]
+        matched_phrases, matched_indices = match_focus_words_in_tokens(token_texts, focus_set)
+        if matched_phrases:
+            return matched_phrases, matched_indices
+
+        # Fallback for single-token legacy normalized keys without spaces
         matched: list[str] = []
         seen: set[str] = set()
-        for token in sentence.tokens:
+        indices: set[int] = set()
+        for idx, token in enumerate(sentence.tokens):
             norm = normalize_token(token.text)
-            if norm and norm in focus_set and norm not in seen:
-                seen.add(norm)
-                matched.append(_clean_display_word(token.text))
+            if norm and norm in focus_set:
+                indices.add(idx)
+                if norm not in seen:
+                    seen.add(norm)
+                    matched.append(_clean_display_word(token.text))
+        return matched, indices
+
+    @classmethod
+    def _matched_difficult_words(
+        cls,
+        sentence: ExtractedSentence,
+        focus_set: set[str] | list[str],
+    ) -> list[str]:
+        matched, _ = cls._matched_difficult_words_and_indices(sentence, focus_set)
         return matched
 
     @classmethod
@@ -296,18 +324,21 @@ class SentenceShooterService:
         total_rounds: int,
         focus_set: set[str],
         rng: random.SystemRandom,
+        *,
+        preferred_page_id: UUID | None = None,
     ) -> list[tuple[_PageSource, ExtractedSentence]]:
-        if not focus_set:
+        if not focus_set and preferred_page_id is None:
             return rng.sample(candidates, total_rounds)
 
-        buckets: dict[int, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
+        buckets: dict[tuple[int, int], list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
         for item in candidates:
+            page_boost = 1 if preferred_page_id is not None and item[0].page.Id == preferred_page_id else 0
             score = len(cls._matched_difficult_words(item[1], focus_set))
-            buckets[score].append(item)
+            buckets[(page_boost, score)].append(item)
 
         chosen: list[tuple[_PageSource, ExtractedSentence]] = []
-        for score in sorted(buckets.keys(), reverse=True):
-            group = list(buckets[score])
+        for bucket_key in sorted(buckets.keys(), reverse=True):
+            group = list(buckets[bucket_key])
             rng.shuffle(group)
             needed = total_rounds - len(chosen)
             chosen.extend(group[:needed])
@@ -353,7 +384,7 @@ class SentenceShooterService:
         book_word_pool: list[str],
         rng: random.SystemRandom,
     ) -> _PreparedRound:
-        practiced = cls._matched_difficult_words(sentence, focus_set)
+        practiced, diff_indices = cls._matched_difficult_words_and_indices(sentence, focus_set)
         if learning_mode == "WORD_ORDER":
             expected_ids = [token.token_id for token in sentence.tokens]
             shuffled_ids = shuffle_token_ids(expected_ids, rng=rng)
@@ -361,9 +392,9 @@ class SentenceShooterService:
                 {
                     "id": str(token.token_id),
                     "text": token.text,
-                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                    "is_difficult_word": idx in diff_indices,
                 }
-                for token in sentence.tokens
+                for idx, token in enumerate(sentence.tokens)
             ]
             tokens_snapshot.append(
                 {
@@ -388,7 +419,7 @@ class SentenceShooterService:
             scored_indices: list[tuple[int, int]] = []
             for idx, token in enumerate(sentence.tokens):
                 norm = normalize_token(token.text)
-                is_diff = 1 if norm in focus_set else 0
+                is_diff = 1 if idx in diff_indices else 0
                 is_non_first = 1 if idx > 0 else 0
                 has_length = 1 if len(norm) >= 2 else 0
                 scored_indices.append((is_diff * 10 + has_length * 3 + is_non_first, idx))
@@ -415,7 +446,7 @@ class SentenceShooterService:
                     "position": idx,
                     "text": None if idx in blank_set else token.text,
                     "is_blank": idx in blank_set,
-                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                    "is_difficult_word": idx in diff_indices,
                 }
                 for idx, token in enumerate(sentence.tokens)
             ]
@@ -546,7 +577,7 @@ class SentenceShooterService:
                 "position": idx,
                 "text": None if idx == target_idx else token.text,
                 "is_blank": idx == target_idx,
-                "is_difficult_word": normalize_token(token.text) in focus_set,
+                "is_difficult_word": idx in diff_indices,
             }
             for idx, token in enumerate(sentence.tokens)
         ]
@@ -587,8 +618,20 @@ class SentenceShooterService:
             raise HTTPException(status_code=422, detail="Invalid round count")
 
         rows = await self.repository.verified_word_rows(child.Grade)
+        repo_difficult_words: list[str] = []
+        if hasattr(self.repository, "active_difficult_words"):
+            repo_difficult_words = await self.repository.active_difficult_words(child.Id)
+        from app.services.active_weak_words import normalize_focus_phrase
+
+        focus_phrases = {
+            phrase
+            for raw in repo_difficult_words
+            if (phrase := normalize_focus_phrase(str(raw)))
+        }
         sources = self._group_page_sources(rows)
         by_book: dict[UUID, tuple[Book, int]] = {}
+        matched_by_book: dict[UUID, list[str]] = defaultdict(list)
+        seen_matched_by_book: dict[UUID, set[str]] = defaultdict(set)
         seen_by_book: dict[UUID, set[tuple[str, ...]]] = defaultdict(set)
         for source in sources:
             book_id = source.book.Id
@@ -599,14 +642,27 @@ class SentenceShooterService:
                     continue
                 seen_by_book[book_id].add(key)
                 count += 1
+                if focus_phrases:
+                    for word in self._matched_difficult_words(sentence, focus_phrases):
+                        wkey = word.casefold()
+                        if wkey not in seen_matched_by_book[book_id]:
+                            seen_matched_by_book[book_id].add(wkey)
+                            matched_by_book[book_id].append(word)
             by_book[book_id] = (source.book, count)
 
         result = [
-            self._book_read(book, count)
+            self._book_read(
+                book,
+                count,
+                matched_difficult_words=matched_by_book.get(book.Id, []),
+            )
             for book, count in by_book.values()
             if count >= total_rounds
         ]
-        return sorted(result, key=lambda item: (item.title.casefold(), str(item.id)))
+        return sorted(
+            result,
+            key=lambda item: (-item.difficult_word_count, item.title.casefold(), str(item.id)),
+        )
 
     async def create_session(
         self,
@@ -619,11 +675,25 @@ class SentenceShooterService:
         # transaction with rollback and would expire ORM instances.
         child_id = child.Id
         child_grade = child.Grade
-        rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
+        if hasattr(self.repository.verified_word_rows, "__code__") and (
+            "parent_id" in self.repository.verified_word_rows.__code__.co_varnames
+        ):
+            rows = await self.repository.verified_word_rows(
+                child_grade, payload.book_id, parent_id=actor_id
+            )
+        else:
+            rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
         sources = self._group_page_sources(rows)
         candidates = self._sentences(sources, payload.difficulty)
         if not candidates:
-            book = await self.repository.book_for_session(payload.book_id)
+            if hasattr(self.repository.book_for_session, "__code__") and (
+                "parent_id" in self.repository.book_for_session.__code__.co_varnames
+            ):
+                book = await self.repository.book_for_session(
+                    payload.book_id, parent_id=actor_id
+                )
+            else:
+                book = await self.repository.book_for_session(payload.book_id)
             if (
                 book is None
                 or book.LifecycleStatus != "ACTIVE"
@@ -639,14 +709,17 @@ class SentenceShooterService:
         if len(candidates) < payload.total_rounds:
             raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
 
-        # Gather active difficult words safely (explicit payload + child practice history).
+        # Gather active difficult words safely (explicit payload + child practice history),
+        # preserving 1..3 syllable compound/reduplicative Vietnamese phrases.
         repo_difficult_words: list[str] = []
         if hasattr(self.repository, "active_difficult_words"):
             repo_difficult_words = await self.repository.active_difficult_words(child_id)
+        from app.services.active_weak_words import normalize_focus_phrase
+
         focus_set = {
-            norm
+            phrase
             for raw in [*payload.focus_words, *repo_difficult_words]
-            if (norm := normalize_token(str(raw)))
+            if (phrase := normalize_focus_phrase(str(raw)) or normalize_token(str(raw)))
         }
 
         rng = random.SystemRandom()
@@ -655,6 +728,7 @@ class SentenceShooterService:
             payload.total_rounds,
             focus_set,
             rng,
+            preferred_page_id=payload.book_page_id,
         )
         book_word_pool = [
             token.text

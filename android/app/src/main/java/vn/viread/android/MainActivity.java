@@ -15,8 +15,6 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -93,6 +91,7 @@ public final class MainActivity extends Activity {
     static final int FILE_CHOOSER_CODE = 152;
     static final int CAMERA_CHOOSER_PERMISSION_CODE = 153;
     static final int NATIVE_SPEECH_PERMISSION_CODE = 154;
+    static final int NATIVE_REMINDER_PERMISSION_CODE = 155;
 
     static final String BACKEND_HEALTH_WARMUP_URL = "https://capstone1-ssd8.onrender.com/health";
     private static final int BACKEND_WARMUP_TIMEOUT_MS = 12_000;
@@ -159,6 +158,8 @@ public final class MainActivity extends Activity {
     private ServerEndpointStore endpointStore;
     private TrustedNavigation navigation;
     private ViReadNativeSpeechBridge nativeSpeechBridge;
+    private ViReadNativeReminderBridge nativeReminderBridge;
+    private ViReadNativeOfflineBridge nativeOfflineBridge;
 
     private WebView webView;
     private ProgressBar progress;
@@ -190,17 +191,16 @@ public final class MainActivity extends Activity {
     private boolean webViewPausedForStop;
     private boolean oauthExternalTabLaunched;
     private boolean oauthTabLeftForeground;
-    private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
     private boolean noisyReceiverRegistered;
 
     private final Runnable deferredWebViewPauseRunnable = this::pauseWebViewAfterBackgroundEvent;
 
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
-        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            dispatchAndroidBackgroundEvent(false);
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
-                && (nativeSpeechBridge == null || !nativeSpeechBridge.hasActiveTtsForTest())) {
+        if (nativeSpeechBridge != null && nativeSpeechBridge.isAudioSessionActive()) {
+            return;
+        }
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS
+                || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
             dispatchAndroidBackgroundEvent(false);
         }
     };
@@ -398,6 +398,8 @@ public final class MainActivity extends Activity {
         configureWebViewSettings(webView.getSettings());
         installWebViewClients();
         installNativeSpeechBridge();
+        installNativeReminderBridge();
+        installNativeOfflineBridge();
         registerModernBackCallback();
         cleanupStaleCameraCaptures(true);
 
@@ -406,8 +408,11 @@ public final class MainActivity extends Activity {
         }
 
         String initialDeepLinkCallback = resolveAuthCallbackIntent(getIntent());
+        String reminderLaunchUrl = resolveReminderLaunchIntent(getIntent());
         if (initialDeepLinkCallback != null) {
             loadTrustedUrl(initialDeepLinkCallback);
+        } else if (reminderLaunchUrl != null) {
+            loadTrustedUrl(reminderLaunchUrl);
         } else if (state != null && webView.restoreState(state) != null) {
             String restoredUrl = webView.getUrl();
             if (restoredUrl != null && navigation.isTrusted(restoredUrl)) {
@@ -454,6 +459,44 @@ public final class MainActivity extends Activity {
                     }
                 });
         nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+        nativeSpeechBridge.warmUpTts();
+    }
+
+    private void installNativeReminderBridge() {
+        nativeReminderBridge = ViReadNativeReminderBridge.createDefault(
+                this,
+                () -> navigation,
+                new ViReadNativeReminderBridge.HostCallbacks() {
+                    @Override
+                    public boolean hasNotificationPermission() {
+                        if (Build.VERSION.SDK_INT < 33) {
+                            return true;
+                        }
+                        return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                                == PackageManager.PERMISSION_GRANTED;
+                    }
+
+                    @Override
+                    public boolean requestNotificationPermission() {
+                        if (isFinishing()) return false;
+                        if (Build.VERSION.SDK_INT < 33) {
+                            return true;
+                        }
+                        awaitingSystemPermission = true;
+                        requestPermissions(
+                                new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                                NATIVE_REMINDER_PERMISSION_CODE);
+                        return true;
+                    }
+                });
+        nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
+    }
+
+    private void installNativeOfflineBridge() {
+        nativeOfflineBridge = ViReadNativeOfflineBridge.createDefault(
+                this,
+                () -> navigation);
+        nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
     }
 
     String resolveInitialStartupUrl() {
@@ -542,7 +585,26 @@ public final class MainActivity extends Activity {
             oauthTabLeftForeground = false;
             oauthLoopbackServer.stop();
             loadTrustedUrl(callbackUrl);
+            return;
         }
+        String reminderLaunchUrl = resolveReminderLaunchIntent(intent);
+        if (reminderLaunchUrl != null) {
+            loadTrustedUrl(reminderLaunchUrl);
+        }
+    }
+
+    String resolveReminderLaunchIntent(Intent intent) {
+        if (intent == null || navigation == null) {
+            return null;
+        }
+        String launchPath = intent.getStringExtra(ReadingReminderReceiver.EXTRA_LAUNCH_PATH);
+        if (launchPath == null || launchPath.trim().isEmpty()) {
+            return null;
+        }
+        intent.removeExtra(ReadingReminderReceiver.EXTRA_LAUNCH_PATH);
+        String cleanPath = ViReadNativeReminderBridge.sanitizeTargetPath(launchPath);
+        String candidate = navigation.getOrigin() + cleanPath;
+        return navigation.isTrusted(candidate) ? candidate : null;
     }
 
     String resolveAuthCallbackIntent(Intent intent) {
@@ -830,10 +892,16 @@ public final class MainActivity extends Activity {
             if (errorTitleView != null) errorTitleView.setText(title);
             if (errorMessageView != null) errorMessageView.setText(message);
             if (errorDetailView != null) {
-                String suffix = (codeLabel != null && !codeLabel.trim().isEmpty())
-                        ? " · " + codeLabel.trim()
-                        : "";
-                errorDetailView.setText("Máy chủ: " + navigation.getOrigin() + suffix);
+                if (BuildConfig.DEBUG) {
+                    String suffix = (codeLabel != null && !codeLabel.trim().isEmpty())
+                            ? " · " + codeLabel.trim()
+                            : "";
+                    errorDetailView.setText("Máy chủ: " + navigation.getOrigin() + suffix);
+                    errorDetailView.setVisibility(View.VISIBLE);
+                } else {
+                    errorDetailView.setText("");
+                    errorDetailView.setVisibility(View.GONE);
+                }
             }
             if (errorOverlay != null) errorOverlay.setVisibility(View.VISIBLE);
         });
@@ -1063,6 +1131,12 @@ public final class MainActivity extends Activity {
                         if (nativeSpeechBridge != null) {
                             nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
                         }
+                        if (nativeReminderBridge != null) {
+                            nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
+                        }
+                        if (nativeOfflineBridge != null) {
+                            nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
+                        }
                         lastFailedUrl = null;
                         hasLoadedCleanPage = false;
                         loadTrustedUrl(navigation.getOrigin());
@@ -1075,6 +1149,12 @@ public final class MainActivity extends Activity {
                     navigation = endpointStore.clearCustomLanOrigin();
                     if (nativeSpeechBridge != null) {
                         nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+                    }
+                    if (nativeReminderBridge != null) {
+                        nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
+                    }
+                    if (nativeOfflineBridge != null) {
+                        nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
                     }
                     lastFailedUrl = null;
                     hasLoadedCleanPage = false;
@@ -1435,6 +1515,17 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        if (code == NATIVE_REMINDER_PERMISSION_CODE) {
+            awaitingSystemPermission = false;
+            boolean granted = results != null
+                    && results.length > 0
+                    && results[0] == PackageManager.PERMISSION_GRANTED;
+            if (nativeReminderBridge != null) {
+                nativeReminderBridge.onNotificationPermissionResult(granted);
+            }
+            return;
+        }
+
         if (code != WEB_PERMISSION_CODE) return;
         awaitingSystemPermission = false;
         boolean granted = results != null && results.length > 0;
@@ -1579,44 +1670,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void requestAppAudioFocus() {
-        if (audioManager == null) {
-            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        }
-        if (audioManager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (audioFocusRequest == null) {
-                AudioAttributes attrs = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build();
-                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                        .setAudioAttributes(attrs)
-                        .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
-                        .build();
-            }
-            audioManager.requestAudioFocus(audioFocusRequest);
-        } else {
-            @SuppressWarnings("deprecation")
-            int ignored = audioManager.requestAudioFocus(
-                    audioFocusChangeListener,
-                    AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN);
-        }
-    }
-
-    private void abandonAppAudioFocus() {
-        if (audioManager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest);
-            }
-        } else {
-            @SuppressWarnings("deprecation")
-            int ignored = audioManager.abandonAudioFocus(audioFocusChangeListener);
-        }
-    }
-
     private void registerBecomingNoisyReceiver() {
         if (noisyReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
@@ -1643,7 +1696,6 @@ public final class MainActivity extends Activity {
         activityStopped = true;
         webViewPausedForStop = false;
         unregisterBecomingNoisyReceiver();
-        abandonAppAudioFocus();
         if (webView != null) {
             syncLocalePreferenceFromCookies();
             CookieManager.getInstance().flush();
@@ -1673,7 +1725,11 @@ public final class MainActivity extends Activity {
             oauthLoopbackServer.stop();
         }
         registerBecomingNoisyReceiver();
-        requestAppAudioFocus();
+        // Do NOT request permanent Activity-level AUDIOFOCUS_GAIN in onResume():
+        // Chromium WebView <audio> playback and ViReadNativeSpeechBridge TTS/STT
+        // each acquire scoped audio focus per utterance/capture, and holding a
+        // separate Activity AUDIOFOCUS_GAIN causes self-inflicted AUDIOFOCUS_LOSS
+        // / AUDIOFOCUS_LOSS_TRANSIENT callbacks that abort WebView TTS and native STT.
         if (webView != null) webView.onResume();
     }
 
@@ -1724,7 +1780,6 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
         unregisterBecomingNoisyReceiver();
-        abandonAppAudioFocus();
         cancelLoadWatchdog();
         oauthExternalTabLaunched = false;
         oauthTabLeftForeground = false;
@@ -1743,8 +1798,15 @@ public final class MainActivity extends Activity {
             nativeSpeechBridge.onHostDestroy();
             nativeSpeechBridge = null;
         }
+        if (nativeReminderBridge != null) {
+            nativeReminderBridge.onHostDestroy();
+            nativeReminderBridge = null;
+        }
+        nativeOfflineBridge = null;
         if (webView != null) {
             ViReadNativeSpeechBridge.detachFromWebView(webView);
+            ViReadNativeReminderBridge.detachFromWebView(webView);
+            ViReadNativeOfflineBridge.detachFromWebView(webView);
             webView.stopLoading();
             webView.loadUrl("about:blank");
             webView.destroy();

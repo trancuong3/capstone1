@@ -90,6 +90,8 @@ class BookContentQualityService:
 
     @staticmethod
     def _scan_read(run: BookQualityScanRun) -> BookQualityScanRead:
+        from app.services.ai_task_progress import compute_quality_scan_progress
+
         return BookQualityScanRead(
             id=run.Id,
             book_id=run.BookId,
@@ -104,6 +106,13 @@ class BookContentQualityService:
             failed_pages=run.FailedPages,
             ai_completed_pages=run.AICompletedPages,
             ai_unavailable_pages=run.AIUnavailablePages,
+            progress_pct=compute_quality_scan_progress(
+                status=run.Status,
+                completed_pages=run.CompletedPages,
+                skipped_pages=run.SkippedPages,
+                failed_pages=run.FailedPages,
+                total_pages=run.TotalPages,
+            ),
             error_summary=run.ErrorSummary,
             started_at=run.StartedAt,
             completed_at=run.CompletedAt,
@@ -420,6 +429,8 @@ class BookContentQualityService:
         *,
         rights_evidence: BookRightsEvidence | None = None,
         current_rights_fingerprint: str | None = None,
+        min_grade: int | None = None,
+        max_grade: int | None = None,
     ) -> BookApprovalAssessment:
         now = datetime.now(timezone.utc)
         active_rows = []
@@ -774,6 +785,23 @@ class BookContentQualityService:
         else:
             status_value = "PENDING_ADMIN_REVIEW"
         metadata = metadata if current_decision else {}
+        verified_texts_for_readability: list[str] = []
+        for row in active_rows:
+            rev = row[2] if len(row) == 7 else row[1]
+            if rev is not None and rev.VerificationStatus == "VERIFIED" and rev.VerifiedText:
+                verified_texts_for_readability.append(str(rev.VerifiedText))
+        readability_dto = None
+        if verified_texts_for_readability:
+            from app.schemas.book_content_quality import BookReadabilityRead
+            from app.services.vietnamese_readability import analyse_vietnamese_readability
+
+            rep = analyse_vietnamese_readability(
+                "\n".join(verified_texts_for_readability),
+                min_grade=min_grade,
+                max_grade=max_grade,
+            )
+            readability_dto = BookReadabilityRead(**rep.to_dict())
+
         return BookApprovalAssessment(
             status=status_value,
             page_count=page_count,
@@ -818,6 +846,7 @@ class BookContentQualityService:
             ),
             rights_confirmed=bool(rights_valid or (approved and metadata.get("rights_confirmed") is True)),
             blockers=blockers,
+            readability=readability_dto,
         )
 
     async def auto_publish_if_eligible(self, book_id: UUID) -> bool:
@@ -1561,6 +1590,8 @@ class BookContentQualityService:
                 decisions_by_book.get(book.Id, []),
                 rights_evidence=rights_by_book.get(book.Id),
                 current_rights_fingerprint=rights_fp,
+                min_grade=getattr(book, "MinGrade", None),
+                max_grade=getattr(book, "MaxGrade", None),
             )
             status_counts[assessment.status] = status_counts.get(assessment.status, 0) + 1
             has_safety = assessment.finding_count > 0
@@ -1679,6 +1710,8 @@ class BookContentQualityService:
                 decisions,
                 rights_evidence=rights_row,
                 current_rights_fingerprint=current_rights_fp,
+                min_grade=getattr(book, "MinGrade", None),
+                max_grade=getattr(book, "MaxGrade", None),
             ),
             rights_evidence=self._rights_read(
                 book_id,

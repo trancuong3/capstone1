@@ -12,6 +12,7 @@ import {
 } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
@@ -20,7 +21,6 @@ import {
 import { isStudioAuthenticatedMediaUrl } from "@/lib/api/book-assets-service";
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
   getWordHighlightTier,
@@ -28,6 +28,7 @@ import {
   type PageWordEvidence,
   wordStateForPage,
 } from "@/lib/reading/word-presentation";
+import type { LucBatWordAnnotation } from "@/lib/reading/luc-bat-cadence";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ReadingPageWordDTO } from "@/types/reading";
@@ -42,8 +43,11 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustrationUrl?: string | null;
   illustrationTextFree?: boolean;
   initialReadingMode?: ReadingDisplayMode;
+  retryMode?: boolean;
+  retryFocusKey?: string | null;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
+  lucBatAnnotations?: ReadonlyMap<string, LucBatWordAnnotation> | null;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
@@ -194,7 +198,8 @@ function PageSurface(
 ) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
-  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
+  const teacherPersona = useTeacherPersona();
+  const isMalePersona = teacherPersona.gender === "male";
   const {
     page,
     currentWordId,
@@ -513,23 +518,37 @@ function PageSurface(
         ? "text"
         : legacyMode;
 
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const prevRenderModeRef = useRef(renderMode);
+  useEffect(() => {
+    if (prevRenderModeRef.current !== renderMode) {
+      prevRenderModeRef.current = renderMode;
+      setLayoutRevision((rev) => rev + 1);
+    }
+  }, [renderMode]);
+
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
 
   const getActiveNode = useCallback(() => {
     if (!activeId) return null;
-    if (overlay) {
+    if (renderMode === "image-overlay") {
       return overlayNodesRef.current.get(activeId) ?? null;
     }
     return textNodesRef.current.get(activeId) ?? null;
-  }, [activeId, overlay]);
+  }, [activeId, renderMode]);
 
   const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
     containerRef: rootRef,
     getActiveElement: getActiveNode,
     activeWordId: activeId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
+    centerMode: Boolean(props.retryMode),
+    forceFocusKey:
+      props.retryMode && props.retryFocusKey
+        ? `${props.retryFocusKey}:rev=${layoutRevision}`
+        : null,
     isPreview: Boolean(previewSnapshot),
   });
 
@@ -552,7 +571,7 @@ function PageSurface(
         page: formatNumber(page.page_number),
       })}
       className={cn(
-        "reader-sheet mx-auto w-full min-w-0 max-w-[1104px] rounded-xl border-0 bg-[#FFFDF8] shadow-xs sm:rounded-card sm:border sm:border-border sm:bg-cream sm:shadow-none",
+        "reader-sheet mx-auto w-full min-w-0 max-w-[1104px]",
         isTransitioning && "opacity-60",
       )}
       data-page-id={page.page_id}
@@ -570,20 +589,34 @@ function PageSurface(
       }
     >
       <header className="reader-bookplate">
-        <div className="flex min-w-0 flex-1 items-center justify-between gap-2 sm:block sm:w-full">
-          <p className="reader-folio sr-only sm:not-sr-only">
-            {t("progress.pageLabel", { page: formatNumber(page.page_number) })}
-          </p>
-          <h1
-            className="book-title viread-learning-content min-w-0 flex-1 truncate text-sm font-extrabold sm:line-clamp-none sm:whitespace-normal sm:break-words sm:text-3xl"
-            dir="ltr"
-            lang="vi"
-          >
-            {props.title ?? t("pageViewer.defaultBookTitle")}
-          </h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 md:block">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <p className="reader-folio">
+                {t("progress.pageLabel", {
+                  page: formatNumber(page.page_number),
+                })}
+              </p>
+              {page.page_kind ? (
+                <span
+                  className="inline-flex items-center rounded-full border border-primary/25 bg-sky/70 px-2 py-0.5 text-[11px] font-bold text-primary-hover"
+                  data-testid="studio-v2-page-kind-badge"
+                >
+                  {t(`pageKinds.${page.page_kind}`, undefined, page.page_kind)}
+                </span>
+              ) : null}
+            </div>
+            <h1
+              className="book-title viread-learning-content line-clamp-1 break-words text-sm sm:text-base md:mt-1 md:line-clamp-none md:text-2xl"
+              dir="ltr"
+              lang="vi"
+            >
+              {props.title ?? t("pageViewer.defaultBookTitle")}
+            </h1>
+          </div>
           <div
             aria-label={t("pageViewer.readingModeSwitcherAria")}
-            className="inline-flex shrink-0 flex-nowrap items-center gap-1 sm:mt-2 sm:flex-wrap sm:gap-1.5"
+            className="mt-1 inline-flex flex-wrap items-center gap-1 md:mt-2 md:gap-1.5"
             data-testid="reading-mode-switcher"
             role="tablist"
           >
@@ -591,7 +624,7 @@ function PageSurface(
               <button
                 aria-selected={effectiveReadingMode === "ILLUSTRATED"}
                 className={cn(
-                  "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                  "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                   effectiveReadingMode === "ILLUSTRATED"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -608,7 +641,7 @@ function PageSurface(
             <button
               aria-selected={effectiveReadingMode === "TEXT"}
               className={cn(
-                "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                 effectiveReadingMode === "TEXT"
                   ? "border-primary bg-primary text-white shadow-xs"
                   : "border-border bg-white text-ink hover:bg-canvas",
@@ -625,7 +658,7 @@ function PageSurface(
               <button
                 aria-selected={effectiveReadingMode === "ORIGINAL"}
                 className={cn(
-                  "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                  "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                   effectiveReadingMode === "ORIGINAL"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -642,12 +675,12 @@ function PageSurface(
           </div>
         </div>
         {props.illustration ? (
-          <span className="hidden sm:contents">{props.illustration}</span>
+          <div className="hidden md:block">{props.illustration}</div>
         ) : null}
       </header>
       <div
         ref={rootRef}
-        className="reader-leaf w-full min-w-0 px-3 py-2.5 sm:px-6 sm:py-5"
+        className="reader-leaf w-full min-w-0"
         data-reading-scroll-container="true"
         data-auto-follow={isDetached ? "paused" : "active"}
         tabIndex={0}
@@ -688,6 +721,7 @@ function PageSurface(
                     page: formatNumber(page.page_number),
                   })}
                   className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                  onLoad={() => setLayoutRevision((rev) => rev + 1)}
                   onError={() => {
                     if (illustrationNeedsAuth && safeIllustrationUrl) {
                       setIllustrationAuthState({
@@ -792,6 +826,7 @@ function PageSurface(
                     height={Math.max(1, page.height)}
                     unoptimized
                     className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
+                    onLoad={() => setLayoutRevision((rev) => rev + 1)}
                     onError={handleImageLoadError}
                   />
                 </div>
@@ -800,7 +835,7 @@ function PageSurface(
                   onToggle={(event) =>
                     setReferenceOpen(event.currentTarget.open)
                   }
-                  className="mb-2 hidden rounded-control border border-border bg-white/70 p-1.5 sm:block"
+                  className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
                 >
                   <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
                     {t("pageViewer.viewPageImage")}

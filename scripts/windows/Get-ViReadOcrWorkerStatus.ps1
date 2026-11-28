@@ -1,4 +1,4 @@
-# Report status of the standalone ViRead Remote OCR Worker (never prints secrets).
+# Report status of the standalone or autostart-supervised ViRead Remote OCR Worker (never prints secrets).
 param(
     [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
     [string]$BindHost = "127.0.0.1",
@@ -9,7 +9,22 @@ param(
 $ErrorActionPreference = "Stop"
 
 $stateFile = Join-Path $OcrRuntimeDir "ocr-worker-state.json"
-$state = if (Test-Path $stateFile) { Get-Content $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+$autostartStateFile = Join-Path $OcrRuntimeDir "autostart-state.json"
+$autostartStopFile = Join-Path $OcrRuntimeDir "autostart.stop"
+
+$state = if (Test-Path -LiteralPath $stateFile) { Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+$autoState = if (Test-Path -LiteralPath $autostartStateFile) { Get-Content -LiteralPath $autostartStateFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+$stopSentinelPresent = Test-Path -LiteralPath $autostartStopFile
+
+$supervisorPid = if ($autoState -and $autoState.PSObject.Properties["supervisorPid"] -and $null -ne $autoState.supervisorPid) { [int]$autoState.supervisorPid } else { $null }
+$supervisorRunning = $false
+if ($supervisorPid -and $supervisorPid -gt 0) {
+    $supProc = Get-Process -Id $supervisorPid -ErrorAction SilentlyContinue
+    if ($supProc -and (-not $supProc.HasExited) -and ($supProc.ProcessName -in @("powershell", "pwsh"))) {
+        $supervisorRunning = $true
+    }
+}
+
 $listening = [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 
 $health = $null
@@ -21,10 +36,22 @@ try {
     $version = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/version" -TimeoutSec 3
 } catch { }
 
+$autostartReport = @{
+    statePresent        = ($null -ne $autoState)
+    stopSentinelPresent = $stopSentinelPresent
+    supervisorPid       = $supervisorPid
+    supervisorRunning   = $supervisorRunning
+    workerPid           = if ($autoState -and $autoState.PSObject.Properties["workerPid"]) { $autoState.workerPid } else { $null }
+    status              = if ($autoState -and $autoState.PSObject.Properties["status"]) { [string]$autoState.status } else { $null }
+    repoRoot            = if ($autoState -and $autoState.PSObject.Properties["repoRoot"]) { $autoState.repoRoot } else { $null }
+    pythonExe           = if ($autoState -and $autoState.PSObject.Properties["pythonExe"]) { $autoState.pythonExe } else { $null }
+}
+
 $report = @{
     endpoint     = "http://${BindHost}:${Port}"
     listening    = $listening
-    statePresent = ($null -ne $state)
+    statePresent = ($null -ne $state -or $null -ne $autoState)
+    autostart    = $autostartReport
     health       = $health
     version      = $version
     logsDir      = Join-Path $OcrRuntimeDir "logs"
@@ -35,6 +62,7 @@ if ($AsJson) {
 } else {
     Write-Host "=== ViRead Remote OCR Worker Status ==="
     Write-Host "Endpoint:  $($report.endpoint) (listening=$listening)"
+    Write-Host "Autostart: state=$($autostartReport.statePresent) supervisorRunning=$supervisorRunning (pid=$supervisorPid, status=$($autostartReport.status), stopSentinel=$stopSentinelPresent)"
     if ($health) {
         $modelProfile = if ($health.model) { $health.model.profile } else { "unknown" }
         $priority = if ($health.system) { $health.system.process_priority } else { "unknown" }

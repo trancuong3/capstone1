@@ -16,22 +16,38 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ocr_worker.service import (  # noqa: E402
+    BELOW_NORMAL_PRIORITY_CLASS,
     CPU_THREADS,
     EXPECTED_FLOW1_TRDG_SHA256,
+    NORMAL_PRIORITY_CLASS,
+    ORIGINAL_VIETOCR_SHA256,
     OcrRuntimeManager,
+    _CUDA_STATS_CACHE,
+    _CUDA_STATS_CACHE_LOCK,
+    apply_windows_process_priority,
     build_smoke_test_image_bytes,
     build_worker_http_app,
     configure_cpu_thread_caps,
+    get_system_memory_stats,
     install_vietocr_safe_config_loader,
     install_zero_db_config_shim,
+    resolve_windows_process_priority,
+    set_windows_below_normal_priority,
 )
 from ocr_worker.worker import (  # noqa: E402
     DEFAULT_BACKEND_TIMEOUT_SECONDS,
+    DEFAULT_HEARTBEAT_SECONDS,
     BackendOcrClient,
+    apply_loopback_quiet_standby_keepalive_guard,
     compute_adaptive_poll_delay,
+    compute_degraded_retry_backoff,
+    drain_queue_synchronously,
     is_quiet_standby_enabled,
+    main as worker_main,
     process_claimed_job,
+    resolve_max_degraded_seconds,
     resolve_quiet_standby_keepalive_seconds,
+    run_worker_forever,
 )
 
 
@@ -1283,6 +1299,809 @@ sys.exit(2)
             )
             self.assertNotIn(secret_token, proc2.stdout)
             self.assertNotIn(secret_token, proc2.stderr)
+
+    def test_backend_client_retries_transient_502_503_504_on_claim_and_heartbeats(self):
+        import json
+
+        token = "r" * 40
+        counts = {"worker_hb": 0, "job_hb": 0, "claim": 0, "conflict_hb": 0, "timeout_claim": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path == "/internal/ocr-jobs/worker-heartbeat":
+                counts["worker_hb"] += 1
+                if counts["worker_hb"] < 3:
+                    return httpx.Response(503, text="restarting")
+                return httpx.Response(200, json={"ok": True})
+            if path == "/internal/ocr-jobs/job-1/heartbeat":
+                counts["job_hb"] += 1
+                if counts["job_hb"] == 1:
+                    return httpx.Response(502, text="bad gateway")
+                return httpx.Response(200, json={"cancelled": False, "status": "RUNNING"})
+            if path == "/internal/ocr-jobs/job-conflict/heartbeat":
+                counts["conflict_hb"] += 1
+                return httpx.Response(409, json={"detail": "conflict"})
+            if path == "/internal/ocr-jobs/claim":
+                body = json.loads(request.content.decode("utf-8"))
+                if body.get("worker_id") == "w-readtimeout":
+                    counts["timeout_claim"] += 1
+                    raise httpx.ReadTimeout("slow read after commit")
+                counts["claim"] += 1
+                if counts["claim"] == 1:
+                    return httpx.Response(504, text="gateway timeout")
+                if counts["claim"] == 2:
+                    raise httpx.ConnectError("transient connect failure")
+                return httpx.Response(200, json={"job": {"job_id": "job-1"}})
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(handler),
+            completion_retry_attempts=3,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            self.assertEqual(client.send_worker_heartbeat({"worker_id": "w-1"}), {"ok": True})
+            self.assertEqual(counts["worker_hb"], 3)
+
+            self.assertEqual(
+                client.heartbeat_job("job-1", worker_id="w-1", fencing_token=1),
+                {"cancelled": False, "status": "RUNNING"},
+            )
+            self.assertEqual(counts["job_hb"], 2)
+
+            self.assertEqual(
+                client.heartbeat_job("job-conflict", worker_id="w-1", fencing_token=1),
+                {"cancelled": True, "status": "CONFLICT"},
+            )
+            self.assertEqual(counts["conflict_hb"], 1)
+
+            claimed = client.claim_next_job("w-1")
+            self.assertEqual(claimed, {"job_id": "job-1"})
+            self.assertEqual(counts["claim"], 3)
+
+            with self.assertRaises(httpx.ReadTimeout):
+                client.claim_next_job("w-readtimeout")
+            self.assertEqual(counts["timeout_claim"], 1)
+        finally:
+            client.close()
+
+    def test_degraded_paddle_failure_preserves_last_error_and_skips_smoke_verification(self):
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import MagicMock
+
+        self.assertEqual(os.environ.get("LMDB_FORCE_CPYTHON"), "1")
+        mem_stats = get_system_memory_stats()
+        self.assertIn("pagefile_total_mb", mem_stats)
+        self.assertIn("pagefile_available_mb", mem_stats)
+        if sys.platform == "win32":
+            self.assertIsNotNone(mem_stats["pagefile_total_mb"])
+            self.assertIsNotNone(mem_stats["pagefile_available_mb"])
+
+        runtime = OcrRuntimeManager(worker_id="w-degraded-paddle")
+        fake_ocr_mod = ModuleType("app.services.ocr_engine")
+        fake_ocr_mod._paddle_engine = None
+        fake_ocr_mod._paddle_initialization_error = "DistutilsPlatformError"
+        fake_ocr_mod._paddle_import_error = "DistutilsPlatformError"
+        fake_ocr_mod._vietocr_engine = object()
+        fake_ocr_mod._vietocr_initialization_error = None
+        fake_ocr_mod._vietocr_import_error = None
+        fake_ocr_mod._v2_artifact_from_storage = lambda _active: ("fake.pth", None, None)
+        fake_ocr_mod.set_active_viread_model_cache = lambda _item: None
+        fake_ocr_mod.warmup_ocr_engines = lambda: None
+        fake_ocr_mod.get_loaded_vietocr_runtime_status = lambda: {
+            "loaded_profile": "ORIGINAL",
+            "loaded_checkpoint_sha256": ORIGINAL_VIETOCR_SHA256,
+        }
+        fake_ocr_mod.extract_text_and_boxes = MagicMock(
+            return_value={
+                "text": "fallback",
+                "words": [],
+                "metadata": {
+                    "engine": "tesseract",
+                    "engine_statuses": {
+                        "paddleocr": "not_initialized",
+                        "vietocr": "not_run",
+                        "tesseract": "success",
+                    },
+                },
+            }
+        )
+
+        fake_services_pkg = ModuleType("app.services")
+        fake_services_pkg.ocr_engine = fake_ocr_mod
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "app.services": fake_services_pkg,
+                    "app.services.ocr_engine": fake_ocr_mod,
+                },
+            ),
+            patch(
+                "ocr_worker.service.import_ml_modules_safe_order",
+                return_value=(
+                    SimpleNamespace(__version__="2.5.0"),
+                    SimpleNamespace(__version__="2.6.2"),
+                ),
+            ),
+            patch("ocr_worker.service.install_vietocr_safe_config_loader"),
+            patch.object(runtime, "_run_smoke_verification", wraps=runtime._run_smoke_verification) as smoke_spy,
+            patch.object(runtime, "_verify_tesseract_smoke", return_value=True) as tess_spy,
+        ):
+            health = runtime.initialize_and_verify_engines(run_smoke_inference=True)
+            self.assertFalse(health["ready"])
+            self.assertEqual(health["status"], "degraded")
+            self.assertEqual(health["worker_status"], "DEGRADED")
+            self.assertFalse(health["engines"]["paddleocr"]["loaded"])
+            self.assertEqual(
+                health["engines"]["paddleocr"]["error"], "DistutilsPlatformError"
+            )
+            self.assertIsNotNone(health["last_error"])
+            self.assertIn("DistutilsPlatformError", health["last_error"])
+            # Smoke verification MUST be skipped when primary engines failed to load!
+            smoke_spy.assert_not_called()
+            fake_ocr_mod.extract_text_and_boxes.assert_not_called()
+            tess_spy.assert_not_called()
+
+            # Even if _run_smoke_verification is invoked directly and falls back to Tesseract,
+            # last_error must NOT be cleared to None and tesseract.exe must NOT be spammed.
+            runtime._run_smoke_verification(fake_ocr_mod)
+            after_smoke = runtime.health_payload()
+            self.assertFalse(after_smoke["ready"])
+            self.assertIsNotNone(after_smoke["last_error"])
+            self.assertIn("smoke_verification_incomplete", after_smoke["last_error"])
+            tess_spy.assert_not_called()
+
+            # When run_ocr_for_job executes while still degraded, last_error stays preserved.
+            runtime.run_ocr_for_job("job-deg", b"synthetic")
+            self.assertIsNotNone(runtime.health_payload()["last_error"])
+
+            # Now simulate PaddleOCR recovering, then VietOCR failing during maybe_resync_active_model.
+            fake_ocr_mod._paddle_engine = object()
+            fake_ocr_mod._paddle_initialization_error = None
+            fake_ocr_mod._paddle_import_error = None
+            fake_ocr_mod.extract_text_and_boxes.return_value = {
+                "text": "Xin chào Việt Nam",
+                "words": [{"text": "Xin"}],
+                "metadata": {
+                    "engine": "paddleocr_vietocr_dual",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                },
+            }
+            recovered = runtime.initialize_and_verify_engines(
+                run_smoke_inference=True, force_reinit=True
+            )
+            self.assertTrue(recovered["ready"])
+            self.assertIsNone(recovered["last_error"])
+
+            new_sha = "a" * 64
+            fake_ocr_mod._vietocr_engine = None
+            fake_ocr_mod._vietocr_initialization_error = "RuntimeError"
+            resynced = runtime.maybe_resync_active_model(
+                manifest_fetcher=lambda: {
+                    "profile": "FLOW2_ADMIN_VERIFIED",
+                    "checkpoint_sha256": new_sha,
+                    "shards": [],
+                },
+                artifact_fetcher=lambda _k, _i: b"",
+                force=True,
+            )
+            self.assertTrue(resynced)
+            degraded_resync = runtime.health_payload()
+            self.assertFalse(degraded_resync["ready"])
+            self.assertEqual(degraded_resync["engines"]["vietocr"]["error"], "RuntimeError")
+            self.assertIn("RuntimeError", str(degraded_resync["last_error"]))
+
+    def test_claim_next_job_blocked_when_not_ready_and_loopback_quiet_standby_guard(self):
+        import json
+        from unittest.mock import MagicMock
+
+        # 1. Loopback QuietStandby keepalive clamp contract
+        with patch.dict(os.environ, {"SPACE_ID": ""}, clear=False):
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=False,
+                    bind_host="127.0.0.1",
+                    keepalive_seconds=0.0,
+                ),
+                20.0,
+            )
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=False,
+                    bind_host="localhost",
+                    keepalive_seconds=0.0,
+                ),
+                20.0,
+            )
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=False,
+                    bind_host="::1",
+                    keepalive_seconds=0.0,
+                ),
+                20.0,
+            )
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=True,
+                    bind_host="127.0.0.1",
+                    keepalive_seconds=0.0,
+                ),
+                0.0,
+            )
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=False,
+                    bind_host="0.0.0.0",
+                    keepalive_seconds=0.0,
+                ),
+                0.0,
+            )
+        with patch.dict(os.environ, {"SPACE_ID": "demo/viread-ocr"}, clear=False):
+            self.assertEqual(
+                apply_loopback_quiet_standby_keepalive_guard(
+                    use_quiet_standby=True,
+                    use_scale_to_zero=False,
+                    bind_host="127.0.0.1",
+                    keepalive_seconds=0.0,
+                ),
+                0.0,
+            )
+
+        # 2. drain_queue_synchronously must NEVER call claim_next_job when runtime is degraded
+        token = "q" * 40
+        claim_calls = 0
+        heartbeats: list[dict] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal claim_calls
+            if request.url.path == "/internal/ocr-jobs/claim":
+                claim_calls += 1
+                return httpx.Response(200, json={"job": {"job_id": "should-not-claim"}})
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                heartbeats.append(json.loads(request.content.decode("utf-8")))
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(404)
+
+        degraded_rt = OcrRuntimeManager(worker_id="w-drain-degraded")
+        with degraded_rt._state_lock:
+            degraded_rt._engines["paddleocr"].installed = True
+            degraded_rt._engines["paddleocr"].loaded = False
+            degraded_rt._engines["paddleocr"].error = "DistutilsPlatformError"
+            degraded_rt._engines["vietocr"].installed = True
+            degraded_rt._engines["vietocr"].loaded = True
+            degraded_rt._last_error = "paddleocr:DistutilsPlatformError"
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+        )
+        try:
+            with patch.object(
+                degraded_rt,
+                "initialize_and_verify_engines",
+                side_effect=lambda **_kw: degraded_rt.health_payload(),
+            ):
+                drained = drain_queue_synchronously(
+                    client,
+                    degraded_rt,
+                    straggler_wait_seconds=0.01,
+                )
+            self.assertEqual(drained, 0)
+            self.assertEqual(claim_calls, 0)
+        finally:
+            client.close()
+
+        # 3. QuietStandby loopback keepalive runs maybe_resync_active_model and blocks claim if resync degrades
+        resync_calls = 0
+        initial_burst_claim_calls = 0
+        keepalive_claim_calls = 0
+        total_backend_requests = 0
+        wait_invocations = 0
+
+        def keepalive_backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal initial_burst_claim_calls, keepalive_claim_calls, total_backend_requests
+            total_backend_requests += 1
+            if total_backend_requests > 25:
+                raise AssertionError("Unexpected spin loop in keepalive_backend_handler")
+            if request.url.path == "/internal/ocr-jobs/claim":
+                if wait_invocations < 2 and resync_calls == 0:
+                    initial_burst_claim_calls += 1
+                    return httpx.Response(200, json={"job": None})
+                keepalive_claim_calls += 1
+                return httpx.Response(200, json={"job": {"job_id": "should-not-claim-in-keepalive"}})
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(404)
+
+        ka_clock = [2000.0]
+
+        class _KeepaliveDegradingRuntime(OcrRuntimeManager):
+            def __post_init__(self) -> None:
+                super().__post_init__()
+                with self._state_lock:
+                    self._ocr_engine_mod = object()
+                    self._engines["paddleocr"].installed = True
+                    self._engines["paddleocr"].loaded = True
+                    self._engines["vietocr"].installed = True
+                    self._engines["vietocr"].loaded = True
+
+            def initialize_and_verify_engines(self, **_kwargs):
+                return self.health_payload()
+
+            def maybe_resync_active_model(self, **_kwargs) -> bool:
+                nonlocal resync_calls
+                resync_calls += 1
+                with self._state_lock:
+                    self._engines["vietocr"].loaded = False
+                    self._engines["vietocr"].inference_verified = False
+                    self._engines["vietocr"].error = "RuntimeError"
+                    self._last_error = "vietocr:RuntimeError"
+                return True
+
+        def fake_wait_wake_or_stop(stop_event, _wake_event, timeout_seconds):
+            nonlocal wait_invocations
+            wait_invocations += 1
+            if wait_invocations > 10:
+                stop_event.set()
+                raise AssertionError("Unexpected wait loop spin in fake_wait_wake_or_stop")
+            if wait_invocations == 1:
+                # First wait: expire initial burst window so next iteration enters QuietStandby keepalive
+                ka_clock[0] += float(timeout_seconds or 20.0) + 200.0
+                return False
+            if wait_invocations == 2:
+                # Second wait is keepalive_wait (clamped to 20.0s on loopback!)
+                self.assertEqual(timeout_seconds, 20.0)
+                ka_clock[0] += 20.0
+                return False
+            stop_event.set()
+            return False
+
+        def make_ka_client(backend_url: str, worker_token: str) -> BackendOcrClient:
+            return BackendOcrClient(
+                backend_url,
+                worker_token,
+                transport=httpx.MockTransport(keepalive_backend_handler),
+            )
+
+        fake_ka_server = MagicMock()
+        fake_ka_server.run = lambda: None
+
+        with (
+            patch.dict(
+                os.environ,
+                {"SPACE_ID": "", "VIREAD_OCR_SCALE_TO_ZERO": "false"},
+                clear=False,
+            ),
+            patch("ocr_worker.worker.OcrRuntimeManager", _KeepaliveDegradingRuntime),
+            patch("ocr_worker.worker.BackendOcrClient", side_effect=make_ka_client),
+            patch("ocr_worker.worker.uvicorn.Server", return_value=fake_ka_server),
+            patch("ocr_worker.worker._wait_for_wake_or_stop", side_effect=fake_wait_wake_or_stop),
+            patch("ocr_worker.worker._sleep_degraded_backoff", side_effect=lambda stop_ev, *_a, **_kw: (stop_ev.set(), 0.0)[1]),
+            patch("ocr_worker.worker.drain_queue_synchronously", return_value=0),
+            patch("ocr_worker.worker.time.monotonic", side_effect=lambda: ka_clock[0]),
+        ):
+            rc_ka = run_worker_forever(
+                backend_url="https://api.example",
+                worker_token=token,
+                bind_host="127.0.0.1",
+                bind_port=18021,
+                apply_priority=False,
+                quiet_standby=True,
+                quiet_standby_keepalive_seconds=0.0,
+                wake_burst_seconds=10.0,
+                max_degraded_seconds=180.0,
+            )
+        self.assertEqual(rc_ka, 0)
+        self.assertEqual(initial_burst_claim_calls, 1)
+        self.assertEqual(resync_calls, 1)
+        self.assertEqual(keepalive_claim_calls, 0)
+
+    def test_degraded_watchdog_progressive_backoff_and_exit_code_2(self):
+        import json
+        from unittest.mock import MagicMock
+
+        self.assertEqual(
+            [compute_degraded_retry_backoff(i) for i in range(5)],
+            [15.0, 30.0, 60.0, 60.0, 60.0],
+        )
+        with patch.dict(os.environ, {"VIREAD_OCR_MAX_DEGRADED_SECONDS": ""}, clear=False):
+            self.assertEqual(resolve_max_degraded_seconds(), 180.0)
+        self.assertEqual(resolve_max_degraded_seconds(0), 0.0)
+        self.assertEqual(resolve_max_degraded_seconds(-10), 0.0)
+        self.assertEqual(resolve_max_degraded_seconds(90), 90.0)
+
+        token = "w" * 40
+        claim_calls = 0
+        heartbeat_statuses: list[str] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal claim_calls
+            if request.url.path == "/internal/ocr-jobs/claim":
+                claim_calls += 1
+                return httpx.Response(200, json={"job": {"job_id": "never"}})
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                body = json.loads(request.content.decode("utf-8"))
+                heartbeat_statuses.append(str(body.get("status")))
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(404)
+
+        fake_clock = [1000.0]
+        recorded_sleeps: list[float] = []
+
+        class _AlwaysDegradedRuntime(OcrRuntimeManager):
+            def __post_init__(self) -> None:
+                super().__post_init__()
+                with self._state_lock:
+                    self._ocr_engine_mod = object()
+                    self._engines["paddleocr"].installed = True
+                    self._engines["paddleocr"].loaded = False
+                    self._engines["paddleocr"].error = "DistutilsPlatformError"
+                    self._engines["vietocr"].installed = True
+                    self._engines["vietocr"].loaded = True
+                    self._last_error = "paddleocr:DistutilsPlatformError"
+
+            def initialize_and_verify_engines(self, **_kwargs):
+                return self.health_payload()
+
+        def fake_sleep_backoff(stop_event, wait_seconds, **_kwargs):
+            recorded_sleeps.append(round(float(wait_seconds), 3))
+            fake_clock[0] += float(wait_seconds)
+            return 0.0
+
+        def make_mock_client(backend_url: str, worker_token: str) -> BackendOcrClient:
+            return BackendOcrClient(
+                backend_url,
+                worker_token,
+                transport=httpx.MockTransport(backend_handler),
+            )
+
+        fake_server = MagicMock()
+        fake_server.run = lambda: None
+
+        with (
+            patch("ocr_worker.worker.OcrRuntimeManager", _AlwaysDegradedRuntime),
+            patch("ocr_worker.worker.BackendOcrClient", side_effect=make_mock_client),
+            patch("ocr_worker.worker.uvicorn.Server", return_value=fake_server),
+            patch("ocr_worker.worker._sleep_degraded_backoff", side_effect=fake_sleep_backoff),
+            patch("ocr_worker.worker.time.monotonic", side_effect=lambda: fake_clock[0]),
+        ):
+            rc = run_worker_forever(
+                backend_url="https://api.example",
+                worker_token=token,
+                bind_host="127.0.0.1",
+                bind_port=18020,
+                apply_priority=False,
+                quiet_standby=False,
+                max_degraded_seconds=180.0,
+            )
+
+        self.assertEqual(rc, 2)
+        self.assertEqual(claim_calls, 0)
+        self.assertEqual(recorded_sleeps, [15.0, 30.0, 60.0, 60.0, 15.0])
+        self.assertIn("DEGRADED", heartbeat_statuses)
+        self.assertEqual(heartbeat_statuses[-1], "OFFLINE")
+
+    def test_health_payload_caches_vram_skips_cuda_when_locked_and_reports_starting(self):
+        import importlib.machinery
+        from types import ModuleType, SimpleNamespace
+
+        with _CUDA_STATS_CACHE_LOCK:
+            saved_cache = dict(_CUDA_STATS_CACHE)
+            _CUDA_STATS_CACHE.update(
+                {
+                    "updated_at": 0.0,
+                    "cuda_available": False,
+                    "vram_free_mb": None,
+                    "vram_total_mb": None,
+                }
+            )
+
+        mem_get_info_calls = 0
+
+        def fake_mem_get_info(device: int = 0) -> tuple[int, int]:
+            nonlocal mem_get_info_calls
+            mem_get_info_calls += 1
+            return (4096 * 1024 * 1024, 6144 * 1024 * 1024)
+
+        fake_torch = SimpleNamespace(
+            __spec__=importlib.machinery.ModuleSpec("torch", loader=None),
+            __version__="2.5.0",
+            cuda=SimpleNamespace(
+                is_available=lambda: True,
+                mem_get_info=fake_mem_get_info,
+            ),
+            set_num_threads=lambda _n: None,
+        )
+
+        runtime = OcrRuntimeManager(worker_id="w-nonblock-health")
+        with runtime._state_lock:
+            for st in runtime._engines.values():
+                st.installed = True
+                st.loaded = False
+                st.inference_verified = False
+                st.error = None
+
+        try:
+            with patch.dict(sys.modules, {"torch": fake_torch}):
+                # 1. Initial unlocked call queries CUDA once and caches VRAM stats.
+                h1 = runtime.health_payload()
+                self.assertEqual(mem_get_info_calls, 1)
+                self.assertTrue(h1["system"]["cuda_available"])
+                self.assertEqual(h1["system"]["vram_free_mb"], 4096.0)
+                self.assertEqual(h1["system"]["vram_total_mb"], 6144.0)
+                self.assertEqual(h1["worker_status"], "DEGRADED")
+
+                # 2. Second call within 30s TTL must NOT re-query torch.cuda.mem_get_info.
+                h2 = runtime.health_payload()
+                self.assertEqual(mem_get_info_calls, 1)
+                self.assertEqual(h2["system"]["vram_free_mb"], 4096.0)
+
+                # 3. Expire cache TTL, hold _inference_lock, and mark _initializing=True:
+                #    health_payload() must NOT invoke mem_get_info and must report STARTING.
+                with _CUDA_STATS_CACHE_LOCK:
+                    _CUDA_STATS_CACHE["updated_at"] = 0.0
+
+                with runtime._inference_lock:
+                    with runtime._state_lock:
+                        runtime._initializing = True
+                    try:
+                        self.assertTrue(runtime.is_initializing())
+                        h_locked = runtime.health_payload()
+                        hb_locked = runtime.heartbeat_payload()
+                    finally:
+                        with runtime._state_lock:
+                            runtime._initializing = False
+
+                self.assertEqual(mem_get_info_calls, 1)
+                self.assertEqual(h_locked["worker_status"], "STARTING")
+                self.assertFalse(h_locked["ready"])
+                self.assertTrue(h_locked["system"]["cuda_available"])
+                self.assertEqual(h_locked["system"]["vram_free_mb"], 4096.0)
+                self.assertEqual(h_locked["system"]["vram_total_mb"], 6144.0)
+                self.assertEqual(hb_locked["status"], "STARTING")
+
+                # 4. Verify initialize_and_verify_engines sets STARTING during warmup and clears in finally.
+                observed_during_warmup: dict[str, object] = {}
+                fake_ocr_mod = ModuleType("app.services.ocr_engine")
+                fake_ocr_mod._paddle_engine = object()
+                fake_ocr_mod._vietocr_engine = object()
+                fake_ocr_mod._v2_artifact_from_storage = lambda _a: ("fake.pth", None, None)
+                fake_ocr_mod.set_active_viread_model_cache = lambda _i: None
+                fake_ocr_mod.get_loaded_vietocr_runtime_status = lambda: {
+                    "loaded_profile": "ORIGINAL",
+                    "loaded_checkpoint_sha256": ORIGINAL_VIETOCR_SHA256,
+                }
+
+                def fake_warmup():
+                    # Expire TTL again to confirm warmup lock prevents CUDA query.
+                    with _CUDA_STATS_CACHE_LOCK:
+                        _CUDA_STATS_CACHE["updated_at"] = 0.0
+                    observed_during_warmup["initializing"] = runtime.is_initializing()
+                    observed_during_warmup["health"] = runtime.health_payload()
+                    observed_during_warmup["cuda_calls"] = mem_get_info_calls
+                    return {"paddleocr": "loaded", "vietocr": "loaded"}
+
+                fake_ocr_mod.warmup_ocr_engines = fake_warmup
+                fake_services_pkg = ModuleType("app.services")
+                fake_services_pkg.ocr_engine = fake_ocr_mod
+
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {
+                            "app.services": fake_services_pkg,
+                            "app.services.ocr_engine": fake_ocr_mod,
+                        },
+                    ),
+                    patch(
+                        "ocr_worker.service.import_ml_modules_safe_order",
+                        return_value=(fake_torch, SimpleNamespace(__version__="2.6.2")),
+                    ),
+                    patch("ocr_worker.service.install_vietocr_safe_config_loader"),
+                ):
+                    after_init = runtime.initialize_and_verify_engines(
+                        run_smoke_inference=False
+                    )
+
+                self.assertTrue(observed_during_warmup["initializing"])
+                self.assertEqual(
+                    observed_during_warmup["health"]["worker_status"],
+                    "STARTING",
+                )
+                self.assertEqual(observed_during_warmup["cuda_calls"], 1)
+                self.assertFalse(runtime.is_initializing())
+                self.assertTrue(after_init["ready"])
+                self.assertEqual(after_init["worker_status"], "IDLE")
+                # After lock released and TTL expired, post-init health_payload refreshes cache once.
+                self.assertEqual(mem_get_info_calls, 2)
+        finally:
+            with _CUDA_STATS_CACHE_LOCK:
+                _CUDA_STATS_CACHE.clear()
+                _CUDA_STATS_CACHE.update(saved_cache)
+
+    def test_background_heartbeat_thread_keeps_beating_while_claim_blocked_and_joins_before_offline(self):
+        import json
+        import threading
+        from unittest.mock import MagicMock
+
+        token = "b" * 40
+        hb_lock = threading.Lock()
+        recorded_statuses: list[str] = []
+        claim_entered = threading.Event()
+        enough_bg_hbs = threading.Event()
+        hbs_during_claim = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal hbs_during_claim
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                body = json.loads(request.content.decode("utf-8"))
+                st = str(body.get("status"))
+                with hb_lock:
+                    recorded_statuses.append(st)
+                    if claim_entered.is_set() and st != "OFFLINE":
+                        hbs_during_claim += 1
+                        if hbs_during_claim >= 2:
+                            enough_bg_hbs.set()
+                return httpx.Response(200, json={"ok": True})
+            if request.url.path == "/internal/ocr-jobs/claim":
+                claim_entered.set()
+                # Block the main polling loop until background heartbeat thread sends >= 2 heartbeats!
+                enough_bg_hbs.wait(timeout=3.0)
+                return httpx.Response(200, json={"job": None})
+            return httpx.Response(404)
+
+        class _ReadyRuntime(OcrRuntimeManager):
+            def __post_init__(self) -> None:
+                super().__post_init__()
+                with self._state_lock:
+                    self._ocr_engine_mod = object()
+                    self._engines["paddleocr"].installed = True
+                    self._engines["paddleocr"].loaded = True
+                    self._engines["vietocr"].installed = True
+                    self._engines["vietocr"].loaded = True
+
+            def initialize_and_verify_engines(self, **_kwargs):
+                return self.health_payload()
+
+        def make_client(backend_url: str, worker_token: str) -> BackendOcrClient:
+            return BackendOcrClient(
+                backend_url,
+                worker_token,
+                transport=httpx.MockTransport(backend_handler),
+            )
+
+        fake_server = MagicMock()
+        fake_server.run = lambda: None
+
+        def stop_on_first_wait(stop_event, _wake_event, _timeout_seconds):
+            stop_event.set()
+            return False
+
+        with (
+            patch("ocr_worker.worker.OcrRuntimeManager", _ReadyRuntime),
+            patch("ocr_worker.worker.BackendOcrClient", side_effect=make_client),
+            patch("ocr_worker.worker.uvicorn.Server", return_value=fake_server),
+            patch("ocr_worker.worker.drain_queue_synchronously", return_value=0),
+            patch("ocr_worker.worker._wait_for_wake_or_stop", side_effect=stop_on_first_wait),
+        ):
+            rc = run_worker_forever(
+                backend_url="https://api.example",
+                worker_token=token,
+                bind_host="127.0.0.1",
+                bind_port=18022,
+                poll_seconds=0.05,
+                heartbeat_seconds=0.05,
+                apply_priority=False,
+                quiet_standby=False,
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(claim_entered.is_set())
+        self.assertTrue(
+            enough_bg_hbs.is_set(),
+            msg=f"Background heartbeat thread failed to beat while claim blocked: {recorded_statuses}",
+        )
+        self.assertGreaterEqual(hbs_during_claim, 2)
+        self.assertEqual(recorded_statuses[-1], "OFFLINE")
+        self.assertEqual(recorded_statuses.count("OFFLINE"), 1)
+        # Verify background heartbeat thread joined cleanly before return.
+        lingering = [
+            t for t in threading.enumerate() if t.name == "ocr_worker_heartbeat" and t.is_alive()
+        ]
+        self.assertEqual(lingering, [])
+
+    def test_default_heartbeat_15s_and_windows_priority_defaults_to_normal(self):
+        import inspect
+        from unittest.mock import MagicMock
+
+        # 1. Default heartbeat interval is 15.0s across constant, function signature, and CLI.
+        self.assertEqual(DEFAULT_HEARTBEAT_SECONDS, 15.0)
+        self.assertEqual(
+            inspect.signature(run_worker_forever).parameters["heartbeat_seconds"].default,
+            15.0,
+        )
+
+        with (
+            patch.dict(os.environ, {"VIREAD_OCR_HEARTBEAT_SECONDS": ""}, clear=False),
+            patch("ocr_worker.worker.run_worker_forever", return_value=0) as run_mock,
+        ):
+            self.assertEqual(worker_main([]), 0)
+            self.assertEqual(run_mock.call_args.kwargs["heartbeat_seconds"], 15.0)
+
+        with (
+            patch.dict(os.environ, {"VIREAD_OCR_HEARTBEAT_SECONDS": "12"}, clear=False),
+            patch("ocr_worker.worker.run_worker_forever", return_value=0) as run_mock,
+        ):
+            self.assertEqual(worker_main([]), 0)
+            self.assertEqual(run_mock.call_args.kwargs["heartbeat_seconds"], 12.0)
+
+        with patch("ocr_worker.worker.run_worker_forever", return_value=0) as run_mock:
+            self.assertEqual(worker_main(["--heartbeat-seconds", "18"]), 0)
+            self.assertEqual(run_mock.call_args.kwargs["heartbeat_seconds"], 18.0)
+
+        # 2. Windows process priority defaults to Normal unless VIREAD_OCR_PROCESS_PRIORITY requests BelowNormal.
+        with patch.dict(os.environ, {"VIREAD_OCR_PROCESS_PRIORITY": ""}, clear=False):
+            self.assertEqual(
+                resolve_windows_process_priority(),
+                ("Normal", NORMAL_PRIORITY_CLASS),
+            )
+        with patch.dict(os.environ, {"VIREAD_OCR_PROCESS_PRIORITY": "BelowNormal"}, clear=False):
+            self.assertEqual(
+                resolve_windows_process_priority(),
+                ("BelowNormal", BELOW_NORMAL_PRIORITY_CLASS),
+            )
+        with patch.dict(os.environ, {"VIREAD_OCR_PROCESS_PRIORITY": "below_normal"}, clear=False):
+            self.assertEqual(
+                resolve_windows_process_priority(),
+                ("BelowNormal", BELOW_NORMAL_PRIORITY_CLASS),
+            )
+
+        fake_kernel32 = MagicMock()
+        applied_classes: list[int] = []
+
+        def fake_set_priority(_handle, prio_class):
+            applied_classes.append(prio_class)
+            return 1
+
+        fake_kernel32.SetPriorityClass.side_effect = fake_set_priority
+        fake_kernel32.GetPriorityClass.side_effect = lambda _h: applied_classes[-1]
+
+        with (
+            patch("ocr_worker.service.sys.platform", "win32"),
+            patch("ocr_worker.service._kernel32_handle", return_value=(fake_kernel32, 1234)),
+        ):
+            with patch.dict(os.environ, {"VIREAD_OCR_PROCESS_PRIORITY": ""}, clear=False):
+                res_default = set_windows_below_normal_priority()
+                self.assertTrue(res_default["applied"])
+                self.assertEqual(res_default["requested"], "Normal")
+                self.assertEqual(res_default["priority_class"], "Normal")
+                self.assertEqual(applied_classes[-1], NORMAL_PRIORITY_CLASS)
+
+            with patch.dict(
+                os.environ,
+                {"VIREAD_OCR_PROCESS_PRIORITY": "BelowNormal"},
+                clear=False,
+            ):
+                res_below = apply_windows_process_priority()
+                self.assertTrue(res_below["applied"])
+                self.assertEqual(res_below["requested"], "BelowNormal")
+                self.assertEqual(res_below["priority_class"], "BelowNormal")
+                self.assertEqual(applied_classes[-1], BELOW_NORMAL_PRIORITY_CLASS)
 
 
 if __name__ == "__main__":

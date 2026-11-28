@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "dd4a9ea4-b571-5b25-a04e-dc065e3a38ca",
+      "text": "Giữa trùng khơi xanh ngọn hải đăng",
+      "start_ms": 2609,
+      "end_ms": 7174,
+      "syllables": [
+        {
+          "id": "22d89f8b-af78-5fc8-8e24-401004ea16ed",
+          "text": "Giữa",
+          "start_ms": 2609,
+          "end_ms": 3196
+        },
+        {
+          "id": "5b9fb62b-3c50-5401-a2b0-dc1566f6581e",
+          "text": "trùng",
+          "start_ms": 3196,
+          "end_ms": 3783
+        },
+        {
+          "id": "2481fd07-cef3-5b36-9613-e27aa695404d",
+          "text": "khơi",
+          "start_ms": 3783,
+          "end_ms": 4370
+        },
+        {
+          "id": "c0982e30-0ced-5b0b-a96d-94b0298e64a3",
+          "text": "xanh",
+          "start_ms": 4370,
+          "end_ms": 4957
+        },
+        {
+          "id": "9ee6e2f4-b317-5e66-95d9-8e09e78b3671",
+          "text": "ngọn",
+          "start_ms": 4957,
+          "end_ms": 5544
+        },
+        {
+          "id": "7992ab1e-aac0-53e8-b86f-85dc77387bdc",
+          "text": "hải",
+          "start_ms": 5544,
+          "end_ms": 6131
+        },
+        {
+          "id": "ebf9346e-d77d-5f8e-824a-19371b6077c7",
+          "text": "đăng",
+          "start_ms": 6131,
+          "end_ms": 7174
+        }
+      ]
+    },
+    {
+      "id": "d428fd97-3b13-5128-9746-0538bea7ad2d",
+      "text": "Đứng canh biển rộng suốt tháng năm",
+      "start_ms": 7826,
+      "end_ms": 12391,
+      "syllables": [
+        {
+          "id": "dae37d8d-76e4-5a14-b980-ce8434a7f115",
+          "text": "Đứng",
+          "start_ms": 7826,
+          "end_ms": 8413
+        },
+        {
+          "id": "8bd9d7fd-58c4-5d8a-b022-88a5e9f92b87",
+          "text": "canh",
+          "start_ms": 8413,
+          "end_ms": 9000
+        },
+        {
+          "id": "73848929-c8ff-5c97-acd5-df0babc50980",
+          "text": "biển",
+          "start_ms": 9000,
+          "end_ms": 9587
+        },
+        {
+          "id": "4a4a888b-2c83-5221-8748-a41fa32f0eb2",
+          "text": "rộng",
+          "start_ms": 9587,
+          "end_ms": 10174
+        },
+        {
+          "id": "68206834-04ff-59e2-944c-55748145c8fd",
+          "text": "suốt",
+          "start_ms": 10174,
+          "end_ms": 10761
+        },
+        {
+          "id": "5c1198fa-ef98-5f93-8cd1-3dc2c5f664d8",
+          "text": "tháng",
+          "start_ms": 10761,
+          "end_ms": 11348
+        },
+        {
+          "id": "aafd1e55-62af-5460-be08-59df59a75fbd",
+          "text": "năm",
+          "start_ms": 11348,
+          "end_ms": 12391
+        }
+      ]
+    },
+    {
+      "id": "aa7c44b3-13b5-580c-b50c-ddadcb1d3c43",
+      "text": "Mặc cho sóng vỗ cùng giông gió",
+      "start_ms": 13043,
+      "end_ms": 17608,
+      "syllables": [
+        {
+          "id": "50af10c0-83f4-5676-af8f-3dc8f52d8d98",
+          "text": "Mặc",
+          "start_ms": 13043,
+          "end_ms": 13630
+        },
+        {
+          "id": "0bb07c77-19d4-528a-8091-6ec7630b0e50",
+          "text": "cho",
+          "start_ms": 13630,
+          "end_ms": 14217
+        },
+        {
+          "id": "7a6e7220-cd4b-51b8-9d2b-2399156c141a",
+          "text": "sóng",
+          "start_ms": 14217,
+          "end_ms": 14804
+        },
+        {
+          "id": "5c612e42-d5c2-5929-9f01-5ebceeda977f",
+          "text": "vỗ",
+          "start_ms": 14804,
+          "end_ms": 15391
+        },
+        {
+          "id": "27508ad7-2961-5fa7-8890-ae88b1dd7532",
+          "text": "cùng",
+          "start_ms": 15391,
+          "end_ms": 15978
+        },
+        {
+          "id": "d3071b68-a4bd-5ea3-b431-a2008bd13849",
+          "text": "giông",
+          "start_ms": 15978,
+          "end_ms": 16565
+        },
+        {
+          "id": "bc3bea37-fa18-5903-ad94-3d89f923bb07",
+          "text": "gió",
+          "start_ms": 16565,
+          "end_ms": 17608
+        }
+      ]
+    },
+    {
+      "id": "b625e3b5-c24d-568e-a7d9-161759653dc9",
+      "text": "Ngọn đèn kiên cường chiếu xa xăm",
+      "start_ms": 18260,
+      "end_ms": 22825,
+      "syllables": [
+        {
+          "id": "7e3891a4-cd17-520b-a4cf-7df108a504c4",
+          "text": "Ngọn",
+          "start_ms": 18260,
+          "end_ms": 18847
+        },
+        {
+          "id": "d8ecfa39-2275-5939-88ed-89bb30110067",
+          "text": "đèn",
+          "start_ms": 18847,
+          "end_ms": 19434
+        },
+        {
+          "id": "c5eea932-2787-5dbd-91f0-f0fe74c1fe5a",
+          "text": "kiên",
+          "start_ms": 19434,
+          "end_ms": 20021
+        },
+        {
+          "id": "cce4bc08-ded4-51a3-883d-202329c468b2",
+          "text": "cường",
+          "start_ms": 20021,
+          "end_ms": 20608
+        },
+        {
+          "id": "ee025a3d-e976-5858-8b8c-be5cc098120b",
+          "text": "chiếu",
+          "start_ms": 20608,
+          "end_ms": 21195
+        },
+        {
+          "id": "17b1299d-da92-575f-86aa-613054ee7516",
+          "text": "xa",
+          "start_ms": 21195,
+          "end_ms": 21782
+        },
+        {
+          "id": "b3e84198-76b1-5fda-8491-532d9a8a30e3",
+          "text": "xăm",
+          "start_ms": 21782,
+          "end_ms": 22825
+        }
+      ]
+    },
+    {
+      "id": "65f74286-f4a1-59c6-a1d0-1aee1a72aebb",
+      "text": "Dẫn đoàn tàu cá về bến ấm",
+      "start_ms": 23477,
+      "end_ms": 28042,
+      "syllables": [
+        {
+          "id": "98db392d-2b66-5e0e-a1bd-8d3094a1ab3d",
+          "text": "Dẫn",
+          "start_ms": 23477,
+          "end_ms": 24064
+        },
+        {
+          "id": "d45a1684-2baa-5e96-974f-4b5455f030c4",
+          "text": "đoàn",
+          "start_ms": 24064,
+          "end_ms": 24651
+        },
+        {
+          "id": "e7e5e024-1beb-5d1b-924b-93d5d7a7faee",
+          "text": "tàu",
+          "start_ms": 24651,
+          "end_ms": 25238
+        },
+        {
+          "id": "98cb0a37-89dc-5c5d-9f6c-b86bc8bdf113",
+          "text": "cá",
+          "start_ms": 25238,
+          "end_ms": 25825
+        },
+        {
+          "id": "85bf94e3-a836-53de-9d14-894e4f11433d",
+          "text": "về",
+          "start_ms": 25825,
+          "end_ms": 26412
+        },
+        {
+          "id": "da8a84c5-e8ce-55a2-932c-496bb228cf0a",
+          "text": "bến",
+          "start_ms": 26412,
+          "end_ms": 26999
+        },
+        {
+          "id": "4d44a569-09dc-5428-8b55-fcb806c8857a",
+          "text": "ấm",
+          "start_ms": 26999,
+          "end_ms": 28042
+        }
+      ]
+    },
+    {
+      "id": "c16f9ce0-fd07-5323-ac19-ad0f1fcf4885",
+      "text": "Biển trời Tổ quốc mãi bình yên",
+      "start_ms": 28694,
+      "end_ms": 33259,
+      "syllables": [
+        {
+          "id": "aea6821c-6d94-5bc7-8694-db565edb5a44",
+          "text": "Biển",
+          "start_ms": 28694,
+          "end_ms": 29281
+        },
+        {
+          "id": "edb3d30d-6ded-561b-a4e3-1091e68823a2",
+          "text": "trời",
+          "start_ms": 29281,
+          "end_ms": 29868
+        },
+        {
+          "id": "b6bfc90e-80ac-56fa-a130-afab8e0aaabb",
+          "text": "Tổ",
+          "start_ms": 29868,
+          "end_ms": 30455
+        },
+        {
+          "id": "1a7442ae-3f9a-5603-8b10-394161e0a309",
+          "text": "quốc",
+          "start_ms": 30455,
+          "end_ms": 31042
+        },
+        {
+          "id": "290e9df1-0714-55e1-8951-5a2d16bbe7aa",
+          "text": "mãi",
+          "start_ms": 31042,
+          "end_ms": 31629
+        },
+        {
+          "id": "af50c279-065d-5c87-ae04-6a35840da9f3",
+          "text": "bình",
+          "start_ms": 31629,
+          "end_ms": 32216
+        },
+        {
+          "id": "a9da1a17-8824-5d50-91dc-9f8614e1ece0",
+          "text": "yên",
+          "start_ms": 32216,
+          "end_ms": 33259
+        }
+      ]
+    }
+  ]
+}

@@ -30,12 +30,20 @@
     ".next/dev/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
     ".next-e2e/dev/types/**/*.ts",
-    ".next-figma-build/types/**/*.ts",
-    ".next-figma-build/dev/types/**/*.ts",
-    ".next-overnight-build/types/**/*.ts",
-    ".next-overnight-build/dev/types/**/*.ts",
-    ".next-ppb-e2e/types/**/*.ts",
-    ".next-ppb-e2e/dev/types/**/*.ts"
+    ".next-gate/types/**/*.ts",
+    ".next-gate/dev/types/**/*.ts",
+    ".next-browser-verify/types/**/*.ts",
+    ".next-browser-verify/dev/types/**/*.ts",
+    ".next-e2e-tts/types/**/*.ts",
+    ".next-e2e-tts/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    ".next-*",
+    ".next-*/**",
+    "frontend/**",
+    "coverage",
+    "playwright-report",
+    "test-results"
+  ]
 }

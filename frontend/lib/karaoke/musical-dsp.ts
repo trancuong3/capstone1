@@ -15,8 +15,116 @@
 
 export const CHILD_MIN_F0_HZ = 130;
 export const CHILD_MAX_F0_HZ = 880;
+/** Extended upper bound (~C6) for high-pitched primary-school child singing. */
+export const CHILD_EXTENDED_MAX_F0_HZ = 1100;
 export const DEFAULT_DSP_SAMPLE_RATE = 48_000;
 export const DEFAULT_DSP_FRAME_SIZE = 2048;
+export const MIC_LATENCY_MIN_MS = -250;
+export const MIC_LATENCY_MAX_MS = 250;
+export const DEFAULT_MIC_LATENCY_MS = 40;
+
+export interface LivePitchSample {
+  timeMs: number;
+  rawMidi: number | null;
+  smoothedMidi: number | null;
+  frequencyHz: number | null;
+  clarity: number;
+  rms: number;
+  vocalBandRms: number;
+  voiced: boolean;
+  signalState: LiveDspTelemetry["signalState"];
+}
+
+/**
+ * Low-latency (<40 ms) real-time F0 pitch smoother with:
+ * - 3-frame spike/outlier rejection
+ * - Octave-jump guard (suppresses isolated ±12 semitone errors)
+ * - Light exponential moving average (EMA) for silk-smooth 60fps drawing
+ */
+export class RealtimePitchSmoother {
+  private lastMidi: number | null = null;
+  private pendingJumpMidi: number | null = null;
+  private pendingJumpCount = 0;
+  private unvoicedStreak = 0;
+  private readonly alpha: number;
+
+  constructor(alpha = 0.38) {
+    this.alpha = Math.min(0.85, Math.max(0.15, alpha));
+  }
+
+  reset(): void {
+    this.lastMidi = null;
+    this.pendingJumpMidi = null;
+    this.pendingJumpCount = 0;
+    this.unvoicedStreak = 0;
+  }
+
+  update(rawMidi: number | null, voiced: boolean): number | null {
+    if (!voiced || rawMidi === null || !Number.isFinite(rawMidi)) {
+      this.unvoicedStreak++;
+      this.pendingJumpMidi = null;
+      this.pendingJumpCount = 0;
+      if (this.unvoicedStreak >= 3) {
+        this.lastMidi = null;
+      }
+      return null;
+    }
+
+    this.unvoicedStreak = 0;
+    if (this.lastMidi === null) {
+      this.lastMidi = rawMidi;
+      this.pendingJumpMidi = null;
+      this.pendingJumpCount = 0;
+      return rawMidi;
+    }
+
+    let candidate = rawMidi;
+    const diff = candidate - this.lastMidi;
+
+    // Guard isolated single-frame ±12 semitone octave jumps.
+    if (Math.abs(Math.abs(diff) - 12) <= 1.8) {
+      if (
+        this.pendingJumpMidi !== null &&
+        Math.abs(candidate - this.pendingJumpMidi) <= 1.5
+      ) {
+        this.pendingJumpCount++;
+        if (this.pendingJumpCount < 2) {
+          // Fold back for 1 confirmation frame so brief harmonic glitches never jump.
+          candidate -= 12 * Math.sign(diff);
+        }
+      } else {
+        this.pendingJumpMidi = candidate;
+        this.pendingJumpCount = 1;
+        candidate -= 12 * Math.sign(diff);
+      }
+    } else if (Math.abs(diff) > 6.5) {
+      // Large sudden jump (>6.5 semitones): confirm over 2 consecutive frames before snapping.
+      if (
+        this.pendingJumpMidi !== null &&
+        Math.abs(candidate - this.pendingJumpMidi) <= 2.0
+      ) {
+        this.pendingJumpCount++;
+        if (this.pendingJumpCount >= 2) {
+          this.lastMidi = candidate;
+          this.pendingJumpMidi = null;
+          this.pendingJumpCount = 0;
+          return candidate;
+        }
+      } else {
+        this.pendingJumpMidi = candidate;
+        this.pendingJumpCount = 1;
+      }
+      return this.lastMidi;
+    } else {
+      this.pendingJumpMidi = null;
+      this.pendingJumpCount = 0;
+    }
+
+    const smoothed = this.lastMidi + this.alpha * (candidate - this.lastMidi);
+    this.lastMidi = smoothed;
+    return smoothed;
+  }
+}
 
 const FFT_SIZE = 512;
 const EPS = 1e-12;
@@ -379,6 +487,25 @@ function computeRadix2Fft(ws: YinWorkspace): void {
 }
 
 /**
+ * Zero-Crossing Rate (ZCR) unvoiced/wind/breath/white-noise detector combined
+ * with spectral flatness. Uses sample-rate-invariant `zcrHz` so bright child
+ * vocals on 16 kHz mobile mics stay voiced while broadband white noise, wind,
+ * breath bursts, and high-frequency sibilants are reliably rejected.
+ */
+function isHighZcrNoise(
+  zeroCrossingRate: number,
+  spectralFlatness: number,
+  sampleRate: number,
+): boolean {
+  const zcrHz = zeroCrossingRate * sampleRate * 0.5;
+  return (
+    (zcrHz >= 4500 && spectralFlatness >= 0.22) ||
+    (zcrHz >= 3000 && spectralFlatness >= 0.28) ||
+    (zeroCrossingRate >= 0.42 && spectralFlatness >= 0.24)
+  );
+}
+
+/**
  * Pure TypeScript YIN fundamental frequency detector (de Cheveigné & Kawahara, 2002)
  * with 4th-order 115 Hz hum-rejection high-pass, CMND, and parabolic interpolation.
  */
@@ -515,8 +642,12 @@ export function detectPitchYIN(
   const lowBandRatio = clamp01(lowBandEnergy / (trimmedFullEnergy + EPS));
   const highBandRatio = clamp01(highBandEnergy / (trimmedFullEnergy + EPS));
   const isHumLike = lowBandRatio >= 0.65 && rms >= 0.003;
+  const zcrHz = zeroCrossingRate * sampleRate * 0.5;
+  const isUnvoicedZcrBurst =
+    (zcrHz >= 5000 && highBandRatio >= 0.65) ||
+    (zeroCrossingRate >= 0.42 && highBandRatio >= 0.55);
 
-  if (isHumLike || vocalBandRms < minVocalRms) {
+  if (isHumLike || isUnvoicedZcrBurst || vocalBandRms < minVocalRms) {
     return {
       frequencyHz: null,
       midiNote: null,
@@ -754,8 +885,13 @@ export class MusicalDspAnalyzer {
   private readonly sampleRate: number;
   private readonly lyricSpans: LyricTimeSpan[];
   private readonly headphoneMode: boolean;
+  private readonly maxF0Hz: number;
+  private micLatencyMs: number;
   private readonly frames: DspFrame[] = [];
   private readonly onsets: DspOnset[] = [];
+  private readonly pitchSmoother = new RealtimePitchSmoother(0.38);
+  private readonly pitchRing: LivePitchSample[] = [];
+  private readonly maxPitchRingSize = 600;
 
   private hasPrevSpectrum = false;
   private prevVocalRms = 0;
@@ -774,6 +910,8 @@ export class MusicalDspAnalyzer {
       frameSize?: number;
       lyricSpans?: LyricTimeSpan[];
       headphoneMode?: boolean;
+      maxF0Hz?: number;
+      micLatencyMs?: number;
     } = {},
   ) {
     this.sampleRate = Math.max(
@@ -782,6 +920,11 @@ export class MusicalDspAnalyzer {
     );
     this.lyricSpans = options.lyricSpans ?? [];
     this.headphoneMode = options.headphoneMode ?? false;
+    this.maxF0Hz = options.maxF0Hz ?? CHILD_EXTENDED_MAX_F0_HZ;
+    this.micLatencyMs = Math.max(
+      MIC_LATENCY_MIN_MS,
+      Math.min(MIC_LATENCY_MAX_MS, Math.round(options.micLatencyMs ?? 0)),
+    );
     this.ws = createYinWorkspace(
       this.sampleRate,
       CHILD_MIN_F0_HZ,
@@ -789,9 +932,29 @@ export class MusicalDspAnalyzer {
     );
   }
 
+  setMicLatencyMs(ms: number): void {
+    if (!Number.isFinite(ms)) return;
+    this.micLatencyMs = Math.max(
+      MIC_LATENCY_MIN_MS,
+      Math.min(MIC_LATENCY_MAX_MS, Math.round(ms)),
+    );
+  }
+
+  getPitchRing(): readonly LivePitchSample[] {
+    return this.pitchRing;
+  }
+
+  getLatestPitchSample(): LivePitchSample | null {
+    return this.pitchRing.length > 0
+      ? this.pitchRing[this.pitchRing.length - 1]
+      : null;
+  }
+
   reset(): void {
     this.frames.length = 0;
     this.onsets.length = 0;
+    this.pitchRing.length = 0;
+    this.pitchSmoother.reset();
     this.hasPrevSpectrum = false;
     this.prevVocalRms = 0;
     this.prevVoiced = false;
@@ -803,9 +966,15 @@ export class MusicalDspAnalyzer {
     this.ws.prevMag.fill(0);
   }
 
-  /** Analyze one PCM frame at exact audio-clock timestamp `timeMs`. */
-  processFrame(samples: Float32Array, timeMs: number): DspFrame {
-    const pitch = detectPitchYIN(samples, this.sampleRate, {}, this.ws);
+  /** Analyze one PCM frame at exact audio-clock timestamp `timeMs` (with latency compensation). */
+  processFrame(samples: Float32Array, rawTimeMs: number): DspFrame {
+    const timeMs = Math.max(0, Math.round(rawTimeMs - this.micLatencyMs));
+    const pitch = detectPitchYIN(
+      samples,
+      this.sampleRate,
+      { maxF0Hz: this.maxF0Hz },
+      this.ws,
+    );
     const { spectralFlux, spectralFlatness } = analyzeVocalSpectrum(
       this.ws,
       samples.length,
@@ -831,11 +1000,18 @@ export class MusicalDspAnalyzer {
     const adaptiveMean =
       this.noveltyRingCount > 0 ? ringSum / this.noveltyRingCount : 0;
 
+    const zcrNoise = isHighZcrNoise(
+      pitch.zeroCrossingRate,
+      spectralFlatness,
+      this.sampleRate,
+    );
+    const frameVoiced = pitch.voiced && !pitch.isHumLike && !zcrNoise;
+
     // Detect note/syllable attack: either clear novelty spike OR voiced onset/pitch step.
     const voicedEntry =
-      pitch.voiced && !this.prevVoiced && pitch.vocalBandRms >= 0.01;
+      frameVoiced && !this.prevVoiced && pitch.vocalBandRms >= 0.01;
     const pitchJumpSemitones =
-      pitch.voiced &&
+      frameVoiced &&
       this.prevVoiced &&
       pitch.frequencyHz !== null &&
       this.prevFrequencyHz !== null
@@ -845,6 +1021,7 @@ export class MusicalDspAnalyzer {
       novelty > Math.max(0.085, adaptiveMean * 1.9 + 0.035) &&
       pitch.vocalBandRms >= 0.01 &&
       !pitch.isHumLike &&
+      !zcrNoise &&
       spectralFlatness < 0.48;
     const pitchAttack =
       pitchJumpSemitones >= 1.2 &&
@@ -861,7 +1038,7 @@ export class MusicalDspAnalyzer {
         timeMs,
         strength: Number((novelty + (voicedEntry ? 0.12 : 0)).toFixed(4)),
         vocalBandRms: pitch.vocalBandRms,
-        frequencyHz: pitch.frequencyHz,
+        frequencyHz: frameVoiced ? pitch.frequencyHz : null,
         clarity: pitch.clarity,
       });
     }
@@ -873,13 +1050,13 @@ export class MusicalDspAnalyzer {
       this.noveltyRingCount++;
     }
     this.prevVocalRms = pitch.vocalBandRms;
-    this.prevVoiced = pitch.voiced;
-    this.prevFrequencyHz = pitch.frequencyHz;
+    this.prevVoiced = frameVoiced;
+    this.prevFrequencyHz = frameVoiced ? pitch.frequencyHz : null;
 
     const frame: DspFrame = {
       timeMs,
-      frequencyHz: pitch.frequencyHz,
-      midiNote: pitch.midiNote,
+      frequencyHz: frameVoiced ? pitch.frequencyHz : null,
+      midiNote: frameVoiced ? pitch.midiNote : null,
       clarity: pitch.clarity,
       rms: pitch.rms,
       rmsDb: pitch.rmsDb,
@@ -889,12 +1066,40 @@ export class MusicalDspAnalyzer {
       spectralFlux,
       spectralFlatness,
       zeroCrossingRate: pitch.zeroCrossingRate,
-      voiced: pitch.voiced,
+      voiced: frameVoiced,
       isHumLike: pitch.isHumLike,
       inLyricSpan,
       isOnset,
     };
     this.frames.push(frame);
+
+    const smoothedMidi = this.pitchSmoother.update(
+      frame.midiNote,
+      frameVoiced && spectralFlatness < 0.35,
+    );
+    let signalState: LiveDspTelemetry["signalState"] = "quiet";
+    if (pitch.isHumLike) signalState = "hum";
+    else if (pitch.rms < 0.004) signalState = "quiet";
+    else if (frameVoiced && spectralFlatness < 0.35) signalState = "singing";
+    else if (zcrNoise || spectralFlatness >= 0.35 || pitch.clarity < 0.45)
+      signalState = "noise";
+    else signalState = "bleed";
+
+    this.pitchRing.push({
+      timeMs,
+      rawMidi: frame.midiNote,
+      smoothedMidi,
+      frequencyHz: frame.frequencyHz,
+      clarity: pitch.clarity,
+      rms: pitch.rms,
+      vocalBandRms: pitch.vocalBandRms,
+      voiced: frameVoiced,
+      signalState,
+    });
+    if (this.pitchRing.length > this.maxPitchRingSize) {
+      this.pitchRing.splice(0, this.pitchRing.length - this.maxPitchRingSize);
+    }
+
     return frame;
   }
 
@@ -902,12 +1107,17 @@ export class MusicalDspAnalyzer {
   getLiveTelemetry(): LiveDspTelemetry | null {
     const last = this.frames[this.frames.length - 1];
     if (!last) return null;
+    const zcrNoise = isHighZcrNoise(
+      last.zeroCrossingRate,
+      last.spectralFlatness,
+      this.sampleRate,
+    );
     let signalState: LiveDspTelemetry["signalState"] = "quiet";
     if (last.isHumLike) signalState = "hum";
     else if (last.rms < 0.004) signalState = "quiet";
-    else if (last.voiced && last.spectralFlatness < 0.35)
+    else if (last.voiced && !zcrNoise && last.spectralFlatness < 0.35)
       signalState = "singing";
-    else if (last.spectralFlatness >= 0.35 || last.clarity < 0.45)
+    else if (zcrNoise || last.spectralFlatness >= 0.35 || last.clarity < 0.45)
       signalState = "noise";
     else signalState = "bleed";
 
@@ -998,11 +1208,16 @@ export class MusicalDspAnalyzer {
       if (f.vocalBandRms > peakVocalRms) peakVocalRms = f.vocalBandRms;
 
       const isSilent = f.rms < 0.004;
+      const zcrNoise = isHighZcrNoise(
+        f.zeroCrossingRate,
+        f.spectralFlatness,
+        this.sampleRate,
+      );
       const isNoise =
         !isSilent &&
         !f.isHumLike &&
         !f.voiced &&
-        (f.spectralFlatness >= 0.34 || f.clarity < 0.45);
+        (zcrNoise || f.spectralFlatness >= 0.34 || f.clarity < 0.45);
 
       if (isSilent) silentCount++;
       else {
@@ -1155,21 +1370,62 @@ export interface BrowserMusicalMonitorOptions {
   getCurrentMs: () => number;
   lyricSpans?: LyricTimeSpan[];
   headphoneMode?: boolean;
+  micLatencyMs?: number;
   pollIntervalMs?: number;
   telemetryThrottleMs?: number;
+  /** Optional existing analyzer to continue accumulating across pause/resume within one song. */
+  existingAnalyzer?: MusicalDspAnalyzer;
   onTelemetry?: (telemetry: LiveDspTelemetry) => void;
+  onSample?: (sample: LivePitchSample) => void;
 }
 
 export interface BrowserMusicalMonitor {
   stop: () => void;
+  setMicLatencyMs: (ms: number) => void;
   getSummary: (range?: LyricTimeSpan | null) => DspSessionSummary;
   getAnalyzer: () => MusicalDspAnalyzer;
+  getPitchRing: () => readonly LivePitchSample[];
+  getLatestPitchSample: () => LivePitchSample | null;
 }
+
+const VOCAL_WORKLET_PROCESSOR_SOURCE = `
+class ViReadVocalDspProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buf = new Float32Array(2048);
+    this._write = 0;
+    this._hop = 0;
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const ch = input[0];
+    const len = ch.length;
+    const buf = this._buf;
+    for (let i = 0; i < len; i++) {
+      buf[this._write] = ch[i];
+      this._write = (this._write + 1) & 2047;
+    }
+    this._hop += len;
+    if (this._hop >= 1024) {
+      this._hop = 0;
+      const ordered = new Float32Array(2048);
+      const tail = 2048 - this._write;
+      ordered.set(buf.subarray(this._write), 0);
+      ordered.set(buf.subarray(0, this._write), tail);
+      this.port.postMessage(ordered, [ordered.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor("viread-vocal-dsp-processor", ViReadVocalDspProcessor);
+`;
 
 /**
  * Real-time browser Web Audio analyzer wrapper.
- * Uses pre-allocated Float32Array + AnalyserNode (`getFloatTimeDomainData`) with
- * zero per-frame allocations and automatic teardown on stop/pause/background.
+ * Prefers `AudioWorkletNode` for jitter-free capture and automatically falls back
+ * to `AnalyserNode` (`getFloatTimeDomainData`) in older browsers/WebViews/jsdom.
+ * Automatic teardown on stop/pause/visibilitychange/viread:android-background.
  */
 export function createBrowserMusicalMonitor(
   options: BrowserMusicalMonitorOptions,
@@ -1178,8 +1434,20 @@ export function createBrowserMusicalMonitor(
   let context: AudioContext | undefined;
   let source: MediaStreamAudioSourceNode | undefined;
   let analyser: AnalyserNode | undefined;
+  let workletNode: AudioWorkletNode | undefined;
+  let silentSink: GainNode | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let workletActive = false;
   let stopped = false;
+
+  const onVisibilityChange = () => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      stop();
+    }
+  };
 
   const stop = () => {
     if (stopped) return;
@@ -1187,6 +1455,19 @@ export function createBrowserMusicalMonitor(
     if (timer !== undefined) {
       clearInterval(timer);
       timer = undefined;
+    }
+    try {
+      if (workletNode) {
+        workletNode.port.onmessage = null;
+        workletNode.disconnect();
+      }
+    } catch {
+      /* Already disconnected. */
+    }
+    try {
+      silentSink?.disconnect();
+    } catch {
+      /* Already disconnected. */
     }
     try {
       source?.disconnect();
@@ -1203,6 +1484,7 @@ export function createBrowserMusicalMonitor(
     }
     if (typeof document !== "undefined") {
       document.removeEventListener("viread:android-background", stop);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     }
   };
 
@@ -1222,28 +1504,52 @@ export function createBrowserMusicalMonitor(
     source.connect(analyser);
 
     const sampleRate = context.sampleRate || DEFAULT_DSP_SAMPLE_RATE;
-    const analyzer = new MusicalDspAnalyzer({
-      sampleRate,
-      frameSize: analyser.fftSize,
-      lyricSpans: options.lyricSpans,
-      headphoneMode: options.headphoneMode,
-    });
-    // Single pre-allocated PCM buffer reused for every frame.
+    const baseLatSec =
+      typeof context.baseLatency === "number" &&
+      Number.isFinite(context.baseLatency)
+        ? Math.max(0, context.baseLatency)
+        : 0;
+    const outLatSec =
+      typeof (context as AudioContext & { outputLatency?: number })
+        .outputLatency === "number" &&
+      Number.isFinite(
+        (context as AudioContext & { outputLatency?: number }).outputLatency,
+      )
+        ? Math.max(
+            0,
+            (context as AudioContext & { outputLatency?: number })
+              .outputLatency!,
+          )
+        : 0;
+    const hardwareLatencyMs =
+      baseLatSec + outLatSec > 0
+        ? Math.max(
+            40,
+            Math.min(220, Math.round((baseLatSec + outLatSec) * 1000 + 45)),
+          )
+        : DEFAULT_MIC_LATENCY_MS;
+    const resolvedLatencyMs = options.micLatencyMs ?? hardwareLatencyMs;
+    const analyzer =
+      options.existingAnalyzer ??
+      new MusicalDspAnalyzer({
+        sampleRate,
+        frameSize: analyser.fftSize,
+        lyricSpans: options.lyricSpans,
+        headphoneMode: options.headphoneMode,
+        micLatencyMs: resolvedLatencyMs,
+      });
+    if (options.existingAnalyzer && options.micLatencyMs !== undefined) {
+      analyzer.setMicLatencyMs(options.micLatencyMs);
+    }
+    // Single pre-allocated PCM buffer reused for AnalyserNode fallback frames.
     const pcmBuffer = new Float32Array(analyser.fftSize);
-    const pollMs = Math.max(20, options.pollIntervalMs ?? 40);
+    const pollMs = Math.max(16, options.pollIntervalMs ?? 32);
     const telemetryThrottleMs = Math.max(50, options.telemetryThrottleMs ?? 80);
     let lastTelemetryWall = 0;
     let lastMediaMs = -1;
 
-    if (typeof context.resume === "function") {
-      void context.resume().catch(() => {});
-    }
-    if (typeof document !== "undefined") {
-      document.addEventListener("viread:android-background", stop);
-    }
-
-    timer = setInterval(() => {
-      if (stopped || !analyser || !context) return;
+    const ingestFrame = (samples: Float32Array) => {
+      if (stopped || !context) return;
       const track = options.stream.getAudioTracks?.()[0];
       if (
         context.state !== "running" ||
@@ -1257,8 +1563,12 @@ export function createBrowserMusicalMonitor(
       const mediaMs = options.getCurrentMs();
       if (!Number.isFinite(mediaMs) || mediaMs === lastMediaMs) return;
       lastMediaMs = mediaMs;
-      analyser.getFloatTimeDomainData(pcmBuffer);
-      analyzer.processFrame(pcmBuffer, mediaMs);
+      analyzer.processFrame(samples, mediaMs);
+
+      const latest = analyzer.getLatestPitchSample();
+      if (latest && options.onSample) {
+        options.onSample(latest);
+      }
 
       if (options.onTelemetry) {
         const now =
@@ -1269,15 +1579,225 @@ export function createBrowserMusicalMonitor(
           if (telemetry) options.onTelemetry(telemetry);
         }
       }
+    };
+
+    if (typeof context.resume === "function") {
+      void context.resume().catch(() => {});
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("viread:android-background", stop);
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
+    // Attempt AudioWorkletNode upgrade asynchronously while AnalyserNode polling runs immediately.
+    if (
+      typeof AudioWorkletNode !== "undefined" &&
+      context.audioWorklet &&
+      typeof context.audioWorklet.addModule === "function" &&
+      typeof Blob !== "undefined" &&
+      typeof URL !== "undefined" &&
+      typeof URL.createObjectURL === "function"
+    ) {
+      let workletUrl: string | null = null;
+      try {
+        workletUrl = URL.createObjectURL(
+          new Blob([VOCAL_WORKLET_PROCESSOR_SOURCE], {
+            type: "application/javascript",
+          }),
+        );
+        const ctxRef = context;
+        const srcRef = source;
+        void ctxRef.audioWorklet
+          .addModule(workletUrl)
+          .then(() => {
+            if (workletUrl) {
+              URL.revokeObjectURL(workletUrl);
+              workletUrl = null;
+            }
+            if (stopped || ctxRef.state === "closed") return;
+            const node = new AudioWorkletNode(
+              ctxRef,
+              "viread-vocal-dsp-processor",
+            );
+            node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+              if (stopped) return;
+              const chunk = event.data;
+              if (chunk instanceof Float32Array && chunk.length > 0) {
+                ingestFrame(chunk);
+              }
+            };
+            const sink = ctxRef.createGain();
+            sink.gain.value = 0;
+            srcRef.connect(node);
+            node.connect(sink);
+            sink.connect(ctxRef.destination);
+            workletNode = node;
+            silentSink = sink;
+            workletActive = true;
+            if (timer !== undefined) {
+              clearInterval(timer);
+              timer = undefined;
+            }
+          })
+          .catch(() => {
+            if (workletUrl) {
+              URL.revokeObjectURL(workletUrl);
+              workletUrl = null;
+            }
+          });
+      } catch {
+        if (workletUrl) URL.revokeObjectURL(workletUrl);
+      }
+    }
+
+    timer = setInterval(() => {
+      if (stopped || workletActive || !analyser) return;
+      analyser.getFloatTimeDomainData(pcmBuffer);
+      ingestFrame(pcmBuffer);
     }, pollMs);
 
     return {
       stop,
+      setMicLatencyMs: (ms) => analyzer.setMicLatencyMs(ms),
       getSummary: (range) => analyzer.summarize(range),
       getAnalyzer: () => analyzer,
+      getPitchRing: () => analyzer.getPitchRing(),
+      getLatestPitchSample: () => analyzer.getLatestPitchSample(),
     };
   } catch {
     stop();
     return null;
   }
+}
+
+export interface LocalVocalRecorder {
+  start: () => void;
+  stop: () => Promise<string | null>;
+  dispose: () => void;
+}
+
+/**
+ * Local-only in-memory vocal replay recorder for the Score Card.
+ * Strictly NEVER uploads raw audio — blob URLs are always revoked on dispose/unmount.
+ */
+export function createLocalVocalRecorder(
+  stream: MediaStream,
+): LocalVocalRecorder | null {
+  if (
+    typeof MediaRecorder === "undefined" ||
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function"
+  ) {
+    return null;
+  }
+  const preferredMimes = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg",
+  ];
+  let mimeType = "";
+  if (typeof MediaRecorder.isTypeSupported === "function") {
+    for (const candidate of preferredMimes) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        mimeType = candidate;
+        break;
+      }
+    }
+  }
+
+  let recorder: MediaRecorder | null = null;
+  const chunks: Blob[] = [];
+  let objectUrl: string | null = null;
+  let disposed = false;
+
+  try {
+    recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream);
+    recorder.ondataavailable = (event: BlobEvent) => {
+      if (!disposed && event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+  } catch {
+    return null;
+  }
+
+  const revokeUrl = () => {
+    if (objectUrl) {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+        /* Safe revoke. */
+      }
+      objectUrl = null;
+    }
+  };
+
+  return {
+    start() {
+      if (disposed || !recorder || recorder.state !== "inactive") return;
+      chunks.length = 0;
+      revokeUrl();
+      try {
+        recorder.start(500);
+      } catch {
+        /* Ignore unsupported recording state. */
+      }
+    },
+    stop() {
+      if (disposed || !recorder) return Promise.resolve(null);
+      if (recorder.state === "inactive") {
+        if (objectUrl) return Promise.resolve(objectUrl);
+        if (chunks.length > 0) {
+          objectUrl = URL.createObjectURL(
+            new Blob(chunks, { type: mimeType || "audio/webm" }),
+          );
+          return Promise.resolve(objectUrl);
+        }
+        return Promise.resolve(null);
+      }
+      return new Promise<string | null>((resolve) => {
+        if (!recorder) {
+          resolve(null);
+          return;
+        }
+        const active = recorder;
+        const finish = () => {
+          if (disposed || chunks.length === 0) {
+            resolve(null);
+            return;
+          }
+          revokeUrl();
+          objectUrl = URL.createObjectURL(
+            new Blob(chunks, {
+              type: mimeType || active.mimeType || "audio/webm",
+            }),
+          );
+          resolve(objectUrl);
+        };
+        active.onstop = finish;
+        try {
+          active.stop();
+        } catch {
+          resolve(null);
+        }
+      });
+    },
+    dispose() {
+      disposed = true;
+      chunks.length = 0;
+      if (recorder && recorder.state !== "inactive") {
+        try {
+          recorder.onstop = null;
+          recorder.stop();
+        } catch {
+          /* Safe stop. */
+        }
+      }
+      recorder = null;
+      revokeUrl();
+    },
+  };
 }

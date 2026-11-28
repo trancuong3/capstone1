@@ -15,6 +15,8 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
+import { OfflinePackAndQrPanel } from "@/components/books/offline-pack-and-qr-panel";
+import { OfflinePackControls } from "@/components/offline/offline-pack-controls";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
@@ -25,6 +27,7 @@ import { useBookService } from "@/hooks/use-book-service";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -77,7 +80,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     pageNumber: number | null;
   } | null>(null);
   const [thumbnailPage, setThumbnailPage] = useState(1);
-  const THUMBNAILS_PER_PAGE = 24;
+  const THUMBNAILS_PER_PAGE = 12;
 
   useEffect(() => {
     let isActive = true;
@@ -183,6 +186,17 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   ]);
 
   useEffect(() => {
+    if (state.status !== "ready") return;
+    const initialPage = selectedPage ?? state.pages[0] ?? null;
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: initialPage?.page_id ?? null,
+      pageRevisionId: initialPage?.current_verified_revision_id ?? null,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
+  }, [selectedPage, state]);
+
+  useEffect(() => {
     if (
       state.status !== "ready" ||
       !targetPageId ||
@@ -217,6 +231,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     }
 
     setStartState("starting");
+    // Immediately start preloading STT (WASM/Android) & TTS voices on click so
+    // engines are warm BEFORE the child even enters the reading page!
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: selectedPage.page_id,
+      pageRevisionId: selectedPage.current_verified_revision_id,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
     const params = new URLSearchParams({
       bookId: state.book.id,
       pageId: selectedPage.page_id,
@@ -260,26 +282,25 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
   if (state.status === "loading") {
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3.5 pt-0 pb-8 sm:gap-6 sm:px-8 sm:py-8">
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
         <BookChildHeader
           child={null}
-          fullBleedDesktop
           mobileLabel={t("detail.loadingMobileLabel")}
         />
         <div
           aria-busy="true"
           aria-label={t("detail.loadingAria")}
-          className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:gap-12"
+          className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 sm:flex-row sm:gap-12"
         >
           <span className="sr-only" role="status">
             {t("detail.loadingText")}
           </span>
-          <Skeleton className="h-[132px] w-[96px] rounded-card sm:h-[518px] sm:w-[307px]" />
-          <div className="flex flex-1 flex-col gap-3 sm:gap-4">
-            <Skeleton className="h-10 w-3/5 sm:h-16" />
-            <Skeleton className="h-6 w-2/5 sm:h-7" />
-            <Skeleton className="h-16 w-4/5 sm:h-20" />
-            <Skeleton className="h-12 w-full sm:h-16 sm:w-[360px]" />
+          <Skeleton className="h-[518px] w-full rounded-card sm:w-[307px]" />
+          <div className="flex flex-1 flex-col gap-4">
+            <Skeleton className="h-16 w-3/5" />
+            <Skeleton className="h-7 w-2/5" />
+            <Skeleton className="h-20 w-4/5" />
+            <Skeleton className="h-16 w-full sm:w-[360px]" />
           </div>
         </div>
       </section>
@@ -290,12 +311,8 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     const unavailable = state.status === "unavailable";
 
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3.5 pt-0 pb-8 sm:gap-6 sm:px-8 sm:py-8">
-        <BookChildHeader
-          child={null}
-          fullBleedDesktop
-          mobileLabel={t("detail.pageTitle")}
-        />
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
+        <BookChildHeader child={null} mobileLabel={t("detail.pageTitle")} />
         <div className="mx-auto w-full max-w-[720px]">
           <EmptyState
             headingLevel={1}
@@ -331,12 +348,8 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3.5 pt-0 pb-8 sm:gap-6 sm:px-8 sm:py-8">
-        <BookChildHeader
-          child={null}
-          fullBleedDesktop
-          mobileLabel={t("detail.pageTitle")}
-        />
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
+        <BookChildHeader child={null} mobileLabel={t("detail.pageTitle")} />
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
           <StatusMessage title={t("detail.loadErrorTitle")} tone="error">
             {t("catalog.loadErrorBody")}
@@ -382,7 +395,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     );
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 pt-0 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       {reportTarget ? (
         <BookContentReportDialog
           bookId={book.id}
@@ -399,50 +412,46 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         mobileLabel={book.title}
       />
 
-      <div className="mx-auto grid w-full max-w-[1130px] grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-3 sm:grid-cols-[306px_minmax(0,1fr)] sm:items-start sm:gap-x-12 sm:gap-y-4">
-        <article className="flex h-[132px] w-[96px] shrink-0 flex-col overflow-hidden rounded-card border border-border bg-white p-1.5 sm:row-span-6 sm:h-auto sm:w-[306px] sm:gap-3 sm:p-4">
-          <BookCover
-            book={book}
-            className="detail-cover-jacket h-full w-full max-w-none sm:h-64 sm:p-4"
-          />
-        </article>
-
-        <div className="flex min-w-0 flex-col justify-center gap-1.5 sm:justify-start sm:gap-3">
-          {book.visibility_scope === "PARENT_PRIVATE" ? (
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 sm:px-3 sm:py-1 sm:text-xs">
-                {t("card.privateFamilyBadge")}
-              </span>
-              <span className="hidden text-xs text-muted sm:inline">
-                {t("detail.privateFamilyNote")}
-              </span>
-            </div>
-          ) : null}
-          <h1
-            className="viread-learning-content line-clamp-3 break-words text-lg font-extrabold leading-snug text-ink sm:line-clamp-none sm:text-4xl sm:leading-tight"
-            dir="ltr"
-            lang="vi"
-          >
-            {book.title}
-          </h1>
-          <p className="text-xs text-muted sm:text-body">
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:items-start sm:gap-12">
+        <article className="flex w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:w-[306px]">
+          <BookCover book={book} className="h-64 max-w-none p-4" />
+          <p className="text-sm font-medium text-muted">
             {book.author ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
                 {book.author}
               </span>
             ) : (
               t("card.authorPending")
-            )}{" "}
-            ·{" "}
-            <span className="font-semibold text-primary">
-              {formatGradeRange(book, t)}
-            </span>
+            )}
           </p>
+          <p className="text-sm font-semibold text-primary">
+            {formatGradeRange(book, t)}
+          </p>
+        </article>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {book.visibility_scope === "PARENT_PRIVATE" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+                {t("card.privateFamilyBadge")}
+              </span>
+              <span className="text-xs text-muted">
+                {t("detail.privateFamilyNote")}
+              </span>
+            </div>
+          ) : null}
+          <h1
+            className="viread-learning-content break-words text-heading font-extrabold leading-tight text-ink sm:text-4xl"
+            dir="ltr"
+            lang="vi"
+          >
+            {book.title}
+          </h1>
           {targetPageId &&
           targetConfidence !== null &&
           targetConfidence >= 0 &&
           targetConfidence <= 1 ? (
-            <p className="text-xs font-semibold text-primary sm:text-sm">
+            <p className="text-sm text-primary">
               {t("detail.confidenceLabel", {
                 percent: Math.round(targetConfidence * 100),
               })}{" "}
@@ -451,15 +460,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               </span>
             </p>
           ) : null}
-        </div>
-
-        <div className="col-span-2 flex min-w-0 flex-col gap-3 sm:col-span-1 sm:col-start-2 sm:gap-4">
           {book.visibility_scope === "PARENT_PRIVATE" ? (
-            <div className="order-last flex flex-wrap gap-2 border-t border-border pt-3 sm:pt-4">
+            <div className="order-last flex flex-wrap gap-2 border-t border-border pt-4">
               <ButtonLink
                 href={`/my-books/${encodeURIComponent(book.id)}`}
                 variant="secondary"
-                className="min-h-10 text-xs sm:min-h-12 sm:w-auto sm:text-button"
+                className="sm:w-auto"
               >
                 {t("detail.manageInMyBooks")}
               </ButtonLink>
@@ -468,18 +474,18 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             <div
               aria-label={t("detail.reportMenuAria")}
               role="group"
-              className="order-last flex flex-wrap gap-2 border-t border-border pt-3 sm:pt-4"
+              className="order-last flex flex-wrap gap-2 border-t border-border pt-4"
             >
               <ButtonLink
                 href="/book-reports"
                 variant="quiet"
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="sm:w-auto"
               >
                 <ClipboardList aria-hidden="true" className="size-4" />{" "}
                 {t("detail.myReportsButton")}
               </ButtonLink>
               <Button
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="sm:w-auto"
                 onClick={() =>
                   setReportTarget({ pageId: null, pageNumber: null })
                 }
@@ -488,7 +494,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 {t("detail.reportBookButton")}
               </Button>
               <Button
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="sm:w-auto"
                 disabled={!selectedPage}
                 onClick={() =>
                   selectedPage
@@ -505,7 +511,17 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </div>
           )}
 
-          <p className="text-sm leading-relaxed text-ink sm:text-xl sm:font-medium sm:leading-7">
+          <p className="text-body text-muted">
+            {book.author ? (
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {book.author}
+              </span>
+            ) : (
+              t("card.authorPending")
+            )}{" "}
+            · {formatGradeRange(book, t)}
+          </p>
+          <p className="text-xl font-medium leading-7 text-ink">
             {book.title === "Chú Mèo Nhỏ"
               ? t("detail.summaryLittleCat")
               : t("detail.summaryDefault", {
@@ -513,31 +529,38 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 })}
           </p>
 
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(35,62,64,0.08)] backdrop-blur-sm sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
-            <Button
-              id="start-reading-button"
-              className="min-h-12 sm:min-h-16 sm:w-[360px]"
-              disabled={
-                !selectedPage ||
-                !selectedEndPageId ||
-                !child ||
-                selectedRangeHasGap ||
-                pages.length === 0
-              }
-              isLoading={startState === "starting"}
-              onClick={handleStartReading}
-            >
-              {startState === "starting"
-                ? t("detail.preparingButton")
-                : t("detail.prepareButton")}
-              {startState === "idle" ? (
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-5"
-                />
-              ) : null}
-            </Button>
-          </div>
+          <Button
+            id="start-reading-button"
+            className="min-h-16 sm:w-[360px]"
+            disabled={
+              !selectedPage ||
+              !selectedEndPageId ||
+              !child ||
+              selectedRangeHasGap ||
+              pages.length === 0
+            }
+            isLoading={startState === "starting"}
+            onClick={handleStartReading}
+          >
+            {startState === "starting"
+              ? t("detail.preparingButton")
+              : t("detail.prepareButton")}
+            {startState === "idle" ? (
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-5"
+              />
+            ) : null}
+          </Button>
+
+          <OfflinePackControls
+            bookId={book.id}
+            bookTitle={book.title}
+            estimatedPageCount={pages.length || 4}
+            parentAccountId={currentUserId || null}
+            childProfileId={child.id}
+            child={child}
+          />
 
           {targetPageId && !selectedPage ? (
             <StatusMessage
@@ -549,14 +572,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           ) : null}
 
           {selectedPage && selectedEndPage ? (
-            <section className="rounded-card bg-sky px-3.5 py-2.5 sm:p-4">
-              <h2 className="text-sm font-extrabold text-ink sm:text-base">
+            <section className="rounded-card bg-sky p-4">
+              <h2 className="font-extrabold text-ink">
                 {t("detail.readingRangeHeading", {
                   start: selectedPage.page_number,
                   end: selectedEndPage.page_number,
                 })}
               </h2>
-              <p className="mt-0.5 text-xs text-muted sm:mt-2 sm:text-body">
+              <p className="mt-2 text-body text-muted">
                 {t("detail.readingRangeValidPages", {
                   count: selectedRangePages.length,
                 })}
@@ -564,12 +587,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </section>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
-            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-3 sm:min-h-[96px] sm:p-4">
-              <span className="text-xs font-semibold text-ink sm:text-sm">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
+              <span className="text-sm font-semibold text-ink">
                 {t("detail.startPageLabel")}
               </span>
-              <span className="text-sm font-bold text-primary sm:text-body sm:font-normal">
+              <span className="text-body text-primary">
                 {selectedPage
                   ? t("detail.pageNumberOption", {
                       page: selectedPage.page_number,
@@ -577,15 +600,15 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   : t("detail.noPageSelected")}
               </span>
             </div>
-            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-3 sm:min-h-[96px] sm:p-4">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
               <label
-                className="text-xs font-semibold text-ink sm:text-sm"
+                className="text-sm font-semibold text-ink"
                 htmlFor="reading-end-page"
               >
                 {t("detail.endPageLabel")}
               </label>
               <select
-                className="min-h-9 rounded-control border border-border bg-white px-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-11 sm:px-3 sm:text-body"
+                className="min-h-11 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={
                   !selectedPage ||
                   pages.length === 0 ||
@@ -614,7 +637,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               </select>
             </div>
             {selectedRangeHasGap ? (
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <StatusMessage
                   title={t("detail.nonContiguousTitle")}
                   tone="error"
@@ -625,9 +648,18 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             ) : null}
           </div>
 
+          {pages.length > 0 && child ? (
+            <OfflinePackAndQrPanel
+              book={book}
+              child={child}
+              startPageId={selectedPage?.page_id ?? null}
+              userId={currentUserId}
+            />
+          ) : null}
+
           <div className="order-3">
             {previewUnavailable ? (
-              <div className="mb-3 flex flex-col gap-2.5 sm:mb-4 sm:gap-3">
+              <div className="mb-4 flex flex-col gap-3">
                 <StatusMessage
                   title={t("detail.previewPendingTitle")}
                   tone="info"
@@ -644,48 +676,63 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 </Button>
               </div>
             ) : null}
-            <div
-              aria-label={t("detail.previewGridAria")}
-              className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1 sm:gap-4"
-            >
-              {pages
-                .slice(
-                  (thumbnailPage - 1) * THUMBNAILS_PER_PAGE,
-                  thumbnailPage * THUMBNAILS_PER_PAGE,
-                )
-                .map((page) => (
-                  <BookPageThumbnail
-                    isSelected={selectedPage?.page_id === page.page_id}
-                    key={page.page_id}
-                    onSelect={(nextPage) => {
-                      setSelectedPage(nextPage);
-                      setSelectedEndPageId((currentEndId) => {
-                        const currentEnd = pages.find(
-                          (candidate) => candidate.page_id === currentEndId,
-                        );
-                        return !currentEnd ||
-                          currentEnd.page_number < nextPage.page_number
-                          ? nextPage.page_id
-                          : currentEnd.page_id;
-                      });
-                      setStartState("idle");
-                    }}
-                    page={page}
-                  />
-                ))}
-            </div>
-            {pages.length > THUMBNAILS_PER_PAGE ? (
-              <PaginationBar
-                ariaLabel={t("detail.previewPaginationAria")}
-                className="mt-3"
-                compact
-                itemLabel={t("detail.previewPaginationItemLabel")}
-                onPageChange={setThumbnailPage}
-                page={thumbnailPage}
-                pageSize={THUMBNAILS_PER_PAGE}
-                total={pages.length}
-              />
-            ) : null}
+            {(() => {
+              const totalThumbnailPages = Math.max(
+                1,
+                Math.ceil(pages.length / THUMBNAILS_PER_PAGE),
+              );
+              const safeThumbnailPage = Math.min(
+                Math.max(1, thumbnailPage),
+                totalThumbnailPages,
+              );
+              return (
+                <>
+                  <div
+                    aria-label={t("detail.previewGridAria")}
+                    className="flex gap-4 overflow-x-auto pb-1"
+                  >
+                    {pages
+                      .slice(
+                        (safeThumbnailPage - 1) * THUMBNAILS_PER_PAGE,
+                        safeThumbnailPage * THUMBNAILS_PER_PAGE,
+                      )
+                      .map((page) => (
+                        <BookPageThumbnail
+                          isSelected={selectedPage?.page_id === page.page_id}
+                          key={page.page_id}
+                          onSelect={(nextPage) => {
+                            setSelectedPage(nextPage);
+                            setSelectedEndPageId((currentEndId) => {
+                              const currentEnd = pages.find(
+                                (candidate) =>
+                                  candidate.page_id === currentEndId,
+                              );
+                              return !currentEnd ||
+                                currentEnd.page_number < nextPage.page_number
+                                ? nextPage.page_id
+                                : currentEnd.page_id;
+                            });
+                            setStartState("idle");
+                          }}
+                          page={page}
+                        />
+                      ))}
+                  </div>
+                  {pages.length > THUMBNAILS_PER_PAGE ? (
+                    <PaginationBar
+                      ariaLabel={t("detail.previewPaginationAria")}
+                      className="mt-3"
+                      compact
+                      itemLabel={t("detail.previewPaginationItemLabel")}
+                      onPageChange={setThumbnailPage}
+                      page={safeThumbnailPage}
+                      pageSize={THUMBNAILS_PER_PAGE}
+                      total={pages.length}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

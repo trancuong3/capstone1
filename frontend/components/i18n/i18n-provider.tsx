@@ -43,6 +43,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   getCachedLocaleMessages,
   loadLocaleMessages,
+  withCachedRuntimeNamespaces,
   type LocaleBundleLoader,
 } from "@/messages/loader";
 import { viMessages } from "@/messages/vi";
@@ -81,15 +82,21 @@ const defaultI18nContextValue: I18nContextValue = {
   metadata: getLocaleMetadata(DEFAULT_LOCALE),
   messages: viMessages,
   isLoadingLocale: false,
-  t: (key: string, params?: TranslationParams, defaultValue?: string): string =>
-    translateMessage(
-      viMessages,
-      viMessages,
+  t: (
+    key: string,
+    params?: TranslationParams,
+    defaultValue?: string,
+  ): string => {
+    const dictionary = withCachedRuntimeNamespaces(DEFAULT_LOCALE, viMessages);
+    return translateMessage(
+      dictionary,
+      dictionary,
       DEFAULT_LOCALE,
       key,
       params,
       defaultValue,
-    ),
+    );
+  },
   setLocale: async (nextLocale: string) =>
     normalizeLocale(nextLocale) ?? DEFAULT_LOCALE,
   ...defaultFormatter,
@@ -387,8 +394,8 @@ export function I18nProvider({
       isLoadingLocale,
       t: (key, params, defaultValue) =>
         translateMessage(
-          localeState.messages,
-          viMessages,
+          withCachedRuntimeNamespaces(localeState.locale, localeState.messages),
+          withCachedRuntimeNamespaces(DEFAULT_LOCALE, viMessages),
           localeState.locale,
           key,
           params,

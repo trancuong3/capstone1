@@ -124,16 +124,23 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+    ...(isPlaywrightDev
+      ? {
+          cpus: 1,
+          workerThreads: true,
+          devMemoryThresholdRestart: false,
+          serverComponentsHmrCache: false,
+          webpackMemoryOptimizations: true,
+        }
+      : {}),
+  },
   ...(isPlaywrightDev
     ? {
         onDemandEntries: {
           maxInactiveAge: 60 * 60 * 1000,
           pagesBufferLength: 100,
-        },
-        experimental: {
-          devMemoryThresholdRestart: false,
-          serverComponentsHmrCache: false,
-          webpackMemoryOptimizations: true,
         },
       }
     : {}),
@@ -146,6 +153,33 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/images/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/audio/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/workers/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=3600, stale-while-revalidate=86400",
           },
         ],
       },
@@ -168,6 +202,14 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(self), microphone=(self)",
           },
+          ...(process.env.NODE_ENV !== "development"
+            ? [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=63072000; includeSubDomains; preload",
+                },
+              ]
+            : []),
           {
             key: "Content-Security-Policy",
             value: buildContentSecurityPolicy(),

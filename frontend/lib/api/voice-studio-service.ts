@@ -12,12 +12,21 @@ import {
 } from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
+  approveSessionVoiceSwitch,
+  clearPendingSessionVoiceSwitch,
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
+  isSyntheticClientVoiceSessionId,
 } from "@/lib/reading/session-voice-lock";
+import {
+  DEFAULT_SPEED,
+  getSpeechPreferences,
+  getSpeechPreferencesMeta,
+} from "@/lib/reading/speech-preferences";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
   buildTtsBrowserCacheKey,
@@ -108,6 +117,7 @@ export interface TimedSpeechOptions {
   readonly pageRevisionId?: string | null;
   readonly cacheScope?: TtsCacheScope | null;
   readonly isPrivateBook?: boolean;
+  readonly ephemeral?: boolean;
   readonly bypassSessionLock?: boolean;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -262,7 +272,13 @@ export function createVoiceStudioService(): VoiceStudioService {
     async updateSessionVoiceLock({ sessionId, voiceId, signal }) {
       const cleanSessionId = sessionId.trim();
       const cleanVoiceId = voiceId.trim();
-      if (!cleanSessionId || !cleanVoiceId) return;
+      if (
+        !cleanSessionId ||
+        !cleanVoiceId ||
+        isSyntheticClientVoiceSessionId(cleanSessionId)
+      ) {
+        return;
+      }
       const policy = getVoicePolicyPreferences();
       await request(
         "/voice/session-lock",
@@ -289,21 +305,49 @@ export function createVoiceStudioService(): VoiceStudioService {
       const activeLock = options.bypassSessionLock
         ? null
         : getActiveSessionVoiceLock();
+      const sessionId =
+        activeLock?.sessionId &&
+        !isSyntheticClientVoiceSessionId(activeLock.sessionId)
+          ? activeLock.sessionId
+          : null;
+      const isEphemeral = Boolean(options.ephemeral);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
+        !isEphemeral &&
         typeof indexedDB !== "undefined" &&
         shouldPersistTtsCacheEntry({
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const speechMeta = getSpeechPreferencesMeta();
+      const hasExplicitGlobalSpeed =
+        speechPrefs.speed !== DEFAULT_SPEED || speechMeta.updatedAt > 0;
+      const resolvedRequestSpeed =
+        options.speed ??
+        activeLock?.speed ??
+        (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
+      const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        (options.voiceId === null
+          ? null
+          : (speechPrefs.voiceId ?? defaultVoiceOverride));
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
-          : inferModelVersionForVoiceId(cacheVoiceId);
-      const cacheSpeed = options.speed ?? activeLock?.speed ?? 1;
+          : inferModelVersionForVoiceId(cacheVoiceId, policy.modelVersion);
+      const cacheSpeed = resolvedRequestSpeed ?? speechPrefs.speed;
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
             kind: "timed",
@@ -348,43 +392,67 @@ export function createVoiceStudioService(): VoiceStudioService {
         }
       }
 
-      const { payload, headers } = await requestWithHeaders(
-        "/voice/text-to-speech/timed",
-        {
-          method: "POST",
-          headers: {
-            Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
-            ...(hasPendingSessionVoiceSwitch(activeLock?.sessionId)
-              ? { "X-Voice-Lock-Update": "1" }
-              : {}),
+      const timedBody = JSON.stringify({
+        words,
+        ...(resolvedRequestVoiceId ? { voice_id: resolvedRequestVoiceId } : {}),
+        ...(resolvedRequestSpeed !== undefined
+          ? { speed: resolvedRequestSpeed }
+          : {}),
+        ...(options.audioFormat ? { audio_format: options.audioFormat } : {}),
+        ...(policy.providerMode !== "local_only"
+          ? { provider_mode: policy.providerMode }
+          : {}),
+        ...(policy.allowGoogleTtsFallback ? { allow_google_tts: true } : {}),
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...(!isEphemeral && options.bookId ? { book_id: options.bookId } : {}),
+        ...(!isEphemeral && options.pageId ? { page_id: options.pageId } : {}),
+        ...(!isEphemeral && options.pageRevisionId
+          ? { page_revision_id: options.pageRevisionId }
+          : {}),
+        ...(!isEphemeral && options.cacheScope
+          ? { cache_scope: options.cacheScope }
+          : {}),
+      });
+      const sendTimedTts = (sendLockUpdate: boolean) =>
+        requestWithHeaders(
+          "/voice/text-to-speech/timed",
+          {
+            method: "POST",
+            headers: {
+              Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+              ...(sendLockUpdate ? { "X-Voice-Lock-Update": "1" } : {}),
+            },
+            body: timedBody,
           },
-          body: JSON.stringify({
-            words,
-            ...(options.voiceId ? { voice_id: options.voiceId } : {}),
-            ...(options.speed !== undefined ? { speed: options.speed } : {}),
-            ...(options.audioFormat
-              ? { audio_format: options.audioFormat }
-              : {}),
-            ...(policy.providerMode !== "local_only"
-              ? { provider_mode: policy.providerMode }
-              : {}),
-            ...(policy.allowGoogleTtsFallback
-              ? { allow_google_tts: true }
-              : {}),
-            ...(activeLock?.sessionId
-              ? { session_id: activeLock.sessionId }
-              : {}),
-            ...(options.bookId ? { book_id: options.bookId } : {}),
-            ...(options.pageId ? { page_id: options.pageId } : {}),
-            ...(options.pageRevisionId
-              ? { page_revision_id: options.pageRevisionId }
-              : {}),
-            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
-          }),
-        },
-        options.signal,
-        options.timeoutMs,
-      );
+          options.signal,
+          options.timeoutMs,
+        );
+      let sentLockUpdate = hasPendingSessionVoiceSwitch(sessionId);
+      let payload: unknown;
+      let headers: Headers;
+      try {
+        ({ payload, headers } = await sendTimedTts(sentLockUpdate));
+      } catch (error) {
+        const targetVoiceId = resolvedRequestVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        if (
+          sessionId &&
+          !sentLockUpdate &&
+          speechMeta.globalSelectionUpdatedAt > 0 &&
+          targetVoiceId === effectiveVoiceId &&
+          error instanceof ServiceError &&
+          error.status === 409 &&
+          error.provider_code === "SESSION_VOICE_LOCKED"
+        ) {
+          approveSessionVoiceSwitch(sessionId);
+          sentLockUpdate = true;
+          ({ payload, headers } = await sendTimedTts(true));
+        } else {
+          throw error;
+        }
+      }
+      if (sentLockUpdate && sessionId) {
+        clearPendingSessionVoiceSwitch(sessionId);
+      }
       const parsed = timedSpeechSchema.safeParse(payload);
       if (!parsed.success || parsed.data.words.length !== words.length) {
         throw failure(502);
@@ -417,8 +485,14 @@ export function createVoiceStudioService(): VoiceStudioService {
       }
       if (!audio.size) throw failure(502);
       const timedProvider = parsed.data.provider ?? "local";
+      const isElevenLabsTimed = timedProvider
+        .toLowerCase()
+        .startsWith("elevenlabs");
       const resolvedId =
-        parsed.data.resolved_voice_id ?? options.voiceId ?? null;
+        parsed.data.resolved_voice_id ??
+        resolvedRequestVoiceId ??
+        options.voiceId ??
+        null;
       const usedFallbackVoice = Boolean(parsed.data.used_fallback_voice);
       const cachedSpeed =
         parsed.data.cached_speed ??
@@ -436,9 +510,13 @@ export function createVoiceStudioService(): VoiceStudioService {
         fallbackUsed:
           usedFallbackVoice ||
           (timedProvider === "google" &&
-            !options.voiceId?.startsWith("google_")),
+            !resolvedRequestVoiceId?.startsWith("google_")),
         voiceId: resolvedId,
-        voiceGender: resolveVoiceGender(resolvedId),
+        voiceGender: resolveVoiceGender(
+          isElevenLabsTimed
+            ? (resolvedRequestVoiceId ?? resolvedId)
+            : resolvedId,
+        ),
       });
       const headerScopeRaw = headers.get("x-tts-scope")?.trim().toUpperCase();
       const effectiveScope: TtsCacheScope =
@@ -450,6 +528,7 @@ export function createVoiceStudioService(): VoiceStudioService {
       if (
         browserCacheKey &&
         !usedFallbackVoice &&
+        !isElevenLabsTimed &&
         shouldPersistTtsCacheEntry({
           scope: effectiveScope,
           cacheControl: headers.get("cache-control"),

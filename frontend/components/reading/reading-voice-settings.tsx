@@ -1,8 +1,9 @@
 "use client";
 
-import { RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
+import { Check, RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -10,23 +11,34 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { AppServicesContext } from "@/components/providers/app-services-provider";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import { createChildService } from "@/lib/api/child-service";
 import {
   createVoiceStudioService,
   type VoiceList,
   type VoiceOption,
 } from "@/lib/api/voice-studio-service";
 import {
+  applyGlobalTeacherVoiceSelection,
   getActiveSessionVoiceLock,
+  getDefaultLocalVoiceIdForRegionAndGender,
+  getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
+  getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
-  lockSessionVoice,
+  isSyntheticClientVoiceSessionId,
   setVoicePolicyPreferences,
   subscribeVoiceLock,
   subscribeVoicePolicy,
@@ -39,18 +51,24 @@ import {
   SPEED_MIN,
   SPEED_STEP,
   getSpeechPreferences,
+  type setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getBrowserOnlineStatus,
   getCachedVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
   subscribeBrowserOnlineStatus,
   subscribeVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
   resolveVoiceGender,
+  type VoiceGender,
 } from "@/lib/reading/voice-persona";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -79,12 +97,14 @@ type LoadState =
   | { status: "error" };
 
 interface ReadingVoiceSettingsProps {
+  childId?: string | null;
   disabled?: boolean;
   isPreviewing?: boolean;
   fallbackNotice?: string | null;
   /** Speaks a short sample with the currently chosen voice and speed. */
   onPreview: (sample: string) => void | Promise<void>;
   onStopPreview: () => void;
+  onOpen?: () => void;
 }
 
 function voiceTitle(voice: VoiceOption): string {
@@ -149,18 +169,29 @@ function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
 }
 
 export function ReadingVoiceSettings({
+  childId = null,
   disabled = false,
   isPreviewing = false,
   fallbackNotice = null,
   onPreview,
   onStopPreview,
+  onOpen,
 }: ReadingVoiceSettingsProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("speech");
+  const tCommon = useTranslations("common");
   const formatSpeed = (speed: number): string =>
     `${formatNumber(speed, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
-  const { preferences, update } = useSpeechPreferences();
+  const appStore = useContext(AppStoreContext);
+  const appServices = useContext(AppServicesContext);
+  const childService = useMemo(
+    () => appServices?.childService ?? createChildService(),
+    [appServices?.childService],
+  );
+  const selectedChildId = childId ?? appStore?.selectedChildId ?? null;
+  const { preferences } = useSpeechPreferences();
+  const teacherPersona = useTeacherPersona();
   const policy = useSyncExternalStore(
     subscribeVoicePolicy,
     getVoicePolicyPreferences,
@@ -189,6 +220,24 @@ export function ReadingVoiceSettings({
     null,
   );
   const [previewError, setPreviewError] = useState(false);
+  const [isSynthesizingPreview, setIsSynthesizingPreview] = useState(false);
+  const voiceListProgress = useAiProgress({
+    active: isOpen && loadState.status === "loading",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.connecting") },
+      { atPct: 60, label: tCommon("aiProgress.processing") },
+      { atPct: 88, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const previewVoiceProgress = useAiProgress({
+    active: isSynthesizingPreview && !isPreviewing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 70, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
@@ -211,41 +260,10 @@ export function ReadingVoiceSettings({
     void fetchVoiceEngineHealth(controller.signal);
   }, []);
 
-  const syncPausedSessionLock = useCallback(
-    (nextVoiceId?: string | null, nextSpeed?: number, modelVer?: string) => {
-      const activeLock = getActiveSessionVoiceLock();
-      if (!activeLock) return;
-      const updatedLock = lockSessionVoice(activeLock.sessionId, {
-        voiceId:
-          nextVoiceId !== undefined
-            ? nextVoiceId
-            : getSpeechPreferences().voiceId,
-        speed:
-          nextSpeed !== undefined ? nextSpeed : getSpeechPreferences().speed,
-        modelVersion: modelVer,
-        forceUpdate: true,
-      });
-      // Explicitly resync server-side SessionVoiceLock so subsequent playback
-      // never hits 409 SESSION_VOICE_LOCKED after an intentional paused voice change.
-      if (
-        updatedLock.voiceId !== activeLock.voiceId &&
-        typeof voiceStudio.updateSessionVoiceLock === "function"
-      ) {
-        void voiceStudio
-          .updateSessionVoiceLock({
-            sessionId: activeLock.sessionId,
-            voiceId: updatedLock.voiceId,
-          })
-          .catch(() => undefined);
-      }
-    },
-    [voiceStudio],
-  );
-
   const buildVoiceContextKey = useCallback(
     (healthSnap = getCachedVoiceEngineHealth()) => {
       const currentPolicy = getVoicePolicyPreferences();
-      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}`;
+      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}:${healthSnap?.elevenlabs?.tts_configured ?? "u"}:${healthSnap?.elevenlabs?.male_tts_configured ?? "u"}`;
     },
     [],
   );
@@ -267,8 +285,67 @@ export function ReadingVoiceSettings({
           !data.voices.some((voice) => voice.voice_id === storedVoice)
         ) {
           setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
-          update({ voiceId: null });
-          syncPausedSessionLock(null);
+          const preservedGender = resolveVoiceGender(
+            storedVoice,
+            getEffectiveTeacherPersona().gender,
+          );
+          const preservedRegion = inferRegionFromVoiceId(
+            storedVoice,
+            getVoicePolicyPreferences().region,
+          );
+          const fallbackVoice =
+            data.voices.find(
+              (v) =>
+                resolveVoiceRegion(v) === preservedRegion &&
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            data.voices.find(
+              (v) =>
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            null;
+          const fallbackVoiceId =
+            fallbackVoice && fallbackVoice.voice_id !== data.default_voice_id
+              ? fallbackVoice.voice_id
+              : null;
+          const persistRemovedFallback =
+            selectedChildId &&
+            typeof childService.updateVoicePreferences === "function"
+              ? (
+                  cid: string,
+                  payload: Parameters<
+                    NonNullable<typeof childService.updateVoicePreferences>
+                  >[1],
+                ) => childService.updateVoicePreferences!(cid, payload)
+              : undefined;
+          const syncRemovedSessionLock =
+            typeof voiceStudio.updateSessionVoiceLock === "function"
+              ? (lockInput: {
+                  readonly sessionId: string;
+                  readonly voiceId: string;
+                }) => voiceStudio.updateSessionVoiceLock!(lockInput)
+              : undefined;
+          if (fallbackVoice) {
+            applyGlobalTeacherVoiceSelection({
+              voiceId: fallbackVoice.voice_id,
+              storedVoiceId: fallbackVoiceId,
+              gender: preservedGender,
+              region: resolveVoiceRegion(fallbackVoice) ?? preservedRegion,
+              childId: selectedChildId,
+              persistToBackend: persistRemovedFallback,
+              syncActiveServerSessionLock: syncRemovedSessionLock,
+            });
+          } else {
+            applyGlobalTeacherVoiceSelection({
+              voiceId: data.default_voice_id,
+              storedVoiceId: null,
+              gender: "female",
+              region: "north",
+              childId: selectedChildId,
+              persistToBackend: persistRemovedFallback,
+              syncActiveServerSessionLock: syncRemovedSessionLock,
+            });
+          }
         }
         setLoadState({ status: "ready", data });
       })
@@ -276,31 +353,119 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update, syncPausedSessionLock, t, buildVoiceContextKey]);
+  }, [voiceStudio, selectedChildId, childService, t, buildVoiceContextKey]);
 
   function change(
-    value: Parameters<typeof update>[0],
+    value: Parameters<typeof setSpeechPreferences>[0],
     selectedOption?: VoiceOption,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
-    update(value);
-    if (selectedOption) {
-      const reg = resolveVoiceRegion(selectedOption);
-      setVoicePolicyPreferences({
-        ...(reg ? { region: reg } : {}),
-        ...(selectedOption.model_version
-          ? { modelVersion: selectedOption.model_version }
+    const resolvedRegion = selectedOption
+      ? (resolveVoiceRegion(selectedOption) ?? undefined)
+      : undefined;
+    const isDefaultOrReset = value.voiceId === null;
+    const explicitVoiceId =
+      value.voiceId !== undefined
+        ? value.voiceId === null
+          ? loadState.status === "ready"
+            ? loadState.data.default_voice_id
+            : "local_north_truc_ly"
+          : value.voiceId
+        : undefined;
+    const storedVoiceId =
+      value.voiceId !== undefined
+        ? value.voiceId
+        : getSpeechPreferences().voiceId;
+
+    applyGlobalTeacherVoiceSelection({
+      ...(explicitVoiceId !== undefined ? { voiceId: explicitVoiceId } : {}),
+      storedVoiceId: isDefaultOrReset ? null : storedVoiceId,
+      ...(selectedOption
+        ? {
+            gender: resolveVoiceGender(
+              selectedOption.voice_id,
+              selectedOption.gender,
+            ),
+          }
+        : value.voiceId === null
+          ? { gender: "female" }
           : {}),
-      });
+      ...(resolvedRegion ? { region: resolvedRegion } : {}),
+      ...(value.speed !== undefined ? { speed: value.speed } : {}),
+      ...(selectedOption?.model_version
+        ? { modelVersion: selectedOption.model_version }
+        : {}),
+      childId: selectedChildId,
+      persistToBackend:
+        selectedChildId &&
+        typeof childService.updateVoicePreferences === "function"
+          ? (childId, payload) =>
+              childService.updateVoicePreferences!(childId, payload)
+          : undefined,
+      syncActiveServerSessionLock:
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+          ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+          : undefined,
+    });
+    const targetGender = selectedOption
+      ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
+      : value.voiceId === null
+        ? "female"
+        : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
+    void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
+  }
+
+  function selectTeacherGender(nextGender: VoiceGender) {
+    previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
+    onStopPreview();
+    setPreviewError(false);
+    setRemovedVoiceNotice(null);
+    const targetRegion: VoiceRegion =
+      regionTab !== "all" ? regionTab : activeRegionKey;
+    let pickedVoice: VoiceOption | undefined;
+    if (loadState.status === "ready") {
+      const sameRegionSameGender = loadState.data.voices.filter(
+        (v) =>
+          resolveVoiceRegion(v) === targetRegion &&
+          resolveVoiceGender(v.voice_id, v.gender) === nextGender,
+      );
+      const defaultForPair = getDefaultVoiceIdForRegionAndGender(
+        targetRegion,
+        nextGender,
+      );
+      pickedVoice =
+        sameRegionSameGender.find((v) => v.voice_id === defaultForPair) ??
+        sameRegionSameGender[0] ??
+        loadState.data.voices.find(
+          (v) => resolveVoiceGender(v.voice_id, v.gender) === nextGender,
+        );
     }
-    syncPausedSessionLock(
-      value.voiceId,
-      value.speed,
-      selectedOption?.model_version ?? undefined,
-    );
+    const nextVoiceId =
+      pickedVoice?.voice_id ??
+      getDefaultVoiceIdForRegionAndGender(targetRegion, nextGender);
+    applyGlobalTeacherVoiceSelection({
+      voiceId: nextVoiceId,
+      gender: nextGender,
+      region: targetRegion,
+      modelVersion: pickedVoice?.model_version ?? undefined,
+      childId: selectedChildId,
+      persistToBackend:
+        selectedChildId &&
+        typeof childService.updateVoicePreferences === "function"
+          ? (childId, payload) =>
+              childService.updateVoicePreferences!(childId, payload)
+          : undefined,
+      syncActiveServerSessionLock:
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+          ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+          : undefined,
+    });
+    void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
   }
 
   function changeProviderPolicy(
@@ -311,18 +476,49 @@ export function ReadingVoiceSettings({
     }>,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice
+    // If Google TTS was disabled while a Google voice was chosen, downgrade
+    // cleanly to the matching region+gender local voice (treating default as null).
     const currentVoiceId = getSpeechPreferences().voiceId;
     if (
       currentVoiceId?.startsWith("google_") &&
       (updated.providerMode !== "local_with_google_fallback" ||
         !updated.allowGoogleTtsFallback)
     ) {
-      update({ voiceId: null });
-      syncPausedSessionLock(null);
+      const preservedGender = resolveVoiceGender(currentVoiceId);
+      const preservedRegion = inferRegionFromVoiceId(
+        currentVoiceId,
+        updated.region,
+      );
+      const localFallbackId = getDefaultLocalVoiceIdForRegionAndGender(
+        preservedRegion,
+        preservedGender,
+      );
+      const defaultVoice =
+        loadState.status === "ready"
+          ? loadState.data.default_voice_id
+          : "local_north_truc_ly";
+      applyGlobalTeacherVoiceSelection({
+        voiceId: localFallbackId,
+        storedVoiceId:
+          localFallbackId === defaultVoice ? null : localFallbackId,
+        gender: preservedGender,
+        region: preservedRegion,
+        childId: selectedChildId,
+        persistToBackend:
+          selectedChildId &&
+          typeof childService.updateVoicePreferences === "function"
+            ? (childId, payload) =>
+                childService.updateVoicePreferences!(childId, payload)
+            : undefined,
+        syncActiveServerSessionLock:
+          typeof voiceStudio.updateSessionVoiceLock === "function"
+            ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+            : undefined,
+      });
     }
     if (isOpen) {
       loadVoices();
@@ -334,34 +530,48 @@ export function ReadingVoiceSettings({
     if (nextTab === "all") return;
     // During an active locked reading session, switching region tabs ONLY filters
     // the visible list so browsing regions never silently alters the locked voice.
-    if (getActiveSessionVoiceLock() !== null) {
+    const currentLock = getActiveSessionVoiceLock();
+    if (
+      currentLock !== null &&
+      !isSyntheticClientVoiceSessionId(currentLock.sessionId)
+    ) {
       return;
     }
+    const previousVoiceId = preferences.voiceId ?? getEffectiveVoiceId();
     setVoicePolicyPreferences({ region: nextTab });
     if (loadState.status === "ready") {
       const regionVoices = loadState.data.voices.filter(
         (v) => resolveVoiceRegion(v) === nextTab,
       );
       if (regionVoices.length > 0) {
-        const currentId =
-          preferences.voiceId ?? loadState.data.default_voice_id;
-        if (!regionVoices.some((v) => v.voice_id === currentId)) {
-          const pick = regionVoices[0];
-          change(
-            {
-              voiceId:
-                pick.voice_id === loadState.data.default_voice_id
-                  ? null
-                  : pick.voice_id,
-            },
-            pick,
+        const currentGender = resolveVoiceGender(
+          previousVoiceId,
+          teacherPersona.gender,
+        );
+        if (
+          preferences.voiceId === null ||
+          !regionVoices.some((v) => v.voice_id === previousVoiceId)
+        ) {
+          // ALWAYS preserve the active gender when changing region tabs!
+          const sameGenderVoices = regionVoices.filter(
+            (v) => resolveVoiceGender(v.voice_id, v.gender) === currentGender,
           );
+          const defaultForPair = getDefaultVoiceIdForRegionAndGender(
+            nextTab,
+            currentGender,
+          );
+          const pick =
+            sameGenderVoices.find((v) => v.voice_id === defaultForPair) ??
+            sameGenderVoices[0] ??
+            regionVoices[0];
+          change({ voiceId: pick.voice_id }, pick);
         }
       }
     }
   }
 
   function open() {
+    onOpen?.();
     setIsOpen(true);
     loadVoiceHealth();
     const currentKey = buildVoiceContextKey();
@@ -376,6 +586,7 @@ export function ReadingVoiceSettings({
 
   function close() {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
@@ -386,7 +597,17 @@ export function ReadingVoiceSettings({
 
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
-  const selectedVoiceId = preferences.voiceId ?? defaultVoiceId;
+  const effectiveVoiceId = getEffectiveVoiceId();
+  const selectedVoiceId =
+    preferences.voiceId ??
+    (loadState.status === "ready" &&
+    loadState.data.voices.some((v) => v.voice_id === effectiveVoiceId)
+      ? effectiveVoiceId
+      : (defaultVoiceId ?? effectiveVoiceId));
+  const hasRealReadingSessionLock = Boolean(
+    activeSessionLock &&
+    !isSyntheticClientVoiceSessionId(activeSessionLock.sessionId),
+  );
   const isYouthful = (voice: VoiceOption) =>
     ["young", "young_adult", "youthful"].includes(
       voice.age?.toLowerCase() ?? "",
@@ -433,7 +654,7 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button"
+        className="min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-11 lg:flex-row lg:gap-1.5 lg:px-2.5 lg:py-1.5 lg:text-sm"
         disabled={disabled}
         onClick={open}
         size="compact"
@@ -455,7 +676,10 @@ export function ReadingVoiceSettings({
               <Button
                 className="w-auto!"
                 size="compact"
-                onClick={() => change({ voiceId: null })}
+                onClick={() => {
+                  setVoicePolicyPreferences({ region: "north" });
+                  change({ voiceId: null });
+                }}
                 variant="quiet"
               >
                 {t("settings.useDefaultVoice")}
@@ -465,34 +689,64 @@ export function ReadingVoiceSettings({
                 size="compact"
                 onClick={() => {
                   const generation = ++previewGenerationRef.current;
-                  if (isPreviewing) {
+                  if (isPreviewing || isSynthesizingPreview) {
+                    setIsSynthesizingPreview(false);
                     onStopPreview();
                     return;
                   }
                   setPreviewError(false);
+                  setIsSynthesizingPreview(true);
                   const previewText = adaptTextToTeacherPersona(
                     PREVIEW_TEXT,
-                    resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                    resolveVoiceGender(
+                      selectedVoiceId,
+                      selectedVoice?.gender ?? teacherPersona.gender,
+                    ),
                   );
                   void Promise.resolve()
                     .then(() => onPreview(previewText))
                     .catch((error: unknown) => {
+                      const isAbortError =
+                        typeof error === "object" &&
+                        error !== null &&
+                        "name" in error &&
+                        (error as { name?: unknown }).name === "AbortError";
                       if (
                         mountedRef.current &&
                         generation === previewGenerationRef.current &&
-                        !(error instanceof Error && error.name === "AbortError")
+                        !isAbortError
                       )
                         setPreviewError(true);
+                    })
+                    .finally(() => {
+                      if (
+                        mountedRef.current &&
+                        generation === previewGenerationRef.current
+                      ) {
+                        setIsSynthesizingPreview(false);
+                      }
                     });
                 }}
                 variant="primary"
               >
                 <Volume2 aria-hidden="true" className="size-5" />
-                {isPreviewing
+                {isPreviewing || isSynthesizingPreview
                   ? t("settings.stopPreview")
                   : t("settings.preview")}
               </Button>
             </footer>
+            {isSynthesizingPreview && !isPreviewing ? (
+              <AiProgressBar
+                active
+                label={
+                  previewVoiceProgress.stageLabel ??
+                  tCommon("aiProgress.synthesizingVoice")
+                }
+                percent={previewVoiceProgress.percent}
+                size="compact"
+                testId="voice-preview-progress"
+              />
+            ) : null}
             {previewError ? (
               <p role="alert" className="text-body text-muted">
                 {t("settings.previewFailed")}
@@ -509,14 +763,56 @@ export function ReadingVoiceSettings({
         }
         isOpen={isOpen}
         onClose={close}
-        title={t("settings.modalTitle")}
+        title={`${t("settings.modalTitle")} · ${teacherPersona.title}`}
       >
-        <div className="space-y-4">
+        <div className="space-y-4 pb-4">
+          <div
+            aria-label={t("settings.teacherPersonaAria")}
+            className="grid grid-cols-2 gap-2"
+            role="group"
+          >
+            {(
+              [
+                {
+                  gender: "female" as const,
+                  label: t("settings.femaleTeacherQuickBtn"),
+                },
+                {
+                  gender: "male" as const,
+                  label: t("settings.maleTeacherQuickBtn"),
+                },
+              ] as const
+            ).map((option) => {
+              const active = teacherPersona.gender === option.gender;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={cn(
+                    "inline-flex min-h-12 items-center justify-center gap-1.5 rounded-control border-2 px-3 py-2 text-sm font-extrabold transition focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    active
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:border-primary/60 hover:bg-cream",
+                  )}
+                  data-testid={`voice-modal-teacher-${option.gender}`}
+                  key={option.gender}
+                  onClick={() => selectTeacherGender(option.gender)}
+                  type="button"
+                >
+                  {active ? (
+                    <Check aria-hidden="true" className="size-4 shrink-0" />
+                  ) : null}
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
             aria-live="polite"
           >
             <div>
+              {teacherPersona.title} ·{" "}
               {selectedVoice
                 ? voiceTitle(selectedVoice)
                 : preferences.voiceId
@@ -527,14 +823,24 @@ export function ReadingVoiceSettings({
                 ? t("settings.localOnlyMode")
                 : t("settings.localWithGoogleMode")}
             </div>
-            {activeSessionLock || !isBrowserOnline ? (
+            {hasRealReadingSessionLock ||
+            !isBrowserOnline ||
+            isAndroidNativeSpeechAvailable() ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
-                {activeSessionLock ? (
+                {hasRealReadingSessionLock ? (
                   <span
                     data-testid="session-voice-lock-badge"
                     className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"
                   >
                     {t("settings.sessionLockedBadge")}
+                  </span>
+                ) : null}
+                {isAndroidNativeSpeechAvailable() ? (
+                  <span
+                    data-testid="android-native-speech-badge"
+                    className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-900"
+                  >
+                    Android TTS/STT (vi-VN)
                   </span>
                 ) : null}
                 {!isBrowserOnline ? (
@@ -675,9 +981,23 @@ export function ReadingVoiceSettings({
             ) : null}
 
             {loadState.status === "loading" || loadState.status === "idle" ? (
-              <p className="text-body text-muted">
-                {t("settings.loadingVoices")}
-              </p>
+              <div className="space-y-2">
+                <p className="text-body text-muted">
+                  {t("settings.loadingVoices")}
+                </p>
+                {loadState.status === "loading" ? (
+                  <AiProgressBar
+                    active
+                    label={
+                      voiceListProgress.stageLabel ??
+                      tCommon("aiProgress.connecting")
+                    }
+                    percent={voiceListProgress.percent}
+                    size="compact"
+                    testId="voice-list-loading-progress"
+                  />
+                ) : null}
+              </div>
             ) : loadState.status === "error" ? (
               <div className="space-y-2">
                 <p className="text-body text-muted">
@@ -769,13 +1089,18 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
+            !detectBrowserWasmTtsSupport().supported &&
             !(
-              voiceHealth?.elevenlabs?.tts_configured ||
-              voiceHealth?.elevenlabs?.stt_configured
+              policy.providerMode === "local_with_google_fallback" &&
+              ((policy.allowGoogleTtsFallback &&
+                voiceHealth?.elevenlabs?.tts_configured) ||
+                (policy.allowGoogleSttFallback &&
+                  voiceHealth?.elevenlabs?.stt_configured))
             ) &&
-            (voiceHealth
-              ? !voiceHealth.local.available
-              : loadState.data.local_worker_ready === false)
+            (isPermanentlyHostedLocalUnconfigured(voiceHealth) ||
+              (voiceHealth
+                ? !voiceHealth.local.available
+                : loadState.data.local_worker_ready === false))
               ? (() => {
                   const cachedIds =
                     loadState.data.cached_voice_ids !== undefined

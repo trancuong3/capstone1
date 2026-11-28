@@ -26,7 +26,11 @@
       "sessions": "回顾已完成的阅读会话",
       "entertainment": "语言游戏、故事讲述和卡拉OK",
       "difficultWords": "练习孩子容易读错的词汇"
-    }
+    },
+    "devicePermissions": "麦克风与摄像头检测",
+    "aiTasksNotifications": "AI 任务与通知",
+    "userGuide": "详细使用指南",
+    "helpFeedback": "帮助与反馈"
   },
   "admin": {
     "navLabel": "管理后台导航",
@@ -37,15 +41,15 @@
     "books": "图书库",
     "metadataQuality": "图书质量",
     "auditLogs": "审计日志",
-    "training": "OCR 训练",
+    "training": "文字识别模型",
     "health": "运营",
     "moreTitle": "更多管理",
     "mobileQualityShort": "质量",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "识字",
     "mobileMoreDescriptions": {
       "auditLogs": "追踪管理审计日志",
-      "training": "训练并运行 VietOCR V2 模型",
-      "health": "系统状态、OCR worker 和语音"
+      "training": "训练与管理文字识别模型",
+      "health": "系统状态、文字识别与语音"
     }
   },
   "accountMenu": {
@@ -58,7 +62,19 @@
     "accountSection": "账户",
     "helpSection": "帮助",
     "sessionSection": "会话",
-    "defaultAccountLabel": "ViRead 账户"
+    "defaultAccountLabel": "ViRead 账户",
+    "activitiesSection": "活动与工具",
+    "accountDeviceSection": "账户与设备",
+    "guideSupportSection": "指南与支持",
+    "quickChildTitle": "当前阅读儿童",
+    "languageLabel": "界面语言",
+    "taskStatusRunning": "{count} 项任务正在后台运行",
+    "taskStatusReview": "{count} 项任务等待审核",
+    "taskStatusFailed": "{count} 项任务出现异常",
+    "taskStatusNewDone": "{count} 项任务刚刚完成",
+    "taskStatusIdle": "暂无新任务",
+    "unreadBadgeAria": "有未读 AI 任务通知",
+    "runningBadgeAria": "有后台 AI 任务运行中"
   },
   "childSwitcher": {
     "selectedAria": "当前选择：{alias}，点击切换",
@@ -73,5 +89,38 @@
     "ariaLabel": "ViRead 信息",
     "logoDashboardAria": "ViRead - 前往概览",
     "logoHomeAria": "ViRead - 前往首页"
+  },
+  "guide": {
+    "title": "ViRead 使用指南",
+    "subtitle": "每天陪伴孩子阅读的 5 个简单步骤。",
+    "closeAction": "知道了",
+    "openHelpCenter": "打开帮助中心",
+    "steps": {
+      "1": {
+        "title": "1. 创建孩子档案",
+        "body": "在孩子档案中添加昵称和年级（1–5 年级），获取合适书籍推荐。",
+        "action": "孩子档案"
+      },
+      "2": {
+        "title": "2. 选书或上传家庭私密书籍",
+        "body": "从书库选书，或在“我的书籍”上传图片、PDF 或 DOCX 供家庭阅读。",
+        "action": "我的书籍"
+      },
+      "3": {
+        "title": "3. 检测麦克风并一起阅读",
+        "body": "阅读前测试麦克风，确保 ViRead 清晰收音并及时辅导拼读。",
+        "action": "设备检测"
+      },
+      "4": {
+        "title": "4. 复习难点词并查看进度",
+        "body": "按书籍练习易错词语，每周查看孩子的阅读成长趋势。",
+        "action": "难点词"
+      },
+      "5": {
+        "title": "5. 设定阅读计划与跟踪 AI 任务",
+        "body": "在阅读管理中设置目标与提醒，并在 AI 任务中查看 OCR 进度。",
+        "action": "阅读管理"
+      }
+    }
   }
 }

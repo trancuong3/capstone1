@@ -220,7 +220,7 @@ describe("Global AI Task Center", () => {
     expect(service.listTasks).toHaveBeenCalledTimes(1);
   });
 
-  it("renders honest measured progress vs indeterminate bar without fake percentage timers", async () => {
+  it("renders measured and staged percentage progress bars for every active AI task", async () => {
     const measuredTask = makeTask({
       id: "job-measured",
       title_vi: "Nhập nhiều trang sách",
@@ -228,20 +228,20 @@ describe("Global AI Task Center", () => {
       progress_total: 10,
       progress_unit: "trang",
       progress_pct: 30,
+      progress_mode: "measured",
       is_indeterminate: false,
     });
-    const indeterminateTask = makeTask({
+    const stagedTask = makeTask({
       id: "job-indeterminate",
       title_vi: "Nhận diện chữ trang sách",
       progress_completed: null,
       progress_total: null,
       progress_unit: null,
       progress_pct: null,
+      progress_mode: "staged",
       is_indeterminate: true,
     });
-    const service = createMockService(
-      makeFeed([measuredTask, indeterminateTask]),
-    );
+    const service = createMockService(makeFeed([measuredTask, stagedTask]));
 
     render(
       <AiTaskCenterProvider
@@ -255,22 +255,25 @@ describe("Global AI Task Center", () => {
 
     const trigger = await screen.findByTestId("global-task-center-trigger");
     await waitFor(() => expect(trigger).toHaveTextContent("AI đang chạy (2)"));
+    expect(trigger).toHaveTextContent("30%");
 
     fireEvent.click(trigger);
 
-    const measuredBox = screen.getByTestId("task-progress-job-measured");
+    const measuredBox = await screen.findByTestId("task-progress-job-measured");
     expect(measuredBox).toHaveTextContent("3/10 trang");
     expect(measuredBox).toHaveTextContent("30%");
     const measuredBar = within(measuredBox).getByRole("progressbar");
-    expect(measuredBar).toHaveAttribute("aria-valuenow", "3");
-    expect(measuredBar).toHaveAttribute("aria-valuemax", "10");
+    expect(measuredBar).toHaveAttribute("aria-valuenow", "30");
+    expect(measuredBar).toHaveAttribute("aria-valuemax", "100");
 
-    const indetBox = screen.getByTestId("task-progress-job-indeterminate");
-    expect(indetBox).toHaveTextContent("Đang xử lý nền…");
-    expect(indetBox).not.toHaveTextContent("%");
-    const indetBar = within(indetBox).getByRole("progressbar");
-    expect(indetBar).toHaveAttribute("data-indeterminate", "true");
-    expect(indetBar).not.toHaveAttribute("aria-valuenow");
+    const stagedBox = screen.getByTestId("task-progress-job-indeterminate");
+    expect(stagedBox).toHaveTextContent("%");
+    const stagedBar = within(stagedBox).getByRole("progressbar");
+    expect(stagedBar).toHaveAttribute("aria-valuemin", "0");
+    expect(stagedBar).toHaveAttribute("aria-valuemax", "100");
+    const stagedPct = Number(stagedBar.getAttribute("aria-valuenow"));
+    expect(stagedPct).toBeGreaterThanOrEqual(8);
+    expect(stagedPct).toBeLessThan(100);
   });
 
   it("supports Retry, Cancel, and non-blocking 'Xem kết quả' link with >=48px mobile bottom-sheet targets", async () => {
@@ -317,7 +320,7 @@ describe("Global AI Task Center", () => {
     await waitFor(() => expect(service.listTasks).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByTestId("global-task-center-trigger"));
 
-    const panel = screen.getByTestId("global-task-center-panel");
+    const panel = await screen.findByTestId("global-task-center-panel");
     // Mobile bottom-sheet classes + desktop slide-over classes
     expect(panel.className).toContain("rounded-t-2xl");
     expect(panel.className).toContain("max-h-[82dvh]");
@@ -343,12 +346,16 @@ describe("Global AI Task Center", () => {
 
     fireEvent.click(retryBtn);
     await waitFor(() =>
-      expect(service.retryTask).toHaveBeenCalledWith("job-failed"),
+      expect(service.retryTask).toHaveBeenCalledWith("job-failed", {
+        portal: "parent",
+      }),
     );
 
     fireEvent.click(cancelBtn);
     await waitFor(() =>
-      expect(service.cancelTask).toHaveBeenCalledWith("job-running"),
+      expect(service.cancelTask).toHaveBeenCalledWith("job-running", {
+        portal: "parent",
+      }),
     );
   });
 
@@ -568,5 +575,105 @@ describe("Global AI Task Center", () => {
     expect(typeof svc.cancelTask).toBe("function");
     expect(typeof svc.getCapabilities).toBe("function");
     vi.unstubAllGlobals();
+  });
+
+  it("uses amber bg-amber-600 count pill on sidebar variant when all active tasks are WAITING_FOR_WORKER and shows offline banner even with 0 active tasks", async () => {
+    const waitingTask = makeTask({
+      id: "job-waiting-1",
+      status: "WAITING_FOR_WORKER",
+      status_label_vi: "Chờ máy xử lý AI kết nối lại",
+      stage_label_vi: "Đã lưu trong hàng chờ — Chờ máy chủ OCR bật lại",
+    });
+    const service = createMockService(
+      makeFeed([waitingTask], { worker_online: false }),
+    );
+
+    const { rerender } = render(
+      <AiTaskCenterProvider
+        actorId="parent-a"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+      </AiTaskCenterProvider>,
+    );
+
+    const sidebarBadge = await screen.findByTestId(
+      "global-task-center-sidebar-count",
+    );
+    expect(sidebarBadge).toHaveTextContent("1");
+    expect(sidebarBadge.className).toContain("bg-amber-600");
+    expect(sidebarBadge.className).not.toContain("bg-primary");
+
+    // Now simulate 0 active tasks while worker_online === false -> drawer STILL shows workerOfflineBanner
+    service.listTasks.mockResolvedValue(
+      makeFeed([], {
+        actor_id: "parent-b",
+        active_count: 0,
+        worker_online: false,
+      }),
+    );
+    rerender(
+      <AiTaskCenterProvider
+        actorId="parent-b"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    fireEvent.click(trigger);
+
+    const offlineBanner = await screen.findByTestId(
+      "global-task-center-worker-offline-banner",
+    );
+    expect(offlineBanner).toHaveTextContent(/Dịch vụ OCR hiện chưa sẵn sàng/i);
+  });
+
+  it("paginates tasks inside the drawer (6 per page) when many background tasks exist", async () => {
+    const manyTasks = Array.from({ length: 10 }, (_, idx) =>
+      makeTask({
+        id: `job-paged-${idx + 1}`,
+        title_vi: `Tác vụ số ${idx + 1}`,
+        status: idx < 2 ? "RUNNING" : "SUCCEEDED",
+        status_label_vi: idx < 2 ? "Đang xử lý" : "Hoàn thành",
+        can_cancel: idx < 2,
+      }),
+    );
+    const service = createMockService(makeFeed(manyTasks));
+
+    render(
+      <AiTaskCenterProvider
+        actorId="parent-a"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="header-pill" />
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    fireEvent.click(trigger);
+
+    expect(screen.getByTestId("task-card-job-paged-1")).toBeInTheDocument();
+    expect(screen.getByTestId("task-card-job-paged-6")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-card-job-paged-7"),
+    ).not.toBeInTheDocument();
+
+    const nav = within(
+      screen.getByTestId("global-task-center-panel"),
+    ).getByRole("navigation", { name: "Trung tâm tác vụ AI" });
+    expect(nav).toHaveTextContent("Trang 1 / 2");
+
+    fireEvent.click(within(nav).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByTestId("task-card-job-paged-7")).toBeInTheDocument();
+    expect(screen.getByTestId("task-card-job-paged-10")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-card-job-paged-1"),
+    ).not.toBeInTheDocument();
+    expect(nav).toHaveTextContent("Trang 2 / 2");
   });
 });

@@ -321,10 +321,9 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     expect(
       within(sheet).getByRole("link", { name: /Nhật ký/ }),
     ).toHaveAttribute("href", "/admin/audit-logs");
-    expect(within(sheet).getByRole("link", { name: /^OCR/ })).toHaveAttribute(
-      "href",
-      "/admin/viread-training",
-    );
+    expect(
+      within(sheet).getByRole("link", { name: /^Đọc chữ/ }),
+    ).toHaveAttribute("href", "/admin/viread-training");
     expect(
       within(sheet).getByRole("link", { name: /Vận hành/ }),
     ).toHaveAttribute("href", "/admin/health");

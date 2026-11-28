@@ -1480,6 +1480,7 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
     def test_put_dedup_stream_selftest_resume_and_connect_with_owner_pinning(self):
         import asyncio
         import tempfile
+        from types import SimpleNamespace
         from app.services.training_storage.google_drive_desktop_store import (
             DRIVE_DESKTOP_SYNC_SCOPE,
             GoogleDriveDesktopStore,
@@ -1491,6 +1492,11 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
         )
 
         invalidate_sync_google_drive_store_cache()
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             my_drive = Path(tmpdir) / "My Drive"
             my_drive.mkdir()
@@ -1501,7 +1507,10 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
                 "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
                 "VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS": str(tmpdir),
             }
-            with patch.dict(os.environ, env, clear=False):
+            with patch.dict(os.environ, env, clear=False), patch(
+                "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+                return_value=fake_disk_usage,
+            ):
                 # Wrong owner email rejected with 403
                 svc_bad = VireadDriveConnectionService(MagicMock())
                 svc_bad.repo = MagicMock()
@@ -1571,6 +1580,110 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
                 self.assertEqual(rmeta.size_bytes, len(blob))
                 self.assertEqual(b"".join(rstream), blob)
                 self.assertTrue(store.delete_resume_file(job_id, f"blobs/{bsha}.part0000"))
+
+    def test_apps_script_bridge_surfaces_trash_fallback_telemetry_and_warning(self):
+        import asyncio
+        from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
+        from app.services.training_storage.base import StorageQuotaStatus
+        from app.services.viread_drive_connection_service import VireadDriveConnectionService
+
+        store = GoogleAppsScriptDriveStore(
+            web_app_url="https://script.google.com/macros/s/AKfycbzTestDeployment0123456789/exec",
+            bridge_secret="s" * 40,
+        )
+
+        def fake_bridge(action: str, payload=None):
+            if action == "health":
+                return {
+                    "ok": True,
+                    "account_email": "owner@example.com",
+                    "root_folder_id": "drv_root_12345",
+                    "subfolder_ids": {"_selftest": "drv_sub_12345"},
+                    "quota": {"limit_bytes": 15 * 1024**3, "usage_bytes": 1024},
+                    "advanced_drive_enabled": False,
+                    "delete_mode": "trash_fallback",
+                }
+            if action == "delete_file":
+                return {
+                    "ok": True,
+                    "deleted": True,
+                    "delete_mode": "trash_fallback",
+                    "permanent_delete": False,
+                    "trashed_fallback": True,
+                }
+            if action == "quota":
+                return {"ok": True, "quota": {"limit_bytes": 15 * 1024**3, "usage_bytes": 1024}}
+            raise AssertionError(f"Unexpected action {action}")
+
+        with patch.object(store, "_call_bridge", side_effect=fake_bridge):
+            health = store.health_check()
+            self.assertFalse(health.advanced_drive_enabled)
+            self.assertEqual(health.delete_mode, "trash_fallback")
+            self.assertTrue(health.warnings)
+
+            from app.services.training_storage.base import ArtifactMetadata, StoredArtifact
+            from app.services.training_storage.references import StorageProvider
+
+            captured_payload: list[bytes] = []
+
+            def _fake_put(_path, data, **_kwargs):
+                raw = data if isinstance(data, bytes) else data.read()
+                captured_payload.append(raw)
+                return StoredArtifact(
+                    provider=StorageProvider.GOOGLE_DRIVE,
+                    reference="gdrive://drv_selftest_12345",
+                    logical_path=_path,
+                    sha256=hashlib.sha256(raw).hexdigest(),
+                    size_bytes=len(raw),
+                    content_type="text/plain",
+                    drive_file_id="drv_selftest_12345",
+                )
+
+            fake_meta = ArtifactMetadata(
+                provider=StorageProvider.GOOGLE_DRIVE,
+                reference="gdrive://drv_selftest_12345",
+                name="selftest-1.txt",
+                size_bytes=10,
+                sha256="a" * 64,
+                content_type="text/plain",
+                trashed=False,
+                is_public=False,
+                drive_file_id="drv_selftest_12345",
+            )
+            with (
+                patch.object(store, "put", side_effect=_fake_put),
+                patch.object(store, "get", side_effect=lambda *a, **kw: captured_payload[-1]),
+                patch.object(store, "get_metadata", return_value=fake_meta),
+            ):
+                self_test_res = store.self_test()
+            self.assertTrue(self_test_res.ok)
+            self.assertEqual(self_test_res.delete_mode, "trash_fallback")
+            self.assertFalse(self_test_res.permanent_delete)
+            self.assertIsNotNone(self_test_res.warning)
+
+        # Service check_health & run_self_test pass fields through
+        svc = VireadDriveConnectionService(MagicMock())
+        svc.repo = MagicMock()
+        svc.repo.get_primary = AsyncMock(
+            return_value=(
+                {
+                    "status": "CONNECTED",
+                    "oauth_scope": "apps_script_bridge",
+                    "account_email": "owner@example.com",
+                    "subfolder_ids": {},
+                },
+                True,
+            )
+        )
+        svc.repo.update_health_and_quota = AsyncMock(return_value={})
+        svc._release_read_txn = AsyncMock()
+        svc._build_store_async = AsyncMock(return_value=store)
+
+        with patch.object(store, "_call_bridge", side_effect=fake_bridge):
+            payload = asyncio.run(svc.check_health())
+        self.assertFalse(payload["advanced_drive_enabled"])
+        self.assertEqual(payload["delete_mode"], "trash_fallback")
+        self.assertTrue(payload["warnings"])
 
 
 if __name__ == "__main__":

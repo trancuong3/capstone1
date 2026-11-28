@@ -13,7 +13,7 @@
     "noChildDescription": "建立個人檔案並開始閱讀，以便系統記錄證據。",
     "createChildAction": "建立孩子檔案",
     "unsupportedTitle": "資料待補充",
-    "unsupportedDescription": "此項目的資料格式目前不適用，無範例資料。",
+    "unsupportedDescription": "此部分資料尚未就緒，請稍後再試。",
     "retry": "重試",
     "manageChildren": "管理兒童檔案",
     "notFoundTitle": "找不到資料",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "沒有符合所選練習狀態的詞彙。",
     "viewAllWords": "查看所有詞彙 ({count})",
     "paginationAria": "待練習詞彙書籍分頁",
-    "paginationItemLabel": "本書籍"
+    "paginationItemLabel": "本書籍",
+    "statTotal": "總詞數",
+    "statCompleted": "已讀準",
+    "statRemaining": "待複習",
+    "quickMastered": "已掌握",
+    "quickNeedsMoreFull": "需加強"
   },
   "bookCard": {
     "gradeSingle": "{grade} 年級",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "尚未重讀",
     "badgeNeedsMore": "需要加強練習",
     "badgeInProgress": "練習中",
-    "badgeCompleted": "已正確朗讀"
+    "badgeCompleted": "已正確朗讀",
+    "showMoreWords": "+{count} 個詞",
+    "showFewerWords": "收合",
+    "tagMispronounced": "讀錯 {count}",
+    "tagOmitted": "漏讀 {count}",
+    "tagRepeated": "重複 {count}"
   },
   "item": {
     "notPracticed": "未練習",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "此裝置無法播放越南語範例音訊。孩子仍可與爸爸媽媽一起朗讀。",
     "phonicsLockedBusy": "拼讀語音暫時忙碌中。請依照螢幕步驟操作並點擊「重試」。",
     "evaluationTimeoutError": "系統檢查時間比預期長。您可以重新發送剛才的錄音。",
-    "evaluationSaveError": "無法將結果儲存至伺服器。孩子的錄音已保留 — 請點擊「儲存結果」。",
+    "evaluationSaveError": "暫時無法儲存結果。孩子的錄音已保留，請點擊儲存結果重試。",
     "micPermissionError": "瀏覽器未獲得麥克風權限。請爸爸媽媽在瀏覽器設定中開啟麥克風權限後再試。",
     "micNotFoundError": "在此裝置上找不到麥克風。請爸爸媽媽檢查麥克風連線。",
     "micUnsupportedError": "目前的瀏覽器不支援直接錄音。",
@@ -162,5 +172,25 @@
   "runtime": {
     "practiceOpened": "已開啟單字「{word}」的第#{attempt}次練習。",
     "unknownBookSource": "未指定書籍來源"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "60秒語音熱身",
+    "title": "最小對立詞工坊與聲調鏡",
+    "subtitle": "幫助 {alias} 聽辨並練習容易混淆的聲調、聲母與韻尾。",
+    "openButton": "打開60秒工坊",
+    "collapseButton": "收起",
+    "unavailableHint": "暫時無法載入最小對立詞練習，請稍後再試。",
+    "pairCounter": "詞組 {current}/{total}",
+    "listenWord": "試聽",
+    "speakWord": "跟讀",
+    "listening": "正在聆聽...",
+    "spokenMatch": "太棒了！目標詞發音清晰準確！",
+    "spokenContrast": "聽起來接近「{heard}」——先聽示範再慢速讀一遍吧！",
+    "spokenRetry": "還沒聽清楚，請靠近麥克風慢速再讀一次！",
+    "earChallengeButton": "聽音辨詞",
+    "earCorrect": "答對啦！耳力真敏銳！",
+    "earRetry": "差一點點，再聽一次試試看！",
+    "nextPairButton": "下一組",
+    "nonClinicalDisclaimer": "基於自動語音辨識的閱讀輔助練習建議（非醫學或語言治療診斷）。"
   }
 }

@@ -163,32 +163,16 @@ export function BookContentReportDialog({
               {t("reportDialog.wholeBookFollowup")}
             </p>
           </div>
-          <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-muted">{t("reportDialog.reportIdLabel")}</dt>
-              <dd className="break-all font-mono font-semibold text-ink">
-                {created.id}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted">{t("reportDialog.statusLabel")}</dt>
-              <dd className="font-semibold text-ink">
-                {t(
-                  `reportDialog.statuses.${created.status}`,
-                  undefined,
-                  created.status,
-                )}
-              </dd>
-            </div>
-            <div className="sm:col-span-2">
-              <dt className="text-muted">
-                {t("reportDialog.scanRequestLabel")}
-              </dt>
-              <dd className="break-all font-mono text-ink">
-                {created.scan_run_id ?? t("reportDialog.noScanIdReturned")}
-              </dd>
-            </div>
-          </dl>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border p-4 text-sm">
+            <span className="text-muted">{t("reportDialog.statusLabel")}</span>
+            <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
+              {t(
+                `reportDialog.statuses.${created.status}`,
+                undefined,
+                created.status,
+              )}
+            </span>
+          </div>
         </div>
       ) : (
         <form

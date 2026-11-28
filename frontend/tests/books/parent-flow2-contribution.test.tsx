@@ -61,7 +61,7 @@ describe("Parent Private Book -> Flow 2 OCR Contribution UI", () => {
       screen.getByText(/Đang tắt — không dùng để huấn luyện/i),
     ).toBeInTheDocument();
     const enableBtn = screen.getByRole("button", {
-      name: /Bật đóng góp mẫu OCR/i,
+      name: /Bật đóng góp mẫu nhận diện/i,
     });
     expect(enableBtn).toBeDisabled();
 
@@ -95,7 +95,7 @@ describe("Parent Private Book -> Flow 2 OCR Contribution UI", () => {
     );
 
     expect(screen.getByText(/Chờ Admin xác minh: 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/Đã đồng bộ Flow 2: 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Đã đồng bộ: 1/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Ngừng đóng góp/i }));
     await waitFor(() => {

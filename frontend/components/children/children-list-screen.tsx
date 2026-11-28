@@ -7,11 +7,14 @@ import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/common/page-header";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
 import { useI18n } from "@/hooks/use-i18n";
 import type { ChildProfileDTO } from "@/types/child";
+
+const CHILDREN_PAGE_SIZE = 6;
 
 type ChildrenState =
   | { status: "loading" }
@@ -22,6 +25,7 @@ export function ChildrenListScreen() {
   const { t } = useI18n();
   const childService = useChildService();
   const [requestKey, setRequestKey] = useState(0);
+  const [page, setPage] = useState(1);
   const [state, setState] = useState<ChildrenState>({ status: "loading" });
 
   useEffect(() => {
@@ -47,6 +51,17 @@ export function ChildrenListScreen() {
       isActive = false;
     };
   }, [childService, requestKey]);
+
+  const totalChildren = state.status === "ready" ? state.children.length : 0;
+  const totalPages = Math.max(1, Math.ceil(totalChildren / CHILDREN_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const visibleChildren =
+    state.status === "ready"
+      ? state.children.slice(
+          (safePage - 1) * CHILDREN_PAGE_SIZE,
+          safePage * CHILDREN_PAGE_SIZE,
+        )
+      : [];
 
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
@@ -90,7 +105,10 @@ export function ChildrenListScreen() {
           </StatusMessage>
           <Button
             className="sm:w-auto sm:self-start sm:px-8"
-            onClick={() => setRequestKey((key) => key + 1)}
+            onClick={() => {
+              setPage(1);
+              setRequestKey((key) => key + 1);
+            }}
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-5" />
@@ -116,16 +134,25 @@ export function ChildrenListScreen() {
       ) : null}
 
       {state.status === "ready" && state.children.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 sm:gap-6">
-          {state.children.map((child) => (
-            <ChildProfileCard
-              child={child}
-              href={`/children/${child.id}`}
-              key={child.id}
-              showEditAction
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-6">
+            {visibleChildren.map((child) => (
+              <ChildProfileCard
+                child={child}
+                href={`/children/${child.id}`}
+                key={child.id}
+                showEditAction
+              />
+            ))}
+          </div>
+          <PaginationBar
+            itemLabel={t("parent.dashboard.childProfilesTitle")}
+            onPageChange={setPage}
+            page={safePage}
+            pageSize={CHILDREN_PAGE_SIZE}
+            total={state.children.length}
+          />
+        </>
       ) : null}
     </section>
   );

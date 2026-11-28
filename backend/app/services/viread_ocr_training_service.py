@@ -9,8 +9,10 @@ import math
 import os
 import random
 import re
+import threading
+import time
 import unicodedata
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -49,11 +51,38 @@ from app.services.viread_training_storage_quota import ensure_database_capacity,
 
 logger = logging.getLogger(__name__)
 
-_OVERVIEW_MANIFEST_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_OVERVIEW_MANIFEST_CACHE_MAXSIZE = 16
+_OVERVIEW_MANIFEST_CACHE_TTL_SECONDS = 300.0
+_OVERVIEW_MANIFEST_CACHE_LOCK = threading.Lock()
+_OVERVIEW_MANIFEST_CACHE: OrderedDict[tuple[str, str], tuple[float, dict[str, Any]]] = OrderedDict()
 
 
 def invalidate_overview_manifest_cache() -> None:
-    _OVERVIEW_MANIFEST_CACHE.clear()
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        _OVERVIEW_MANIFEST_CACHE.clear()
+
+
+def _get_cached_overview_manifest(cache_key: tuple[str, str]) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        entry = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
+        if entry is None:
+            return None
+        expires_at, meta = entry
+        if now >= expires_at:
+            _OVERVIEW_MANIFEST_CACHE.pop(cache_key, None)
+            return None
+        _OVERVIEW_MANIFEST_CACHE.move_to_end(cache_key)
+        return dict(meta)
+
+
+def _set_cached_overview_manifest(cache_key: tuple[str, str], meta: dict[str, Any]) -> None:
+    expires_at = time.monotonic() + _OVERVIEW_MANIFEST_CACHE_TTL_SECONDS
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        _OVERVIEW_MANIFEST_CACHE[cache_key] = (expires_at, dict(meta))
+        _OVERVIEW_MANIFEST_CACHE.move_to_end(cache_key)
+        while len(_OVERVIEW_MANIFEST_CACHE) > _OVERVIEW_MANIFEST_CACHE_MAXSIZE:
+            _OVERVIEW_MANIFEST_CACHE.popitem(last=False)
 
 ORIGINAL_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
@@ -704,6 +733,13 @@ class VireadOcrTrainingService:
             LEFT JOIN public.viread_ocr_training_runs AS training_run ON training_run.id=job.run_id
             ORDER BY job.created_at DESC LIMIT 30
         """)
+        from app.services.ai_task_progress import compute_training_job_progress
+
+        for job_row in jobs:
+            job_row["progress_pct"] = compute_training_job_progress(
+                status=job_row.get("status"),
+                progress=job_row.get("progress"),
+            )
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
                    candidate_checkpoint_sha256, locked_test_manifest_sha256, evaluation_type, created_at
@@ -726,7 +762,7 @@ class VireadOcrTrainingService:
                 active["source"] = "original_default"
             else:
                 cache_key = (str(active.get("checkpoint_sha256")), str(active.get("storage_path")))
-                cached_meta = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
+                cached_meta = _get_cached_overview_manifest(cache_key)
                 if cached_meta is None:
                     try:
                         active_router = (
@@ -749,7 +785,7 @@ class VireadOcrTrainingService:
                             "comparison_summary": m_json.get("comparison_summary"),
                             "source": m_json.get("source"),
                         }
-                        _OVERVIEW_MANIFEST_CACHE[cache_key] = cached_meta
+                        _set_cached_overview_manifest(cache_key, cached_meta)
                     except Exception as exc:
                         logger.warning("Could not read active model manifest metadata: %s", exc)
                         cached_meta = {
@@ -1020,23 +1056,23 @@ class VireadOcrTrainingService:
         flow2_blockers: list[str] = []
         if flow2_storage_provider_setting() == StorageProvider.GOOGLE_DRIVE:
             if not google_drive or not google_drive.get("connected"):
-                flow2_blockers.append("Google Drive cho Luồng 2 chưa kết nối hoặc phiên bridge không hợp lệ.")
+                flow2_blockers.append("Google Drive cho dữ liệu xác minh chưa kết nối hoặc phiên cầu nối không hợp lệ.")
             elif google_drive.get("connection_mode") == "drive_desktop_sync" and web_heavy_disabled:
-                flow2_blockers.append("Đang dùng Google Drive Desktop trên máy cá nhân; Cloud server cần Apps Script Bridge.")
+                flow2_blockers.append("Đang dùng Google Drive trên máy cá nhân; máy chủ đám mây cần kết nối qua Apps Script Bridge.")
         if flow2_legacy_count > 0:
             flow2_blockers.append(
-                f"Còn {flow2_legacy_count} mẫu chưa đồng bộ lên Cloud Google Drive (cần Apps Script Bridge & migrate)."
+                f"Còn {flow2_legacy_count} mẫu chưa đồng bộ lên Google Drive (cần kết nối Apps Script Bridge và đồng bộ)."
             )
         if not (flow2_train_count > 0 and flow2_validation_count > 0):
             flow2_blockers.append(
-                f"Pool sạch Luồng 2 cần mẫu ở cả train ({flow2_train_count}) và validation ({flow2_validation_count}); có thể bấm kích hoạt tạo snapshot nếu đã có ít nhất 2 nhóm sách."
+                f"Kho dữ liệu sạch cần có mẫu ở cả tập huấn luyện ({flow2_train_count}) và tập kiểm thử ({flow2_validation_count}); có thể bấm tạo bản tổng hợp nếu đã có ít nhất 2 nhóm sách."
             )
         if web_heavy_disabled and not any(
             str(j.get("profile") or "") in {"FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"}
             and str(j.get("status") or "") in {"WAITING_FOR_COLAB_WORKER", "COLAB_RUNNING", "QUEUED"}
             for j in jobs
         ):
-            flow2_blockers.append("Worker nền trên Web bị tắt (VIREAD_WEB_DISABLE_HEAVY_WORKERS=true); hãy bấm 'Tạo snapshot & Xếp hàng train Luồng 2' để đẩy job cho Colab.")
+            flow2_blockers.append("Tác vụ huấn luyện nền trên máy chủ web đang tắt; hãy bấm 'Tạo bản tổng hợp & Xếp hàng huấn luyện' để gửi tác vụ cho máy chủ xử lý.")
 
         storage_summary = {
             "flow2_write_provider": flow2_storage_provider_setting().value,

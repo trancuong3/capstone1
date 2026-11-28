@@ -11,6 +11,7 @@ SourceType = Literal["BOOK_PAGE", "CUSTOM_UPLOAD", "SAMPLE"]
 SessionStatus = Literal["ACTIVE", "COMPLETED"]
 InputMode = Literal["VOICE", "TEXT"]
 EvaluationSource = Literal["AI", "FALLBACK"]
+TeacherGender = Literal["female", "male"]
 TeachingMode = Literal[
     "OBSERVE",
     "VOCABULARY",
@@ -70,6 +71,9 @@ class PictureBookPageItem(BaseModel):
     page_id: UUID
     page_number: int = Field(..., ge=1)
     image_url: str
+    has_verified_illustration: bool = False
+    page_kind: str | None = None
+    ocr_excerpt: str | None = None
 
 
 class PictureCatalogRead(BaseModel):
@@ -164,6 +168,7 @@ class PictureEvaluateRequest(BaseModel):
     input_mode: InputMode = "TEXT"
     teaching_mode: TeachingMode | None = None
     target_words: list[str] | None = None
+    teacher_gender: TeacherGender | None = None
 
     @field_validator("transcript_text")
     @classmethod

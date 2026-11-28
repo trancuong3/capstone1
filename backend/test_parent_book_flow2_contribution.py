@@ -315,7 +315,7 @@ class ParentPrivateBookFlow2ContributionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(detail["book"]["ocr_contribution"]["enabled"])
             self.assertEqual(detail["book"]["ocr_contribution"]["status"], "OPTED_OUT")
             self.assertEqual(detail["book"]["ocr_contribution"]["pending_verification_count"], 0)
-            self.assertIn("không được dùng để huấn luyện", detail["book"]["privacy_notice"].lower())
+            self.assertIn("không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ", detail["book"]["privacy_notice"].lower())
 
         # Admin CANNOT opt in on behalf of Parent A
         async with self._client(ADMIN_1) as client:

@@ -189,7 +189,7 @@
     "submitFeedback": "傳送意見回饋",
     "charCount": "{count}/{max}",
     "privacyNote": "此資訊將用於接收和處理支援請求。請勿在意見回饋內容中傳送密碼或驗證碼。",
-    "sentSuccessDetail": "郵件伺服器已收到家長的意見回饋。如有最新資訊，ViRead 將透過聯絡電子郵件回覆。",
+    "sentSuccessDetail": "ViRead 已收到您的意見回饋。有最新消息時我們將透過您的聯絡電子郵件回覆。",
     "submitError": "無法傳送意見回饋。請稍後再試。",
     "categories": {
       "technical_issue": "回報技術問題",
@@ -220,8 +220,8 @@
         "title": "書籍與辨識",
         "q1": "如何選書？",
         "a1": "開啟書籍目錄，選擇目錄中提供的一本書，然後依照螢幕上的指示開始。",
-        "q2": "如果 OCR 內容不正確，我該怎麼做？",
-        "a2": "家長可以在此頁面提交意見回饋，詳細註明書名、發生問題的頁碼，並描述辨識不正確的內容。OCR 內容在用於閱讀活動之前必須先經過檢查。"
+        "q2": "如果從書頁辨識出的文字不準確該怎麼辦？",
+        "a2": "您可以在本頁提交回饋，註明書名、頁碼與不準確的內容，以便 ViRead 團隊確認並更新。"
       },
       "reading": {
         "title": "閱讀課程",
@@ -233,5 +233,73 @@
         "a3": "開啟「進度」區段查看報告，或開啟「歷史記錄」區段查看已儲存的閱讀課程。"
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "全系統語音同步",
+    "title": "選擇 AI 女老師 / 男老師",
+    "subtitle": "所選聲音將同步套用於閱讀 · 拼讀 · 錯詞重讀 · 閱讀理解 · 趣味遊戲。",
+    "savedForChild": "已為 {alias} 儲存",
+    "previewButton": "試聽聲音",
+    "stopPreviewButton": "停止試聽",
+    "personaGroupAria": "選擇 AI 女老師或 AI 男老師",
+    "femaleTitle": "AI 女老師",
+    "femaleDesc": "溫柔親切的女聲",
+    "maleTitle": "AI 男老師",
+    "maleDesc": "沉穩生動的男聲",
+    "selectedBadge": "目前選擇",
+    "regionLabel": "地區口音",
+    "voiceListLabel": "選擇具體聲音",
+    "voiceListAria": "依老師與地區篩選的聲音清單",
+    "policyLabel": "語音引擎模式",
+    "policyAria": "選擇語音引擎模式",
+    "policyLocalOnly": "僅限本機",
+    "policyOnlineBackup": "本機 + 線上備援",
+    "workerOfflineHint": "本機語音服務目前未執行。請開啟「本機 + 線上備援」，以便朗讀未預先快取的繪本句子與遊戲語音。"
+  },
+  "childModePin": {
+    "lockedPill": "兒童鎖定已開啟",
+    "unlockedPill": "兒童模式鎖",
+    "lockedTooltip": "兒童安全模式已開啟 — 點擊輸入家長 PIN 解鎖",
+    "unlockedTooltip": "啟用 4 位家長 PIN，防止孩子誤入家長管理與設定頁面",
+    "setupTitle": "設定兒童安全模式 4 位 PIN",
+    "manageTitle": "修改兒童安全模式 PIN",
+    "unlockTitle": "輸入家長 PIN 解鎖",
+    "setupDesc": "4 位數字 PIN 可在孩子閱讀時保護設定、私享書庫與檔案管理頁面。",
+    "unlockDesc": "此頁面僅供家長存取，請輸入 4 位數字 PIN 繼續。",
+    "currentPinLabel": "目前 PIN",
+    "newPinLabel": "新的 4 位數字 PIN",
+    "enterPinLabel": "家長 4 位數字 PIN",
+    "autoEnableCheckbox": "為此帳號記住兒童安全模式偏好",
+    "invalidFormat": "PIN 必須恰好為 4 位數字（0-9）。",
+    "currentPinRequired": "請輸入目前 4 位數字 PIN。",
+    "wrongPinRemaining": "PIN 不正確，再錯 {remaining} 次將暫停 5 分鐘。",
+    "requestFailed": "暫時無法驗證或儲存 PIN，請稍後再試。",
+    "removePinButton": "移除 PIN",
+    "cancelButton": "取消",
+    "saveAndLockButton": "儲存 PIN 並開啟鎖定",
+    "unlockButton": "解鎖家長模式",
+    "routeGuardTitle": "兒童安全模式保護中",
+    "routeGuardDesc": "此管理頁面僅供家長使用。請返回閱讀書桌或輸入家長 PIN。",
+    "backToChildDesk": "返回孩子書桌"
+  },
+  "passport": {
+    "tabGroupAria": "在家庭書架與閱讀護照之間切換",
+    "deskTabLabel": "家庭書架",
+    "passportTabLabel": "閱讀護照",
+    "stampsSummary": "閱讀護照 · {unlocked}/{total} 枚印章",
+    "streakBadge": "連續 {days} 天溫暖閱讀",
+    "encouragementTitle": "爸媽語音鼓勵留言（5–10 秒）",
+    "encouragementPrivacyHint": "僅在私有儲存空間保存家長的簡短鼓勵錄音；絕不保存兒童語音。",
+    "playEncouragement": "播放爸媽鼓勵",
+    "stopEncouragement": "停止播放",
+    "deleteEncouragement": "刪除語音留言",
+    "recordButton": "錄製鼓勵語音",
+    "stopRecordButton": "停止並儲存",
+    "defaultEncouragementTitle": "送給 {alias} 的閱讀鼓勵",
+    "encouragementPlayError": "暫時無法播放鼓勵語音。",
+    "micUnsupported": "目前瀏覽器不支援直接錄音。",
+    "micDenied": "請允許麥克風權限以錄製簡短鼓勵語音。",
+    "clipTooLarge": "錄音需在 10 秒以內（最大 256 KB）。",
+    "uploadFailed": "儲存鼓勵語音失敗，請稍後再試。"
   }
 }

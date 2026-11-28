@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import logging
 import time
 from datetime import datetime, timezone
@@ -44,7 +45,22 @@ logger = logging.getLogger(__name__)
 _WORKER_KEY = "parent_email_dispatcher"
 DEFAULT_ENGAGEMENT_MAX_EMAILS = 5
 DEFAULT_ENGAGEMENT_MAX_SECONDS = 10.0
-DISPATCH_SUBTASK_TIMEOUT_SECONDS = 25.0
+DISPATCH_TOTAL_BUDGET_SECONDS = 28.0
+HEARTBEAT_PERSIST_RESERVE_SECONDS = 4.0
+DISPATCH_SUBTASK_TIMEOUT_SECONDS = 24.0
+
+
+def _accepts_kwarg(fn: object, name: str) -> bool:
+    try:
+        sig = inspect.signature(fn)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    if name in sig.parameters:
+        return True
+    return any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in sig.parameters.values()
+    )
 
 
 def _worker_ready() -> tuple[bool, str]:
@@ -76,6 +92,8 @@ async def dispatch_all_once(
     scope: str = "all",
     source: str = "cron",
     execution_mode: str = "cron_scheduled",
+    dry_run: bool = False,
+    total_budget_seconds: float = DISPATCH_TOTAL_BUDGET_SECONDS,
 ) -> dict[str, object]:
     now = now or datetime.now(timezone.utc)
     ready, provider_or_reason = _worker_ready()
@@ -88,7 +106,19 @@ async def dispatch_all_once(
         "reminders_sent": 0,
         "engagement_sent": 0,
         "checked_at": now,
+        "dry_run": bool(dry_run),
     }
+    if dry_run:
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="parent_email_dispatch_dry_run",
+            stage="dispatcher",
+            scope=scope,
+            delivery_configured=ready,
+            delivery_provider=provider,
+        )
+        return result
     if not ready:
         log_diagnostic(
             logger,
@@ -100,115 +130,139 @@ async def dispatch_all_once(
         )
         return result
 
+    total_budget = max(0.1, float(total_budget_seconds))
+    heartbeat_reserve = min(HEARTBEAT_PERSIST_RESERVE_SECONDS, total_budget * 0.2)
+    work_deadline = time.monotonic() + max(0.05, total_budget - heartbeat_reserve)
+    min_step_budget = 0.25 if total_budget >= 2.0 else 0.02
+
+    def _remaining_work_timeout() -> float:
+        return max(0.0, min(DISPATCH_SUBTASK_TIMEOUT_SECONDS, work_deadline - time.monotonic()))
+
     pending_heartbeats: list[dict[str, object]] = []
     presence_error: BaseException | None = None
     reminders_error: BaseException | None = None
     engagement_error: BaseException | None = None
+    engagement_executed = False
 
     if scope in ("all", "presence"):
-        try:
-            presence_sent = int(
-                await asyncio.wait_for(
-                    process_due_alerts_once(now),
-                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+        step_timeout = _remaining_work_timeout()
+        if step_timeout > min_step_budget:
+            try:
+                presence_sent = int(
+                    await asyncio.wait_for(
+                        process_due_alerts_once(now),
+                        timeout=step_timeout,
+                    )
                 )
-            )
-            result["presence_sent"] = presence_sent
-            record_worker_success("reading_presence")
-            pending_heartbeats.append(
-                {
-                    "worker_id": "reading_presence",
-                    "execution_mode": execution_mode,
-                    "ok": True,
-                    "items_processed": presence_sent,
-                    "source": source,
-                }
-            )
-        except Exception as error:
-            presence_error = error
-            record_worker_error("reading_presence", error)
-            pending_heartbeats.append(
-                {
-                    "worker_id": "reading_presence",
-                    "execution_mode": execution_mode,
-                    "ok": False,
-                    "items_processed": 0,
-                    "source": source,
-                    "error_code": type(error).__name__,
-                }
-            )
-            log_diagnostic(
-                logger,
-                logging.WARNING,
-                event="parent_email_presence_dispatch_failed",
-                stage="presence_dispatch",
-                exception=error,
-            )
+                result["presence_sent"] = presence_sent
+                record_worker_success("reading_presence")
+                pending_heartbeats.append(
+                    {
+                        "worker_id": "reading_presence",
+                        "execution_mode": execution_mode,
+                        "ok": True,
+                        "items_processed": presence_sent,
+                        "source": source,
+                    }
+                )
+            except Exception as error:
+                presence_error = error
+                record_worker_error("reading_presence", error)
+                pending_heartbeats.append(
+                    {
+                        "worker_id": "reading_presence",
+                        "execution_mode": execution_mode,
+                        "ok": False,
+                        "items_processed": 0,
+                        "source": source,
+                        "error_code": type(error).__name__,
+                    }
+                )
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_email_presence_dispatch_failed",
+                    stage="presence_dispatch",
+                    exception=error,
+                )
 
     if scope in ("all", "reminders"):
-        try:
-            reminders_sent = int(
-                await asyncio.wait_for(
-                    process_due_reminders_once(now),
-                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+        step_timeout = _remaining_work_timeout()
+        if step_timeout > min_step_budget:
+            try:
+                reminders_sent = int(
+                    await asyncio.wait_for(
+                        process_due_reminders_once(now),
+                        timeout=step_timeout,
+                    )
                 )
-            )
-            result["reminders_sent"] = reminders_sent
-            record_worker_success("reading_reminder")
-            pending_heartbeats.append(
-                {
-                    "worker_id": "reading_reminder",
-                    "execution_mode": execution_mode,
-                    "ok": True,
-                    "items_processed": reminders_sent,
-                    "source": source,
-                }
-            )
-        except Exception as error:
-            reminders_error = error
-            record_worker_error("reading_reminder", error)
-            pending_heartbeats.append(
-                {
-                    "worker_id": "reading_reminder",
-                    "execution_mode": execution_mode,
-                    "ok": False,
-                    "items_processed": 0,
-                    "source": source,
-                    "error_code": type(error).__name__,
-                }
-            )
-            log_diagnostic(
-                logger,
-                logging.WARNING,
-                event="parent_email_reminders_dispatch_failed",
-                stage="reminders_dispatch",
-                exception=error,
-            )
+                result["reminders_sent"] = reminders_sent
+                record_worker_success("reading_reminder")
+                pending_heartbeats.append(
+                    {
+                        "worker_id": "reading_reminder",
+                        "execution_mode": execution_mode,
+                        "ok": True,
+                        "items_processed": reminders_sent,
+                        "source": source,
+                    }
+                )
+            except Exception as error:
+                reminders_error = error
+                record_worker_error("reading_reminder", error)
+                pending_heartbeats.append(
+                    {
+                        "worker_id": "reading_reminder",
+                        "execution_mode": execution_mode,
+                        "ok": False,
+                        "items_processed": 0,
+                        "source": source,
+                        "error_code": type(error).__name__,
+                    }
+                )
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_email_reminders_dispatch_failed",
+                    stage="reminders_dispatch",
+                    exception=error,
+                )
 
     if scope in ("all", "engagement"):
-        try:
-            engagement_sent = int(
-                await asyncio.wait_for(
-                    process_engagement_emails_once(now),
-                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+        step_timeout = _remaining_work_timeout()
+        if step_timeout > min_step_budget:
+            engagement_executed = True
+            try:
+                engagement_kwargs: dict[str, object] = {}
+                if _accepts_kwarg(process_engagement_emails_once, "max_seconds"):
+                    engagement_kwargs["max_seconds"] = min(
+                        DEFAULT_ENGAGEMENT_MAX_SECONDS,
+                        max(0.1, step_timeout - 0.5) if step_timeout >= 1.0 else step_timeout,
+                    )
+                engagement_sent = int(
+                    await asyncio.wait_for(
+                        process_engagement_emails_once(now, **engagement_kwargs),  # type: ignore[arg-type]
+                        timeout=step_timeout,
+                    )
                 )
-            )
-            result["engagement_sent"] = engagement_sent
-        except Exception as error:
-            engagement_error = error
-            log_diagnostic(
-                logger,
-                logging.WARNING,
-                event="parent_email_engagement_dispatch_failed",
-                stage="engagement_dispatch",
-                exception=error,
-            )
+                result["engagement_sent"] = engagement_sent
+            except Exception as error:
+                engagement_error = error
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_email_engagement_dispatch_failed",
+                    stage="engagement_dispatch",
+                    exception=error,
+                )
 
     dispatcher_error = (
         engagement_error
-        if scope in ("all", "engagement")
-        else (presence_error if scope == "presence" else reminders_error)
+        if (scope in ("all", "engagement") and engagement_executed)
+        else (presence_error or reminders_error)
     )
+    if scope == "all" and not engagement_executed and dispatcher_error is None:
+        dispatcher_error = presence_error or reminders_error
     total_sent = (
         int(result["presence_sent"])  # type: ignore[arg-type]
         + int(result["reminders_sent"])  # type: ignore[arg-type]
@@ -241,7 +295,7 @@ async def dispatch_all_once(
     await persist_worker_heartbeats_batch_with_factory(
         AsyncSessionLocal,
         pending_heartbeats,
-        timeout_seconds=5.0,
+        timeout_seconds=min(HEARTBEAT_PERSIST_RESERVE_SECONDS, max(1.0, heartbeat_reserve)),
     )
 
     return result

@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Navigation du parcours de lecture"
+  },
   "overview": {
     "title": "Rapport de progression",
     "subtitle": "Suivez le temps de lecture, la précision et les séries de lecture de votre enfant.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "Le rapport actuel est toujours affiché. Vous pouvez essayer de recharger la liste des périodes.",
     "noPeriodReportTitle": "Aucun rapport pour la période sélectionnée",
     "noSavedReportTitle": "Aucun rapport enregistré",
-    "noReportDescription": "Aucun rapport pour cette sélection. Veuillez choisir un autre enfant ou une autre période ; le système n'utilise pas de données fictives.",
+    "noReportDescription": "Aucun rapport pour cette sélection. Vous pouvez choisir un autre profil ou une autre période.",
     "pendingReportTitle": "Données en attente de complément",
-    "pendingReportDesc": "Les données du rapport ne sont pas encore prêtes. Le système n'affiche pas de chiffres estimés.",
+    "pendingReportDesc": "Les données du rapport ne sont pas encore disponibles. Veuillez réessayer plus tard.",
     "periodBannerRange": "Période : {start} → {end}",
     "periodGeneratedAt": "Mis à jour le {dateTime} (heure du Vietnam) ; ne se recalcule pas automatiquement après chaque session.",
     "unsupportedFormatTitle": "Format de rapport non pris en charge",
@@ -61,10 +64,10 @@
     "viewAllWords": "Voir tout ({count})",
     "noDifficultWordsInPeriod": "Aucun mot difficile enregistré pour cette période.",
     "difficultWordsWindowNote": "Note : La section des mots difficiles est définie par défaut sur les 90 derniers jours et ne change pas en fonction de la période de rapport ci-dessus.",
-    "legacyMetricsTitle": "Métriques héritées",
-    "legacyMetricsSubtitle": "Noms de champs enregistrés conservés ; non convertis en nombre de sessions ou en pourcentages exacts.",
-    "legacyTotalBooks": "Total des livres enregistrés (total_books)",
-    "legacyAvgFluency": "Valeur avg_fluency enregistrée (unité non définie)",
+    "legacyMetricsTitle": "Indicateurs enregistrés précédemment",
+    "legacyMetricsSubtitle": "Indicateurs synthétiques issus d'un ancien format d'enregistrement.",
+    "legacyTotalBooks": "Total de livres enregistrés",
+    "legacyAvgFluency": "Score moyen de fluidité",
     "periodSelectLabel": "Période de rapport enregistrée",
     "periodLatestOption": "Le plus récent",
     "periodSelectedRange": "{start} → {end} (sélectionné)",
@@ -135,6 +138,9 @@
       "aiWriting": "L'IA rédige un commentaire…",
       "aiRefresh": "Demander à l'IA de réécrire le commentaire",
       "aiFallbackHint": "L'IA n'est pas connectée, un commentaire automatique basé sur les données est donc affiché. Les parents peuvent appuyer sur « Demander à l'IA de réécrire le commentaire » plus tard.",
+      "aiFallbackQuota": "L'IA est temporairement occupée ou a atteint sa limite de requêtes ; un commentaire automatique basé sur les données est affiché. Veuillez patienter quelques minutes puis appuyer sur « Demander à l'IA de réécrire le commentaire ».",
+      "aiFallbackTimeout": "L'IA a mis plus de temps que prévu à répondre ; un commentaire automatique basé sur les données est affiché. Vous pouvez réessayer dans quelques secondes via « Demander à l'IA de réécrire le commentaire ».",
+      "aiFallbackConfig": "Le service d'IA n'est pas configuré actuellement sur le serveur ; un commentaire automatique basé sur les données est affiché. Veuillez réessayer plus tard ou contacter l'administrateur.",
       "strengthsTitle": "L'enfant réussit bien",
       "improvementsTitle": "L'enfant a besoin d'amélioration",
       "actionsTitle": "Prochaines étapes pour accompagner",
@@ -143,7 +149,11 @@
       "recommendedWordsTitle": "Mots suggérés pour l'entraînement ({days} jours)",
       "heardAsCount": "L'enfant lit souvent « {heardAs} » ({times} fois)",
       "recordedCount": "Enregistré {times} fois",
-      "heardAsInline": "(lu comme « {heardAs} »)"
+      "heardAsInline": "(lu comme « {heardAs} »)",
+      "phonologyTitle": "Tons et sons souvent travaillés en lecture",
+      "phonologyDisclaimer": "Regroupé depuis les séances récentes pour un échauffement doux (non médical).",
+      "openMinimalPairSandbox": "Paires minimales 60s",
+      "phonologySessionsBadge": "{sessions} séances"
     },
     "firstPassSummary": {
       "regionAria": "Résultats de la première tentative et de l'entraînement",
@@ -162,7 +172,11 @@
       "uncertainLabel": "Pas entendu clairement",
       "uncertainNote": "Enregistré séparément, non compté comme une erreur de prononciation confirmée."
     },
-    "entertainmentSummaryHeading": "Apprentissage ludique et compétences langagières (V4.0)"
+    "entertainmentSummaryHeading": "Apprentissage ludique et compétences langagières (V4.0)",
+    "focusAria": "Filtrer les sections du rapport",
+    "focusAssessment": "Évaluation IA",
+    "focusSignals": "Graphiques et indicateurs",
+    "focusEntertainment": "Apprendre en jouant"
   },
   "sessions": {
     "title": "Historique de lecture",
@@ -174,7 +188,7 @@
     "noChildDesc": "Créez un profil pour commencer à enregistrer les sessions de lecture de l'enfant.",
     "createChildAction": "Créer le profil de l'enfant",
     "pendingDataTitle": "Données en attente de complément",
-    "pendingHistoryDesc": "Les données de l'historique de lecture ne sont pas encore disponibles. Le système n'affiche pas de données d'exemple.",
+    "pendingHistoryDesc": "L'historique de lecture n'est pas encore disponible. Veuillez réessayer plus tard.",
     "retry": "Réessayer",
     "manageChildren": "Gérer les profils enfants",
     "notFoundTitle": "Historique introuvable",
@@ -217,7 +231,7 @@
     "durationMinutesSeconds": "{minutes} minutes {seconds} secondes",
     "detail": {
       "loadingAria": "Chargement des détails de la session de lecture",
-      "pendingDesc": "Les données de cet élément ne sont pas disponibles au format actuel. Aucune donnée d'exemple disponible.",
+      "pendingDesc": "Les données de cet élément ne sont pas encore disponibles. Veuillez réessayer plus tard.",
       "notFoundTitle": "Session de lecture introuvable",
       "notFoundDesc": "La session de lecture n'existe pas ou n'appartient pas au compte actuel.",
       "backToHistory": "Retour à l'historique",
@@ -283,7 +297,7 @@
       "originalOmission": "Omission",
       "originalMispronunciation": "Prononciation incorrecte",
       "recognizedPrefix": "ViRead a reconnu : “{text}”",
-      "pageRevisionMeta": "Page {pageId} · version ",
+      "pageRevisionMeta": "Page du livre",
       "firstPassSectionAria": "Événements de première lecture",
       "firstPassSectionTitle": "Événements de première lecture",
       "timestampAt": "À ",
@@ -346,7 +360,7 @@
       "prevShort": "Précédent",
       "nextShort": "Suivant",
       "loadingPageAria": "Chargement du contenu de la page",
-      "verifiedPageTitle": "Contenu de page vérifié",
+      "verifiedPageTitle": "Contenu de la page du livre",
       "selfCorrectedCount": "Auto-corrigé : {count} mots",
       "pageMissingContentNote": "Impossible de charger la version exacte de la page lue par votre enfant. Les transcriptions et statistiques enregistrées restent inchangées.",
       "legendAria": "Légende des couleurs",
@@ -388,7 +402,20 @@
         "repeated": "Répétition",
         "hesitation": "Hésitant"
       }
-    }
+    },
+    "summarySessions": "Séances",
+    "summaryDuration": "Durée totale",
+    "summaryCompleted": "Terminées",
+    "summaryDurationZero": "0 min",
+    "filterAria": "Filtrer les séances par statut",
+    "filterAll": "Toutes",
+    "filterCompleted": "Terminées",
+    "filterIncomplete": "En cours",
+    "searchPlaceholder": "Filtrer par titre sur cette page…",
+    "searchAria": "Rechercher par titre de livre",
+    "filterEmptyTitle": "Aucune séance ne correspond",
+    "filterEmptyDesc": "Essayez un autre filtre ou effacez la recherche.",
+    "clearFilterAction": "Afficher toutes les séances"
   },
   "readingManagement": {
     "title": "Gestion de la lecture et rappels",
@@ -406,7 +433,7 @@
     "errorTitle": "Une erreur s'est produite",
     "savedTitle": "Enregistré",
     "loadChildFailed": "Impossible de charger le profil de l'enfant. Veuillez réessayer.",
-    "loadManagementFailed": "Impossible de charger les données de gestion de la lecture. Vérifiez le backend et les migrations de gestion de la lecture, puis réessayez.",
+    "loadManagementFailed": "Impossible de charger les données de gestion de lecture. Veuillez réessayer plus tard.",
     "mutationUnconfirmed": "L'action n'a pas pu être exécutée. Les données n'ont pas été confirmées comme enregistrées ; veuillez réessayer.",
     "overviewAria": "Aperçu des habitudes de lecture",
     "summaryRunningGoals": "Objectifs actifs",
@@ -514,7 +541,7 @@
     "goalsTimezoneRule": "La progression ne comptabilise que les sessions terminées avec des heures de début et de fin valides. Les objectifs ne se terminent pas automatiquement en atteignant 100 %.",
     "remindersSectionAria": "Rappels de lecture",
     "remindersTitle": "Rappels de lecture",
-    "remindersSubtitle": "Les calendriers sont enregistrés dans votre fuseau horaire sélectionné. Lorsque les alertes par e-mail sont activées, les rappels sont envoyés à l'adresse vérifiée du parent.",
+    "remindersSubtitle": "Les horaires sont enregistrés dans le fuseau choisi. Si l'e-mail est activé, le système envoie des rappels à l'adresse vérifiée du parent.",
     "addReminder": "Ajouter un rappel",
     "dueRemindersTitle": "Heure de lire ({count})",
     "reminderAtPrefix": "Rappel à ",
@@ -565,7 +592,7 @@
       "startLabel": "Démarrer",
       "createGoal": "Créer un objectif",
       "localTimeLabel": "Heure locale",
-      "ianaTimezoneLabel": "Fuseau horaire IANA",
+      "ianaTimezoneLabel": "Fuseau horaire détaillé",
       "repeatDaysLabel": "Répéter le",
       "emailReminderLabel": "E-mail de rappel de lecture",
       "sendEmailCheck": "Envoyer un e-mail au parent à l'heure de lecture",
@@ -643,7 +670,12 @@
       "favorited": "Ajouté aux favoris",
       "wantToRead": "À lire",
       "savedToRead": "Enregistré dans la liste de lecture"
-    }
+    },
+    "focusAria": "Filtrer les sections de gestion de lecture",
+    "focusPlans": "Programmes",
+    "focusGoals": "Objectifs",
+    "focusReminders": "Rappels",
+    "androidReminderBody": "C'est l'heure de lire avec {alias} sur ViRead !"
   },
   "entertainmentSummary": {
     "loading": "Synthèse des progrès ludiques de {childName} en cours…",
@@ -665,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Passages à chanter lentement à 0,85x",
     "openSongAction": "Ouvrir la chanson",
     "homeTipsTitle": "Conseils d'accompagnement à la maison"
+  },
+  "printCertificate": {
+    "brandTagline": "Bilan familial de progression en lecture",
+    "printA4Action": "Imprimer le bilan A4",
+    "downloadCertificateAction": "Télécharger le certificat (.png)",
+    "certificateHeading": "CERTIFICAT D’ÉTAPE DE LECTURE",
+    "certificateSubtitle": "Célébrant la persévérance en lecture vietnamienne en famille",
+    "awardedTo": "Décerné avec fierté à",
+    "progressAchievement": "{alias} a pratiqué la lecture avec régularité et enrichi son vocabulaire vietnamien !",
+    "progressStatsLine": "Séances : {sessions} · Mots lus : {words} · Précision moy. : {accuracy}",
+    "sessionReaderFallback": "Jeune lecteur assidu",
+    "sessionAchievement": "A terminé une séance de lecture claire et confiante !",
+    "sessionStatsLine": "Pages lues : {pages} · Mots totaux : {words} · Meilleure précision : {accuracy}",
+    "issuedOn": "Délivré le : {date}",
+    "encouragementFooter": "Chaque page lue aujourd’hui sème une graine chaleureuse de savoir en famille."
   }
 }

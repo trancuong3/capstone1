@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowRight, BookOpen } from "lucide-react";
+import { ArrowRight, Award, BookOpen } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
+import { ReadingPassportPanel } from "@/components/dashboard/reading-passport-panel";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import type { ChildProfileDTO } from "@/types/child";
@@ -24,6 +25,18 @@ interface RecentReading {
   title: string;
   href: string;
   resumable: boolean;
+}
+
+const MAX_RESUMABLE_SESSION_AGE_MS = 12 * 60 * 60 * 1000;
+
+function isSessionFreshForResume(
+  startedAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!startedAt) return true;
+  const parsed = Date.parse(startedAt);
+  if (!Number.isFinite(parsed)) return true;
+  return nowMs - parsed <= MAX_RESUMABLE_SESSION_AGE_MS;
 }
 
 function mapSummarySessionToRecent(
@@ -55,6 +68,7 @@ export function FamilyReadingDesk({
   const [fallbackRecent, setFallbackRecent] = useState<RecentReading | null>(
     null,
   );
+  const [deskTab, setDeskTab] = useState<"desk" | "passport">("desk");
   const childId = child?.id;
 
   const summaryRecent = useMemo(
@@ -75,7 +89,9 @@ export function FamilyReadingDesk({
       const book = await sessionService.getBook(session.id);
       if (!current || book.id !== session.book_id) return;
       const resumable =
-        !session.ended_at && !["FINISHED", "ABORTED"].includes(session.state);
+        !session.ended_at &&
+        !["FINISHED", "ABORTED"].includes(session.state) &&
+        isSessionFreshForResume(session.started_at);
       setFallbackRecent({
         title: book.title,
         resumable,
@@ -93,104 +109,146 @@ export function FamilyReadingDesk({
 
   const recent =
     summarySource === "dashboard-summary" ? summaryRecent : fallbackRecent;
+  const isPassportTab = Boolean(child && deskTab === "passport");
 
   return (
     <section
-      className="family-reading-desk order-2 max-sm:rounded-card! sm:order-1"
-      aria-labelledby="desk-title"
+      className={`family-reading-desk order-2 md:order-1${
+        isPassportTab ? " family-reading-desk--passport" : ""
+      }`}
+      aria-label={
+        isPassportTab ? tParent("passport.passportTabLabel") : undefined
+      }
+      aria-labelledby={isPassportTab ? undefined : "desk-title"}
     >
-      <div className="desk-copy max-sm:p-3.5!">
-        <div className="desk-label max-sm:text-xs!">
-          <BookOpen aria-hidden="true" size={16} />
-          {recent?.resumable
-            ? tParent("desk.continueReadingLabel")
-            : tParent("desk.familyBookshelfLabel")}
-        </div>
-        <h2
-          id="desk-title"
-          className="max-sm:my-1.5! max-sm:text-lg! max-sm:leading-snug!"
-        >
-          {recent?.resumable ? recent.title : tParent("desk.defaultHeading")}
-        </h2>
-        <p className="max-sm:text-xs! max-sm:leading-relaxed!">
-          {recent?.resumable
-            ? tParent("desk.resumePrompt", { alias: child?.alias ?? "" })
-            : child
-              ? tParent("desk.chooseForChild", { alias: child.alias })
-              : isLoadingProfiles
-                ? tParent("desk.loadingProfiles")
-                : hasProfiles
-                  ? tParent("desk.selectChildPrompt")
-                  : tParent("desk.createFirstChildPrompt")}
-        </p>
-        <div className="desk-actions max-sm:mt-3! max-sm:gap-2!">
-          {recent?.resumable ? (
-            <ButtonLink
-              href={recent.href}
-              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
-            >
-              {tParent("desk.resumeButton")}{" "}
-              <ArrowRight
-                aria-hidden="true"
-                className="viread-rtl-flip"
-                size={18}
-              />
-            </ButtonLink>
-          ) : hasProfiles || isLoadingProfiles ? (
-            <Button
-              onClick={onChooseBook}
-              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
-              disabled={isLoadingProfiles && !child}
-            >
-              {tParent("desk.chooseBookButton")}{" "}
-              <ArrowRight
-                aria-hidden="true"
-                className="viread-rtl-flip"
-                size={18}
-              />
-            </Button>
-          ) : (
-            <ButtonLink
-              href="/children/new"
-              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
-            >
-              {tParent("desk.createFirstChildButton")}{" "}
-              <ArrowRight
-                aria-hidden="true"
-                className="viread-rtl-flip"
-                size={18}
-              />
-            </ButtonLink>
-          )}
-          {recent?.resumable ? (
-            <button
-              className="desk-text-link min-h-11 px-1 max-sm:text-xs!"
-              type="button"
-              onClick={onChooseBook}
-            >
-              {tParent("desk.chooseBookButton")}
-            </button>
-          ) : null}
-        </div>
-        {recent && !recent.resumable ? (
-          <Link
-            className="desk-recent max-sm:mt-2! max-sm:text-xs!"
-            href={recent.href}
+      <div className="desk-copy">
+        {child ? (
+          <div
+            aria-label={tParent("passport.tabGroupAria")}
+            className="mb-4 inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-border bg-white/90 p-1"
+            role="tablist"
           >
-            {tParent("desk.latestReadPrefix", { title: recent.title })}
-          </Link>
+            <button
+              aria-selected={deskTab === "desk"}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold transition-colors ${
+                deskTab === "desk"
+                  ? "bg-primary text-white"
+                  : "text-ink hover:bg-sky/60"
+              }`}
+              data-testid="desk-tab-bookshelf"
+              onClick={() => setDeskTab("desk")}
+              role="tab"
+              type="button"
+            >
+              <BookOpen aria-hidden="true" size={14} />
+              {tParent("passport.deskTabLabel")}
+            </button>
+            <button
+              aria-selected={deskTab === "passport"}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold transition-colors ${
+                deskTab === "passport"
+                  ? "bg-primary text-white"
+                  : "text-ink hover:bg-sky/60"
+              }`}
+              data-testid="desk-tab-passport"
+              onClick={() => setDeskTab("passport")}
+              role="tab"
+              type="button"
+            >
+              <Award aria-hidden="true" size={14} />
+              {tParent("passport.passportTabLabel")}
+            </button>
+          </div>
         ) : null}
+        {isPassportTab && child ? (
+          <ReadingPassportPanel childAlias={child.alias} childId={child.id} />
+        ) : (
+          <>
+            <div className="desk-label">
+              <BookOpen aria-hidden="true" size={17} />
+              {recent?.resumable
+                ? tParent("desk.continueReadingLabel")
+                : tParent("desk.familyBookshelfLabel")}
+            </div>
+            <h2 id="desk-title">
+              {recent?.resumable
+                ? recent.title
+                : tParent("desk.defaultHeading")}
+            </h2>
+            <p>
+              {recent?.resumable
+                ? tParent("desk.resumePrompt", { alias: child?.alias ?? "" })
+                : child
+                  ? tParent("desk.chooseForChild", { alias: child.alias })
+                  : isLoadingProfiles
+                    ? tParent("desk.loadingProfiles")
+                    : hasProfiles
+                      ? tParent("desk.selectChildPrompt")
+                      : tParent("desk.createFirstChildPrompt")}
+            </p>
+            <div className="desk-actions">
+              {recent?.resumable ? (
+                <ButtonLink href={recent.href} className="desk-primary">
+                  {tParent("desk.resumeButton")}{" "}
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="viread-rtl-flip"
+                    size={18}
+                  />
+                </ButtonLink>
+              ) : hasProfiles || isLoadingProfiles ? (
+                <Button
+                  onClick={onChooseBook}
+                  className="desk-primary"
+                  disabled={isLoadingProfiles && !child}
+                >
+                  {tParent("desk.chooseBookButton")}{" "}
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="viread-rtl-flip"
+                    size={18}
+                  />
+                </Button>
+              ) : (
+                <ButtonLink href="/children/new" className="desk-primary">
+                  {tParent("desk.createFirstChildButton")}{" "}
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="viread-rtl-flip"
+                    size={18}
+                  />
+                </ButtonLink>
+              )}
+              {recent?.resumable ? (
+                <button
+                  className="desk-text-link min-h-11 px-1"
+                  type="button"
+                  onClick={onChooseBook}
+                >
+                  {tParent("desk.chooseBookButton")}
+                </button>
+              ) : null}
+            </div>
+            {recent && !recent.resumable ? (
+              <Link className="desk-recent" href={recent.href}>
+                {tParent("desk.latestReadPrefix", { title: recent.title })}
+              </Link>
+            ) : null}
+          </>
+        )}
       </div>
-      <div className="desk-illustration max-sm:min-h-[96px]! max-sm:max-h-[112px]!">
-        <Image
-          alt=""
-          src="/images/reading-studio.webp"
-          fill
-          priority
-          sizes="(min-width: 1000px) 380px, 100vw"
-          className="object-cover"
-        />
-      </div>
+      {!isPassportTab ? (
+        <div className="desk-illustration">
+          <Image
+            alt=""
+            src="/images/reading-studio.webp"
+            fill
+            priority
+            sizes="(min-width: 1000px) 380px, 100vw"
+            className="object-cover"
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

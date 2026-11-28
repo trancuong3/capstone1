@@ -33,7 +33,7 @@ export interface EchoGuardOptions {
 
 function defaultOnsetGraceMs(): number {
   if (isAndroidNativeSpeechAvailable()) {
-    return 320;
+    return 250;
   }
   if (
     typeof navigator !== "undefined" &&
@@ -41,7 +41,7 @@ function defaultOnsetGraceMs(): number {
   ) {
     return 400;
   }
-  return 250;
+  return 150;
 }
 
 export type EchoVerdictReason =
@@ -148,13 +148,29 @@ export class EchoGuard {
       if (segment.onsetAt != null) {
         if (
           segment.onsetAt >= record.startedAt &&
-          segment.onsetAt < record.endedAt + this.onsetGraceMs
+          segment.onsetAt <= record.endedAt
         ) {
           return {
             accept: false,
             reason: "onset-during-playback",
             playbackId: record.id,
           };
+        }
+        if (
+          segment.onsetAt > record.endedAt &&
+          segment.onsetAt < record.endedAt + this.onsetGraceMs
+        ) {
+          // After playback finished, only reject in the short grace window when
+          // the transcript overlaps non-trivially with the prompt text — never
+          // blindly drop the child's first book word that has 0% overlap with
+          // "Đến lượt con đọc nhé.".
+          if (tokens.length === 0 || this.overlap(tokens, record.tokens) > 0) {
+            return {
+              accept: false,
+              reason: "onset-during-playback",
+              playbackId: record.id,
+            };
+          }
         }
         const onsetSinceEnd = segment.onsetAt - record.endedAt;
         if (

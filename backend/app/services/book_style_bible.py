@@ -23,6 +23,18 @@ from app.schemas.book_assets import (
     StyleBibleCharacterRead,
     StyleBibleContentRead,
 )
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    build_gemini_model_chain,
+    extract_gemini_text,
+    gemini_thinking_config,
+    read_model_env,
+    read_secret_env,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
 from app.services.ocr_ai.config import OcrCorrectionConfig
 
 logger = logging.getLogger(__name__)
@@ -244,40 +256,138 @@ async def _default_gemini_refine(
     timeout_seconds: float,
 ) -> dict[str, Any] | None:
     """Optional Free-Tier Gemini text JSON refinement (passes API key via header, never URL)."""
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model_id}:generateContent"
-    )
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 700,
-            "responseMimeType": "application/json",
-        },
-    }
+    candidates = build_gemini_model_chain(
+        model_id,
+        DEFAULT_GEMINI_FALLBACK_MODEL,
+        (DEFAULT_GEMINI_ALIAS_MODEL,),
+    )
     async with httpx.AsyncClient(
         timeout=timeout_seconds, trust_env=False, follow_redirects=False
     ) as client:
-        response = await client.post(url, json=body, headers=headers)
-        if response.status_code != 200:
-            return None
-        payload = response.json()
-    candidates = payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        return None
-    parts = (candidates[0].get("content") or {}).get("parts") or []
-    raw_text = "".join(
-        str(part.get("text") or "") for part in parts if isinstance(part, dict)
-    ).strip()
-    if not raw_text:
-        return None
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+        for candidate_model in candidates:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{candidate_model}:generateContent"
+            )
+            generation_config: dict[str, Any] = {
+                "temperature": 0.2,
+                "maxOutputTokens": 700,
+                "responseMimeType": "application/json",
+            }
+            thinking_cfg = gemini_thinking_config(candidate_model)
+            if thinking_cfg is not None:
+                generation_config["thinkingConfig"] = thinking_cfg
+            body = {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": generation_config,
+            }
+            try:
+                response = await client.post(url, json=body, headers=headers)
+                if response.status_code == 400 and thinking_cfg is not None:
+                    generation_config.pop("thinkingConfig", None)
+                    response = await client.post(url, json=body, headers=headers)
+            except httpx.TimeoutException:
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code="PROVIDER_TIMEOUT",
+                    http_status=504,
+                )
+                continue
+            except httpx.RequestError:
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code="PROVIDER_NETWORK",
+                    http_status=503,
+                )
+                continue
+
+            if response.status_code != 200:
+                err_code = (
+                    "PROVIDER_AUTHENTICATION"
+                    if response.status_code in {401, 403}
+                    else "PROVIDER_QUOTA"
+                    if response.status_code == 429
+                    else "MODEL_UNAVAILABLE"
+                    if response.status_code == 404
+                    else "PROVIDER_UNAVAILABLE"
+                    if response.status_code >= 500
+                    else "PROVIDER_REJECTED"
+                )
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code=err_code,
+                    http_status=response.status_code,
+                )
+                if response.status_code in {401, 403}:
+                    return None
+                if response.status_code == 404 or response.status_code >= 500 or response.status_code == 429:
+                    continue
+                return None
+
+            try:
+                payload = response.json()
+            except ValueError:
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
+                continue
+            raw_text = extract_gemini_text(payload)
+            cleaned = strip_think_tags(raw_text) if isinstance(raw_text, str) else ""
+            if not cleaned:
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
+                continue
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
+                continue
+            if isinstance(parsed, dict):
+                record_cloud_ai_outcome(
+                    "book_style_bible",
+                    "gemini",
+                    candidate_model,
+                    ok=True,
+                    http_status=response.status_code,
+                )
+                return parsed
+            record_cloud_ai_outcome(
+                "book_style_bible",
+                "gemini",
+                candidate_model,
+                ok=False,
+                error_code="INVALID_CONTENT",
+                http_status=response.status_code,
+            )
+    return None
 
 
 class BookStyleBibleService:
@@ -296,7 +406,7 @@ class BookStyleBibleService:
     def _cloud_refinement_allowed(self, book: Book) -> tuple[bool, str | None, str]:
         """Strictly gate cloud Gemini refinement by PRIVATE_BOOK_ALLOW_CLOUD_AI for private books."""
         if is_book_private(book) and not OcrCorrectionConfig.private_book_allow_cloud_ai():
-            return False, None, "gemini-3.5-flash-lite"
+            return False, None, DEFAULT_GEMINI_PRIMARY_MODEL
 
         cloud_enabled = (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower() in {
             "1",
@@ -304,12 +414,13 @@ class BookStyleBibleService:
             "yes",
             "on",
         }
-        api_key = (os.getenv("GEMINI_API_KEY") or "").strip() or None
-        model_id = (
-            os.getenv("GEMINI_STYLE_BIBLE_MODEL")
-            or os.getenv("GEMINI_OCR_PRIMARY_MODEL")
-            or "gemini-3.5-flash-lite"
-        ).strip()
+        api_key = read_secret_env("GEMINI_API_KEY")
+        model_id = read_model_env(
+            "GEMINI_STYLE_BIBLE_MODEL",
+            "GEMINI_PRIMARY_MODEL",
+            "GEMINI_OCR_PRIMARY_MODEL",
+            default=DEFAULT_GEMINI_PRIMARY_MODEL,
+        )
         if not (cloud_enabled and api_key):
             return False, None, model_id
         return True, api_key, model_id

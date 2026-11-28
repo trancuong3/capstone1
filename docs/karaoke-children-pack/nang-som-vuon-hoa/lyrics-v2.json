@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "d8f198b6-3b93-502d-9355-f1aeec094a09",
+      "text": "Sáng nay bé Na ra vườn nhỏ",
+      "start_ms": 2500,
+      "end_ms": 6872,
+      "syllables": [
+        {
+          "id": "2268c269-c8f5-5049-b517-3c3d68615420",
+          "text": "Sáng",
+          "start_ms": 2500,
+          "end_ms": 3062
+        },
+        {
+          "id": "ba272baf-9fda-5e1f-87b1-703a3d61ee6f",
+          "text": "nay",
+          "start_ms": 3062,
+          "end_ms": 3624
+        },
+        {
+          "id": "93409847-942d-5ae2-80f7-b06df73038ff",
+          "text": "bé",
+          "start_ms": 3624,
+          "end_ms": 4186
+        },
+        {
+          "id": "2353bbcc-d759-5195-80e4-33739af16be0",
+          "text": "Na",
+          "start_ms": 4186,
+          "end_ms": 4748
+        },
+        {
+          "id": "7c374f56-d432-5acf-bf52-5b2a6965f8aa",
+          "text": "ra",
+          "start_ms": 4748,
+          "end_ms": 5310
+        },
+        {
+          "id": "b8b887d0-9720-55cd-8d05-e7dc268a9984",
+          "text": "vườn",
+          "start_ms": 5310,
+          "end_ms": 5872
+        },
+        {
+          "id": "d689b818-5222-52c8-b585-3a071fce1e43",
+          "text": "nhỏ",
+          "start_ms": 5872,
+          "end_ms": 6872
+        }
+      ]
+    },
+    {
+      "id": "8f09f92f-e0ec-5e2b-839a-8c3b7846a50a",
+      "text": "Tưới làn nước mát cho mầm xanh",
+      "start_ms": 7497,
+      "end_ms": 11869,
+      "syllables": [
+        {
+          "id": "470684fc-bfc4-53cd-877d-9e06935dc1fc",
+          "text": "Tưới",
+          "start_ms": 7497,
+          "end_ms": 8059
+        },
+        {
+          "id": "bf2eb00f-e28f-5c12-a8a3-2ba3f8362103",
+          "text": "làn",
+          "start_ms": 8059,
+          "end_ms": 8621
+        },
+        {
+          "id": "05e4bcd6-dc18-5db6-8e46-e32a1aa3f7ef",
+          "text": "nước",
+          "start_ms": 8621,
+          "end_ms": 9183
+        },
+        {
+          "id": "e69f9a39-fa19-5c51-aa0e-15a8ff7f248c",
+          "text": "mát",
+          "start_ms": 9183,
+          "end_ms": 9745
+        },
+        {
+          "id": "b07d8756-9703-5e2c-8736-e86bf36e2ba5",
+          "text": "cho",
+          "start_ms": 9745,
+          "end_ms": 10307
+        },
+        {
+          "id": "71d77e3f-72bc-5c10-87bf-7faca339fbb6",
+          "text": "mầm",
+          "start_ms": 10307,
+          "end_ms": 10869
+        },
+        {
+          "id": "bfb0e5ed-fcdc-5d4d-beb1-45c07197dded",
+          "text": "xanh",
+          "start_ms": 10869,
+          "end_ms": 11869
+        }
+      ]
+    },
+    {
+      "id": "8e1190ba-83ff-5c50-ae41-20cb3ee1e0fb",
+      "text": "Gió reo rì rào qua kẽ lá",
+      "start_ms": 12494,
+      "end_ms": 16866,
+      "syllables": [
+        {
+          "id": "297e4dd4-7aa9-5fc9-8b47-7f7539401eb7",
+          "text": "Gió",
+          "start_ms": 12494,
+          "end_ms": 13056
+        },
+        {
+          "id": "90f4a2a6-8554-5d62-bb9b-0181c92f656d",
+          "text": "reo",
+          "start_ms": 13056,
+          "end_ms": 13618
+        },
+        {
+          "id": "dc1e017f-f7b7-510f-982e-2bae6da526b8",
+          "text": "rì",
+          "start_ms": 13618,
+          "end_ms": 14180
+        },
+        {
+          "id": "99da8dc5-fde9-5065-841a-e7535c097a74",
+          "text": "rào",
+          "start_ms": 14180,
+          "end_ms": 14742
+        },
+        {
+          "id": "8ccb3a51-9082-562e-a1a3-78008e7a0da3",
+          "text": "qua",
+          "start_ms": 14742,
+          "end_ms": 15304
+        },
+        {
+          "id": "869b3687-2713-56d7-8429-fc2a7eec8c31",
+          "text": "kẽ",
+          "start_ms": 15304,
+          "end_ms": 15866
+        },
+        {
+          "id": "18ac69f0-0927-53ec-90a9-cb356c28bba0",
+          "text": "lá",
+          "start_ms": 15866,
+          "end_ms": 16866
+        }
+      ]
+    },
+    {
+      "id": "54f42e4d-e583-5e1f-83c1-5ec9fe834059",
+      "text": "Chim sâu ríu rít chuyền trên cành",
+      "start_ms": 17491,
+      "end_ms": 21863,
+      "syllables": [
+        {
+          "id": "42490957-43bc-5078-acc7-42d5a7131a60",
+          "text": "Chim",
+          "start_ms": 17491,
+          "end_ms": 18053
+        },
+        {
+          "id": "33b02da2-8f19-5095-b6de-40ae6740acc4",
+          "text": "sâu",
+          "start_ms": 18053,
+          "end_ms": 18615
+        },
+        {
+          "id": "fc698847-f9c2-5083-8ad3-71c386b4340c",
+          "text": "ríu",
+          "start_ms": 18615,
+          "end_ms": 19177
+        },
+        {
+          "id": "eb70f698-aa75-5742-9b16-7fc963224086",
+          "text": "rít",
+          "start_ms": 19177,
+          "end_ms": 19739
+        },
+        {
+          "id": "75f7a988-ad87-5ef8-ae0a-36d2bf75c4fd",
+          "text": "chuyền",
+          "start_ms": 19739,
+          "end_ms": 20301
+        },
+        {
+          "id": "0f97ab3d-d6b9-579c-b43a-00ffc189b4b3",
+          "text": "trên",
+          "start_ms": 20301,
+          "end_ms": 20863
+        },
+        {
+          "id": "77fbdc92-3808-5c5d-b936-e68192abb155",
+          "text": "cành",
+          "start_ms": 20863,
+          "end_ms": 21863
+        }
+      ]
+    },
+    {
+      "id": "6fa1b445-31bf-5141-9f05-9bbe350e5665",
+      "text": "Hướng dương nở vàng khoe sắc thắm",
+      "start_ms": 22488,
+      "end_ms": 26860,
+      "syllables": [
+        {
+          "id": "f6bead15-0828-5500-9756-3d3b99bce03f",
+          "text": "Hướng",
+          "start_ms": 22488,
+          "end_ms": 23050
+        },
+        {
+          "id": "a9dd8287-9950-52cd-acfb-885d7deefc4e",
+          "text": "dương",
+          "start_ms": 23050,
+          "end_ms": 23612
+        },
+        {
+          "id": "35c55414-ce34-5963-9339-2698cdcfe571",
+          "text": "nở",
+          "start_ms": 23612,
+          "end_ms": 24174
+        },
+        {
+          "id": "6db3756d-87dc-5d8b-a8c3-d9a13fc7192f",
+          "text": "vàng",
+          "start_ms": 24174,
+          "end_ms": 24736
+        },
+        {
+          "id": "7849b0db-5976-51a6-ae09-82c6bd063b19",
+          "text": "khoe",
+          "start_ms": 24736,
+          "end_ms": 25298
+        },
+        {
+          "id": "fd799247-3b88-5d69-833e-1a06d6a5fc96",
+          "text": "sắc",
+          "start_ms": 25298,
+          "end_ms": 25860
+        },
+        {
+          "id": "5d2a71a4-f6a7-5181-b769-78c85a02614e",
+          "text": "thắm",
+          "start_ms": 25860,
+          "end_ms": 26860
+        }
+      ]
+    },
+    {
+      "id": "68fe9ee0-e6a9-51af-bb88-4ffc48478ca0",
+      "text": "Vườn em thơm ngát nắng trong lành",
+      "start_ms": 27485,
+      "end_ms": 31857,
+      "syllables": [
+        {
+          "id": "84e44d77-bbe8-516e-b613-0feabdad3c4b",
+          "text": "Vườn",
+          "start_ms": 27485,
+          "end_ms": 28047
+        },
+        {
+          "id": "73c1248c-6651-5822-9807-3a2d3a706260",
+          "text": "em",
+          "start_ms": 28047,
+          "end_ms": 28609
+        },
+        {
+          "id": "ef13eee6-b2f1-56eb-b345-0727479c0b27",
+          "text": "thơm",
+          "start_ms": 28609,
+          "end_ms": 29171
+        },
+        {
+          "id": "c171ece8-cd98-5fbe-9faa-03608ef67915",
+          "text": "ngát",
+          "start_ms": 29171,
+          "end_ms": 29733
+        },
+        {
+          "id": "23d2cbd8-0943-58b1-bff5-47fee364357d",
+          "text": "nắng",
+          "start_ms": 29733,
+          "end_ms": 30295
+        },
+        {
+          "id": "9bd6d5c2-9c53-5409-8c57-3d91ef9c95bb",
+          "text": "trong",
+          "start_ms": 30295,
+          "end_ms": 30857
+        },
+        {
+          "id": "91bf87bb-c120-5726-84e5-e25ddb0e1726",
+          "text": "lành",
+          "start_ms": 30857,
+          "end_ms": 31857
+        }
+      ]
+    }
+  ]
+}

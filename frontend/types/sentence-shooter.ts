@@ -13,6 +13,8 @@ export interface SentenceShooterBookDTO {
   readonly min_grade: number;
   readonly max_grade: number;
   readonly available_rounds: number;
+  readonly difficult_word_count?: number;
+  readonly matched_difficult_words?: readonly string[];
 }
 
 export interface SentenceShooterTokenDTO {

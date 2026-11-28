@@ -140,10 +140,16 @@ describe("Entertainment Hub V4.0 & Parent Learning Analytics", () => {
 
     expect(
       screen.getByRole("link", { name: "Khám phá trí nhớ" }),
-    ).toHaveAttribute("href", "/entertainment/memory-game");
+    ).toHaveAttribute(
+      "href",
+      "/entertainment/memory-game?focus=kh%E1%BB%A7ng%20long%2Cb%C3%B4ng%20hoa",
+    );
     expect(
       screen.getByRole("link", { name: "Mở thư viện bài hát" }),
-    ).toHaveAttribute("href", "/karaoke");
+    ).toHaveAttribute(
+      "href",
+      "/karaoke?focus=kh%E1%BB%A7ng%20long%2Cb%C3%B4ng%20hoa",
+    );
 
     // Focus difficult words & mascot greeting
     expect(screen.getByText("khủng long")).toBeInTheDocument();

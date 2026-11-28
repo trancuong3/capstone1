@@ -13,7 +13,7 @@
     "noChildDescription": "أنشئ ملفاً شخصياً وابدأ القراءة ليوفر النظام دليلاً.",
     "createChildAction": "إنشاء ملف تعريف الطفل",
     "unsupportedTitle": "البيانات في انتظار الإضافة",
-    "unsupportedDescription": "بيانات هذا العنصر غير جاهزة بالصيغة الحالية. لا توجد بيانات نموذجية بديلة.",
+    "unsupportedDescription": "بيانات هذا القسم غير جاهزة بعد. يُرجى المحاولة لاحقًا.",
     "retry": "إعادة المحاولة",
     "manageChildren": "إدارة ملفات الأطفال",
     "notFoundTitle": "لم يتم العثور على بيانات",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "لا توجد كلمات تطابق حالة التدريب المحددة.",
     "viewAllWords": "عرض جميع الكلمات ({count})",
     "paginationAria": "ترقيم صفحات مجموعات كتب تدريب الكلمات",
-    "paginationItemLabel": "كتب"
+    "paginationItemLabel": "كتب",
+    "statTotal": "إجمالي الكلمات",
+    "statCompleted": "قُرئت بدقة",
+    "statRemaining": "للمراجعة",
+    "quickMastered": "مُتقَنة",
+    "quickNeedsMoreFull": "تحتاج مراجعة"
   },
   "bookCard": {
     "gradeSingle": "الصف {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "لم يُقرأ مرة أخرى",
     "badgeNeedsMore": "يحتاج إلى مزيد من التدريب",
     "badgeInProgress": "قيد التدريب",
-    "badgeCompleted": "تمت القراءة بشكل صحيح"
+    "badgeCompleted": "تمت القراءة بشكل صحيح",
+    "showMoreWords": "+{count} كلمات أخرى",
+    "showFewerWords": "عرض أقل",
+    "tagMispronounced": "خطأ {count}",
+    "tagOmitted": "تخطي {count}",
+    "tagRepeated": "تكرار {count}"
   },
   "item": {
     "notPracticed": "لم يتم التدريب",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "تعذر تشغيل الصوت النموذجي على هذا الجهاز. لا يزال بإمكان الطفل القراءة مع الوالدين.",
     "phonicsLockedBusy": "صوت التهجئة مشغول مؤقتاً. يرجى اتباع الخطوات التي تظهر على الشاشة والنقر فوق إعادة المحاولة.",
     "evaluationTimeoutError": "فحص النظام يستغرق وقتاً أطول من المتوقع. يمكنك إعادة إرسال التسجيل.",
-    "evaluationSaveError": "تعذر حفظ النتائج على الخادم. تم الاحتفاظ بتسجيل صوت الطفل — انقر فوق حفظ النتائج.",
+    "evaluationSaveError": "تعذر حفظ النتيجة حاليًا. تم الاحتفاظ بتسجيل الطفل — اضغط حفظ النتيجة للمحاولة مجددًا.",
     "micPermissionError": "تم رفض إذن الميكروفون في المتصفح. يرجى من الوالدين تمكين الوصول إلى الميكروفون في إعدادات المتصفح والمحاولة مرة أخرى.",
     "micNotFoundError": "لم يتم العثور على ميكروفون. يرجى التحقق من اتصال الميكروفون.",
     "micUnsupportedError": "متصفحك الحالي لا يدعم التسجيل المباشر.",
@@ -162,5 +172,25 @@
   "runtime": {
     "practiceOpened": "تم فتح محاولة التدريب رقم #{attempt} للكلمة \"{word}\".",
     "unknownBookSource": "مصدر الكتاب غير محدد"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "إحماء صوتي لمدة 60 ثانية",
+    "title": "مختبر الأزواج الصوتية ومرآة النغمات",
+    "subtitle": "يساعد {alias} على الاستماع والتمييز بين النغمات والأصوات المتشابهة.",
+    "openButton": "فتح تمرين 60 ثانية",
+    "collapseButton": "طي",
+    "unavailableHint": "تعذر تحميل تمارين الأزواج الصوتية الآن. يرجى المحاولة لاحقا.",
+    "pairCounter": "الزوج {current}/{total}",
+    "listenWord": "استمع",
+    "speakWord": "جرب النطق",
+    "listening": "جار الاستماع...",
+    "spokenMatch": "رائع! نطق واضح وصحيح للكلمة المستهدفة!",
+    "spokenContrast": "بدا قريبا من \"{heard}\" — استمع للنموذج وحاول ببطء!",
+    "spokenRetry": "لم يتم سماع الصوت بوضوح. اقترب من الميكروفون وحاول ببطء!",
+    "earChallengeButton": "تحدي الاستماع",
+    "earCorrect": "صحيح تماما! استماع ممتاز!",
+    "earRetry": "قريب جدا! استمع مرة أخرى وجرب!",
+    "nextPairButton": "الزوج التالي",
+    "nonClinicalDisclaimer": "ملاحظات تدريبية لدعم القراءة وليست تشخيصا طبيا أو علاجيا للنطق."
   }
 }

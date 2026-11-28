@@ -1161,6 +1161,10 @@ def generate_scene_spec(
     ]
 
     guided_questions = _build_guided_questions(objects)
+    matched_lower = {w.casefold() for w in matched_focus_words}
+    creative_focus_words = [
+        w for w in normalized_focus if w.casefold() not in matched_lower
+    ][:3]
 
     return SceneSpec(
         schema_version="v4.0",
@@ -1177,6 +1181,7 @@ def generate_scene_spec(
         guided_questions_vi=guided_questions,
         creative_prompt_vi=theme.creative_prompt_vi,
         matched_focus_words=matched_focus_words,
+        creative_focus_words=creative_focus_words,
     )
 
 

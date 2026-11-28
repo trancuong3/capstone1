@@ -1,5 +1,4 @@
 import accessibility from "./accessibility.json";
-import admin from "./admin.json";
 import auth from "./auth.json";
 import books from "./books.json";
 import child from "./child.json";
@@ -17,6 +16,7 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
+import { coReadingEn } from "../features/co_reading_messages";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 const messages: MessagesDictionary = {
@@ -25,7 +25,6 @@ const messages: MessagesDictionary = {
   navigation,
   parent,
   child,
-  admin,
   books,
   ocr,
   reading,

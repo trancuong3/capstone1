@@ -11,12 +11,12 @@ import {
   type RefObject,
 } from "react";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   computeUniversalPageWordLayout,
   type WordLayoutEntry,
 } from "@/lib/reading/ocr-text-reflow";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import {
   getWordHighlightTier,
   wordPresentationClasses,
@@ -24,6 +24,10 @@ import {
   type WordPresentationState,
   wordStateForPage,
 } from "@/lib/reading/word-presentation";
+import type {
+  LucBatWordAnnotation,
+  LucBatWordRole,
+} from "@/lib/reading/luc-bat-cadence";
 
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageWordDTO } from "@/types/reading";
@@ -38,6 +42,8 @@ interface BookPageContentProps extends PageWordEvidence {
   scrollContainerRef?: RefObject<HTMLElement | null>;
   /** Optional word node registrar when parent manages container auto-scroll. */
   registerWordNode?: (wordId: string, node: HTMLElement | null) => void;
+  /** Optional Lục Bát 6-8 cadence & 6th-syllable rhyme annotations (zero extra DOM nodes). */
+  lucBatAnnotations?: ReadonlyMap<string, LucBatWordAnnotation> | null;
 }
 
 interface WordTokenProps {
@@ -51,6 +57,8 @@ interface WordTokenProps {
   readonly titleText?: string;
   readonly isCurrent: boolean;
   readonly readOnly: boolean;
+  readonly lucBatRole?: LucBatWordRole;
+  readonly lucBatCaesura?: boolean;
   readonly onSelectWord: (word: ReadingPageWordDTO) => void;
   readonly registerNode: (wordId: string, node: HTMLSpanElement | null) => void;
   readonly onRender?: (wordId: string) => void;
@@ -67,6 +75,8 @@ const MemoWordToken = memo(function WordToken({
   titleText,
   isCurrent,
   readOnly,
+  lucBatRole,
+  lucBatCaesura,
   onSelectWord,
   registerNode,
   onRender,
@@ -100,12 +110,17 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "relative me-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-1 py-0.5 motion-reduce:transition-none sm:me-1.5 sm:px-2",
+          "relative me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-2 py-0.5 motion-reduce:transition-none",
+          lucBatCaesura && "me-3.5",
+          (lucBatRole === "rhyme6_luc" || lucBatRole === "rhyme6_bat") &&
+            "underline decoration-amber-500 decoration-wavy underline-offset-4",
+          lucBatRole === "rhyme8_bat" &&
+            "underline decoration-emerald-600 decoration-dotted underline-offset-4",
           isCurrent || presentationState === "current"
             ? "transition-none"
             : "transition-[background-color,color,border-color,box-shadow] duration-75 ease-out",
           !readOnly &&
-            "min-h-9 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-11",
+            "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
           isCurrent &&
@@ -120,6 +135,8 @@ const MemoWordToken = memo(function WordToken({
         )}
         data-bbox={word.bbox.join(",")}
         data-line-index={lineIndex}
+        data-luc-bat-caesura={lucBatCaesura ? "true" : undefined}
+        data-luc-bat-role={lucBatRole}
         data-page-revision-id={pageRevisionId}
         data-word-id={word.word_id}
         data-reading-state={presentationState}
@@ -152,7 +169,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "self-corrected" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-green-900 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-green-900 shadow-2xs"
           >
             ↺
           </span>
@@ -160,7 +177,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "unresolved" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-red-900 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-red-900 shadow-2xs"
           >
             ◇
           </span>
@@ -168,7 +185,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "uncertain" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-slate-700 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-slate-700 shadow-2xs"
           >
             ?
           </span>
@@ -176,7 +193,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "assisted" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-primary shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-primary shadow-2xs"
           >
             {"\u266A"}
           </span>
@@ -188,7 +205,8 @@ const MemoWordToken = memo(function WordToken({
 
 export function BookPageContent(props: BookPageContentProps) {
   const t = useTranslations("reading");
-  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
+  const teacherPersona = useTeacherPersona();
+  const isMalePersona = teacherPersona.gender === "male";
   const {
     page,
     currentWordId,
@@ -198,6 +216,7 @@ export function BookPageContent(props: BookPageContentProps) {
     onWordTokenRender,
     scrollContainerRef,
     registerWordNode,
+    lucBatAnnotations = null,
   } = props;
   const stateFor = wordStateForPage(props);
   const hasWords = page.words.length > 0;
@@ -274,7 +293,7 @@ export function BookPageContent(props: BookPageContentProps) {
     >
       {hasWords ? (
         <p
-          className="viread-learning-content w-full max-w-[58ch] text-[23px] font-bold leading-[1.85] tracking-normal text-ink sm:text-[30px] sm:leading-[1.9]"
+          className="viread-learning-content w-full max-w-[62ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.95]"
           dir="ltr"
           lang="vi"
         >
@@ -290,6 +309,7 @@ export function BookPageContent(props: BookPageContentProps) {
               : isCurr && pState === "incorrect"
                 ? t("pageContent.incorrectWordAria", { word: entry.word.text })
                 : t("pageContent.tapToListenAria", { word: entry.word.text });
+            const lb = lucBatAnnotations?.get(entry.word.word_id);
             return (
               <MemoWordToken
                 key={entry.word.word_id}
@@ -303,6 +323,8 @@ export function BookPageContent(props: BookPageContentProps) {
                 titleText={titleText}
                 isCurrent={isCurr}
                 readOnly={readOnly}
+                lucBatRole={lb?.role}
+                lucBatCaesura={lb?.caesuraAfter}
                 onSelectWord={handleSelectWord}
                 registerNode={registerNode}
                 onRender={onWordTokenRender}

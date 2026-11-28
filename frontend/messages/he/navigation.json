@@ -26,7 +26,11 @@
       "sessions": "סקירת סכומי קריאה שהושלמו",
       "entertainment": "משחקי שפה, סיפור סיפורים וקריוקי",
       "difficultWords": "תרجול מילים שהילד נוטה לקרוא לא נכון"
-    }
+    },
+    "devicePermissions": "בדיקת מיקרופון ומצלמה",
+    "aiTasksNotifications": "משימות AI והתראות",
+    "userGuide": "מדריך שימוש מפורט",
+    "helpFeedback": "עזרה ושליחת משוב"
   },
   "admin": {
     "navLabel": "ניווט ניהול",
@@ -37,15 +41,15 @@
     "books": "ספריית ספרים",
     "metadataQuality": "איכות ספרים",
     "auditLogs": "יומני פעילות",
-    "training": "אימון OCR",
+    "training": "מודלי זיהוי טקסט",
     "health": "תפעול",
     "moreTitle": "ניהול נוסף",
     "mobileQualityShort": "איכות",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "טקסט",
     "mobileMoreDescriptions": {
       "auditLogs": "מעקב אחר יומני ביקורת ניהוליים",
-      "training": "אימון ותפעול של מודל VietOCR V2",
-      "health": "מצב מערכת, OCR worker וקול"
+      "training": "אימון וניהול מודלים לזיהוי טקסט",
+      "health": "מצב המערכת, זיהוי טקסט וקול"
     }
   },
   "accountMenu": {
@@ -58,7 +62,19 @@
     "accountSection": "חשבון",
     "helpSection": "עזרה",
     "sessionSection": "הפעלה",
-    "defaultAccountLabel": "חשבון ViRead"
+    "defaultAccountLabel": "חשבון ViRead",
+    "activitiesSection": "פעילות וכלים",
+    "accountDeviceSection": "חשבון ומכשירים",
+    "guideSupportSection": "מדריך ותמיכה",
+    "quickChildTitle": "פרופיל הילד הפעיל",
+    "languageLabel": "שפת הממשק",
+    "taskStatusRunning": "{count} משימות פועלות ברקע",
+    "taskStatusReview": "{count} משימות ממתינות לבדיקה",
+    "taskStatusFailed": "{count} משימות דורשות טיפול",
+    "taskStatusNewDone": "{count} משימות הושלמו כעת",
+    "taskStatusIdle": "אין משימות חדשות",
+    "unreadBadgeAria": "התראות משימות AI שלא נקראו",
+    "runningBadgeAria": "משימות AI פועלות ברקע"
   },
   "childSwitcher": {
     "selectedAria": "ילד נבחר: {alias}, הקש כדי להחליף",
@@ -73,5 +89,38 @@
     "ariaLabel": "מידע על ViRead",
     "logoDashboardAria": "ViRead - מעבר ללוח בקרה",
     "logoHomeAria": "ViRead - מעבר לדף הבית"
+  },
+  "guide": {
+    "title": "מדריך שימוש ב-ViRead",
+    "subtitle": "5 צעדים פשוטים לקריאה משותפת מדי יום.",
+    "closeAction": "הבנתי",
+    "openHelpCenter": "פתיחת מרכז העזרה",
+    "steps": {
+      "1": {
+        "title": "1. יצירת פרופיל לילד",
+        "body": "הוסיפו שם וכיתה (א׳–ה׳) כדי לקבל המלצות ספרים מותאמות.",
+        "action": "פרופילי ילדים"
+      },
+      "2": {
+        "title": "2. בחירה או העלאת ספרים פרטיים",
+        "body": "בחרו ספר מהספרייה או העלו תמונות, PDF או DOCX לספרים שלי.",
+        "action": "הספרים שלי"
+      },
+      "3": {
+        "title": "3. בדיקת מיקרופון וקריאה יחד",
+        "body": "בדקו את המיקרופון מראש כדי ש-ViRead ישמע בבירור ויעזור בהגייה.",
+        "action": "בדיקת מכשירים"
+      },
+      "4": {
+        "title": "4. תרגול מילים ומעקב התקדמות",
+        "body": "תרגלו מילים מאתגרות לפי ספר ועקבו אחר ההתקדמות השבועית.",
+        "action": "מילים לתרגול"
+      },
+      "5": {
+        "title": "5. תזמון קריאה ומעקב משימות AI",
+        "body": "הגדירו יעדים ותזכורות בניהול קריאה ועקבו אחר משימות OCR.",
+        "action": "ניהול קריאה"
+      }
+    }
   }
 }

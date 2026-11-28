@@ -307,10 +307,13 @@ function formatWithDateTimeIntl(
 
   const bcp47 = getLocaleMetadata(locale).bcp47;
   const { fallback, ...intlOptions } = options ?? {};
-  const mergedOptions: Intl.DateTimeFormatOptions = {
-    ...defaults,
-    ...intlOptions,
-  };
+  // ECMA-402 throws TypeError if dateStyle/timeStyle is combined with component
+  // defaults (year, month, day, hour, minute), which would fall back to toISOString().
+  const usesStylePresets =
+    intlOptions.dateStyle !== undefined || intlOptions.timeStyle !== undefined;
+  const mergedOptions: Intl.DateTimeFormatOptions = usesStylePresets
+    ? { ...intlOptions }
+    : { ...defaults, ...intlOptions };
 
   try {
     return new Intl.DateTimeFormat(bcp47, mergedOptions).format(date);

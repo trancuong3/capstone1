@@ -130,7 +130,7 @@
     "loadingBook": "Cargando información del libro...",
     "bookUnavailableTitle": "Libro aún no disponible",
     "bookNotFoundTitle": "Libro no encontrado",
-    "bookUnavailableDesc": "Este libro aún no tiene contenido ACTIVE y VERIFIED para que el niño lo lea.",
+    "bookUnavailableDesc": "Este libro aún no tiene contenido listo para leer.",
     "bookNotFoundDesc": "Este libro no existe o no está en la biblioteca actual.",
     "backToLibrary": "Volver a la biblioteca",
     "loadErrorTitle": "No se pudo cargar la información del libro",
@@ -138,9 +138,9 @@
     "micReady": "El micrófono está listo",
     "micGranted": "Permiso de micrófono concedido",
     "rangeSummary": "Rango de lectura: Páginas {start}–{end}",
-    "ocrMatchSummary": "Página OCR confirmada: Página {page} · Confianza {percent}%",
+    "ocrMatchSummary": "Página reconocida: Página {page} · Confianza {percent}%",
     "matchedPageMissingTitle": "Página reconocida no encontrada",
-    "matchedPageMissingDesc": "La página OCR no está en la lista de páginas válidas del libro. ViRead no cambiará de página automáticamente.",
+    "matchedPageMissingDesc": "La página reconocida no está en la lista de páginas válidas del libro. ViRead no cambiará automáticamente a otra página.",
     "invalidRangeTitle": "Rango de páginas no válido",
     "invalidRangeDesc": "Vuelve a los detalles del libro y selecciona de nuevo la página de inicio, la página final o un rango continuo.",
     "micCheckSectionTitle": "Comprobar micrófono",
@@ -173,7 +173,16 @@
       "unsupported": "El navegador no proporciona un estado automático. Aún puedes comprobar el micrófono usando el botón de abajo.",
       "no_device": "No se encontró ningún micrófono en el dispositivo. Conecta un micrófono e inténtalo de nuevo.",
       "device_busy": "El micrófono está siendo utilizado por otra aplicación. Ciérrala e inténtalo de nuevo.",
-      "error": "No se puede comprobar el micrófono. Usa HTTPS o localhost e inténtalo de nuevo."
+      "error": "No se pudo comprobar el micrófono. Verifica la conexión segura y la configuración del navegador e inténtalo de nuevo."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "Repaso espaciado de palabras (1-3-7 días)",
+      "starterEyebrow": "Calentamiento suave de lectura",
+      "title": "Microcuento de calentamiento",
+      "listenStory": "Escuchar cuento",
+      "stopListen": "Detener audio",
+      "refreshStory": "Actualizar microcuento",
+      "focusWordsLabel": "Palabras integradas hoy"
     }
   },
   "ready": {
@@ -260,7 +269,7 @@
     "referencePageAlt": "Imagen de referencia de la página {page}",
     "scrollToCurrentWord": "Sobre la palabra que se está leyendo",
     "currentWordPrefix": "Palabra actual: ",
-    "overlayAria": "Resaltar la palabra actual mediante cuadro delimitador",
+    "overlayAria": "Región resaltada de la palabra actual",
     "readingModeSwitcherAria": "Modo de lectura de la página",
     "readingModeIllustrated": "Con ilustración",
     "readingModeIllustratedTitle": "Ver ilustración sin texto junto al texto de lectura",
@@ -313,7 +322,8 @@
     "listenPhonics": "Escuchar fonética",
     "listeningRetry": "Escuchando a tu hijo…",
     "readAgain": "Leer de nuevo",
-    "stepsAria": "Pasos de fonética"
+    "stepsAria": "Pasos de fonética",
+    "autoHideHint": "Deletreo listo · Ocultando para ver mejor el texto…"
   },
   "companion": {
     "teacherFemaleTitle": "Profesora IA",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "Ejemplo de fonética · Leer frase conectada",
     "quickFixTitle": "Elogio · ¡Autocorrección muy rápida!",
     "phonicsWinTitle": "Elogio · ¡Excelente fonética!",
-    "overcameWordTitle": "¡Hurra! ¡Has dominado una palabra difícil!"
+    "overcameWordTitle": "¡Hurra! ¡Has dominado una palabra difícil!",
+    "dismissAria": "Ocultar mensaje del maestro"
   },
   "tutor": {
     "title": "¿Cómo leemos esta palabra?",
@@ -417,7 +428,7 @@
     "practicedWordsLabel": "en esta sesión",
     "collapseDetails": "Contraer",
     "viewSpokenWords": "Ver palabras leídas",
-    "sttResultsTitle": "Resultados de reconocimiento de voz (STT)",
+    "sttResultsTitle": "Resultados de reconocimiento de voz del niño",
     "recognizedWordsBadge": "{count} palabras reconocidas",
     "unassessedOnlyLabel": "Palabras reconocidas; datos insuficientes para la evaluación o requieren atención:",
     "correctWordsTitle": "Palabras leídas con éxito ({count} palabras):",
@@ -439,7 +450,7 @@
     "versionLoadError": "No se pudo cargar el contenido para esta versión de página.",
     "pageLoadError": "No se pudo cargar el contenido de la página.",
     "loadingAria": "Cargando contenido de lectura",
-    "verifiedContentTitle": "Contenido de página verificado",
+    "verifiedContentTitle": "Contenido de la página del libro",
     "legendAria": "Leyenda de colores",
     "recordedTranscriptLabel": "Voz registrada",
     "notRecorded": "No registrado",
@@ -459,5 +470,38 @@
     "keepTrying": "Intenta leer despacio y con claridad.",
     "wordsRead": "{count, plural, =0 {No se leyeron palabras} one {Leída # palabra} other {Leídas # palabras}}"
   },
-  "learningContentNotice": "El contenido de lectura en vietnamita se muestra de izquierda a derecha para mantener la ortografía correcta."
+  "learningContentNotice": "El contenido de lectura en vietnamita se muestra de izquierda a derecha para mantener la ortografía correcta.",
+  "pageKinds": {
+    "TEXT_ONLY": "Texto",
+    "TEXT_AND_IMAGE": "Cuento ilustrado",
+    "IMAGE_PRIMARY": "Página ilustrada",
+    "COMIC": "Cómic / Diálogo",
+    "POEM": "Poema infantil",
+    "EXERCISE": "Página de práctica",
+    "MULTI_COLUMN": "Multicolumna",
+    "TEXT_OVER_IMAGE": "Texto sobre ilustración",
+    "LOW_QUALITY": "Requiere revisión"
+  },
+  "duet": {
+    "toggleLabel": "Lectura por turnos",
+    "toggleActive": "Modo por turnos activo",
+    "parentTurnBadge": "Turno guía de mamá/papá",
+    "childTurnBadge": "¡Turno del niño para leer!",
+    "listenParentSample": "Escuchar muestra",
+    "completeParentTurn": "Leído — Turno del niño",
+    "turnCounter": "Turno {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Explora la ilustración y oraciones",
+    "subtitle": "Amplía vocabulario y oraciones directamente desde la página recién leída.",
+    "pictureCta": "Describir ilustración",
+    "shooterCta": "Armar oraciones"
+  },
+  "lucBat": {
+    "toggleLabel": "Cadencia poetica Luc Bat 6-8",
+    "toggleActive": "Cadencia Luc Bat activa",
+    "coupletBadge": "{count} pareado(s) (6-8)",
+    "beatGuide": "Ritmo 2/2/2 (verso de 6) · 2/2/2/2 (verso de 8)",
+    "rhymePairLabel": "Rima interna en 6a silaba: \"{sixthLuc}\" <-> \"{sixthBat}\""
+  }
 }

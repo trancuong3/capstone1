@@ -71,6 +71,44 @@ const assessmentSchema = z.object({
       heard_as: z.string().nullable(),
     }),
   ),
+  phonological_patterns: z
+    .array(
+      z.object({
+        pattern_key: z.string(),
+        category: z.enum(["TONE", "ONSET", "CODA"]),
+        unit_a: z.string(),
+        unit_b: z.string(),
+        title_vi: z.string(),
+        summary_vi: z.string(),
+        occurrences: z.number().int().positive(),
+        distinct_sessions: z.number().int().positive(),
+        examples: z
+          .array(
+            z.object({
+              expected_word: z.string(),
+              spoken_word: z.string(),
+              occurrences: z.number().int().positive(),
+            }),
+          )
+          .default([]),
+        minimal_pairs: z
+          .array(
+            z.object({
+              pattern_key: z.string().nullable().optional(),
+              word_a: z.string(),
+              word_b: z.string(),
+              target_word: z.string(),
+              contrast_word: z.string(),
+              hint_vi: z.string(),
+              origin: z
+                .enum(["CHILD_HISTORY", "CURATED_GRADE1"])
+                .default("CURATED_GRADE1"),
+            }),
+          )
+          .default([]),
+      }),
+    )
+    .optional(),
   assessment: z.object({
     source: z.enum(["AI", "RULE_BASED"]),
     model: z.string().nullable(),
@@ -89,9 +127,76 @@ const assessmentSchema = z.object({
     encouragement: z.string(),
   }),
   ai_cached: z.boolean(),
+  ai_fallback_reason: z.string().nullable().optional(),
+});
+
+const phonologySandboxSchema = z.object({
+  child_id: z.string().uuid(),
+  days: z.number().int().min(7).max(90),
+  is_diagnostic: z.boolean().default(false),
+  disclaimer_vi: z.string(),
+  has_recurring_patterns: z.boolean().default(false),
+  patterns: z
+    .array(
+      z.object({
+        pattern_key: z.string(),
+        category: z.enum(["TONE", "ONSET", "CODA"]),
+        unit_a: z.string(),
+        unit_b: z.string(),
+        title_vi: z.string(),
+        summary_vi: z.string(),
+        occurrences: z.number().int().positive(),
+        distinct_sessions: z.number().int().positive(),
+        examples: z
+          .array(
+            z.object({
+              expected_word: z.string(),
+              spoken_word: z.string(),
+              occurrences: z.number().int().positive(),
+            }),
+          )
+          .default([]),
+        minimal_pairs: z
+          .array(
+            z.object({
+              pattern_key: z.string().nullable().optional(),
+              word_a: z.string(),
+              word_b: z.string(),
+              target_word: z.string(),
+              contrast_word: z.string(),
+              hint_vi: z.string(),
+              origin: z
+                .enum(["CHILD_HISTORY", "CURATED_GRADE1"])
+                .default("CURATED_GRADE1"),
+            }),
+          )
+          .default([]),
+      }),
+    )
+    .default([]),
+  recommended_pairs: z
+    .array(
+      z.object({
+        pattern_key: z.string().nullable().optional(),
+        word_a: z.string(),
+        word_b: z.string(),
+        target_word: z.string(),
+        contrast_word: z.string(),
+        hint_vi: z.string(),
+        origin: z
+          .enum(["CHILD_HISTORY", "CURATED_GRADE1"])
+          .default("CURATED_GRADE1"),
+      }),
+    )
+    .default([]),
+  duration_seconds: z.number().int().min(30).max(180).default(60),
 });
 
 export type ChildProgressAssessment = z.infer<typeof assessmentSchema>;
+export type PhonologySandboxDTO = z.infer<typeof phonologySandboxSchema>;
+export type PhonologicalPatternDTO = PhonologySandboxDTO["patterns"][number];
+export type MinimalPairExerciseDTO =
+  PhonologySandboxDTO["recommended_pairs"][number];
 
 export interface ChildProgressService {
   /** Scores and metrics now; comments are cached AI text or offline comments. */
@@ -99,27 +204,46 @@ export interface ChildProgressService {
     childId: string,
     days: number,
     signal?: AbortSignal,
+    teacherGender?: "female" | "male",
   ): Promise<ChildProgressAssessment>;
   /** Asks the AI to write the assessment (cached while the data is unchanged). */
   generate(
     childId: string,
     days: number,
-    options?: { readonly refresh?: boolean; readonly signal?: AbortSignal },
+    options?: {
+      readonly refresh?: boolean;
+      readonly signal?: AbortSignal;
+      readonly teacherGender?: "female" | "male";
+    },
   ): Promise<ChildProgressAssessment>;
+  /** Loads 60s Vietnamese minimal-pair phonological warm-up exercises. */
+  getPhonologySandbox?(
+    childId: string,
+    days?: number,
+    signal?: AbortSignal,
+  ): Promise<PhonologySandboxDTO>;
 }
 
 function path(childId: string): string {
   return `/tutor/children/${encodeURIComponent(childId)}/progress-assessment`;
 }
 
+function sandboxPath(childId: string): string {
+  return `/tutor/children/${encodeURIComponent(childId)}/phonology-sandbox`;
+}
+
 export function createChildProgressService(): ChildProgressService {
   return {
-    get: (childId, days, signal) =>
-      requestApi(
-        `${path(childId)}?days=${encodeURIComponent(String(days))}`,
+    get: (childId, days, signal, teacherGender) => {
+      const genderSuffix = teacherGender
+        ? `&teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
+      return requestApi(
+        `${path(childId)}?days=${encodeURIComponent(String(days))}${genderSuffix}`,
         assessmentSchema.refine((value) => value.child_id === childId),
         signal,
-      ),
+      );
+    },
     generate: (childId, days, options = {}) =>
       requestApi(
         path(childId),
@@ -127,8 +251,22 @@ export function createChildProgressService(): ChildProgressService {
         options.signal,
         {
           method: "POST",
-          body: { days, refresh: options.refresh ?? false },
+          body: {
+            days,
+            refresh: options.refresh ?? false,
+            ...(options.teacherGender
+              ? { teacher_gender: options.teacherGender }
+              : {}),
+          },
+          timeoutMs: 45_000,
+          retryOnColdStart: true,
         },
+      ),
+    getPhonologySandbox: (childId, days = 30, signal) =>
+      requestApi(
+        `${sandboxPath(childId)}?days=${encodeURIComponent(String(days))}`,
+        phonologySandboxSchema.refine((value) => value.child_id === childId),
+        signal,
       ),
   };
 }

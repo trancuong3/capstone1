@@ -15,9 +15,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
@@ -25,17 +27,54 @@ import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import {
   DEFAULT_USER_CACHE_TTL_MS,
+  invalidateUserCacheKey,
   PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
+  sanitizeChildProfileForCache,
   sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
   DashboardLatestSessionDTO,
   DashboardSummaryDTO,
 } from "@/types/profile";
+import { AiTeacherVoiceSection } from "./ai-teacher-voice-section";
 import { FamilyReadingDesk } from "./family-reading-desk";
+
+const DASHBOARD_CHILDREN_PAGE_SIZE = 4;
+
+function getChildVoiceUpdatedAt(child: ChildProfileDTO | undefined): number {
+  const settings = child?.settings;
+  if (!settings || typeof settings !== "object") return 0;
+  const vp = (settings as Record<string, unknown>).voice_preferences;
+  if (!vp || typeof vp !== "object") return 0;
+  const ts = (vp as Record<string, unknown>).updated_at;
+  return typeof ts === "number" && Number.isFinite(ts) && ts > 0
+    ? Math.floor(ts)
+    : 0;
+}
+
+function preferFresherChildVoice(
+  incoming: ChildProfileDTO,
+  existing: ChildProfileDTO | undefined,
+): ChildProfileDTO {
+  if (!existing || existing.id !== incoming.id) return incoming;
+  const existingTs = getChildVoiceUpdatedAt(existing);
+  const incomingTs = getChildVoiceUpdatedAt(incoming);
+  if (existingTs > incomingTs) {
+    return {
+      ...incoming,
+      settings: {
+        ...(incoming.settings ?? {}),
+        voice_preferences: (existing.settings as Record<string, unknown>)
+          ?.voice_preferences,
+      },
+    };
+  }
+  return incoming;
+}
 
 type DashboardState =
   | { status: "loading" }
@@ -65,10 +104,17 @@ export function DashboardScreen() {
 
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DashboardState>({ status: "loading" });
+  const [childPageState, setChildPageState] = useState<{
+    forSelectedId: string | null;
+    page: number;
+  }>({ forSelectedId: null, page: 1 });
   const [selectionPrompt, setSelectionPrompt] = useState(false);
   const selectionSectionRef = useRef<HTMLElement | null>(null);
   const focusRequestHandledRef = useRef(false);
   const hasReadyDataRef = useRef(state.status === "ready");
+  const latestChildrenRef = useRef<ChildProfileDTO[]>(
+    state.status === "ready" ? state.children : [],
+  );
   const selectionReason = searchParams.get("reason");
   const routeSelectionPrompt =
     searchParams.get("focus") === "child-selection" &&
@@ -82,7 +128,10 @@ export function DashboardScreen() {
 
   useEffect(() => {
     hasReadyDataRef.current = state.status === "ready";
-  }, [state.status]);
+    if (state.status === "ready") {
+      latestChildrenRef.current = state.children;
+    }
+  }, [state]);
 
   useEffect(() => {
     let isActive = true;
@@ -96,6 +145,7 @@ export function DashboardScreen() {
       )?.data;
 
       if (cached && isActive) {
+        latestChildrenRef.current = cached.children;
         setState({
           status: "ready",
           children: cached.children,
@@ -110,9 +160,21 @@ export function DashboardScreen() {
         const summary = await profileService.getDashboardSummary();
         if (!isActive) return;
 
-        const cacheOwnerId = userId ?? summary.profile?.id ?? null;
+        const mergedChildren = summary.children.map((item) =>
+          preferFresherChildVoice(
+            item,
+            latestChildrenRef.current.find((prev) => prev.id === item.id),
+          ),
+        );
+        const mergedSummary: DashboardSummaryDTO = {
+          ...summary,
+          children: mergedChildren,
+        };
+
+        const cacheOwnerId = userId ?? mergedSummary.profile?.id ?? null;
         if (cacheOwnerId) {
-          const cacheableSummary = sanitizeDashboardSummaryForCache(summary);
+          const cacheableSummary =
+            sanitizeDashboardSummaryForCache(mergedSummary);
           writeUserCache(cacheOwnerId, "dashboard-summary", cacheableSummary, {
             persist: "session",
           });
@@ -121,11 +183,12 @@ export function DashboardScreen() {
           });
         }
 
+        latestChildrenRef.current = mergedChildren;
         setState({
           status: "ready",
-          children: summary.children,
-          latestSessionsByChild: summary.latest_sessions_by_child,
-          summarySource: summary.source,
+          children: mergedChildren,
+          latestSessionsByChild: mergedSummary.latest_sessions_by_child,
+          summarySource: mergedSummary.source,
         });
       } catch {
         if (!isActive) return;
@@ -152,6 +215,7 @@ export function DashboardScreen() {
       return;
     }
     setValidatedSelectedChild(child);
+    hydrateTeacherVoiceFromChildProfile(child);
   }, [
     clearSelectedChild,
     replace,
@@ -226,27 +290,47 @@ export function DashboardScreen() {
 
   const isLoading = state.status === "loading";
   const children = state.status === "ready" ? state.children : [];
-  const selectedChild = children.find((child) => child.id === selectedChildId);
+  const selectedChildIndex = selectedChildId
+    ? children.findIndex((child) => child.id === selectedChildId)
+    : -1;
+  const selectedChild =
+    selectedChildIndex >= 0 ? children[selectedChildIndex] : undefined;
+  const pageSyncKey = selectedChild?.id ?? null;
+  const defaultChildrenPage =
+    selectedChildIndex >= 0
+      ? Math.floor(selectedChildIndex / DASHBOARD_CHILDREN_PAGE_SIZE) + 1
+      : 1;
+  const childrenTotalPages = Math.max(
+    1,
+    Math.ceil(children.length / DASHBOARD_CHILDREN_PAGE_SIZE),
+  );
+  const rawChildrenPage =
+    childPageState.forSelectedId === pageSyncKey
+      ? childPageState.page
+      : defaultChildrenPage;
+  const safeChildrenPage = Math.min(
+    Math.max(1, rawChildrenPage),
+    childrenTotalPages,
+  );
+  const visibleChildren = children.slice(
+    (safeChildrenPage - 1) * DASHBOARD_CHILDREN_PAGE_SIZE,
+    safeChildrenPage * DASHBOARD_CHILDREN_PAGE_SIZE,
+  );
   const latestSessionForSelected =
     state.status === "ready" && selectedChild
       ? (state.latestSessionsByChild[selectedChild.id] ?? null)
       : null;
 
   return (
-    <section className="family-dashboard max-sm:pb-6">
-      <header className="family-title max-sm:mb-3! max-sm:items-center! max-sm:gap-2!">
-        <h1 className="book-title max-sm:text-xl!">
-          {t("parent.dashboard.familyTitle")}
-        </h1>
-        <Link
-          href="/children"
-          className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
-        >
-          <UsersRound aria-hidden="true" size={16} />{" "}
+    <section className="family-dashboard">
+      <header className="family-title">
+        <h1 className="book-title">{t("parent.dashboard.familyTitle")}</h1>
+        <Link href="/children" className="family-inline-link min-h-12">
+          <UsersRound aria-hidden="true" size={17} />{" "}
           {t("parent.dashboard.manageProfiles")}
         </Link>
       </header>
-      <div className="family-spread max-sm:gap-3!">
+      <div className="family-spread">
         <FamilyReadingDesk
           key={selectedChild?.id ?? "family"}
           child={selectedChild}
@@ -265,18 +349,15 @@ export function DashboardScreen() {
           aria-labelledby="child-selection-title"
           aria-busy={isLoading ? "true" : undefined}
           className={
-            "family-profiles order-1 max-sm:gap-2! sm:order-2" +
+            "family-profiles order-1 md:order-2" +
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2 id="child-selection-title" className="max-sm:text-base!">
+          <h2 id="child-selection-title">
             {t("parent.dashboard.selectChildHeading")}
           </h2>
           {selectionRequired && children.length > 0 ? (
-            <p
-              role="status"
-              className="family-selection-notice max-sm:text-xs!"
-            >
+            <p role="status" className="family-selection-notice">
               {invalidSelection
                 ? t("parent.dashboard.invalidSelectionNotice")
                 : t("parent.dashboard.missingSelectionNotice")}
@@ -284,19 +365,19 @@ export function DashboardScreen() {
           ) : null}
           {isLoading ? (
             <div
-              className="family-profile-list max-sm:gap-2!"
+              className="family-profile-list"
               aria-label={t("parent.dashboard.loadingChildrenAria")}
             >
               <span className="sr-only" role="status">
                 {t("common.states.loading")}
               </span>
-              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
-              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
+              <Skeleton className="h-[68px] w-full rounded-control" />
+              <Skeleton className="h-[68px] w-full rounded-control" />
             </div>
           ) : children.length ? (
             <>
-              <div className="family-profile-list max-sm:gap-2! [&>button]:max-sm:min-h-[56px]! [&>button]:max-sm:px-3! [&>button]:max-sm:py-2!">
-                {children.map((child) => (
+              <div className="family-profile-list">
+                {visibleChildren.map((child) => (
                   <ChildProfileCard
                     key={child.id}
                     child={child}
@@ -304,114 +385,150 @@ export function DashboardScreen() {
                     onSelect={() => {
                       selectChild(child.id);
                       setValidatedSelectedChild(child);
+                      setChildPageState({
+                        forSelectedId: child.id,
+                        page: safeChildrenPage,
+                      });
+                      hydrateTeacherVoiceFromChildProfile(child, {
+                        force: true,
+                      });
                       setSelectionPrompt(false);
                       if (searchParams.toString()) replace("/dashboard");
                     }}
                   />
                 ))}
               </div>
+              <PaginationBar
+                compact
+                itemLabel={t("parent.dashboard.childProfilesTitle")}
+                onPageChange={(nextPage) =>
+                  setChildPageState({
+                    forSelectedId: pageSyncKey,
+                    page: nextPage,
+                  })
+                }
+                page={safeChildrenPage}
+                pageSize={DASHBOARD_CHILDREN_PAGE_SIZE}
+                total={children.length}
+              />
               <Link
                 href="/children/new"
-                className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
+                className="family-inline-link min-h-12"
               >
-                <Plus aria-hidden="true" size={16} />{" "}
+                <Plus aria-hidden="true" size={17} />{" "}
                 {t("parent.dashboard.createChildLink")}
               </Link>
             </>
           ) : (
-            <p className="text-sm text-muted sm:text-body">
+            <p className="text-muted">
               {t("parent.dashboard.emptyChildrenDescription")}
             </p>
           )}
         </section>
       </div>
 
+      {!isLoading && selectedChild ? (
+        <div className="mt-5">
+          <FiveMinuteTrainCtaCard
+            childAlias={selectedChild.alias}
+            childId={selectedChild.id}
+            sourceSurface="dashboard"
+          />
+        </div>
+      ) : null}
+
+      <AiTeacherVoiceSection
+        selectedChild={selectedChild ?? null}
+        onChildSettingsUpdated={(updatedChild) => {
+          const existing = latestChildrenRef.current.find(
+            (item) => item.id === updatedChild.id,
+          );
+          const mergedChild = preferFresherChildVoice(updatedChild, existing);
+          const nextChildren = latestChildrenRef.current.some(
+            (item) => item.id === mergedChild.id,
+          )
+            ? latestChildrenRef.current.map((item) =>
+                item.id === mergedChild.id ? mergedChild : item,
+              )
+            : latestChildrenRef.current;
+          latestChildrenRef.current = nextChildren;
+
+          const cacheOwnerId = userId ?? mergedChild.parent_id ?? null;
+          if (cacheOwnerId && nextChildren.length > 0) {
+            writeUserCache(
+              cacheOwnerId,
+              "children",
+              nextChildren.map((child) => sanitizeChildProfileForCache(child)),
+              { persist: "session" },
+            );
+            const cachedSummary = readUserCacheWithStale<DashboardSummaryDTO>(
+              cacheOwnerId,
+              "dashboard-summary",
+              DEFAULT_USER_CACHE_TTL_MS,
+              PERSISTENT_USER_CACHE_MAX_STALE_MS,
+            )?.data;
+            if (cachedSummary) {
+              const updatedSummary = sanitizeDashboardSummaryForCache({
+                ...cachedSummary,
+                profile: cachedSummary.profile
+                  ? {
+                      ...cachedSummary.profile,
+                      children: cachedSummary.profile.children.map((item) =>
+                        item.id === mergedChild.id ? mergedChild : item,
+                      ),
+                    }
+                  : null,
+                children: nextChildren,
+              });
+              writeUserCache(
+                cacheOwnerId,
+                "dashboard-summary",
+                updatedSummary,
+                {
+                  persist: "session",
+                },
+              );
+            } else {
+              invalidateUserCacheKey(cacheOwnerId, "dashboard-summary");
+            }
+          }
+
+          setState((prev) => {
+            if (prev.status !== "ready") return prev;
+            return {
+              ...prev,
+              children: prev.children.map((item) =>
+                item.id === mergedChild.id
+                  ? preferFresherChildVoice(mergedChild, item)
+                  : item,
+              ),
+            };
+          });
+          setValidatedSelectedChild(mergedChild);
+        }}
+      />
+
       {!isLoading && children.length > 0 ? (
-        <section
-          aria-labelledby="reading-actions-title"
-          className="family-tools max-sm:mt-4!"
-        >
-          <div className="family-tools-heading max-sm:items-center! max-sm:pb-2!">
-            <h2 id="reading-actions-title" className="max-sm:text-base!">
-              {t("parent.dashboard.readingActionsTitle")}
-            </h2>
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-2.5 md:hidden">
             <Link
-              href={
-                selectedChild
-                  ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
-                  : "/sessions"
-              }
-              className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
-            >
-              <History aria-hidden="true" size={16} />{" "}
-              {t("parent.dashboard.readingHistoryLink")}
-            </Link>
-          </div>
-          <div className="family-tool-list max-sm:mt-2.5! max-sm:grid! max-sm:grid-cols-2! max-sm:gap-2.5!">
-            <button
-              type="button"
-              aria-label={t("parent.dashboard.scanBookTitle")}
-              className="order-1 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
-              onClick={() => handleReadingAction("/book-scanner")}
-            >
-              <Camera aria-hidden="true" />
-              <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.scanBookTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.scanBookDesc")}
-                </small>
-              </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
-              />
-            </button>
-            <button
-              type="button"
-              aria-label={t("parent.dashboard.entertainmentTitle")}
-              className="order-4 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
-              onClick={() => handleReadingAction("/entertainment")}
-            >
-              <Music2 aria-hidden="true" />
-              <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.entertainmentTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.entertainmentDesc")}
-                </small>
-              </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
-              />
-            </button>
-            <Link
-              className="order-2 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
+              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
                   : "/reports"
               }
             >
-              <BarChart3 aria-hidden="true" />
-              <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.progressTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.progressDesc")}
-                </small>
-              </span>
-              <ArrowUpRight
+              <BarChart3
                 aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
+                className="size-5 shrink-0 text-primary"
               />
+              <span className="truncate">
+                {t("parent.dashboard.recentProgressLink")}
+              </span>
             </Link>
             <Link
-              className="order-3 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:hidden!"
+              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports/difficult-words?childId=${encodeURIComponent(selectedChild.id)}`
@@ -420,16 +537,76 @@ export function DashboardScreen() {
             >
               <Volume2
                 aria-hidden="true"
-                className="bg-warning-surface! text-warning!"
+                className="size-5 shrink-0 text-warning"
               />
-              <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.difficultWordsLink")}
-                </strong>
+              <span className="truncate">
+                {t("parent.dashboard.difficultWordsLink")}
               </span>
             </Link>
           </div>
-        </section>
+
+          <section
+            aria-labelledby="reading-actions-title"
+            className="family-tools"
+          >
+            <div className="family-tools-heading">
+              <h2 id="reading-actions-title">
+                {t("parent.dashboard.readingActionsTitle")}
+              </h2>
+              <Link
+                href={
+                  selectedChild
+                    ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
+                    : "/sessions"
+                }
+                className="family-inline-link min-h-12"
+              >
+                <History aria-hidden="true" size={16} />{" "}
+                {t("parent.dashboard.readingHistoryLink")}
+              </Link>
+            </div>
+            <div className="family-tool-list">
+              <button
+                type="button"
+                aria-label={t("parent.dashboard.scanBookTitle")}
+                onClick={() => handleReadingAction("/book-scanner")}
+              >
+                <Camera aria-hidden="true" />
+                <span>
+                  <strong>{t("parent.dashboard.scanBookTitle")}</strong>
+                  <small>{t("parent.dashboard.scanBookDesc")}</small>
+                </span>
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
+              </button>
+              <button
+                type="button"
+                aria-label={t("parent.dashboard.entertainmentTitle")}
+                onClick={() => handleReadingAction("/entertainment")}
+              >
+                <Music2 aria-hidden="true" />
+                <span>
+                  <strong>{t("parent.dashboard.entertainmentTitle")}</strong>
+                  <small>{t("parent.dashboard.entertainmentDesc")}</small>
+                </span>
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
+              </button>
+              <Link
+                href={
+                  selectedChild
+                    ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
+                    : "/reports"
+                }
+              >
+                <BarChart3 aria-hidden="true" />
+                <span>
+                  <strong>{t("parent.dashboard.progressTitle")}</strong>
+                  <small>{t("parent.dashboard.progressDesc")}</small>
+                </span>
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
+              </Link>
+            </div>
+          </section>
+        </>
       ) : null}
     </section>
   );

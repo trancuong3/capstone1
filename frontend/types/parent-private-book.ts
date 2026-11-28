@@ -9,6 +9,9 @@ export const sourceUsageTypeSchema = z.enum([
 ]);
 export type SourceUsageType = z.infer<typeof sourceUsageTypeSchema>;
 
+export const scanSaveModeSchema = z.enum(["create_book", "append_page"]);
+export type ScanSaveMode = z.infer<typeof scanSaveModeSchema>;
+
 export const submissionWorkflowStatusSchema = z.enum([
   "CHECKING",
   "PASSED_READY_TO_ADD",
@@ -102,6 +105,21 @@ const safeMediaUrlSchema = z
     }
   });
 
+export const safeMediaUrlForScanSaveSchema = safeMediaUrlSchema;
+
+export const saveScanToMyBooksResponseSchema = z.object({
+  book_id: z.string(),
+  page_id: z.string(),
+  page_number: z.number().int().positive(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string().optional(),
+  visibility_scope: z.literal("PARENT_PRIVATE").optional(),
+  reader_href: safeMediaUrlSchema,
+});
+export type SaveScanToMyBooksResponseDTO = z.infer<
+  typeof saveScanToMyBooksResponseSchema
+>;
+
 export const toolCheckScopeSchema = z.object({
   modality: z.string(),
   covers_all_chunks: z.boolean(),
@@ -147,6 +165,31 @@ export const toolCheckFindingSchema = z.object({
 });
 export type ToolCheckFindingDTO = z.infer<typeof toolCheckFindingSchema>;
 
+export const vietnameseReadabilitySchema = z.object({
+  syllable_count: z.number().int().nonnegative(),
+  sentence_count: z.number().int().nonnegative(),
+  avg_syllables_per_sentence: z.number().nonnegative(),
+  complex_phonics_ratio: z.number().nonnegative(),
+  multisyllable_ratio: z.number().nonnegative(),
+  decodable_syllable_ratio: z.number().nonnegative(),
+  estimated_grade_band: z.enum([
+    "GRADE_1",
+    "GRADE_2",
+    "GRADE_3",
+    "GRADE_4_5",
+    "UNRATED",
+  ]),
+  estimated_min_grade: z.number().int().min(1).max(5),
+  estimated_max_grade: z.number().int().min(1).max(5),
+  grade_match_status: z.enum(["MATCHED", "TOO_HARD", "TOO_EASY", "UNRATED"]),
+  phonics_readiness_score: z.number().nonnegative(),
+  sample_complex_syllables: z.array(z.string()).optional(),
+  explanation_vi: z.string().optional(),
+});
+export type VietnameseReadabilityDTO = z.infer<
+  typeof vietnameseReadabilitySchema
+>;
+
 export const parentPrivatePageSchema = z.object({
   page_id: z.guid(),
   page_number: z.number().int().positive(),
@@ -154,6 +197,7 @@ export const parentPrivatePageSchema = z.object({
   verified_text: z.string().default(""),
   verified_text_preview: z.string(),
   image_url: safeMediaUrlSchema,
+  readability: vietnameseReadabilitySchema.nullable().optional(),
   created_at: z.string(),
 });
 export type ParentPrivatePageDTO = z.infer<typeof parentPrivatePageSchema>;
@@ -177,6 +221,7 @@ export const parentPageSubmissionSchema = z.object({
   optimistic_lock_version: z.number().int().positive(),
   workflow_status: submissionWorkflowStatusSchema,
   workflow_status_label: z.string(),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
   ocr_status: z.string(),
   ocr_text: z.string().nullable(),
   ocr_error_code: z.string().nullable(),
@@ -365,6 +410,7 @@ export const parentPrivateBookSummarySchema = z.object({
   has_held_multipage_batch: z.boolean(),
   privacy_notice: z.string(),
   ocr_contribution: parentOcrContributionStateSchema.nullable().optional(),
+  readability: vietnameseReadabilitySchema.nullable().optional(),
   created_at: z.string(),
 });
 export type ParentPrivateBookSummaryDTO = z.infer<
@@ -388,6 +434,28 @@ export const parentPrivateBookDetailSchema = z.object({
 });
 export type ParentPrivateBookDetailDTO = z.infer<
   typeof parentPrivateBookDetailSchema
+>;
+
+export type StoryweaverStyleMode = "PROSE" | "DUET_DIALOGUE" | "POEM";
+
+export interface ParentStoryweaverInput {
+  readonly child_id?: string | null;
+  readonly title?: string | null;
+  readonly theme: string;
+  readonly page_count: 3 | 4;
+  readonly target_grade?: number | null;
+  readonly style_mode: StoryweaverStyleMode;
+  readonly custom_words?: readonly string[];
+}
+
+export const parentStoryweaverResponseSchema = z.object({
+  book_detail: parentPrivateBookDetailSchema,
+  target_words_used: z.array(z.string()),
+  generation_source: z.enum(["AI", "DETERMINISTIC_TEMPLATE"]),
+  readability: vietnameseReadabilitySchema,
+});
+export type ParentStoryweaverResponseDTO = z.infer<
+  typeof parentStoryweaverResponseSchema
 >;
 
 export const parentSubmitPagesResponseSchema = z.object({

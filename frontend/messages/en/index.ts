@@ -1,5 +1,4 @@
 import accessibility from "./accessibility.json";
-import admin from "./admin.json";
 import auth from "./auth.json";
 import books from "./books.json";
 import child from "./child.json";
@@ -17,6 +16,15 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
+import { fiveMinTrainEn } from "@/messages/features/five_min_train";
+import { offlinePackEn } from "@/messages/features/offline_pack";
+import { coReadingEn } from "../features/co_reading_messages";
+import { microStoryEn } from "../features/micro_story_messages";
+import { phonemeGardenEn } from "../features/phoneme_garden_messages";
+import { prosodyCoachEn } from "../features/prosody_coach_messages";
+import { regionalDialectEn } from "../features/regional_dialect_messages";
+import { scanInstantEn } from "../features/scan_instant";
+import { wordGlossaryEn } from "../features/word_glossary_messages";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 const messages: MessagesDictionary = {
@@ -25,7 +33,6 @@ const messages: MessagesDictionary = {
   navigation,
   parent,
   child,
-  admin,
   books,
   ocr,
   reading,
@@ -39,6 +46,15 @@ const messages: MessagesDictionary = {
   validation,
   notifications,
   accessibility,
+  scanInstant: scanInstantEn,
+  wordGlossary: wordGlossaryEn,
+  fiveMinTrain: fiveMinTrainEn,
+  microStory: microStoryEn,
+  offlinePack: offlinePackEn,
+  prosodyCoach: prosodyCoachEn,
+  regionalDialect: regionalDialectEn,
+  coReading: coReadingEn,
+  phonemeGarden: phonemeGardenEn,
 };
 
 export default messages;

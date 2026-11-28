@@ -130,7 +130,7 @@
     "loadingBook": "טוען פרטי ספר...",
     "bookUnavailableTitle": "הספר עדיין לא מוכן",
     "bookNotFoundTitle": "הספר לא נמצא",
-    "bookUnavailableDesc": "הספר הזה עדיין לא מכיל תוכן פעיל ואומת לקריאה של הילד",
+    "bookUnavailableDesc": "לספר זה עדיין אין תוכן מוכן לקריאה.",
     "bookNotFoundDesc": "הספר אינו קיים או אינו נמצא בספרייה הנוכחית",
     "backToLibrary": "חזרה לספרייה",
     "loadErrorTitle": "לא ניתן לטעון פרטי ספר",
@@ -138,9 +138,9 @@
     "micReady": "המיקרופון מוכן",
     "micGranted": "ניתנה הרשאת מיקרופון",
     "rangeSummary": "טווח קריאה: דפים {start}–{end}",
-    "ocrMatchSummary": "עמוד OCR אושר: עמוד {page} · רמת אמינות {percent}%",
+    "ocrMatchSummary": "דף שזוהה: דף {page} · ודאות {percent}%",
     "matchedPageMissingTitle": "דף מזוהה לא נמצא",
-    "matchedPageMissingDesc": "דף ה-OCR אינו נמצא ברשימת הדפים התקפים של הספר. ViRead לא תחליף דפים באופן אוטומטי.",
+    "matchedPageMissingDesc": "הדף שזוהה אינו ברשימת הדפים התקינים של הספר. ViRead לא תעבור אוטומטית לדף אחר.",
     "invalidRangeTitle": "טווח עמודים לא חוקי",
     "invalidRangeDesc": "אנא חזור אל פרטי הספר ובחר מחדש את עמוד ההתחלה, עמוד הסיום או טווח רציף.",
     "micCheckSectionTitle": "בדיקת מיקרופון",
@@ -173,7 +173,16 @@
       "unsupported": "הדפדפן אינו מספק מצב אוטומטי. הורה יקר, עדיין באפשרותך לבדוק את המיקרופון באמצעות הכפתור שלמטה.",
       "no_device": "לא נמצא מיקרופון במכשיר. אנא חבר מיקרופון ונסה שוב.",
       "device_busy": "המיקרופון נמצא בשימוש על ידי אפליקציה אחרת. אנא סגור אותה ונסה שוב.",
-      "error": "לא ניתן לבדוק את המיקרופון. אנא השתמש ב-HTTPS או ב-localhost ונסה שוב."
+      "error": "לא ניתן לבדוק את המיקרופון. אנא בדקו את החיבור המאובטח והגדרות הדפדפן ונסו שוב."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "חזרה מרווחת על מילים (1-3-7 ימים)",
+      "starterEyebrow": "חימום נעים לפני קריאה",
+      "title": "סיפורון חימום קצר",
+      "listenStory": "האזנה לסיפורון",
+      "stopListen": "עצירה",
+      "refreshStory": "רענון סיפורון החימום",
+      "focusWordsLabel": "מילים משולבות להיום"
     }
   },
   "ready": {
@@ -260,7 +269,7 @@
     "referencePageAlt": "תמונת הפניה לעמוד {page}",
     "scrollToCurrentWord": "על אודות המילה הנקראת",
     "currentWordPrefix": "מילה נוכחית: ",
-    "overlayAria": "הדגש מילה נוכחית באמצעות תיבת תיחוום",
+    "overlayAria": "אזור הדגשת המילה הנוכחית",
     "readingModeSwitcherAria": "מצב קריאת עמוד הספר",
     "readingModeIllustrated": "קריאה עם איור",
     "readingModeIllustratedTitle": "הצגת איור נקי מטקסט לצד טקסט הקריאה",
@@ -313,7 +322,8 @@
     "listenPhonics": "האזנה לפוניקה",
     "listeningRetry": "מאזין לילד שלך...",
     "readAgain": "קרא שוב",
-    "stepsAria": "שלבי פוניקה"
+    "stepsAria": "שלבי פוניקה",
+    "autoHideHint": "האיות הסתיים · מסתיר כדי לקרוא בנוחות…"
   },
   "companion": {
     "teacherFemaleTitle": "מורה AI",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "דוגמת פוניקה · קריאת הביטוי",
     "quickFixTitle": "כל הכבוד · תיקון עצמי מהיר!",
     "phonicsWinTitle": "כל הכבוד · שליטה מצוינת בפוניקה!",
-    "overcameWordTitle": "הידד · צלחת מילה קשה!"
+    "overcameWordTitle": "הידד · צלחת מילה קשה!",
+    "dismissAria": "הסתר הודעת הדרכה"
   },
   "tutor": {
     "title": "איך קוראים את המילה הזו?",
@@ -417,7 +428,7 @@
     "practicedWordsLabel": "בפעילות זו",
     "collapseDetails": "כווץ",
     "viewSpokenWords": "הצג מילים שנקראו",
-    "sttResultsTitle": "תוצאות זיהוי דיבור (STT)",
+    "sttResultsTitle": "תוצאות זיהוי הדיבור של הילד",
     "recognizedWordsBadge": "{count, plural, =1 {מילה אחת זוהתה} other {# מילים זוהו}}",
     "unassessedOnlyLabel": "מילים שזוהו; אין מספיק נתונים להערכה או שנדרשת תשומת לב:",
     "correctWordsTitle": "מילים שנקראו בהצלחה ({count} מילים):",
@@ -439,7 +450,7 @@
     "versionLoadError": "לא ניתן לטעון את התוכן עבור גרסת עמוד זו.",
     "pageLoadError": "לא ניתן לטעון את תוכן העמוד.",
     "loadingAria": "טוען תוכן קריאה",
-    "verifiedContentTitle": "תוכן עמוד מאומת",
+    "verifiedContentTitle": "תוכן דף הספר",
     "legendAria": "מקרא צבעים",
     "recordedTranscriptLabel": "דיבור מוקלט",
     "notRecorded": "לא נותח",
@@ -459,5 +470,38 @@
     "keepTrying": "נסה/י לקרוא לאט ובבירור.",
     "wordsRead": "{count, plural, =0 {לא נקראו מילים} one {נקראה מילה אחת} other {נקראו # מילים}}"
   },
-  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון."
+  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון.",
+  "pageKinds": {
+    "TEXT_ONLY": "טקסט",
+    "TEXT_AND_IMAGE": "סיפור מאויר",
+    "IMAGE_PRIMARY": "עמוד איור",
+    "COMIC": "קומיקס / דו-שיח",
+    "POEM": "שיר ילדים",
+    "EXERCISE": "עמוד תרגול",
+    "MULTI_COLUMN": "רב-עמודות",
+    "TEXT_OVER_IMAGE": "טקסט על איור",
+    "LOW_QUALITY": "דרוש בדיקה"
+  },
+  "duet": {
+    "toggleLabel": "קריאה משותפת בתורות",
+    "toggleActive": "מצב תורות פעיל",
+    "parentTurnBadge": "תור ההורה להוביל",
+    "childTurnBadge": "עכשיו תור הילד/ה לקרוא!",
+    "listenParentSample": "האזנה לדוגמה",
+    "completeParentTurn": "סיימתי לקרוא — תור הילד/ה",
+    "turnCounter": "תור {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "גלו את האיור והמשפטים שבעמוד",
+    "subtitle": "הרחיבו אוצר מילים ומשפטים ישירות מהעמוד שקראתם כעת.",
+    "pictureCta": "תיאור איור העמוד",
+    "shooterCta": "הרכבת משפטי העמוד"
+  },
+  "lucBat": {
+    "toggleLabel": "מקצב שירה 6-8 (Luc Bat)",
+    "toggleActive": "מקצב השירה פעיל",
+    "coupletBadge": "{count} צמדי שורות (6-8)",
+    "beatGuide": "חלוקת קצב 2/2/2 (שורת 6) · 2/2/2/2 (שורת 8)",
+    "rhymePairLabel": "חריזה פנימית בהברה ה-6: \"{sixthLuc}\" <-> \"{sixthBat}\""
+  }
 }

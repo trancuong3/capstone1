@@ -14,6 +14,7 @@ const parentRoutePrefixes = [
   "/book-scanner",
   "/device-permissions",
   "/entertainment",
+  "/learning-train",
   "/help-support",
   "/reading",
   "/reading-management",

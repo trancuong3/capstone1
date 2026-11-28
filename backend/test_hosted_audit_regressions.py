@@ -324,12 +324,18 @@ class HostedAuditBackendRegressionTests(unittest.TestCase):
             def decode_stream(self, _stream):
                 return None
 
-        short_clip = np.full(int(16000 * 0.6), 0.05, dtype=np.float32)
-        long_clip = np.full(int(16000 * 1.5), 0.05, dtype=np.float32)
+        short_t = np.linspace(0.0, 0.6, int(16000 * 0.6), dtype=np.float32)
+        long_t = np.linspace(0.0, 1.5, int(16000 * 1.5), dtype=np.float32)
+        short_clip = (0.15 * np.sin(2 * np.pi * 300 * short_t)).astype(np.float32)
+        long_clip = (0.15 * np.sin(2 * np.pi * 300 * long_t)).astype(np.float32)
 
         with (
             patch.object(vw.runtime, "stt_recognizer", _FakeRecognizer()),
-            patch.object(vw, "preprocess_audio_for_stt", side_effect=lambda x: x),
+            patch.object(
+                vw,
+                "_preprocess_audio_for_stt_with_stats",
+                side_effect=lambda x: (x, 0.0, (float(len(x)) / 16000.0, 0.0, 0.0)),
+            ),
         ):
             vw.decode_stt_window_sync(short_clip, lead_pad_s=0.1, trail_pad_s=0.35)
             vw.decode_stt_window_sync(long_clip, lead_pad_s=0.1, trail_pad_s=0.35)
@@ -675,6 +681,97 @@ class HostedAuditBackendRegressionTests(unittest.TestCase):
         self.assertNotIn("probe_degraded", payload["ocr"])
         self.assertTrue(captured_timeouts)
         self.assertGreaterEqual(captured_timeouts[0], 5.0)
+
+    def test_get_health_shallow_probe_and_short_ttl_cache(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from fastapi import Request
+        from fastapi.testclient import TestClient
+        import app.sever as sever_mod
+
+        sever_mod.clear_health_probe_cache()
+        db_calls = 0
+        ocr_calls = 0
+
+        async def _ok_db(*, timeout: float = 6.0):
+            nonlocal db_calls
+            db_calls += 1
+            return {
+                "ok": True,
+                "dns_resolved": True,
+                "ssl_enabled": True,
+                "pool_class": "NullPool",
+                "pooler_mode": "transaction",
+                "latency_ms": 12,
+            }
+
+        async def _fail_db(*, timeout: float = 6.0):
+            nonlocal db_calls
+            db_calls += 1
+            return {
+                "ok": False,
+                "dns_resolved": True,
+                "ssl_enabled": True,
+                "pool_class": "NullPool",
+                "pooler_mode": "transaction",
+                "latency_ms": 0,
+            }
+
+        async def _ok_ocr():
+            nonlocal ocr_calls
+            ocr_calls += 1
+            return {"ready": True, "engines": {}, "workers": [], "queue": {}, "heartbeat_ttl_seconds": 75}
+
+        client = TestClient(sever_mod.app)
+        with (
+            patch.object(sever_mod, "is_remote_ocr_mode", return_value=True),
+            patch.object(sever_mod, "get_ocr_mode", return_value="remote_worker"),
+            patch.object(sever_mod, "probe_database_connection", side_effect=_ok_db),
+            patch.object(sever_mod, "collect_remote_ocr_health", side_effect=_ok_ocr),
+        ):
+            # 1. Shallow probe runs 0 DB or OCR probes
+            shallow_resp = client.get("/health?probe=shallow")
+            self.assertEqual(shallow_resp.status_code, 200)
+            self.assertEqual(shallow_resp.json()["database"]["status"], "shallow")
+            self.assertTrue(shallow_resp.json()["ocr"]["shallow"])
+            self.assertEqual(db_calls, 0)
+            self.assertEqual(ocr_calls, 0)
+
+            # 2. First full probe executes DB + OCR once and caches for TTL
+            resp1 = client.get("/health")
+            self.assertEqual(resp1.status_code, 200)
+            self.assertEqual(db_calls, 1)
+            self.assertEqual(ocr_calls, 1)
+
+            # Update background worker state; second /health reuses DB+OCR cache while refreshing workers
+            sever_mod.app.state.background_workers = {"parent_email_dispatcher": None}
+            resp2 = client.get("/health")
+            self.assertEqual(resp2.status_code, 200)
+            self.assertEqual(db_calls, 1)
+            self.assertEqual(ocr_calls, 1)
+            self.assertIn("parent_email_dispatcher", resp2.json()["workers"])
+
+            # 3. Direct-call get_health(req) unwraps Query(default=None) safely
+            req = MagicMock(spec=Request)
+            req.app = SimpleNamespace(state=SimpleNamespace(background_workers={}))
+            direct_payload = asyncio.run(sever_mod.get_health(req))
+            self.assertEqual(direct_payload["status"], "ok")
+
+        # 4. Failures are never cached
+        sever_mod.clear_health_probe_cache()
+        db_calls = 0
+        with (
+            patch.object(sever_mod, "is_remote_ocr_mode", return_value=True),
+            patch.object(sever_mod, "get_ocr_mode", return_value="remote_worker"),
+            patch.object(sever_mod, "probe_database_connection", side_effect=_fail_db),
+            patch.object(sever_mod, "collect_remote_ocr_health", side_effect=_ok_ocr),
+        ):
+            fail_1 = client.get("/health")
+            fail_2 = client.get("/health")
+            self.assertEqual(fail_1.json()["status"], "degraded")
+            self.assertEqual(fail_2.json()["status"], "degraded")
+            self.assertEqual(db_calls, 2)
+        sever_mod.clear_health_probe_cache()
 
     def test_voice_voices_exposes_cached_voice_ids_when_offline(self):
         """GET /voice/voices returns distinct precomputed public voice IDs when local worker is offline."""

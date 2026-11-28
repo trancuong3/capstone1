@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import math
 import re
+import threading
+import time
 import unicodedata
-from collections import Counter, defaultdict
+import weakref
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as day_time, timedelta, timezone
 from typing import Any
@@ -31,7 +35,10 @@ from app.providers.elevenlabs_voice_provider import (
     Transcription,
     VoiceProviderError,
 )
-from app.repositories.difficult_words_repository import DifficultWordsRepository
+from app.repositories.difficult_words_repository import (
+    DifficultWordsRepository,
+    _db_bind_cache_key,
+)
 from app.schemas.difficult_words import (
     DifficultWordPracticeAttemptRead,
     DifficultWordPracticeCompleteRequest,
@@ -51,11 +58,40 @@ from app.services.child_progress.metrics import (
     first_pass_reports,
 )
 from app.services.reading_assessment import initial_snapshot
+from app.services.vietnamese_phonics import (
+    TONE_CHAR_MAP as _PHONICS_TONE_CHAR_MAP,
+    decompose_vietnamese_syllable,
+    normalize_vietnamese_word as _normalize_phonics_word,
+    split_vietnamese_rhyme,
+)
+from app.services.voice_orchestrator import VoicePolicyContext
 
 DEFAULT_WINDOW_DAYS = 90
 MAX_WINDOW_DAYS = 366
 REQUIRED_CONSECUTIVE_CORRECT = 1
 MAX_PRACTICE_AUDIO_BYTES = 5 * 1024 * 1024
+_PRACTICE_STT_TOTAL_BUDGET_SECONDS = 10.5
+_PRACTICE_STT_PASS1_TIMEOUT_SECONDS = 7.0
+_PRACTICE_STT_PASS2_TIMEOUT_SECONDS = 3.5
+
+_DIFFICULT_WORDS_RANK_CACHE_TTL_SECONDS = 60.0
+_DIFFICULT_WORDS_RANK_CACHE_MAX_ENTRIES = 512
+_RANK_CACHE_LOCK = threading.Lock()
+_DIFFICULT_WORDS_RANK_CACHE: "OrderedDict[tuple[int, UUID, UUID], tuple[float, list[tuple[str, str]]]]" = OrderedDict()
+_REPO_INSTANCE_RANK_CACHE: "weakref.WeakKeyDictionary[Any, dict[tuple[UUID, UUID], tuple[float, list[tuple[str, str]]]]]" = weakref.WeakKeyDictionary()
+
+
+def clear_difficult_words_rank_cache() -> None:
+    """Clear the per-(actor, child) ranked difficult-words TTL cache."""
+    with _RANK_CACHE_LOCK:
+        _DIFFICULT_WORDS_RANK_CACHE.clear()
+        _REPO_INSTANCE_RANK_CACHE.clear()
+
+
+def _repo_db_bind_key(repository: Any) -> int:
+    if isinstance(repository, DifficultWordsRepository):
+        return _db_bind_cache_key(getattr(repository, "db", None))
+    return 0
 ALLOWED_AUDIO_PREFIXES = ("audio/", "video/", "application/octet-stream")
 ALLOWED_AUDIO_EXTENSIONS = (".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac", ".flac")
 UNUSABLE_AUDIO_QUALITY_STATUSES = {
@@ -116,11 +152,297 @@ def tokenize_vietnamese_practice_text(value: Any) -> list[str]:
 _DIGIT_WORDS = ("không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín")
 
 
+def _map_digit_token(token: str) -> str:
+    if token == "10":
+        return "mười"
+    if len(token) == 1 and "0" <= token <= "9":
+        return _DIGIT_WORDS[int(token)]
+    return token
+
+
 def _short_word_tokens(value: str | None) -> list[str]:
-    tokens = tokenize_vietnamese_practice_text(value)
-    if len(tokens) == 1 and re.fullmatch(r"[0-9]", tokens[0]):
-        return [_DIGIT_WORDS[int(tokens[0])]]
-    return tokens
+    return [_map_digit_token(tok) for tok in tokenize_vietnamese_practice_text(value)]
+
+
+_PHONICS_CONSONANT_SPOKEN_NAMES: dict[str, tuple[str, ...]] = {
+    "b": ("bờ", "bơ", "bợ", "bê", "b"),
+    "c": ("cờ", "cơ", "cợ", "ca", "kờ", "xê", "c"),
+    "k": ("ca", "cờ", "cơ", "kờ", "kơ", "k"),
+    "d": ("dờ", "dơ", "giờ", "dê", "d"),
+    "đ": ("đờ", "đơ", "đợ", "đê", "đ"),
+    "g": ("gờ", "gơ", "ghờ", "giê", "g"),
+    "gh": ("gờ", "gơ", "ghờ", "gh", "g"),
+    "gi": ("di", "gi", "giờ", "giơ", "dờ", "dơ", "gờ", "gơ", "i"),
+    "h": ("hờ", "hơ", "hát", "h"),
+    "l": ("lờ", "lơ", "l"),
+    "m": ("mờ", "mơ", "mợ", "m"),
+    "n": ("nờ", "nơ", "n"),
+    "p": ("pờ", "pơ", "pê", "p"),
+    "ph": ("phờ", "phơ", "pờ", "pơ", "hờ", "hơ", "ph"),
+    "q": ("quờ", "quơ", "cu", "q"),
+    "qu": ("quờ", "quơ", "cu", "cờ", "cơ", "u", "qu"),
+    "r": ("rờ", "rơ", "r"),
+    "s": ("sờ", "sơ", "xờ", "xơ", "s"),
+    "t": ("tờ", "tơ", "tợ", "tở", "từ", "tê", "t"),
+    "th": ("thờ", "thơ", "tờ", "tơ", "hờ", "hơ", "th"),
+    "tr": ("trờ", "trơ", "chờ", "chơ", "tờ", "tơ", "rờ", "rơ", "tr"),
+    "v": ("vờ", "vơ", "vê", "v"),
+    "x": ("xờ", "xơ", "sờ", "sơ", "x"),
+    "ch": ("chờ", "chơ", "cờ", "cơ", "hờ", "hơ", "ch"),
+    "kh": ("khờ", "khơ", "ca", "cờ", "cơ", "hờ", "hơ", "kh"),
+    "ng": ("ngờ", "ngơ", "nghờ", "nờ", "nơ", "gờ", "gơ", "ng"),
+    "ngh": ("ngờ", "ngơ", "nghờ", "nờ", "nơ", "gờ", "gơ", "hờ", "hơ", "ngh"),
+    "nh": ("nhờ", "nhơ", "nờ", "nơ", "hờ", "hơ", "nh"),
+}
+
+_PHONICS_VOWEL_SPOKEN_NAMES: dict[str, tuple[str, ...]] = {
+    "a": ("a", "á", "à", "ả", "ạ", "ha"),
+    "ă": ("ă", "á", "ắ", "ằ", "ha"),
+    "â": ("â", "ớ", "ơ", "ấ", "ầ"),
+    "e": ("e", "é", "è", "he"),
+    "ê": ("ê", "ế", "ề", "ể", "ệ", "hê"),
+    "i": ("i", "í", "ì", "y", "ý", "ỳ", "hi"),
+    "y": ("y", "i", "ý", "ỳ", "í", "ì"),
+    "o": ("o", "ó", "ò", "ho"),
+    "ô": ("ô", "ố", "ồ", "ổ", "ộ", "hô"),
+    "ơ": ("ơ", "ớ", "ờ", "ở", "ợ", "hơ"),
+    "u": ("u", "ú", "ù", "hu"),
+    "ư": ("ư", "ứ", "ừ", "hư"),
+}
+
+_PHONICS_TONE_WORDS: dict[str, tuple[str, ...]] = {
+    "ngang": ("ngang",),
+    "sac": ("sắc", "sắt", "xắc", "dấu"),
+    "huyen": ("huyền", "hiền", "dấu"),
+    "hoi": ("hỏi", "dấu"),
+    "nga": ("ngã", "ngả", "dấu"),
+    "nang": ("nặng", "nặn", "dấu"),
+}
+
+_PHONICS_HESITATION_FILLERS = frozenset({"dấu", "à", "ờ", "ừm"})
+_MAX_PHONICS_CUES = 14
+_SAC_RHYME_VOWEL = {
+    "a": "á", "ă": "ắ", "â": "ấ", "e": "é", "ê": "ế", "i": "í",
+    "o": "ó", "ô": "ố", "ơ": "ớ", "u": "ú", "ư": "ứ", "y": "ý",
+}
+_NANG_RHYME_VOWEL = {
+    "a": "ạ", "ă": "ặ", "â": "ậ", "e": "ẹ", "ê": "ệ", "i": "ị",
+    "o": "ọ", "ô": "ộ", "ơ": "ợ", "u": "ụ", "ư": "ự", "y": "ỵ",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class PhonicsSpellingMatch:
+    matched: bool
+    consumed_count: int
+    cue_count: int
+
+
+def _apply_tone_to_rhyme(rhyme: str, tone: str) -> str | None:
+    table = _SAC_RHYME_VOWEL if tone == "sac" else _NANG_RHYME_VOWEL
+    chars = list(rhyme)
+    idx = next((i for i, c in enumerate(chars) if c in "êơôăâ"), -1)
+    if idx < 0:
+        for i in range(len(chars) - 1, -1, -1):
+            if chars[i] in table:
+                idx = i
+                break
+    if idx < 0:
+        return None
+    chars[idx] = table[chars[idx]]
+    return unicodedata.normalize("NFC", "".join(chars))
+
+
+@functools.lru_cache(maxsize=4096)
+def build_phonics_cue_set(word: str) -> frozenset[str]:
+    parts = decompose_vietnamese_syllable(word)
+    if parts is None:
+        return frozenset()
+    cues: set[str] = set()
+
+    def add(tok: str) -> None:
+        clean = _normalize_phonics_word(tok)
+        if clean:
+            cues.add(clean)
+
+    if parts.onset:
+        for name in _PHONICS_CONSONANT_SPOKEN_NAMES.get(parts.onset, (parts.onset,)):
+            add(name)
+        if parts.onset == "qu":
+            add("u")
+            add(f"u{parts.rhyme}")
+        if parts.onset == "gi":
+            add("i")
+
+    rhyme = parts.rhyme
+    nucleus, coda = split_vietnamese_rhyme(rhyme)
+    add(rhyme)
+    if len(rhyme) >= 2:
+        sac_rhyme = _apply_tone_to_rhyme(rhyme, "sac")
+        nang_rhyme = _apply_tone_to_rhyme(rhyme, "nang")
+        if sac_rhyme:
+            add(sac_rhyme)
+        if nang_rhyme and parts.tone == "nang":
+            add(nang_rhyme)
+    if parts.tone in ("sac", "nang"):
+        toned_rhyme = _apply_tone_to_rhyme(rhyme, parts.tone)
+        if toned_rhyme:
+            add(toned_rhyme)
+
+    if coda:
+        for name in _PHONICS_CONSONANT_SPOKEN_NAMES.get(coda, (coda,)):
+            add(name)
+        if coda in ("c", "ch", "p", "t"):
+            checked_rhyme = _apply_tone_to_rhyme(rhyme, "sac")
+            if checked_rhyme:
+                add(checked_rhyme)
+            add(f"{parts.onset}{checked_rhyme or rhyme}" if parts.onset else (checked_rhyme or rhyme))
+            if parts.tone == "nang":
+                heavy_rhyme = _apply_tone_to_rhyme(rhyme, "nang")
+                if heavy_rhyme:
+                    add(heavy_rhyme)
+
+    if nucleus:
+        add(nucleus)
+        for ch in nucleus:
+            for name in _PHONICS_VOWEL_SPOKEN_NAMES.get(ch, (ch,)):
+                add(name)
+        if len(nucleus) >= 2:
+            add(nucleus[:2])
+            if nucleus in ("iê", "yê"):
+                add("ia")
+                add("iê")
+                add("yê")
+            elif nucleus == "ươ":
+                add("ưa")
+                add("ươ")
+            elif nucleus == "uô":
+                add("ua")
+                add("uô")
+
+    add(parts.untoned_syllable)
+    if parts.onset and len(nucleus) >= 2:
+        add(f"{parts.onset}{nucleus[0]}")
+
+    for tone_word in _PHONICS_TONE_WORDS.get(parts.tone, ()):
+        add(tone_word)
+
+    return frozenset(cues)
+
+
+def match_phonics_spelling(
+    tokens: list[str] | tuple[str, ...],
+    target_word: str,
+) -> PhonicsSpellingMatch | None:
+    target = _normalize_phonics_word(target_word)
+    if not target or len(tokens) < 2:
+        return None
+    cues = build_phonics_cue_set(target)
+    if not cues:
+        return None
+    starts_with_target = _normalize_phonics_word(tokens[0]) == target
+    if starts_with_target and target not in cues:
+        return None
+
+    limit = min(len(tokens), _MAX_PHONICS_CUES + 1)
+    last_match_idx = -1
+    real_cue_count = 0
+    distinct_cue_count = 0
+
+    for i in range(limit):
+        token = _normalize_phonics_word(tokens[i])
+        if not token:
+            break
+        if token == target and i >= 1 and real_cue_count >= 1:
+            if not starts_with_target or distinct_cue_count >= 1:
+                last_match_idx = i
+            if token in cues and not starts_with_target:
+                real_cue_count += 1
+            continue
+        if token in cues:
+            if token != target:
+                distinct_cue_count += 1
+            if token not in _PHONICS_HESITATION_FILLERS:
+                real_cue_count += 1
+            elif real_cue_count == 0:
+                parts = decompose_vietnamese_syllable(target)
+                target_nucleus = split_vietnamese_rhyme(parts.rhyme)[0] if parts else ""
+                is_own_vowel = (
+                    (token == "à" and ("a" in target_nucleus or "ă" in target_nucleus))
+                    or (token == "ờ" and ("ơ" in target_nucleus or "â" in target_nucleus))
+                )
+                if not is_own_vowel:
+                    break
+                real_cue_count += 1
+            continue
+        if token in _PHONICS_HESITATION_FILLERS and real_cue_count >= 1:
+            continue
+        break
+
+    if last_match_idx >= 1 and (not starts_with_target or last_match_idx >= 2):
+        return PhonicsSpellingMatch(
+            matched=True,
+            consumed_count=last_match_idx + 1,
+            cue_count=last_match_idx,
+        )
+    return None
+
+
+def is_phonics_in_progress(
+    tokens: list[str] | tuple[str, ...],
+    target_word: str,
+) -> bool:
+    parts = decompose_vietnamese_syllable(target_word)
+    if parts is None or not tokens or len(tokens) > _MAX_PHONICS_CUES:
+        return False
+    target = parts.normalized
+    nucleus, _coda = split_vietnamese_rhyme(parts.rhyme)
+    cues = build_phonics_cue_set(target)
+    if not cues:
+        return False
+
+    if len(tokens) == 1:
+        single = _normalize_phonics_word(tokens[0])
+        if not single or single == target:
+            return False
+        if single in _PHONICS_HESITATION_FILLERS:
+            is_own_vowel = (
+                (single == "à" and ("a" in nucleus or "ă" in nucleus))
+                or (single == "ờ" and ("ơ" in nucleus or "â" in nucleus))
+            )
+            if not is_own_vowel:
+                return False
+        if parts.onset:
+            if single == parts.untoned_syllable:
+                return False
+            single_parts = decompose_vietnamese_syllable(single)
+            if single_parts is not None and single_parts.untoned_syllable == parts.untoned_syllable:
+                return False
+        elif len(parts.rhyme) == 1:
+            return False
+
+    real_cue_count = 0
+    for raw in tokens:
+        token = _normalize_phonics_word(raw)
+        if not token:
+            return False
+        if token in cues:
+            if token not in _PHONICS_HESITATION_FILLERS:
+                real_cue_count += 1
+            else:
+                is_own_vowel = (
+                    (token == "à" and ("a" in nucleus or "ă" in nucleus))
+                    or (token == "ờ" and ("ơ" in nucleus or "â" in nucleus))
+                )
+                if is_own_vowel:
+                    real_cue_count += 1
+                elif real_cue_count == 0:
+                    return False
+            continue
+        if token in _PHONICS_HESITATION_FILLERS and real_cue_count >= 1:
+            continue
+        return False
+    return real_cue_count >= 1
 
 
 _ASSISTANT_BLEED_PHRASES = (
@@ -174,12 +496,22 @@ def has_confusable_nasal_ending(target: str, transcript: str | None) -> bool:
     return bool(left and right and left.group(1) == right.group(1))
 
 
+def _matches_retry_phonics_spelling(tokens: list[str], expected: str) -> bool:
+    if len(tokens) < 2:
+        return False
+    direct = match_phonics_spelling(tokens, expected)
+    if direct is None:
+        return False
+    rest = tokens[direct.consumed_count :]
+    return not rest or all(tok == expected for tok in rest)
+
+
 def classify_practice_transcript(
     expected_word: str,
     transcript: str | None,
     context_phrase: str | None = None,
 ) -> PracticeAssessmentStatusLiteral:
-    """Classify a short practice transcript against a Vietnamese word or compound phrase."""
+    """Classify a short practice transcript against a Vietnamese word, hyphenated word, or compound phrase."""
     expected_tokens = _short_word_tokens(expected_word)
     if not expected_tokens or len(expected_tokens) > 4:
         return "UNCERTAIN"
@@ -194,25 +526,97 @@ def classify_practice_transcript(
     if is_assistant_prompt_bleed(actual_tokens, expected_tokens):
         return "UNCERTAIN"
 
-    max_tokens = max(4, len(expected_tokens) + 3)
     collapsed_repeats = [
         tok for idx, tok in enumerate(actual_tokens) if idx == 0 or tok != actual_tokens[idx - 1]
     ]
-    if len(actual_tokens) > max_tokens:
-        if len(collapsed_repeats) <= max_tokens and set(collapsed_repeats) == set(expected_tokens):
-            actual_tokens = collapsed_repeats
-        elif context_phrase and 2 <= len(actual_tokens) <= 10:
-            context_tokens = tokenize_vietnamese_practice_text(context_phrase)
-            if _contains_subslice(expected_tokens, actual_tokens) and _contains_subslice(
-                actual_tokens, context_tokens
+
+    if len(expected_tokens) == 1:
+        expected_tok = expected_tokens[0]
+        if _matches_retry_phonics_spelling(actual_tokens, expected_tok) or _matches_retry_phonics_spelling(
+            collapsed_repeats, expected_tok
+        ):
+            return "CORRECT"
+
+        max_tokens = 4
+        candidate_tokens = (
+            collapsed_repeats
+            if len(actual_tokens) > max_tokens
+            and len(collapsed_repeats) <= max_tokens
+            and expected_tok in collapsed_repeats
+            else actual_tokens
+        )
+        if len(candidate_tokens) > max_tokens:
+            if is_phonics_in_progress(actual_tokens, expected_tok) or is_phonics_in_progress(
+                collapsed_repeats, expected_tok
             ):
-                return "CORRECT"
-            return "UNCERTAIN"
-        else:
+                return "UNCERTAIN"
+            if context_phrase and 2 <= len(candidate_tokens) <= 10:
+                context_tokens = _short_word_tokens(context_phrase)
+                if _contains_subslice(expected_tokens, candidate_tokens) and _contains_subslice(
+                    candidate_tokens, context_tokens
+                ):
+                    return "CORRECT"
+            expected_parts = decompose_vietnamese_syllable(expected_tok)
+            last_parts = decompose_vietnamese_syllable(actual_tokens[-1])
+            cues = build_phonics_cue_set(expected_tok)
+            if (
+                expected_parts is not None
+                and last_parts is not None
+                and last_parts.untoned_syllable == expected_parts.untoned_syllable
+                and actual_tokens[-1] != expected_tok
+                and any(_normalize_phonics_word(tok) in cues for tok in actual_tokens[:-1])
+            ):
+                return "INCORRECT"
             return "UNCERTAIN"
 
-    if _contains_subslice(expected_tokens, actual_tokens):
+        if expected_tok in candidate_tokens:
+            return "CORRECT"
+        if is_phonics_in_progress(candidate_tokens, expected_tok) or is_phonics_in_progress(
+            collapsed_repeats, expected_tok
+        ):
+            return "UNCERTAIN"
+        return "INCORRECT"
+
+    # Multi-syllable / hyphenated words ("ô-tô", "ba-lô") and short phrases (2-4 tokens)
+    reduced_tokens: list[str] = []
+    expected_cursor = 0
+    idx = 0
+    while idx < len(actual_tokens):
+        if expected_cursor < len(expected_tokens):
+            target_syl = expected_tokens[expected_cursor]
+            if actual_tokens[idx] == target_syl:
+                reduced_tokens.append(target_syl)
+                expected_cursor += 1
+                idx += 1
+                continue
+            phonics = match_phonics_spelling(actual_tokens[idx:], target_syl)
+            if phonics is not None:
+                reduced_tokens.append(target_syl)
+                expected_cursor += 1
+                idx += phonics.consumed_count
+                continue
+        reduced_tokens.append(actual_tokens[idx])
+        idx += 1
+
+    max_tokens = max(4, len(expected_tokens) + 3)
+    if len(reduced_tokens) > max_tokens:
+        if len(reduced_tokens) <= 10 and _contains_subslice(expected_tokens, reduced_tokens):
+            return "CORRECT"
+        if context_phrase and 2 <= len(reduced_tokens) <= 10:
+            context_tokens = _short_word_tokens(context_phrase)
+            if _contains_subslice(expected_tokens, reduced_tokens) and _contains_subslice(
+                reduced_tokens, context_tokens
+            ):
+                return "CORRECT"
+        return "UNCERTAIN"
+
+    if _contains_subslice(expected_tokens, reduced_tokens):
         return "CORRECT"
+
+    if expected_cursor < len(expected_tokens) and is_phonics_in_progress(
+        actual_tokens[expected_cursor:], expected_tokens[expected_cursor]
+    ):
+        return "UNCERTAIN"
 
     return "INCORRECT"
 
@@ -245,7 +649,7 @@ def has_high_confidence_keyterm_result(transcription: Transcription) -> bool:
         return False
     return all(
         word.get("logprob") is None
-        or (math.isfinite(word["logprob"]) and word["logprob"] >= -0.5)
+        or (math.isfinite(word["logprob"]) and word["logprob"] >= -0.75)
         for word in words
     )
 
@@ -313,14 +717,26 @@ def compute_word_practice_progress(
 
     consecutive_correct = 0
     latest_unambiguous: str | None = None
+    has_isolated_correct_in_streak = False
     for attempt in completed:
         if attempt.AssessmentStatus == "CORRECT":
             consecutive_correct += 1
             latest_unambiguous = "CORRECT"
+            if int(getattr(attempt, "AssessmentVersion", 1) or 1) == 1:
+                has_isolated_correct_in_streak = True
         elif attempt.AssessmentStatus == "INCORRECT":
             consecutive_correct = 0
             latest_unambiguous = "INCORRECT"
+            has_isolated_correct_in_streak = False
         # UNCERTAIN, NO_CLEAR_AUDIO, ENGINE_ERROR never reset or penalize streak.
+
+    has_contextual_entertainment_only = (
+        consecutive_correct > 0
+        and not has_isolated_correct_in_streak
+    )
+    required_consecutive = (
+        2 if has_contextual_entertainment_only else REQUIRED_CONSECUTIVE_CORRECT
+    )
 
     last_attempt = completed[-1] if completed else None
     last_practiced_at = (
@@ -342,8 +758,8 @@ def compute_word_practice_progress(
     if not started_any:
         practice_status: PracticeStatusLiteral = "NOT_PRACTICED"
     elif (
-        consecutive_correct >= REQUIRED_CONSECUTIVE_CORRECT
-        and correct_count >= REQUIRED_CONSECUTIVE_CORRECT
+        consecutive_correct >= required_consecutive
+        and correct_count >= required_consecutive
         and latest_unambiguous == "CORRECT"
         and not encountered_again_after_practice
     ):
@@ -361,7 +777,7 @@ def compute_word_practice_progress(
         practice_incorrect_count=incorrect_count,
         practice_uncertain_count=uncertain_count,
         consecutive_correct_count=consecutive_correct,
-        required_consecutive_correct=REQUIRED_CONSECUTIVE_CORRECT,
+        required_consecutive_correct=required_consecutive,
         last_practiced_at=last_practiced_at,
         last_practice_status=last_practice_status,
     )
@@ -629,20 +1045,33 @@ class DifficultWordsService:
         normalized_word: str | None = None,
         word_text_by_id: dict[UUID, str] | None = None,
         book_by_session: dict[UUID, UUID] | None = None,
+        storage_ready: bool | None = None,
     ) -> tuple[bool, bool, list[Any]]:
         """Load practice attempts merged with ReadingEvent(WORD_RETRY) records without double-counting."""
-        storage_ready = await self.repository.is_practice_storage_ready()
+        resolved_storage_ready = (
+            bool(storage_ready)
+            if storage_ready is not None
+            else await self.repository.is_practice_storage_ready()
+        )
         practice_attempts = (
             await self.repository.list_practice_attempts(
                 child_id, actor_id, normalized_word=normalized_word
             )
-            if storage_ready
+            if resolved_storage_ready
             else []
         )
         list_retry = getattr(self.repository, "list_retry_events_for_child", None)
-        retry_events: list[ReadingEvent] = (
-            await list_retry(child_id, actor_id) if callable(list_retry) else []
-        )
+        retry_events: list[ReadingEvent] = []
+        if callable(list_retry):
+            if normalized_word is not None:
+                try:
+                    retry_events = await list_retry(
+                        child_id, actor_id, normalized_word=normalized_word
+                    )
+                except TypeError:
+                    retry_events = await list_retry(child_id, actor_id)
+            else:
+                retry_events = await list_retry(child_id, actor_id)
 
         seen_req_keys: set[tuple[str, str]] = set()
         seen_approx_keys: set[tuple[str, str, int]] = set()
@@ -750,8 +1179,110 @@ class DifficultWordsService:
             )
 
         merged: list[Any] = list(practice_attempts) + adapted_events
-        effective_ready = storage_ready or bool(adapted_events)
-        return storage_ready, effective_ready, merged
+        effective_ready = resolved_storage_ready or bool(adapted_events)
+        return resolved_storage_ready, effective_ready, merged
+
+    def _get_cached_ranked_words(
+        self, child_id: UUID, actor_id: UUID
+    ) -> list[tuple[str, str]] | None:
+        bind_key = _repo_db_bind_key(self.repository)
+        now = time.monotonic()
+        with _RANK_CACHE_LOCK:
+            if bind_key:
+                key = (bind_key, actor_id, child_id)
+                entry = _DIFFICULT_WORDS_RANK_CACHE.get(key)
+                if entry is None:
+                    return None
+                if entry[0] <= now:
+                    _DIFFICULT_WORDS_RANK_CACHE.pop(key, None)
+                    return None
+                _DIFFICULT_WORDS_RANK_CACHE.move_to_end(key)
+                return list(entry[1])
+            try:
+                per_repo = _REPO_INSTANCE_RANK_CACHE.get(self.repository)
+            except TypeError:
+                return None
+            if per_repo is None:
+                return None
+            entry = per_repo.get((actor_id, child_id))
+            if entry is None:
+                return None
+            if entry[0] <= now:
+                per_repo.pop((actor_id, child_id), None)
+                return None
+            return list(entry[1])
+
+    def _put_cached_ranked_words(
+        self, child_id: UUID, actor_id: UUID, words: list[DifficultWordRead]
+    ) -> None:
+        bind_key = _repo_db_bind_key(self.repository)
+        now = time.monotonic()
+        ranked = [(w.normalized_word, str(w.practice_status)) for w in words]
+        with _RANK_CACHE_LOCK:
+            if bind_key:
+                key = (bind_key, actor_id, child_id)
+                _DIFFICULT_WORDS_RANK_CACHE[key] = (
+                    now + _DIFFICULT_WORDS_RANK_CACHE_TTL_SECONDS,
+                    ranked,
+                )
+                _DIFFICULT_WORDS_RANK_CACHE.move_to_end(key)
+                while len(_DIFFICULT_WORDS_RANK_CACHE) > _DIFFICULT_WORDS_RANK_CACHE_MAX_ENTRIES:
+                    _DIFFICULT_WORDS_RANK_CACHE.popitem(last=False)
+                return
+            try:
+                per_repo = _REPO_INSTANCE_RANK_CACHE.get(self.repository)
+                if per_repo is None:
+                    per_repo = {}
+                    _REPO_INSTANCE_RANK_CACHE[self.repository] = per_repo
+                per_repo[(actor_id, child_id)] = (
+                    now + _DIFFICULT_WORDS_RANK_CACHE_TTL_SECONDS,
+                    ranked,
+                )
+            except TypeError:
+                return
+
+    def _update_cached_word_status(
+        self,
+        child_id: UUID,
+        actor_id: UUID,
+        normalized_word: str,
+        practice_status: str,
+    ) -> None:
+        bind_key = _repo_db_bind_key(self.repository)
+        now = time.monotonic()
+        with _RANK_CACHE_LOCK:
+            if bind_key:
+                key = (bind_key, actor_id, child_id)
+                entry = _DIFFICULT_WORDS_RANK_CACHE.get(key)
+                if entry is None:
+                    return
+                if entry[0] <= now:
+                    _DIFFICULT_WORDS_RANK_CACHE.pop(key, None)
+                    return
+                updated = [
+                    (norm, practice_status if norm == normalized_word else status_val)
+                    for norm, status_val in entry[1]
+                ]
+                _DIFFICULT_WORDS_RANK_CACHE[key] = (entry[0], updated)
+                _DIFFICULT_WORDS_RANK_CACHE.move_to_end(key)
+                return
+            try:
+                per_repo = _REPO_INSTANCE_RANK_CACHE.get(self.repository)
+            except TypeError:
+                return
+            if per_repo is None:
+                return
+            entry = per_repo.get((actor_id, child_id))
+            if entry is None:
+                return
+            if entry[0] <= now:
+                per_repo.pop((actor_id, child_id), None)
+                return
+            updated = [
+                (norm, practice_status if norm == normalized_word else status_val)
+                for norm, status_val in entry[1]
+            ]
+            per_repo[(actor_id, child_id)] = (entry[0], updated)
 
     async def list_difficult_words(
         self,
@@ -761,6 +1292,7 @@ class DifficultWordsService:
         period_start: date | None = None,
         period_end: date | None = None,
         status_filter: PracticeStatusLiteral | None = None,
+        include_context: bool = True,
     ) -> list[DifficultWordRead]:
         await self.access.require_child(child_id, actor_id)
         start, end, since, until_exclusive = self._window_bounds(period_start, period_end)
@@ -774,43 +1306,60 @@ class DifficultWordsService:
         events = await self.repository.reading_events_with_words(
             child_id, actor_id, since, until_exclusive
         )
-        saved_report = await self.repository.saved_progress_report(
-            child_id, start, end, actor_id
+        saved_report = (
+            await self.repository.saved_progress_report(
+                child_id, start, end, actor_id
+            )
+            if (include_context or (not sessions and not raw_reports and not events))
+            else None
         )
 
         session_by_id = {s.Id: s for s in sessions}
         book_by_session = {s.Id: s.BookId for s in sessions if getattr(s, "BookId", None) is not None}
-        book_ids = list(set(book_by_session.values()))
-        page_ids = [
-            pid
-            for pid in (
-                *(r.PageId for r in raw_reports),
-                *(e.PageId for e, _ in events),
+        books_by_id: dict[UUID, Any] = {}
+        pages_by_id: dict[UUID, Any] = {}
+        rev_words_by_rev: dict[UUID, list[Any]] = {}
+        if include_context:
+            book_ids = list(set(book_by_session.values()))
+            page_ids = [
+                pid
+                for pid in (
+                    *(r.PageId for r in raw_reports),
+                    *(e.PageId for e, _ in events),
+                )
+                if pid is not None
+            ]
+            revision_ids = [
+                rid
+                for rid in (
+                    *(r.PageRevisionId for r in raw_reports),
+                    *(e.PageRevisionId for e, _ in events),
+                )
+                if rid is not None
+            ]
+            books_fn = getattr(self.repository, "books_by_ids", None)
+            books_by_id = await books_fn(book_ids) if callable(books_fn) and book_ids else {}
+            pages_words_fn = getattr(self.repository, "pages_and_revision_words", None)
+            pages_by_id, rev_words_by_rev = (
+                await pages_words_fn(page_ids, revision_ids)
+                if callable(pages_words_fn) and (page_ids or revision_ids)
+                else ({}, {})
             )
-            if pid is not None
-        ]
-        revision_ids = [
-            rid
-            for rid in (
-                *(r.PageRevisionId for r in raw_reports),
-                *(e.PageRevisionId for e, _ in events),
-            )
-            if rid is not None
-        ]
-        books_fn = getattr(self.repository, "books_by_ids", None)
-        books_by_id = await books_fn(book_ids) if callable(books_fn) and book_ids else {}
-        pages_words_fn = getattr(self.repository, "pages_and_revision_words", None)
-        pages_by_id, rev_words_by_rev = (
-            await pages_words_fn(page_ids, revision_ids)
-            if callable(pages_words_fn) and (page_ids or revision_ids)
-            else ({}, {})
-        )
 
         word_text_by_id: dict[UUID, str] = {}
         for rev_words in rev_words_by_rev.values():
             for rw in rev_words:
                 if getattr(rw, "Id", None) and getattr(rw, "Text", None):
                     word_text_by_id[rw.Id] = rw.Text
+        if not include_context:
+            for r in raw_reports:
+                snap = initial_snapshot(r.Summary)
+                if snap:
+                    for entry in snap:
+                        wid = self._parse_uuid(entry.get("word_id"))
+                        wtxt = entry.get("text")
+                        if wid and isinstance(wtxt, str) and wtxt.strip():
+                            word_text_by_id.setdefault(wid, wtxt.strip())
         for event, page_word_text in events:
             if event.WordId and page_word_text:
                 word_text_by_id.setdefault(event.WordId, page_word_text)
@@ -861,6 +1410,8 @@ class DifficultWordsService:
                     )
                 )
             enriched.sort(key=_priority_sort_key)
+            if period_start is None and period_end is None:
+                self._put_cached_ranked_words(child_id, actor_id, enriched)
             if status_filter is not None:
                 enriched = [w for w in enriched if w.practice_status == status_filter]
             return enriched
@@ -1099,6 +1650,8 @@ class DifficultWordsService:
             results.append(acc.to_read(progress))
 
         results.sort(key=_priority_sort_key)
+        if period_start is None and period_end is None:
+            self._put_cached_ranked_words(child_id, actor_id, results)
         if status_filter is not None:
             results = [w for w in results if w.practice_status == status_filter]
         return results
@@ -1116,7 +1669,22 @@ class DifficultWordsService:
         actor_id: UUID,
         current_normalized_word: str,
     ) -> str | None:
-        words = await self.list_difficult_words(child_id, actor_id)
+        cached = self._get_cached_ranked_words(child_id, actor_id)
+        if cached is not None:
+            incomplete = [
+                norm
+                for norm, practice_status in cached
+                if norm != current_normalized_word
+                and practice_status != "COMPLETED"
+            ]
+            if incomplete:
+                return incomplete[0]
+            others = [norm for norm, _ in cached if norm != current_normalized_word]
+            return others[0] if others else None
+
+        words = await self.list_difficult_words(
+            child_id, actor_id, include_context=False
+        )
         incomplete = [
             w.normalized_word
             for w in words
@@ -1194,6 +1762,7 @@ class DifficultWordsService:
         browser_transcript: str | None = None,
         browser_confidence: float | None = None,
         context_phrase: str | None = None,
+        policy: VoicePolicyContext | None = None,
     ) -> tuple[
         PracticeAssessmentStatusLiteral,
         PracticeRecognitionSourceLiteral,
@@ -1254,6 +1823,13 @@ class DifficultWordsService:
 
         if audio_bytes is None or len(audio_bytes) == 0:
             assert browser_status is not None
+            if is_word_help_request(clean_browser_text, display_text):
+                return (
+                    "UNCERTAIN",
+                    "BROWSER_SPEECH",
+                    clean_browser_text,
+                    valid_browser_conf,
+                )
             return (
                 browser_status,
                 "BROWSER_SPEECH",
@@ -1272,14 +1848,15 @@ class DifficultWordsService:
             and browser_status == "CORRECT"
             and _short_word_tokens(clean_browser_text) == _short_word_tokens(display_text)
         )
-        wasm_verified_status = (audio_quality_status or "").strip().upper() in {
+        trusted_client_stt_status = (audio_quality_status or "").strip().upper() in {
             "BROWSER_WASM",
             "BROWSER_WASM_VERIFIED",
             "WASM_VERIFIED",
+            "ANDROID_NATIVE_STT",
         }
         exact_browser_read = exact_browser_tokens_match and (
             (valid_browser_conf is not None and valid_browser_conf >= 0.9)
-            or wasm_verified_status
+            or trusted_client_stt_status
         )
         if audio_quality_status in UNUSABLE_AUDIO_QUALITY_STATUSES and not (
             exact_browser_tokens_match and audio_quality_status == "AUDIO_TOO_SHORT"
@@ -1289,6 +1866,14 @@ class DifficultWordsService:
         if browser_usable and is_word_help_request(clean_browser_text, display_text):
             return ("UNCERTAIN", "BROWSER_SPEECH", clean_browser_text, valid_browser_conf)
 
+        if trusted_client_stt_status and browser_usable and browser_status is not None:
+            return (
+                browser_status,
+                "BROWSER_SPEECH",
+                clean_browser_text,
+                valid_browser_conf,
+            )
+
         if exact_browser_read:
             return ("CORRECT", "BROWSER_SPEECH", clean_browser_text, valid_browser_conf)
 
@@ -1296,16 +1881,24 @@ class DifficultWordsService:
         resolved_source: PracticeRecognitionSourceLiteral = "SERVER_STT"
         spoken_transcript: str | None = None
         calibrated_confidence: float | None = None
+        stt_deadline = time.monotonic() + _PRACTICE_STT_TOTAL_BUDGET_SECONDS
 
         try:
+            first_pass_kwargs: dict[str, Any] = {
+                "audio": audio_bytes,
+                "filename": filename or "practice.webm",
+                "content_type": effective_content_type,
+                "language_code": "vi",
+            }
+            if policy is not None:
+                first_pass_kwargs["policy"] = policy
+            pass1_timeout = min(
+                _PRACTICE_STT_PASS1_TIMEOUT_SECONDS,
+                max(0.5, stt_deadline - time.monotonic()),
+            )
             first_pass = await asyncio.wait_for(
-                self.voice_provider.transcribe(
-                    audio=audio_bytes,
-                    filename=filename or "practice.webm",
-                    content_type=effective_content_type,
-                    language_code="vi",
-                ),
-                timeout=7,
+                self.voice_provider.transcribe(**first_pass_kwargs),
+                timeout=pass1_timeout,
             )
             first_text = unicodedata.normalize("NFC", first_pass.text).strip()[:160]
             spoken_transcript = first_text or None
@@ -1323,7 +1916,8 @@ class DifficultWordsService:
             )
 
             # Pure ambient/non-speech tag like "[tiếng đập]" must never be graded INCORRECT.
-            if first_text and not first_tokens:
+            has_non_speech_tag_only = bool(first_text and not first_tokens)
+            if has_non_speech_tag_only:
                 first_status: PracticeAssessmentStatusLiteral = "NO_CLEAR_AUDIO"
             elif (
                 primary_matches
@@ -1351,22 +1945,35 @@ class DifficultWordsService:
                 return ("UNCERTAIN", "SERVER_STT", spoken_transcript, None)
 
             # Hints can transcribe the requested word even when nothing resembling
-            # it was said. Require independent lexical evidence before using them.
+            # it was said. Require independent lexical evidence or SPEECH_DETECTED + high logprob.
             corroborated = browser_status == "CORRECT"
+            speech_detected = audio_quality_status == "SPEECH_DETECTED"
             should_retry_with_keyterm = (
-                first_status == "UNCERTAIN" and (corroborated or primary_matches)
+                not has_non_speech_tag_only
+                and (
+                    (first_status == "UNCERTAIN" and (corroborated or primary_matches or speech_detected))
+                    or (first_status == "NO_CLEAR_AUDIO" and (corroborated or speech_detected))
+                )
             )
-            if should_retry_with_keyterm:
+            remaining_for_pass2 = stt_deadline - time.monotonic()
+            if should_retry_with_keyterm and remaining_for_pass2 >= 1.0:
                 try:
+                    second_pass_kwargs: dict[str, Any] = {
+                        "audio": audio_bytes,
+                        "filename": filename or "practice.webm",
+                        "content_type": effective_content_type,
+                        "language_code": "vi",
+                        "keyterms": [display_text],
+                    }
+                    if policy is not None:
+                        second_pass_kwargs["policy"] = policy
+                    pass2_timeout = min(
+                        _PRACTICE_STT_PASS2_TIMEOUT_SECONDS,
+                        remaining_for_pass2,
+                    )
                     second_pass = await asyncio.wait_for(
-                        self.voice_provider.transcribe(
-                            audio=audio_bytes,
-                            filename=filename or "practice.webm",
-                            content_type=effective_content_type,
-                            language_code="vi",
-                            keyterms=[display_text],
-                        ),
-                        timeout=3,
+                        self.voice_provider.transcribe(**second_pass_kwargs),
+                        timeout=pass2_timeout,
                     )
                     second_text = unicodedata.normalize("NFC", second_pass.text).strip()[:160]
                     high_conf = has_high_confidence_keyterm_result(second_pass)
@@ -1429,7 +2036,7 @@ class DifficultWordsService:
         page_id: UUID | None = None,
         page_revision_id: UUID | None = None,
         word_id: UUID | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Verify optional client-supplied context foreign keys exist and belong to the actor/hierarchy."""
         if (
             book_id is None
@@ -1438,16 +2045,17 @@ class DifficultWordsService:
             and page_revision_id is None
             and word_id is None
         ):
-            return
+            return None
         db = getattr(self.repository, "db", None)
         if db is None:
-            return
+            return None
 
         book_visibility = or_(
             is_catalog_book(),
             is_private_book_owned_by(actor_id, include_retired=True),
         )
         expected_book_id: UUID | None = None
+        session_row: Any = None
 
         if session_id is not None:
             session_row = await db.scalar(
@@ -1466,6 +2074,72 @@ class DifficultWordsService:
                     detail="Reading session not found",
                 )
             expected_book_id = getattr(session_row, "BookId", None)
+
+        # Joined fast-path when word_id is supplied: validates word -> revision -> page -> book
+        # visibility and hierarchy agreement in 1 SQL round-trip instead of 4.
+        if word_id is not None:
+            word_fast = (
+                await db.execute(
+                    select(
+                        PageRevisionWord.PageRevisionId,
+                        PageRevision.PageId,
+                        BookPage.BookId,
+                    )
+                    .join(
+                        PageRevision,
+                        PageRevision.Id == PageRevisionWord.PageRevisionId,
+                    )
+                    .join(BookPage, BookPage.Id == PageRevision.PageId)
+                    .join(Book, Book.Id == BookPage.BookId)
+                    .where(PageRevisionWord.Id == word_id, book_visibility)
+                    .limit(1)
+                )
+            ).first()
+            if word_fast is not None:
+                word_rev_id, word_page_id, word_book_id = (
+                    word_fast[0],
+                    word_fast[1],
+                    word_fast[2],
+                )
+                if (
+                    (book_id is None or word_book_id == book_id)
+                    and (expected_book_id is None or word_book_id == expected_book_id)
+                    and (page_id is None or word_page_id == page_id)
+                    and (page_revision_id is None or word_rev_id == page_revision_id)
+                ):
+                    return {
+                        "session_row": session_row,
+                        "book_id": word_book_id,
+                        "page_id": word_page_id,
+                        "page_revision_id": word_rev_id,
+                        "word_id": word_id,
+                        "word_validated": True,
+                    }
+        elif page_revision_id is not None:
+            rev_fast = (
+                await db.execute(
+                    select(PageRevision.PageId, BookPage.BookId)
+                    .join(BookPage, BookPage.Id == PageRevision.PageId)
+                    .join(Book, Book.Id == BookPage.BookId)
+                    .where(PageRevision.Id == page_revision_id, book_visibility)
+                    .limit(1)
+                )
+            ).first()
+            if rev_fast is not None:
+                rev_page_id, rev_book_id = rev_fast[0], rev_fast[1]
+                if (
+                    (book_id is None or rev_book_id == book_id)
+                    and (expected_book_id is None or rev_book_id == expected_book_id)
+                    and (page_id is None or rev_page_id == page_id)
+                ):
+                    return {
+                        "session_row": session_row,
+                        "book_id": rev_book_id,
+                        "page_id": rev_page_id,
+                        "page_revision_id": page_revision_id,
+                        "word_id": None,
+                        "word_validated": False,
+                    }
 
         if book_id is not None:
             if expected_book_id is not None and expected_book_id != book_id:
@@ -1577,6 +2251,15 @@ class DifficultWordsService:
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="Word does not belong to the referenced book",
                 )
+
+        return {
+            "session_row": session_row,
+            "book_id": expected_book_id,
+            "page_id": expected_page_id,
+            "page_revision_id": page_revision_id,
+            "word_id": word_id,
+            "word_validated": word_id is not None,
+        }
 
     async def start_attempt(
         self,
@@ -1717,8 +2400,25 @@ class DifficultWordsService:
         attempt.UpdatedAt = now
 
         saved = await self.repository.save_practice_attempt(attempt)
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=getattr(saved, "Id", None),
+            normalized_word=saved.NormalizedWord,
+            assessment_status=saved.AssessmentStatus,
+            confidence=saved.Confidence,
+        )
         word_attempts = await self.repository.list_practice_attempts(
             child_id, actor_id, normalized_word=saved.NormalizedWord
+        )
+        progress = compute_word_practice_progress(saved.NormalizedWord, word_attempts)
+        self._update_cached_word_status(
+            child_id, actor_id, saved.NormalizedWord, progress.practice_status
         )
         next_word = await self._next_recommended_word(
             child_id, actor_id, saved.NormalizedWord
@@ -1739,6 +2439,7 @@ class DifficultWordsService:
         audio_quality_status: str | None = None,
         browser_transcript: str | None = None,
         browser_confidence: float | None = None,
+        policy: VoicePolicyContext | None = None,
     ) -> DifficultWordPracticeAttemptRead:
         await self.access.require_child(child_id, actor_id)
         await self._require_storage_ready()
@@ -1788,6 +2489,7 @@ class DifficultWordsService:
             audio_quality_status=audio_quality_status,
             browser_transcript=browser_transcript,
             browser_confidence=browser_confidence,
+            policy=policy,
         )
 
         if released:
@@ -1825,8 +2527,25 @@ class DifficultWordsService:
         attempt.UpdatedAt = now
 
         saved = await self.repository.save_practice_attempt(attempt)
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=getattr(saved, "Id", None),
+            normalized_word=saved.NormalizedWord,
+            assessment_status=saved.AssessmentStatus,
+            confidence=saved.Confidence,
+        )
         word_attempts = await self.repository.list_practice_attempts(
             child_id, actor_id, normalized_word=saved.NormalizedWord
+        )
+        progress = compute_word_practice_progress(saved.NormalizedWord, word_attempts)
+        self._update_cached_word_status(
+            child_id, actor_id, saved.NormalizedWord, progress.practice_status
         )
         next_word = await self._next_recommended_word(
             child_id, actor_id, saved.NormalizedWord
@@ -1855,6 +2574,8 @@ class DifficultWordsService:
         page_revision_id: UUID | None = None,
         word_id: UUID | None = None,
         context_phrase: str | None = None,
+        policy: VoicePolicyContext | None = None,
+        include_next_recommended: bool = True,
     ) -> DifficultWordPracticeAttemptRead:
         """Single-call audio evaluation + durable dual-store save without 503 crashes when legacy DB lacks the practice table."""
         await self.access.require_child(child_id, actor_id)
@@ -1867,7 +2588,7 @@ class DifficultWordsService:
             or norm
         )
 
-        await self._validate_optional_context_fks(
+        validated_ctx = await self._validate_optional_context_fks(
             child_id,
             actor_id,
             book_id=book_id,
@@ -1884,24 +2605,32 @@ class DifficultWordsService:
             )
             if existing is not None and existing.State == "COMPLETED":
                 _, _, word_attempts = await self._load_merged_attempts(
-                    child_id, actor_id, normalized_word=norm
+                    child_id, actor_id, normalized_word=norm, storage_ready=storage_ready
                 )
-                next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                next_word = (
+                    await self._next_recommended_word(child_id, actor_id, norm)
+                    if include_next_recommended
+                    else None
+                )
                 return self._to_attempt_read(existing, word_attempts, next_word)
 
         find_retry = getattr(self.repository, "find_retry_event_by_request", None)
-        if callable(find_retry):
+        if not storage_ready and callable(find_retry):
             existing_event = await find_retry(child_id, actor_id, norm, request_id)
             if existing_event is not None:
                 _, _, word_attempts = await self._load_merged_attempts(
-                    child_id, actor_id, normalized_word=norm
+                    child_id, actor_id, normalized_word=norm, storage_ready=storage_ready
                 )
                 matching = next(
                     (a for a in word_attempts if a.Id == existing_event.Id),
                     word_attempts[-1] if word_attempts else None,
                 )
                 if matching is not None:
-                    next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                    next_word = (
+                        await self._next_recommended_word(child_id, actor_id, norm)
+                        if include_next_recommended
+                        else None
+                    )
                     return self._to_attempt_read(
                         matching,
                         word_attempts,
@@ -1912,18 +2641,52 @@ class DifficultWordsService:
 
         resolve_fn = getattr(self.repository, "resolve_retry_target", None)
         resolved_word_hint = word_id or (evidence_word_ids[0] if evidence_word_ids else None)
-        retry_target = (
-            await resolve_fn(
-                child_id,
-                actor_id,
-                session_id=session_id,
-                page_id=page_id,
-                page_revision_id=page_revision_id,
-                word_id=resolved_word_hint,
+        retry_target: tuple[UUID, UUID, UUID, UUID | None] | None = None
+        if (
+            validated_ctx is not None
+            and validated_ctx.get("session_row") is not None
+            and validated_ctx.get("page_id") is not None
+            and validated_ctx.get("page_revision_id") is not None
+            and (
+                resolved_word_hint is None
+                or (word_id is not None and bool(validated_ctx.get("word_validated")))
             )
-            if callable(resolve_fn)
-            else None
-        )
+        ):
+            retry_target = (
+                validated_ctx["session_row"].Id,
+                validated_ctx["page_id"],
+                validated_ctx["page_revision_id"],
+                word_id if word_id is not None else None,
+            )
+        elif callable(resolve_fn):
+            validated_session = (
+                validated_ctx.get("session_row") if validated_ctx is not None else None
+            )
+            word_already_ok = bool(
+                validated_ctx is not None
+                and word_id is not None
+                and validated_ctx.get("word_validated")
+            )
+            try:
+                retry_target = await resolve_fn(
+                    child_id,
+                    actor_id,
+                    session_id=session_id,
+                    page_id=page_id,
+                    page_revision_id=page_revision_id,
+                    word_id=resolved_word_hint,
+                    validated_session=validated_session,
+                    word_validated=word_already_ok,
+                )
+            except TypeError:
+                retry_target = await resolve_fn(
+                    child_id,
+                    actor_id,
+                    session_id=session_id,
+                    page_id=page_id,
+                    page_revision_id=page_revision_id,
+                    word_id=resolved_word_hint,
+                )
         if not storage_ready and retry_target is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1947,6 +2710,7 @@ class DifficultWordsService:
             browser_transcript=browser_transcript,
             browser_confidence=browser_confidence,
             context_phrase=context_phrase,
+            policy=policy,
         )
 
         # Acquire per-request advisory lock only for the short persistence phase
@@ -1958,22 +2722,30 @@ class DifficultWordsService:
             )
             if existing is not None and existing.State == "COMPLETED":
                 _, _, word_attempts = await self._load_merged_attempts(
-                    child_id, actor_id, normalized_word=norm
+                    child_id, actor_id, normalized_word=norm, storage_ready=storage_ready
                 )
-                next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                next_word = (
+                    await self._next_recommended_word(child_id, actor_id, norm)
+                    if include_next_recommended
+                    else None
+                )
                 return self._to_attempt_read(existing, word_attempts, next_word)
-        if callable(find_retry):
+        elif callable(find_retry):
             existing_event = await find_retry(child_id, actor_id, norm, request_id)
             if existing_event is not None:
                 _, _, word_attempts = await self._load_merged_attempts(
-                    child_id, actor_id, normalized_word=norm
+                    child_id, actor_id, normalized_word=norm, storage_ready=storage_ready
                 )
                 matching = next(
                     (a for a in word_attempts if a.Id == existing_event.Id),
                     word_attempts[-1] if word_attempts else None,
                 )
                 if matching is not None:
-                    next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                    next_word = (
+                        await self._next_recommended_word(child_id, actor_id, norm)
+                        if include_next_recommended
+                        else None
+                    )
                     return self._to_attempt_read(
                         matching,
                         word_attempts,
@@ -1983,10 +2755,10 @@ class DifficultWordsService:
                     )
 
         now = datetime.now(timezone.utc)
-        saved_table_row: DifficultWordPracticeAttempt | None = None
+        attempt_obj: DifficultWordPracticeAttempt | None = None
         if storage_ready:
             attempt_number = await self.repository.next_attempt_number(child_id, norm)
-            attempt = DifficultWordPracticeAttempt(
+            attempt_obj = DifficultWordPracticeAttempt(
                 ChildId=child_id,
                 ParentId=actor_id,
                 NormalizedWord=norm,
@@ -2012,9 +2784,8 @@ class DifficultWordsService:
                 CreatedAt=now,
                 UpdatedAt=now,
             )
-            saved_table_row = await self.repository.create_practice_attempt(attempt)
 
-        saved_event_row: ReadingEvent | None = None
+        event_obj: ReadingEvent | None = None
         create_event_fn = getattr(self.repository, "create_retry_event", None)
         stats_fn = getattr(self.repository, "existing_word_retry_stats", None)
         if retry_target is not None and callable(create_event_fn):
@@ -2039,7 +2810,7 @@ class DifficultWordsService:
                 if incorrect_count >= 3
                 else "RETRYING"
             )
-            event = ReadingEvent(
+            event_obj = ReadingEvent(
                 SessionId=target_session,
                 PageId=target_page,
                 PageRevisionId=target_rev,
@@ -2065,16 +2836,54 @@ class DifficultWordsService:
                 },
                 CreatedAt=now,
             )
-            try:
-                saved_event_row = await create_event_fn(event)
-            except Exception:
-                if saved_table_row is None:
-                    raise
+
+        saved_table_row: DifficultWordPracticeAttempt | None = None
+        saved_event_row: ReadingEvent | None = None
+        save_both_fn = getattr(
+            self.repository, "save_practice_attempt_and_retry_event", None
+        )
+        if callable(save_both_fn):
+            saved_table_row, saved_event_row = await save_both_fn(attempt_obj, event_obj)
+        else:
+            if attempt_obj is not None:
+                saved_table_row = await self.repository.create_practice_attempt(attempt_obj)
+            if event_obj is not None and callable(create_event_fn):
+                try:
+                    saved_event_row = await create_event_fn(event_obj)
+                except Exception:
+                    if saved_table_row is None:
+                        raise
 
         _, _, word_attempts = await self._load_merged_attempts(
-            child_id, actor_id, normalized_word=norm
+            child_id, actor_id, normalized_word=norm, storage_ready=storage_ready
         )
-        next_word = await self._next_recommended_word(child_id, actor_id, norm)
+        word_progress = compute_word_practice_progress(norm, word_attempts)
+        self._update_cached_word_status(
+            child_id, actor_id, norm, word_progress.practice_status
+        )
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        evidence_rec_id = (
+            getattr(saved_table_row, "Id", None)
+            or getattr(saved_event_row, "Id", None)
+            or str(request_id)
+        )
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=evidence_rec_id,
+            normalized_word=norm,
+            assessment_status=resolved_status,
+            confidence=calibrated_confidence,
+        )
+        next_word = (
+            await self._next_recommended_word(child_id, actor_id, norm)
+            if include_next_recommended
+            else None
+        )
         backend_label: str = (
             "PRACTICE_TABLE_AND_EVENT"
             if saved_table_row is not None and saved_event_row is not None

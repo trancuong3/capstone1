@@ -1,15 +1,16 @@
 "use client";
 
 import {
-  Check,
+  AlertTriangle,
   Clock3,
-  Copy,
   Info,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,17 +26,26 @@ import {
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { BookCover } from "@/components/books/book-cover";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import {
+  cancelAdminOcrJob,
   isActiveAdminOcrJobStatus,
+  retryAdminOcrJob,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
@@ -43,11 +53,16 @@ import type { AssetSourceType } from "@/types/book-assets";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
   const t = useTranslations("admin");
-  const { formatNumber } = useI18n();
+  const tCommon = useTranslations("common");
+  const { formatDateTime, formatNumber } = useI18n();
   const skippedAiPageIds = useSkippedAiPageIds(bookId);
-  const pageSize = 24;
+  const pageSize = 12;
+  const ocrJobsPageSize = 5;
   const [pageNumber, setPageNumber] = useState(1);
+  const [queuedJobsPage, setQueuedJobsPage] = useState(1);
+  const [deadLetterPage, setDeadLetterPage] = useState(1);
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
@@ -58,11 +73,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const [pendingRetire, setPendingRetire] =
     useState<AdminPageListItemUI | null>(null);
   const [retiringPageId, setRetiringPageId] = useState<string | null>(null);
+  const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [uploaderOpenOverride, setUploaderOpenOverride] = useState<
     boolean | null
   >(null);
   const [aiBatchOpen, setAiBatchOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState(false);
   const [pageActionNotice, setPageActionNotice] = useState<{
     tone: "error" | "info";
     title: string;
@@ -70,9 +85,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   } | null>(null);
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
-  const copyTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
-    null,
-  );
   const fetchBookOcrJobs = useCallback(async () => {
     if (typeof pages.listOcrJobs !== "function") return [];
     try {
@@ -162,6 +174,111 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       });
     }
   }, [bookId, fetchBookOcrJobs, pages, t]);
+
+  const ocrWorkerStatus = useOcrWorkerStatus({
+    onRecovered: () => {
+      clearApiReadCache();
+      void refreshPages();
+    },
+  });
+
+  async function handleCancelOcrJob(jobId: string) {
+    if (busyJobId !== null) return;
+    setBusyJobId(jobId);
+    setPageActionNotice(null);
+    try {
+      if (typeof pages.cancelOcrJob === "function") {
+        await pages.cancelOcrJob(jobId);
+        taskCenter?.markTaskAlertSeen(jobId);
+        emitStudioTasksChanged({ portal: "admin" });
+      } else {
+        taskCenter?.markTaskAlertSeen(jobId);
+        await cancelAdminOcrJob(jobId);
+      }
+      clearApiReadCache();
+      await refreshPages();
+      if (!mountedRef.current) return;
+      setPageActionNotice({
+        tone: "info",
+        title: t(
+          "books.detail.cancelQueuedJobSuccess",
+          undefined,
+          "Đã hủy tác vụ OCR đang chờ.",
+        ),
+        message: t(
+          "books.detail.cancelQueuedJobSuccess",
+          undefined,
+          "Đã hủy tác vụ OCR đang chờ.",
+        ),
+      });
+    } catch {
+      if (!mountedRef.current) return;
+      setPageActionNotice({
+        tone: "error",
+        title: t(
+          "books.detail.cancelQueuedJobError",
+          undefined,
+          "Không thể hủy tác vụ OCR lúc này. Vui lòng thử lại.",
+        ),
+        message: t(
+          "books.detail.cancelQueuedJobError",
+          undefined,
+          "Không thể hủy tác vụ OCR lúc này. Vui lòng thử lại.",
+        ),
+      });
+    } finally {
+      if (mountedRef.current) setBusyJobId(null);
+    }
+  }
+
+  async function handleRetryOcrJob(jobId: string) {
+    if (busyJobId !== null) return;
+    setBusyJobId(jobId);
+    setPageActionNotice(null);
+    try {
+      if (typeof pages.retryOcrJob === "function") {
+        await pages.retryOcrJob(jobId);
+        taskCenter?.markTaskAlertSeen(jobId);
+        emitStudioTasksChanged({ portal: "admin" });
+      } else {
+        taskCenter?.markTaskAlertSeen(jobId);
+        await retryAdminOcrJob(jobId);
+      }
+      clearApiReadCache();
+      await refreshPages();
+      if (!mountedRef.current) return;
+      setPageActionNotice({
+        tone: "info",
+        title: t(
+          "books.detail.retryOcrJobSuccess",
+          undefined,
+          "Đã đưa tác vụ OCR vào hàng chờ thử lại.",
+        ),
+        message: t(
+          "books.detail.retryOcrJobSuccess",
+          undefined,
+          "Đã đưa tác vụ OCR vào hàng chờ thử lại.",
+        ),
+      });
+    } catch {
+      if (!mountedRef.current) return;
+      setPageActionNotice({
+        tone: "error",
+        title: t(
+          "books.detail.retryOcrJobError",
+          undefined,
+          "Không thể thử lại tác vụ OCR lúc này. Vui lòng thử lại.",
+        ),
+        message: t(
+          "books.detail.retryOcrJobError",
+          undefined,
+          "Không thể thử lại tác vụ OCR lúc này. Vui lòng thử lại.",
+        ),
+      });
+    } finally {
+      if (mountedRef.current) setBusyJobId(null);
+    }
+  }
   async function retirePendingPage() {
     const item = pendingRetire;
     const pageId = item?.processing.page_id;
@@ -187,6 +304,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       );
       setPendingRetire(null);
       setRetiringPageId(null);
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+      emitStudioTasksChanged({ portal: "admin" });
       setPageActionNotice({
         tone: "info",
         title: t("books.detail.pageRetiredTitle"),
@@ -207,24 +326,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     }
   }
 
-  function handleCopyBookId(id: string) {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(id).catch(() => undefined);
-    }
-    setCopiedId(true);
-    if (copyTimerRef.current) globalThis.clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = globalThis.setTimeout(() => {
-      if (mountedRef.current) setCopiedId(false);
-    }, 1800);
-  }
-
   useEffect(() => {
     mountedRef.current = true;
     const timeout = globalThis.setTimeout(() => void load(), 0);
     return () => {
       mountedRef.current = false;
       globalThis.clearTimeout(timeout);
-      if (copyTimerRef.current) globalThis.clearTimeout(copyTimerRef.current);
       requestIdRef.current += 1;
     };
   }, [load]);
@@ -249,13 +356,54 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     };
   }, [items]);
 
-  const activeOcrJobs = ocrJobs.filter((job) =>
-    isActiveAdminOcrJobStatus(job.status),
+  const activeOcrJobs = useMemo(
+    () => ocrJobs.filter((job) => isActiveAdminOcrJobStatus(job.status)),
+    [ocrJobs],
+  );
+  const deadLetterOcrJobs = ocrJobs.filter(
+    (job) => job.status === "DEAD_LETTER",
   );
   const activeOcrJobsCount = activeOcrJobs.length;
-  const ocrWorkerOffline = activeOcrJobs.some(
-    (job) => job.worker_online === false,
+  const ocrWorkerOffline =
+    ocrWorkerStatus.isUnavailable ||
+    activeOcrJobs.some((job) => job.worker_online === false);
+  const hasRunningOcrJob = activeOcrJobs.some(
+    (job) => job.status === "RUNNING" || job.status === "CLAIMED",
   );
+  const isOcrQueueWaitingOffline =
+    activeOcrJobsCount > 0 && ocrWorkerOffline && !hasRunningOcrJob;
+  const ocrQueueRealPercent = useMemo(() => {
+    if (activeOcrJobsCount === 0) return null;
+    if (isOcrQueueWaitingOffline) return 2;
+    const sum = activeOcrJobs.reduce((acc, job) => {
+      if (
+        typeof job.progress_pct === "number" &&
+        Number.isFinite(job.progress_pct)
+      ) {
+        return acc + job.progress_pct;
+      }
+      if (job.status === "RUNNING") return acc + 55;
+      if (job.status === "CLAIMED") return acc + 30;
+      if (job.status === "FAILED_RETRYABLE") return acc + 15;
+      return acc + 12;
+    }, 0);
+    return Math.round(sum / activeOcrJobsCount);
+  }, [activeOcrJobs, activeOcrJobsCount, isOcrQueueWaitingOffline]);
+  const ocrQueueStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 20, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 80, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const ocrQueueProgress = useAiProgress({
+    active: activeOcrJobsCount > 0,
+    realPercent: ocrQueueRealPercent,
+    progressMode: isOcrQueueWaitingOffline ? "measured" : "staged",
+    stages: ocrQueueStages,
+    expectedDurationMs: 16_000,
+  });
 
   // Gently auto-poll active OCR jobs (12s when laptop worker is offline, 4s when online)
   // and refresh pages automatically as soon as any queued job finishes.
@@ -400,11 +548,39 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       job.job_kind === "ADMIN_PAGE_UPLOAD" &&
       (!job.page_id || !activePageIds.has(job.page_id)),
   );
+  const totalPages = Math.max(1, Math.ceil((items?.length ?? 0) / pageSize));
+  const safePage = Math.min(Math.max(1, pageNumber), totalPages);
   const visibleItems = items?.slice(
-    (pageNumber - 1) * pageSize,
-    pageNumber * pageSize,
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
   );
   const showPagination = items !== null && items.length > pageSize;
+
+  const queuedJobsTotalPages = Math.max(
+    1,
+    Math.ceil(pendingNewPageJobs.length / ocrJobsPageSize),
+  );
+  const safeQueuedJobsPage = Math.min(
+    Math.max(1, queuedJobsPage),
+    queuedJobsTotalPages,
+  );
+  const visiblePendingNewPageJobs = pendingNewPageJobs.slice(
+    (safeQueuedJobsPage - 1) * ocrJobsPageSize,
+    safeQueuedJobsPage * ocrJobsPageSize,
+  );
+
+  const deadLetterTotalPages = Math.max(
+    1,
+    Math.ceil(deadLetterOcrJobs.length / ocrJobsPageSize),
+  );
+  const safeDeadLetterPage = Math.min(
+    Math.max(1, deadLetterPage),
+    deadLetterTotalPages,
+  );
+  const visibleDeadLetterOcrJobs = deadLetterOcrJobs.slice(
+    (safeDeadLetterPage - 1) * ocrJobsPageSize,
+    safeDeadLetterPage * ocrJobsPageSize,
+  );
 
   return (
     <div className="space-y-4">
@@ -431,6 +607,52 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         ]}
         eyebrow={t("books.detail.eyebrow")}
         title={resolvedTitle}
+      />
+
+      <OcrServiceStatusBanner
+        body={
+          ocrWorkerStatus.status === "unreachable"
+            ? t(
+                "books.uploader.workerUnreachableBody",
+                undefined,
+                "Hệ thống đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng xử lý.",
+              )
+            : t(
+                "books.uploader.workerOfflineBody",
+                undefined,
+                "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
+              )
+        }
+        isChecking={ocrWorkerStatus.isChecking}
+        justRecovered={ocrWorkerStatus.justRecovered}
+        onDismissRecovered={ocrWorkerStatus.dismissRecoveredNotice}
+        onRecheck={() => void ocrWorkerStatus.recheckNow()}
+        queuedCount={activeOcrJobsCount}
+        recheckLabel={t(
+          "books.uploader.recheckWorkerBtn",
+          undefined,
+          "Kiểm tra lại kết nối OCR",
+        )}
+        recoveredMessage={t(
+          "books.detail.ocrRecoveredNotice",
+          undefined,
+          "Dịch vụ xử lý OCR đã hoạt động trở lại — đang tự động cập nhật tiến trình trang sách.",
+        )}
+        status={ocrWorkerStatus.status}
+        title={
+          ocrWorkerStatus.status === "unreachable"
+            ? t(
+                "books.uploader.workerUnreachableTitle",
+                undefined,
+                "Chưa kiểm tra được trạng thái dịch vụ OCR",
+              )
+            : t(
+                "books.uploader.workerOfflineTitle",
+                undefined,
+                "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
+              )
+        }
+        variant="admin"
       />
 
       {/* Compact Book Summary Strip */}
@@ -464,34 +686,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                   maxGrade: book.max_grade,
                 })}
               </p>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                <button
-                  aria-label={t(
-                    "books.detail.copyIdAria",
-                    undefined,
-                    "Sao chép ID sách",
-                  )}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 py-0.5 font-mono text-[11px] font-semibold text-muted transition-colors hover:border-primary/40 hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
-                  onClick={() => handleCopyBookId(book.id)}
-                  title={book.id}
-                  type="button"
-                >
-                  <span>ID: {book.id.slice(0, 8)}…</span>
-                  {copiedId ? (
-                    <>
-                      <Check
-                        aria-hidden="true"
-                        className="size-3 text-success-ink"
-                      />
-                      <span className="font-sans text-success-ink">
-                        {t("books.detail.copiedId", undefined, "Đã sao chép")}
-                      </span>
-                    </>
-                  ) : (
-                    <Copy aria-hidden="true" className="size-3" />
-                  )}
-                </button>
-              </div>
             </div>
           </div>
 
@@ -522,10 +716,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </div>
             <div className="rounded-lg border border-primary/20 bg-sky/40 px-3 py-1.5 text-center tabular-nums">
               <span className="block text-[11px] font-semibold text-primary-hover">
-                {t("books.detail.statProcessing", undefined, "Đang xử lý")}
+                {t(
+                  "books.detail.statProcessing",
+                  undefined,
+                  "Đang xử lý / Hàng chờ OCR",
+                )}
               </span>
-              <span className="text-sm font-extrabold text-primary-hover">
-                {items ? formatNumber(pageStats.processing) : "—"}
+              <span
+                className="text-sm font-extrabold text-primary-hover"
+                data-testid="admin-book-kpi-processing-count"
+              >
+                {items
+                  ? formatNumber(
+                      pageStats.processing + pendingNewPageJobs.length,
+                    )
+                  : "—"}
               </span>
             </div>
           </div>
@@ -660,25 +865,220 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                 {t("books.detail.ocrQueueCheckNow")}
               </Button>
             </div>
+            <AiProgressBar
+              active={!isOcrQueueWaitingOffline}
+              detail={`${formatNumber(activeOcrJobsCount)}`}
+              elapsedSeconds={
+                isOcrQueueWaitingOffline
+                  ? undefined
+                  : ocrQueueProgress.elapsedSeconds
+              }
+              label={
+                isOcrQueueWaitingOffline
+                  ? tCommon("aiProgress.waitingWorker")
+                  : (ocrQueueProgress.stageLabel ??
+                    tCommon("aiProgress.ocrExtracting"))
+              }
+              percent={ocrQueueProgress.percent}
+              size="sm"
+              testId="admin-book-ocr-queue-progress"
+              tone={isOcrQueueWaitingOffline ? "warning" : "primary"}
+            />
             {pendingNewPageJobs.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {pendingNewPageJobs.map((job, idx) => (
-                  <span
-                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-950"
-                    data-testid="admin-queued-new-page-badge"
-                    key={job.id}
-                  >
-                    <Clock3
-                      aria-hidden="true"
-                      className="size-3.5 text-amber-700"
-                    />
-                    {t("books.detail.queuedNewPageBadge", {
-                      index: formatNumber(idx + 1),
-                    })}
-                  </span>
-                ))}
+              <div className="space-y-2">
+                {visiblePendingNewPageJobs.map((job, localIdx) => {
+                  const idx =
+                    (safeQueuedJobsPage - 1) * ocrJobsPageSize + localIdx;
+                  return (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-amber-950"
+                      data-testid={`admin-queued-new-page-row-${job.id}`}
+                      key={job.id}
+                    >
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 font-bold text-amber-950"
+                          data-testid="admin-queued-new-page-badge"
+                        >
+                          <Clock3
+                            aria-hidden="true"
+                            className="size-3.5 text-amber-700"
+                          />
+                          {t("books.detail.queuedNewPageBadge", {
+                            index: formatNumber(idx + 1),
+                          })}
+                        </span>
+                        {job.file_name ? (
+                          <span className="truncate font-semibold text-ink">
+                            {t(
+                              "books.detail.queuedNewPageFile",
+                              { fileName: job.file_name },
+                              `Tệp: ${job.file_name}`,
+                            )}
+                          </span>
+                        ) : null}
+                        {job.queue_position != null ? (
+                          <span className="rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-950 tabular-nums">
+                            #{formatNumber(job.queue_position)}
+                          </span>
+                        ) : null}
+                        {job.created_at ? (
+                          <span className="text-muted">
+                            {t(
+                              "books.detail.queuedAtLabel",
+                              { time: formatDateTime(job.created_at) },
+                              `Đã xếp hàng lúc ${formatDateTime(job.created_at)}`,
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                      <Button
+                        data-testid={`cancel-queued-ocr-job-${job.id}`}
+                        disabled={busyJobId !== null}
+                        isLoading={busyJobId === job.id}
+                        onClick={() => void handleCancelOcrJob(job.id)}
+                        size="admin"
+                        type="button"
+                        variant="outline"
+                      >
+                        <X aria-hidden="true" className="size-3.5 shrink-0" />
+                        {t(
+                          "books.detail.cancelQueuedJobBtn",
+                          undefined,
+                          "Hủy chờ",
+                        )}
+                      </Button>
+                    </div>
+                  );
+                })}
+                <PaginationBar
+                  compact
+                  onPageChange={setQueuedJobsPage}
+                  page={safeQueuedJobsPage}
+                  pageSize={ocrJobsPageSize}
+                  total={pendingNewPageJobs.length}
+                />
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {deadLetterOcrJobs.length > 0 ? (
+          <div
+            className="flex flex-col gap-3 rounded-xl border border-danger/30 bg-danger-surface/65 p-4 text-ink"
+            data-testid="admin-book-ocr-dead-letter-panel"
+            role="region"
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle
+                aria-hidden="true"
+                className="mt-0.5 size-5 shrink-0 text-danger"
+              />
+              <div>
+                <p className="text-sm font-extrabold text-danger">
+                  {t(
+                    "books.detail.deadLetterHeading",
+                    { count: formatNumber(deadLetterOcrJobs.length) },
+                    `Tác vụ OCR gặp lỗi (${formatNumber(deadLetterOcrJobs.length)})`,
+                  )}
+                </p>
+                <p className="mt-0.5 text-xs text-muted">
+                  {t(
+                    "books.detail.deadLetterDesc",
+                    undefined,
+                    "Các tác vụ dưới đây chưa thể tự động hoàn tất OCR. Bạn có thể thử chạy lại hoặc hủy bỏ.",
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {visibleDeadLetterOcrJobs.map((job) => {
+                const matchedPage = job.page_id
+                  ? items?.find((p) => p.processing.page_id === job.page_id)
+                  : undefined;
+                const label = job.file_name
+                  ? job.file_name
+                  : matchedPage
+                    ? t("books.detail.pageNumber", {
+                        pageNumber: formatNumber(matchedPage.page_number),
+                      })
+                    : t(
+                        "books.detail.deadLetterPageFallback",
+                        undefined,
+                        "Tác vụ OCR trang mới",
+                      );
+                const ts = job.completed_at ?? job.updated_at ?? job.created_at;
+                return (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/25 bg-white px-3 py-2.5 text-xs"
+                    data-testid={`admin-dead-letter-job-${job.id}`}
+                    key={job.id}
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-extrabold text-ink">{label}</span>
+                        {ts ? (
+                          <span className="text-muted">
+                            {formatDateTime(ts)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-danger">
+                        {job.error_message ||
+                          t(
+                            "books.detail.deadLetterFallbackError",
+                            undefined,
+                            "Xử lý OCR không thành công. Hãy thử lại hoặc kiểm tra tệp trang sách.",
+                          )}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        data-testid={`retry-dead-letter-job-${job.id}`}
+                        disabled={busyJobId !== null}
+                        isLoading={busyJobId === job.id}
+                        onClick={() => void handleRetryOcrJob(job.id)}
+                        size="admin"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <RotateCcw
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                        {t(
+                          "books.detail.retryOcrJobBtn",
+                          undefined,
+                          "Thử lại OCR",
+                        )}
+                      </Button>
+                      <Button
+                        data-testid={`cancel-dead-letter-job-${job.id}`}
+                        disabled={busyJobId !== null}
+                        onClick={() => void handleCancelOcrJob(job.id)}
+                        size="admin"
+                        type="button"
+                        variant="outline"
+                      >
+                        <X aria-hidden="true" className="size-3.5 shrink-0" />
+                        {t(
+                          "books.detail.dismissDeadLetterBtn",
+                          undefined,
+                          "Hủy",
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+              <PaginationBar
+                compact
+                onPageChange={setDeadLetterPage}
+                page={safeDeadLetterPage}
+                pageSize={ocrJobsPageSize}
+                total={deadLetterOcrJobs.length}
+              />
+            </div>
           </div>
         ) : null}
 
@@ -686,6 +1086,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         <AdminPageUploader
           bookId={book.id}
           collapsed={!isUploaderExpanded}
+          ocrWorkerStatus={ocrWorkerStatus}
           onUploaded={refreshPages}
         />
 
@@ -717,7 +1118,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           >
             {t("books.detail.pageDataPendingDesc")}
           </StatusMessage>
-        ) : items.length === 0 && activeOcrJobs.length === 0 ? (
+        ) : items.length === 0 &&
+          activeOcrJobs.length === 0 &&
+          deadLetterOcrJobs.length === 0 ? (
           <EmptyState
             description={t("books.detail.emptyPagesDesc")}
             title={t("books.detail.emptyPagesTitle")}
@@ -728,7 +1131,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               <AdminResultsPagination
                 itemLabel={t("books.detail.pageItemLabel")}
                 onPageChange={setPageNumber}
-                page={pageNumber}
+                page={safePage}
                 pageSize={pageSize}
                 total={items.length}
               />
@@ -752,8 +1155,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                             pageNumber: formatNumber(item.page_number),
                           })}
                         </h3>
-                        <span className="rounded-md bg-surface-subtle px-1.5 py-0.5 font-mono text-[11px] font-bold text-muted">
-                          R{item.processing.revision_no}
+                        <span className="rounded-md bg-surface-subtle px-1.5 py-0.5 text-[11px] font-bold text-muted">
+                          Bản {item.processing.revision_no}
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -814,22 +1217,37 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
 
                     <AdminPageImagePreview
                       key={`${item.processing.page_id}:${item.processing.page_revision_id}`}
-                      onReplaced={() => {
-                        setPageActionNotice({
-                          tone: "info",
-                          title: t("books.detail.pendingImageTitle"),
-                          message: t("books.detail.pendingImageDesc"),
-                        });
-                        void load();
+                      onReplaced={({ queued, message }) => {
+                        if (queued) {
+                          setPageActionNotice({
+                            tone: "info",
+                            title: t(
+                              "books.detail.queuedReuploadTitle",
+                              undefined,
+                              "Ảnh mới đã vào hàng chờ OCR",
+                            ),
+                            message:
+                              message ||
+                              t("books.detail.pageQueuedOfflineBadge"),
+                          });
+                        } else {
+                          setPageActionNotice({
+                            tone: "info",
+                            title: t("books.detail.pendingImageTitle"),
+                            message: t("books.detail.pendingImageDesc"),
+                          });
+                        }
+                        clearApiReadCache();
+                        void refreshPages();
                       }}
                       pageId={item.processing.page_id}
                       pageNumber={item.page_number}
                       revisionId={item.processing.page_revision_id}
                     />
 
-                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-border pt-3">
                       <ButtonLink
-                        className="flex-1 whitespace-nowrap"
+                        className="w-full whitespace-nowrap"
                         href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                         size="admin"
                         variant="secondary"
@@ -873,7 +1291,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               <AdminResultsPagination
                 itemLabel={t("books.detail.pageItemLabel")}
                 onPageChange={setPageNumber}
-                page={pageNumber}
+                page={safePage}
                 pageSize={pageSize}
                 total={items.length}
               />

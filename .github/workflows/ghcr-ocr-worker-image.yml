@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "ocr_worker/**"
+      - "backend/app/services/ocr_*.py"
+      - "backend/app/services/word_box_geometry.py"
+      - "backend/app/services/viread_vietocr_v2_preprocessing.py"
       - "scripts/build_hf_space_bundle.py"
       - ".github/workflows/ghcr-ocr-worker-image.yml"
   workflow_dispatch:

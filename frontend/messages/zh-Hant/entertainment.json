@@ -57,7 +57,10 @@
     "memoryCta": "開始記憶探索",
     "breakReminderTitle": "護眼休息提示：",
     "defaultBreakReminder": "每次遊玩約 10–15 分鐘恰到好處，讓孩子眼睛更舒適、吸收更自然。",
-    "recommendationLoadError": "暫時無法載入學習推薦。"
+    "recommendationLoadError": "暫時無法載入學習推薦。",
+    "magicQuestCta": "✨ 60秒魔法單字任務（立即複習）",
+    "magicQuestNoBookHint": "還沒有符合的書嗎？ViRead 貓頭鷹編織 60 秒魔法故事，玩完自動清除！",
+    "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
   },
   "karaoke": {
     "title": "兒童卡拉OK",
@@ -332,6 +335,49 @@
       },
       "lyricsOnlyFallbackGuidance": "此裝置未啟用 Web Audio 音訊分析，本次僅對歌詞準確度進行評分。",
       "mildSpeakerBleedGuidance": "有少量揚聲器音樂進入麥克風。配戴耳機可以讓音高與節奏評分更加精確！"
+    },
+    "magicChant": {
+      "libraryBadge": "✨ Instant · Auto-clears after chant",
+      "libraryCardTitle": "✨ 80 BPM Magic Rhythm Chant · Clap Beats & Review Words (Auto-clears)",
+      "libraryCardDesc": "No matching song yet? ViRead Owl weaves an 80 BPM rhythmic chant from your review words!",
+      "libraryOpenCta": "Open Magic Rhythm Chant",
+      "loadingTitle": "ViRead Owl is setting the beat and weaving your chant…",
+      "loadingStage1": "Picking focus words…",
+      "loadingStage2": "Composing 80 BPM rhyme lines…",
+      "errorTitle": "Magic chant needs a quick retry",
+      "errorBody": "Please tap Retry to weave a fresh rhythm chant.",
+      "expiredNotice": "The previous chant dissolved after 15 minutes — Owl wove a fresh one for you!",
+      "lineBadge": "Chant Line {current}/{total}",
+      "step1ClapPrompt": "Step 1: Tap the drum pad for {beats} steady beats!",
+      "step2SpeakPrompt": "Step 2: Speak «{word}» aloud in rhythm!",
+      "step2NoMicPrompt": "Step 2: Listen to the chant and complete this line!",
+      "listenLineBtn": "Hear chant line",
+      "clapBeatBtn": "Tap beat ({current}/{total})",
+      "speakWordBtn": "Speak «{word}»",
+      "stopListeningBtn": "Done speaking",
+      "listenWordSlowBtn": "Hear slow model",
+      "listeningStatus": "ViRead Owl is listening…",
+      "evaluatingStatus": "Checking your spoken word…",
+      "unclearVoiceRetry": "Couldn't hear clearly — bring the mic closer and say «{word}» again! (No strike used)",
+      "strike1Gentle": "Almost! Listen slowly to «{word}» (0.88×) and try again!",
+      "strike2Phonics": "Let's sound out «{word}» step by step!",
+      "strike3RescueReady": "Owl Assist ready! Tap Owl Boost to keep your rhythm star!",
+      "owlRescueBtn": "🦉 Owl Boost",
+      "finishNoMicBtn": "✨ Listen & Complete Line",
+      "toggleNoMicOn": "No-Mic Mode: Clap Beats & Listen",
+      "toggleNoMicOff": "Play without Mic",
+      "micDeniedFallbackNotice": "Microphone is unavailable — Owl enabled No-Mic Mode: Clap Beats & Listen!",
+      "spokenPraise": "Wonderful! You spoke «{word}» right in rhythm!",
+      "rescuePraise": "Hooray for great effort! Your rhythm star lit up!",
+      "noMicPraise": "Great job! You clapped the beat and heard «{word}»!",
+      "nextLineBtn": "Next chant line",
+      "openFinaleBtn": "Open Glowing Chant Scroll",
+      "finaleEyebrow": "Chant Scroll Illuminated",
+      "listenFullChantBtn": "Hear full rhythm chant",
+      "dissolveBtn": "✨ Release chant scroll to the starry sky",
+      "dissolvedBadge": "Temporary chant cleared · Word mastery saved",
+      "playAnotherBtn": "Weave another rhythm chant",
+      "backToLibraryBtn": "Back to song library"
     }
   },
   "pictureDescription": {
@@ -538,7 +584,11 @@
       "who": "有誰 / 什麼動物？",
       "action": "正在做什麼？",
       "where": "在哪裡 / 什麼顏色？"
-    }
+    },
+    "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
+    "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
+    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",
+    "studioIllustrationBadge": "純淨無字插畫"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "未偵測到播放。請點擊聽句重試。",

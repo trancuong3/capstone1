@@ -7,17 +7,26 @@ parents never depend on an AI model.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from types import SimpleNamespace
 from uuid import UUID
 from app.schemas.reading import ReadingAssessmentMetrics
+from app.services.child_progress.phonology_profiler import (
+    PracticeAttemptEvidenceRow,
+    compute_phonological_patterns,
+)
 from app.services.reading_assessment import aggregate_assessment, initial_snapshot
 
 VIETNAM_TZ = timezone(timedelta(hours=7))
 FINISHED_STATES = ("COMPLETED", "FINISHED")
 MAX_SESSION_MINUTES = 90  # a forgotten open session must not inflate minutes
+IDLE_GAP_THRESHOLD_MINUTES = 15  # gaps > 15m indicate an abandoned/paused session
+ESTIMATED_CHILD_WPM = 45.0  # conservative primary-school rate for post-gap lead-in
+MIN_POST_GAP_LEAD_IN_MINUTES = 1.0
+MAX_POST_GAP_LEAD_IN_MINUTES = 3.0
 MIN_WORD_LENGTH = 2
 QUESTION_TYPES = ("FACTUAL", "CLOZE", "VOCABULARY")
 
@@ -87,6 +96,7 @@ class WindowMetrics:
     word_errors: Counter = field(default_factory=Counter)
     heard_as: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     weekly: list[dict[str, Any]] = field(default_factory=list)
+    phonological_patterns: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def accuracy_pct(self) -> float | None:
@@ -226,10 +236,14 @@ def analyze_first_pass(report: ReportRow) -> dict[str, Any] | None:
     # Insertions have no target word ID, so they cannot live in the per-word
     # snapshot. Preserve their evidence from this same finalized report.
     alignment = analyze_alignment(report.alignment)
-    return {"reached": counts["CORRECT"] + counts["MISPRONUNCIATION"] + counts["OMISSION"],
+    assessed = counts["CORRECT"] + counts["MISPRONUNCIATION"] + counts["OMISSION"]
+    # UNCERTAIN words reflect audio/STT ambiguity, not unread text; exclude them
+    # from the coverage denominator so noisy audio does not penalize coverage_pct.
+    book_total = max(assessed, len(words) - counts["UNCERTAIN"])
+    return {"reached": assessed,
             "correct": counts["CORRECT"], "substituted": counts["MISPRONUNCIATION"],
             "skipped": counts["OMISSION"], "inserted": alignment["inserted"] if alignment else 0,
-            "book_total": len(words),
+            "book_total": book_total,
             "errors": errors, "heard": {}}
 
 
@@ -249,11 +263,79 @@ def first_pass_reports(reports: list[ReportRow]) -> list[ReportRow]:
     return [*legacy_without_identity, *selected.values()]
 
 
-def session_minutes(session: SessionRow) -> float:
+def _as_utc(moment: datetime) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def session_minutes(
+    session: SessionRow,
+    *,
+    activity_timestamps: Sequence[datetime] | None = None,
+    words_read: int = 0,
+    pages_compared: int = 0,
+) -> float:
+    """Compute active reading minutes for a finished session without idle-gap inflation.
+
+    - Unended sessions contribute 0 minutes.
+    - Sessions with wall-clock span <= 15 minutes use exact wall-clock duration.
+    - Sessions spanning > 15 minutes WITH recorded intra-session activity (comparison
+      reports, word retries, page events) sum contiguous active clusters separated by
+      idle gaps <= 15 minutes, plus a bounded 1-3 minute lead-in estimate when reading
+      activity resumed after an idle gap.
+    - Sessions spanning > 15 minutes with NO recorded activity preserve the legacy
+      MAX_SESSION_MINUTES (90m) cap.
+    """
     if session.ended_at is None:
         return 0.0
-    seconds = (session.ended_at - session.started_at).total_seconds()
-    return max(0.0, min(seconds / 60, float(MAX_SESSION_MINUTES)))
+    start = _as_utc(session.started_at)
+    end = _as_utc(session.ended_at)
+    raw_seconds = (end - start).total_seconds()
+    if raw_seconds <= 0:
+        return 0.0
+
+    idle_threshold_sec = IDLE_GAP_THRESHOLD_MINUTES * 60.0
+    if raw_seconds <= idle_threshold_sec:
+        return raw_seconds / 60.0
+
+    pts = sorted(
+        ts
+        for ts in (_as_utc(moment) for moment in (activity_timestamps or ()))
+        if start <= ts <= end
+    )
+    if not pts:
+        return min(raw_seconds / 60.0, float(MAX_SESSION_MINUTES))
+
+    timeline = [start, *pts, end]
+    dedup = [timeline[0]]
+    for ts in timeline[1:]:
+        if (ts - dedup[-1]).total_seconds() >= 1.0:
+            dedup.append(ts)
+
+    active_seconds = 0.0
+    had_idle_gap = False
+    for prev_ts, next_ts in zip(dedup, dedup[1:]):
+        gap = (next_ts - prev_ts).total_seconds()
+        if gap <= idle_threshold_sec:
+            active_seconds += gap
+        else:
+            had_idle_gap = True
+
+    active_minutes = active_seconds / 60.0
+    if had_idle_gap:
+        if pages_compared > 0 or words_read > 0:
+            estimated_lead_in = (
+                (words_read / ESTIMATED_CHILD_WPM) if words_read > 0 else 1.5
+            )
+            lead_in = max(
+                MIN_POST_GAP_LEAD_IN_MINUTES,
+                min(MAX_POST_GAP_LEAD_IN_MINUTES, estimated_lead_in),
+            )
+            active_minutes += lead_in
+        active_minutes = max(MIN_POST_GAP_LEAD_IN_MINUTES, active_minutes)
+
+    return max(0.0, min(active_minutes, float(MAX_SESSION_MINUTES)))
 
 
 def compute_window(
@@ -264,6 +346,7 @@ def compute_window(
     reports: list[ReportRow],
     retries: list[RetryEventRow],
     answers: list[AnswerRow],
+    practice_attempts: list[PracticeAttemptEvidenceRow] | None = None,
 ) -> WindowMetrics:
     """Aggregate everything whose local date falls in [start, end]."""
 
@@ -271,17 +354,26 @@ def compute_window(
         return start <= local_date(moment) <= end
 
     window_sessions = [s for s in sessions if inside(s.started_at)]
-    window_ids = {s.id for s in window_sessions}
+    session_by_id = {s.id: s for s in window_sessions}
+    window_ids = set(session_by_id)
     finished = [s for s in window_sessions if s.state in FINISHED_STATES]
+
+    activity_by_session: dict[UUID, list[datetime]] = defaultdict(list)
+    for raw_report in reports:
+        if raw_report.session_id in window_ids:
+            activity_by_session[raw_report.session_id].append(raw_report.created_at)
+    for retry in retries:
+        if retry.session_id in window_ids:
+            activity_by_session[retry.session_id].append(retry.created_at)
 
     metrics = WindowMetrics()
     metrics.sessions = len(finished)
     metrics.active_days = len({local_date(s.started_at) for s in finished})
-    metrics.reading_minutes = round(sum(session_minutes(s) for s in finished))
     metrics.books = len({s.book_id for s in finished})
 
-    minutes_by_session = {s.id: session_minutes(s) for s in window_sessions}
     compared_sessions: set[UUID] = set()
+    words_by_session: Counter = Counter()
+    pages_by_session: Counter = Counter()
     weekly_words: dict[int, list[int]] = defaultdict(lambda: [0, 0])  # correct, reached
     days = (end - start).days + 1
     bucket_count = max(1, -(-days // 7))
@@ -307,12 +399,30 @@ def compute_window(
         for word, counter in analysis["heard"].items():
             metrics.heard_as[word].update(counter)
         compared_sessions.add(report.session_id)
-        raw_bucket = (local_date(report.created_at) - start).days // 7
+        words_by_session[report.session_id] += analysis["reached"]
+        pages_by_session[report.session_id] += 1
+        owner_session = session_by_id.get(report.session_id)
+        bucket_moment = (
+            owner_session.started_at if owner_session is not None else report.created_at
+        )
+        raw_bucket = (local_date(bucket_moment) - start).days // 7
         bucket_index = max(0, min(bucket_count - 1, raw_bucket))
         bucket = weekly_words[bucket_index]
         bucket[0] += analysis["correct"]
         bucket[1] += analysis["reached"]
 
+    minutes_by_session = {
+        s.id: session_minutes(
+            s,
+            activity_timestamps=activity_by_session.get(s.id),
+            words_read=words_by_session.get(s.id, 0),
+            pages_compared=pages_by_session.get(s.id, 0),
+        )
+        for s in window_sessions
+    }
+    metrics.reading_minutes = round(
+        sum(minutes_by_session.get(s.id, 0.0) for s in finished)
+    )
     metrics.compared_session_minutes = sum(
         minutes_by_session.get(session_id, 0.0) for session_id in compared_sessions
     )
@@ -376,10 +486,22 @@ def compute_window(
             {
                 "week_start": week_start,
                 "sessions": len(week_sessions),
-                "minutes": round(sum(session_minutes(s) for s in week_sessions)),
+                "minutes": round(
+                    sum(minutes_by_session.get(s.id, 0.0) for s in week_sessions)
+                ),
                 "accuracy_pct": _pct(correct, reached),
             }
         )
+
+    metrics.phonological_patterns = compute_phonological_patterns(
+        start=start,
+        end=end,
+        session_ids_in_window=window_ids,
+        reports=reports,
+        retries=retries,
+        practice_attempts=practice_attempts,
+        local_date_fn=local_date,
+    )
     return metrics
 
 

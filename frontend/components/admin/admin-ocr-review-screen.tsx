@@ -37,26 +37,34 @@ import {
 } from "@/components/admin/admin-ui";
 import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import {
+  cancelAdminOcrJob,
   getAdminOcrJob,
   isActiveAdminOcrJobStatus,
   isAdminOcrJobQueuedSignal,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { cn } from "@/lib/utils/cn";
 import { isServiceError } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
 import type { TranslateFn } from "@/lib/i18n/types";
 import { viMessages } from "@/messages/vi";
+import viAdminMessages from "@/messages/vi/admin.json";
 import {
   AiCorrectionCancelledError,
   type AdminAiWorkflowDTO,
@@ -79,6 +87,25 @@ import type {
   AdminRevisionWordDTO,
   AdminRevisionVerifyRequestDTO,
 } from "@/types/admin";
+import type { GlobalTaskStatus } from "@/types/global-tasks";
+
+function mapAdminWorkflowStatusToGlobalTaskStatus(
+  status: AdminAiWorkflowDTO["status"] | undefined,
+): GlobalTaskStatus | undefined {
+  switch (status) {
+    case "READY_FOR_ADMIN_REVIEW":
+      return "WAITING_FOR_REVIEW";
+    case "FAILED":
+      return "FAILED";
+    case "QUEUED":
+      return "QUEUED";
+    case "PROOFREADING":
+    case "CHILD_SAFETY_SCANNING":
+      return "RUNNING";
+    default:
+      return undefined;
+  }
+}
 
 type LoadError = "not-found" | "unavailable" | "safe";
 type WordFilter = "all" | "review" | "risk" | "disagreement" | "red" | "green";
@@ -90,10 +117,15 @@ type AiTokenChange = {
   readonly proposed: string;
 };
 
+const viAdminFallbackMessages = {
+  ...viMessages,
+  admin: viAdminMessages,
+};
+
 const defaultTranslate: TranslateFn = (key, params, fallback) =>
   translateMessage(
-    viMessages,
-    viMessages,
+    viAdminFallbackMessages,
+    viAdminFallbackMessages,
     DEFAULT_LOCALE,
     key.includes(".") && !key.startsWith("admin.") ? `admin.${key}` : key,
     params,
@@ -465,68 +497,67 @@ export function getWordReviewBadgeColor(
   }[group];
 }
 
-function getEngineEvidenceDisplay(
-  word: AdminRevisionWordDTO,
-  engine: "paddleocr" | "vietocr" | "tesseract",
-  metadata: Record<string, unknown>,
-  t: TranslateFn = defaultTranslate,
-): string {
-  const evidence = word.ocr_evidence;
-  const line = getWordLineEvidence(word, metadata);
-  const lineStatuses = asRecord(line?.engine_statuses);
-  const pageStatuses = asRecord(metadata.engine_statuses);
-  const rawLineStatus = lineStatuses?.[engine];
-  const rawPageStatus = pageStatuses?.[engine];
-  const status =
-    evidence?.engine_statuses?.[engine] ??
-    (typeof rawLineStatus === "string" ? rawLineStatus : undefined) ??
-    (typeof rawPageStatus === "string" ? rawPageStatus : undefined);
-  const candidate = evidence?.engine_outputs[engine];
-  const statusLabels: Record<string, string> = {
-    not_installed: t("ocrReview.engineStatus.not_installed"),
-    not_initialized: t("ocrReview.engineStatus.not_initialized"),
-    not_run: t("ocrReview.engineStatus.not_run"),
-    processing: t("ocrReview.engineStatus.processing"),
-    success: t("ocrReview.engineStatus.success"),
-    no_result: t("ocrReview.engineStatus.no_result"),
-    error: t("ocrReview.engineStatus.error"),
-    disabled: t("ocrReview.engineStatus.disabled"),
+function formatWorkflowSuitability(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    SUITABLE: "Phù hợp",
+    SUITABLE_WITH_GUIDANCE: "Phù hợp (cần lưu ý)",
+    REVIEW_REQUIRED: "Cần kiểm tra",
+    NOT_RECOMMENDED: "Không khuyến nghị",
   };
-  const statusLabel = status
-    ? (statusLabels[status] ?? status)
-    : t("ocrReview.engineStatus.unrecorded");
-  if (typeof candidate === "string" && candidate.trim()) {
-    return t("ocrReview.engineStatus.successWithText", {
-      candidate,
-      statusLabel,
-    });
-  }
-  if (status === "success")
-    return t("ocrReview.engineStatus.successNoAlignment");
-  if (status === "no_result") return t("ocrReview.engineStatus.capNoResult");
-  if (status === "not_installed")
-    return t("ocrReview.engineStatus.capNotInstalled");
-  if (status === "not_initialized")
-    return t("ocrReview.engineStatus.capNotInitialized");
-  if (status === "not_run") return t("ocrReview.engineStatus.capNotRun");
-  if (status === "processing") return t("ocrReview.engineStatus.capProcessing");
-  if (status === "error") {
-    const lineErrors = asRecord(line?.engine_errors);
-    const pageReasons = asRecord(metadata.engine_status_reasons);
-    const reason =
-      evidence?.engine_errors?.[engine] ??
-      (typeof lineErrors?.[engine] === "string"
-        ? lineErrors[engine]
-        : undefined) ??
-      (typeof pageReasons?.[engine] === "string"
-        ? pageReasons[engine]
-        : undefined);
-    return reason
-      ? t("ocrReview.engineStatus.capErrorWithReason", { reason })
-      : t("ocrReview.engineStatus.capError");
-  }
-  if (status === "disabled") return t("ocrReview.engineStatus.capDisabled");
-  return t("ocrReview.engineStatus.capMissing");
+  if (!value) return "Chưa có kết quả";
+  return map[value] ?? "Cần kiểm tra";
+}
+
+function formatSafetyStatusLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    PROVISIONAL: "Tạm tính",
+    CONFIRMED: "Đã xác nhận",
+    AUTO_CONFIRMED: "Tự động xác nhận",
+    STALE: "Cần quét lại",
+    FAILED: "Gặp lỗi",
+    PENDING: "Đang chờ",
+    COMPLETED: "Hoàn tất",
+  };
+  if (!value) return "Đang chờ";
+  return map[value] ?? "Đang xử lý";
+}
+
+function formatFindingSeverityLabel(value: unknown): string {
+  const key = String(value ?? "REVIEW").toUpperCase();
+  const map: Record<string, string> = {
+    HIGH: "Nghiêm trọng",
+    MEDIUM: "Trung bình",
+    LOW: "Nhẹ",
+    REVIEW: "Cần xem xét",
+  };
+  return map[key] ?? "Cần xem xét";
+}
+
+function formatFindingCategoryLabel(value: unknown): string {
+  const key = String(value ?? "OTHER_SENSITIVE").toUpperCase();
+  const map: Record<string, string> = {
+    SEXUAL_CONTENT: "Nội dung nhạy cảm",
+    VIOLENCE: "Bạo lực",
+    HATE_SPEECH: "Ngôn từ thù ghét",
+    SELF_HARM: "Tự hại",
+    PROFANITY: "Ngôn từ thô tục",
+    AGE_INAPPROPRIATE: "Chưa phù hợp độ tuổi",
+    DANGEROUS_ACTIVITIES: "Hành vi nguy hiểm",
+    SUBSTANCE_USE: "Chất kích thích",
+    OTHER_SENSITIVE: "Nội dung nhạy cảm khác",
+  };
+  return map[key] ?? "Nội dung cần lưu ý";
+}
+
+function formatFindingContentTypeLabel(value: unknown): string {
+  const key = String(value ?? "MENTION").toUpperCase();
+  const map: Record<string, string> = {
+    MENTION: "Đề cập",
+    DEPICTION: "Mô tả",
+    INSTRUCTION: "Hướng dẫn",
+    EXPLICIT: "Trực tiếp",
+  };
+  return map[key] ?? "Nội dung";
 }
 
 export function getOcrScoreLabel(
@@ -576,48 +607,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function getWordLineEvidence(
-  word: AdminRevisionWordDTO,
-  metadata: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const rawLines = metadata.line_evidence;
-  if (!Array.isArray(rawLines)) return null;
-  return (
-    rawLines
-      .map(asRecord)
-      .find((line) => line?.line_index === word.line_index) ?? null
-  );
-}
-
-function getLineEngineOutput(
-  word: AdminRevisionWordDTO,
-  engine: "paddleocr" | "vietocr",
-  metadata: Record<string, unknown>,
-): string | null {
-  const line = getWordLineEvidence(word, metadata);
-  const key = engine === "paddleocr" ? "paddle_output" : "vietocr_output";
-  const output = line?.[key];
-  return typeof output === "string" && output.trim() ? output : null;
-}
-
-function formatRawOcrEvidence(
-  value: unknown,
-  t: TranslateFn = defaultTranslate,
-): string {
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 12)
-      .map((item) =>
-        typeof item === "number" && Number.isFinite(item)
-          ? String(item)
-          : t("common.emptyDash"),
-      )
-      .join(", ");
-  }
-  return t("ocrReview.wordsPanel.notRecorded");
-}
-
 function getPaddleLineScoreLabel(
   metadata: Record<string, unknown>,
   lineIndex: number,
@@ -639,12 +628,9 @@ function getPaddleLineScoreLabel(
   ) {
     return t("ocrReview.scoreLabels.paddleNotRecorded");
   }
-  const selectedWithVietOcr = line?.vietocr_output_used === true;
   return t("ocrReview.scoreLabels.paddleRaw", {
     score: Math.round(rawScore * 100),
-    vietOcrSuffix: selectedWithVietOcr
-      ? t("ocrReview.scoreLabels.paddleVietOcrSuffix")
-      : "",
+    vietOcrSuffix: "",
   });
 }
 
@@ -910,7 +896,13 @@ export function AdminOcrReviewScreen({
   pageId: string;
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
+  const taskCenterRef = useRef(taskCenter);
+  useEffect(() => {
+    taskCenterRef.current = taskCenter;
+  }, [taskCenter]);
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -937,6 +929,9 @@ export function AdminOcrReviewScreen({
     tone: "info" | "error";
   } | null>(null);
   const [queuedOcrJob, setQueuedOcrJob] = useState<AdminOcrJobDTO | null>(null);
+  const [busyQueuedJobAction, setBusyQueuedJobAction] = useState<
+    "check" | "cancel" | null
+  >(null);
   const notice = noticeState?.message ?? null;
   const noticeTone = noticeState?.tone ?? "info";
   const setNotice = useCallback(
@@ -973,6 +968,81 @@ export function AdminOcrReviewScreen({
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const [illustrationStudioOpen, setIllustrationStudioOpen] = useState(false);
+
+  const aiCorrectRealPercent = useMemo(() => {
+    if (busy !== "ai_correct") return null;
+    if (
+      typeof aiWorkflow?.progress_pct === "number" &&
+      Number.isFinite(aiWorkflow.progress_pct)
+    ) {
+      return aiWorkflow.progress_pct;
+    }
+    const status = aiProgress?.status;
+    const completed = aiProgress?.progress.completed_chunks ?? 0;
+    const total = aiProgress?.progress.total_chunks ?? 0;
+    const ratio = total > 0 ? Math.min(1, completed / total) : 0;
+    if (status === "READY_FOR_ADMIN_REVIEW") return 100;
+    if (status === "CHILD_SAFETY_SCANNING") {
+      return total > 0 ? Math.round(55 + ratio * 38) : 65;
+    }
+    if (status === "PROOFREADING") {
+      return total > 0 ? Math.round(10 + ratio * 45) : 16;
+    }
+    if (status === "QUEUED") return 6;
+    return 10;
+  }, [aiProgress, aiWorkflow?.progress_pct, busy]);
+
+  const aiCorrectBarProgress = useAiProgress({
+    active: busy === "ai_correct",
+    realPercent: aiCorrectRealPercent,
+    progressMode:
+      aiProgress?.status === "READY_FOR_ADMIN_REVIEW" ? "measured" : "staged",
+    completed: aiProgress?.status === "READY_FOR_ADMIN_REVIEW",
+    failed: aiProgress?.status === "FAILED",
+    expectedDurationMs: 16_000,
+  });
+
+  const isQueuedJobOffline = Boolean(
+    queuedOcrJob &&
+    queuedOcrJob.worker_online === false &&
+    (queuedOcrJob.status === "QUEUED" ||
+      queuedOcrJob.status === "FAILED_RETRYABLE"),
+  );
+  const queuedOcrRealPercent = useMemo(() => {
+    if (!queuedOcrJob) return null;
+    if (isQueuedJobOffline) return 2;
+    if (
+      typeof queuedOcrJob.progress_pct === "number" &&
+      Number.isFinite(queuedOcrJob.progress_pct)
+    ) {
+      return queuedOcrJob.progress_pct;
+    }
+    if (queuedOcrJob.status === "RUNNING") return 55;
+    if (queuedOcrJob.status === "CLAIMED") return 30;
+    if (queuedOcrJob.status === "FAILED_RETRYABLE") return 15;
+    return 12;
+  }, [isQueuedJobOffline, queuedOcrJob]);
+
+  const queuedOcrBarProgress = useAiProgress({
+    active: Boolean(queuedOcrJob),
+    realPercent: queuedOcrRealPercent,
+    progressMode: isQueuedJobOffline ? "measured" : "staged",
+    expectedDurationMs: 14_000,
+  });
+
+  const reprocessStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.uploading") },
+      { atPct: 30, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 82, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const reprocessBarProgress = useAiProgress({
+    active: busy === "reprocess" || busy === "reupload",
+    stages: reprocessStages,
+    expectedDurationMs: 14_000,
+  });
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const draftEditVersionRef = useRef(0);
@@ -1197,6 +1267,17 @@ export function AdminOcrReviewScreen({
           }
           setAiWorkflow(updated);
           setCandidateEditPending(false);
+          if (
+            updated.status !== aiWorkflow.status ||
+            updated.candidate_version !== aiWorkflow.candidate_version
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(updated.workflow_id);
+            taskCenterRef.current?.markTargetAlertsSeen({
+              bookId,
+              bookPageId: pageId,
+            });
+            emitStudioTasksChanged({ portal: "admin" });
+          }
         })
         .catch(async (cause: unknown) => {
           if (
@@ -1245,6 +1326,7 @@ export function AdminOcrReviewScreen({
     };
   }, [
     aiWorkflow,
+    bookId,
     candidateEditPending,
     detail,
     draftText,
@@ -1287,6 +1369,34 @@ export function AdminOcrReviewScreen({
         );
         if (!disposed && latest?.workflow_id === activeWorkflowId) {
           setAiWorkflow(latest);
+          if (
+            !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+              latest.status,
+            )
+          ) {
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(latest.workflow_id, {
+                includeNextSync: true,
+                optimisticTask: {
+                  source: "admin_ai_workflow",
+                  status: mapAdminWorkflowStatusToGlobalTaskStatus(
+                    latest.status,
+                  ),
+                  updated_at: latest.updated_at,
+                  completed_at: latest.ocr_approved_at,
+                  attempt_count: latest.attempts,
+                },
+              });
+              taskCenterRef.current?.markTargetAlertsSeen(
+                { bookId, bookPageId: pageId },
+                { includeNextSync: true },
+              );
+            }
+            emitStudioTasksChanged({ portal: "admin" });
+          }
         }
       } catch {
         // The page remains usable while this durable workflow is temporarily unavailable.
@@ -1302,6 +1412,7 @@ export function AdminOcrReviewScreen({
     activeWorkflowId,
     activeWorkflowRevisionId,
     activeWorkflowStatus,
+    bookId,
     ocr,
     pageId,
   ]);
@@ -1568,6 +1679,7 @@ export function AdminOcrReviewScreen({
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setNotice(null);
+    taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
     try {
       const workflow = await ocr.runCombinedWorkflow(
         pageId,
@@ -1587,17 +1699,30 @@ export function AdminOcrReviewScreen({
         return;
       }
       setAiWorkflow(workflow);
+      if (
+        typeof document === "undefined" ||
+        document.visibilityState !== "hidden"
+      ) {
+        taskCenter?.markTaskAlertSeen(workflow.workflow_id, {
+          includeNextSync: true,
+          optimisticTask: {
+            source: "admin_ai_workflow",
+            status: mapAdminWorkflowStatusToGlobalTaskStatus(workflow.status),
+            updated_at: workflow.updated_at,
+            completed_at: workflow.ocr_approved_at,
+            attempt_count: workflow.attempts,
+          },
+        });
+        taskCenter?.markTargetAlertsSeen(
+          { bookId, bookPageId: pageId },
+          { includeNextSync: true },
+        );
+      }
+      emitStudioTasksChanged({ portal: "admin" });
       const correctedText = workflow.proofread_text?.normalize("NFC");
       if (!correctedText) {
         setAiCheckUnavailable(true);
-        setNotice(
-          workflow.error_code
-            ? t("ocrReview.notices.proofreadFailedWithCode", {
-                code: workflow.error_code,
-              })
-            : t("ocrReview.notices.proofreadInvalid"),
-          "error",
-        );
+        setNotice(t("ocrReview.notices.proofreadInvalid"), "error");
         return;
       }
       const result = syncPageTextToWords(correctedText, words);
@@ -1692,15 +1817,32 @@ export function AdminOcrReviewScreen({
     setBusy("workflow");
     setNotice(null);
     try {
-      setAiWorkflow(
-        await ocr.decideWorkflowSafety(
-          pageId,
-          aiWorkflow.workflow_id,
-          aiWorkflow.candidate_hash,
-          confirmed,
-          reason || undefined,
-        ),
+      const updatedWorkflow = await ocr.decideWorkflowSafety(
+        pageId,
+        aiWorkflow.workflow_id,
+        aiWorkflow.candidate_hash,
+        confirmed,
+        reason || undefined,
       );
+      if (!mountedRef.current) return;
+      setAiWorkflow(updatedWorkflow);
+      taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
+        includeNextSync: true,
+        optimisticTask: {
+          source: "admin_ai_workflow",
+          status: mapAdminWorkflowStatusToGlobalTaskStatus(
+            updatedWorkflow.status,
+          ),
+          updated_at: updatedWorkflow.updated_at,
+          completed_at: updatedWorkflow.ocr_approved_at,
+          attempt_count: updatedWorkflow.attempts,
+        },
+      });
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
     } catch (cause) {
       setNotice(
         isServiceError(cause)
@@ -1727,15 +1869,32 @@ export function AdminOcrReviewScreen({
     setBusy("workflow");
     setNotice(null);
     try {
-      setAiWorkflow(
-        await ocr.decideWorkflowImageSafety(
-          pageId,
-          aiWorkflow.workflow_id,
-          status,
-          aiWorkflow.source_image_sha256 ?? undefined,
-          reason || undefined,
-        ),
+      const updatedWorkflow = await ocr.decideWorkflowImageSafety(
+        pageId,
+        aiWorkflow.workflow_id,
+        status,
+        aiWorkflow.source_image_sha256 ?? undefined,
+        reason || undefined,
       );
+      if (!mountedRef.current) return;
+      setAiWorkflow(updatedWorkflow);
+      taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
+        includeNextSync: true,
+        optimisticTask: {
+          source: "admin_ai_workflow",
+          status: mapAdminWorkflowStatusToGlobalTaskStatus(
+            updatedWorkflow.status,
+          ),
+          updated_at: updatedWorkflow.updated_at,
+          completed_at: updatedWorkflow.ocr_approved_at,
+          attempt_count: updatedWorkflow.attempts,
+        },
+      });
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(
         status === "ADMIN_CONFIRMED_SAFE"
           ? t("ocrReview.notices.imageMarkedSafe")
@@ -1767,6 +1926,9 @@ export function AdminOcrReviewScreen({
     setNotice(null);
     try {
       setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
+      taskCenter?.markTaskAlertSeen(aiWorkflow.workflow_id);
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(
         retryingSafety || aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
           ? t("ocrReview.notices.retrySafetyQueued")
@@ -1994,6 +2156,25 @@ export function AdminOcrReviewScreen({
       applyDetail(saved);
       setAiWorkflow(latestWorkflow);
       restoreWorkflowReview(latestWorkflow, saved);
+      if (latestWorkflow) {
+        taskCenter?.markTaskAlertSeen(latestWorkflow.workflow_id, {
+          includeNextSync: true,
+          optimisticTask: {
+            source: "admin_ai_workflow",
+            status: mapAdminWorkflowStatusToGlobalTaskStatus(
+              latestWorkflow.status,
+            ),
+            updated_at: latestWorkflow.updated_at,
+            completed_at: latestWorkflow.ocr_approved_at,
+            attempt_count: latestWorkflow.attempts,
+          },
+        });
+      }
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(t("ocrReview.notices.draftSaved"));
       try {
         setHistory(await revisions.list(pageId));
@@ -2071,6 +2252,16 @@ export function AdminOcrReviewScreen({
         return;
       }
       applyDetail(verifiedResult);
+      if (aiWorkflow) {
+        taskCenter?.markTaskAlertSeen(aiWorkflow.workflow_id, {
+          includeNextSync: true,
+        });
+      }
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(t("ocrReview.notices.verifiedSaved"));
       try {
         setHistory(await revisions.list(pageId));
@@ -2125,6 +2316,152 @@ export function AdminOcrReviewScreen({
   // and refresh the new revision automatically as soon as the worker completes it.
   const queuedOcrJobId = queuedOcrJob?.id ?? null;
   const queuedOcrWorkerOffline = queuedOcrJob?.worker_online === false;
+
+  const applyPolledQueuedJob = useCallback(
+    async (
+      nextJob: AdminOcrJobDTO,
+      isCancelled?: () => boolean,
+    ): Promise<"done" | "pending"> => {
+      if (isCancelled?.()) return "done";
+      if (nextJob.status === "SUCCEEDED") {
+        setQueuedOcrJob(null);
+        const nextRevisionId =
+          nextJob.revision_id ?? (await pages.reload(pageId)).page_revision_id;
+        const [nextDetail, nextImage, nextHistory] = await Promise.all([
+          ocr.getRevision(pageId, nextRevisionId),
+          pages.getImage(pageId, nextRevisionId),
+          revisions.list(pageId),
+        ]);
+        if (!mountedRef.current || isCancelled?.()) return "done";
+        setImage(nextImage);
+        applyDetail(nextDetail);
+        setHistory(nextHistory);
+        if (
+          typeof document === "undefined" ||
+          document.visibilityState !== "hidden"
+        ) {
+          taskCenter?.markTaskAlertSeen(nextJob.id, { includeNextSync: true });
+          taskCenter?.markTargetAlertsSeen(
+            { bookId, bookPageId: pageId },
+            { includeNextSync: true },
+          );
+        }
+        emitStudioTasksChanged({ portal: "admin" });
+        setNotice(
+          nextJob.job_kind === "ADMIN_PAGE_REUPLOAD"
+            ? t("ocrReview.notices.reuploadCreated")
+            : t("ocrReview.notices.reprocessCreated"),
+        );
+        return "done";
+      }
+      if (nextJob.status === "DEAD_LETTER" || nextJob.status === "CANCELLED") {
+        setQueuedOcrJob(null);
+        if (
+          mountedRef.current &&
+          (typeof document === "undefined" ||
+            document.visibilityState !== "hidden")
+        ) {
+          taskCenter?.markTaskAlertSeen(nextJob.id, { includeNextSync: true });
+          taskCenter?.markTargetAlertsSeen(
+            { bookId, bookPageId: pageId },
+            { includeNextSync: true },
+          );
+        }
+        emitStudioTasksChanged({ portal: "admin" });
+        setNotice(
+          nextJob.error_message || t("ocrReview.notices.reprocessError"),
+          "error",
+        );
+        return "done";
+      }
+      setQueuedOcrJob(nextJob);
+      return "pending";
+    },
+    [
+      applyDetail,
+      bookId,
+      ocr,
+      pageId,
+      pages,
+      revisions,
+      setNotice,
+      t,
+      taskCenter,
+    ],
+  );
+
+  const checkQueuedOcrJobNow = useCallback(async () => {
+    if (!queuedOcrJobId || busyQueuedJobAction !== null) return;
+    setBusyQueuedJobAction("check");
+    try {
+      const nextJob = await getAdminOcrJob(queuedOcrJobId);
+      if (!mountedRef.current) return;
+      const outcome = await applyPolledQueuedJob(nextJob);
+      if (outcome === "pending" && mountedRef.current) {
+        setNotice(
+          t(
+            "ocrReview.notices.queuedJobStillPending",
+            undefined,
+            "Yêu cầu OCR vẫn đang ở trạng thái chờ xử lý.",
+          ),
+          "info",
+        );
+      }
+    } catch {
+      if (mountedRef.current) {
+        setNotice(t("ocrReview.notices.reprocessError"), "error");
+      }
+    } finally {
+      if (mountedRef.current) setBusyQueuedJobAction(null);
+    }
+  }, [applyPolledQueuedJob, busyQueuedJobAction, queuedOcrJobId, setNotice, t]);
+
+  const cancelQueuedOcrJob = useCallback(async () => {
+    if (!queuedOcrJobId || busyQueuedJobAction !== null) return;
+    setBusyQueuedJobAction("cancel");
+    try {
+      if (typeof pages.cancelOcrJob === "function") {
+        await pages.cancelOcrJob(queuedOcrJobId);
+        taskCenter?.markTaskAlertSeen(queuedOcrJobId);
+        emitStudioTasksChanged({ portal: "admin" });
+      } else {
+        taskCenter?.markTaskAlertSeen(queuedOcrJobId);
+        await cancelAdminOcrJob(queuedOcrJobId);
+      }
+      if (!mountedRef.current) return;
+      setQueuedOcrJob(null);
+      setNotice(
+        t(
+          "ocrReview.notices.queuedJobCancelled",
+          undefined,
+          "Đã hủy yêu cầu chờ chạy OCR cho trang này.",
+        ),
+        "info",
+      );
+    } catch {
+      if (mountedRef.current) {
+        setNotice(
+          t(
+            "ocrReview.notices.queuedJobCancelError",
+            undefined,
+            "Không thể hủy yêu cầu chờ OCR lúc này. Vui lòng thử lại.",
+          ),
+          "error",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setBusyQueuedJobAction(null);
+    }
+  }, [busyQueuedJobAction, pages, queuedOcrJobId, setNotice, t, taskCenter]);
+
+  const ocrWorkerStatus = useOcrWorkerStatus({
+    onRecovered: () => {
+      if (queuedOcrJobId) {
+        void checkQueuedOcrJobNow();
+      }
+    },
+  });
+
   useEffect(() => {
     if (!queuedOcrJobId) return;
     let active = true;
@@ -2162,40 +2499,11 @@ export function AdminOcrReviewScreen({
       }
       try {
         const nextJob = await getAdminOcrJob(queuedOcrJobId, controller.signal);
-        if (!active || controller.signal.aborted) return;
-        if (nextJob.status === "SUCCEEDED") {
-          setQueuedOcrJob(null);
-          const nextRevisionId =
-            nextJob.revision_id ??
-            (await pages.reload(pageId)).page_revision_id;
-          const [nextDetail, nextImage, nextHistory] = await Promise.all([
-            ocr.getRevision(pageId, nextRevisionId),
-            pages.getImage(pageId, nextRevisionId),
-            revisions.list(pageId),
-          ]);
-          if (!active) return;
-          setImage(nextImage);
-          applyDetail(nextDetail);
-          setHistory(nextHistory);
-          setNotice(
-            nextJob.job_kind === "ADMIN_PAGE_REUPLOAD"
-              ? t("ocrReview.notices.reuploadCreated")
-              : t("ocrReview.notices.reprocessCreated"),
-          );
-          return;
-        }
-        if (
-          nextJob.status === "DEAD_LETTER" ||
-          nextJob.status === "CANCELLED"
-        ) {
-          setQueuedOcrJob(null);
-          setNotice(
-            nextJob.error_message || t("ocrReview.notices.reprocessError"),
-            "error",
-          );
-          return;
-        }
-        setQueuedOcrJob(nextJob);
+        const outcome = await applyPolledQueuedJob(
+          nextJob,
+          () => !active || controller.signal.aborted,
+        );
+        if (outcome === "done") return;
         schedule(nextJob.worker_online === false ? 12_000 : 3_000);
       } catch {
         if (!active || controller.signal.aborted) return;
@@ -2224,17 +2532,7 @@ export function AdminOcrReviewScreen({
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
     };
-  }, [
-    applyDetail,
-    ocr,
-    pageId,
-    pages,
-    queuedOcrJobId,
-    queuedOcrWorkerOffline,
-    revisions,
-    setNotice,
-    t,
-  ]);
+  }, [applyPolledQueuedJob, queuedOcrJobId, queuedOcrWorkerOffline]);
 
   async function reprocess() {
     if (!detail || detail.lifecycle_status !== "ACTIVE" || busy !== null)
@@ -2259,6 +2557,11 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setActiveTab("draft");
       setNotice(t("ocrReview.notices.reprocessCreated"));
     } catch (cause) {
@@ -2269,6 +2572,8 @@ export function AdminOcrReviewScreen({
         return;
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
+        taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+        emitStudioTasksChanged({ portal: "admin" });
         setNotice(cause.message, "info");
         return;
       }
@@ -2320,6 +2625,11 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setReplacementFile(null);
       const input = document.getElementById(
         "replacement-page-image",
@@ -2335,6 +2645,8 @@ export function AdminOcrReviewScreen({
         return;
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
+        taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+        emitStudioTasksChanged({ portal: "admin" });
         setReplacementFile(null);
         const input = document.getElementById(
           "replacement-page-image",
@@ -2675,7 +2987,7 @@ export function AdminOcrReviewScreen({
       label: t(
         "ocrReview.workbenchTabs.history",
         undefined,
-        "Lịch sử Revision",
+        "Lịch sử phiên bản",
       ),
       badge: history.length,
       badgeTone: "neutral",
@@ -2709,9 +3021,7 @@ export function AdminOcrReviewScreen({
           {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
             ? t("ocrReview.safetyPanel.readyForReview")
             : aiWorkflow.status === "FAILED"
-              ? t("ocrReview.safetyPanel.errorStatus", {
-                  code: aiWorkflow.error_code ?? "UNKNOWN",
-                })
+              ? t("ocrReview.draft.statusFailed")
               : aiWorkflow.stage === "PROOFREADING"
                 ? t("ocrReview.safetyPanel.proofreadingRunning")
                 : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
@@ -2726,7 +3036,9 @@ export function AdminOcrReviewScreen({
             {t("ocrReview.safetyPanel.overallSuitabilityLabel")}
           </p>
           <p className="mt-0.5 break-words text-sm font-extrabold text-ink">
-            {aiWorkflow.suitability ?? t("ocrReview.safetyPanel.noResultBadge")}
+            {aiWorkflow.suitability
+              ? formatWorkflowSuitability(aiWorkflow.suitability)
+              : t("ocrReview.safetyPanel.noResultBadge")}
           </p>
         </div>
         <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5">
@@ -2734,7 +3046,9 @@ export function AdminOcrReviewScreen({
             {t("ocrReview.safetyPanel.textSafetyHeading")}
           </p>
           <p className="mt-0.5 break-words text-sm font-extrabold text-ink">
-            {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
+            {formatSafetyStatusLabel(
+              aiWorkflow.text_safety_status ?? aiWorkflow.safety_status,
+            )}
           </p>
         </div>
         <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5 sm:col-span-2">
@@ -2833,47 +3147,12 @@ export function AdminOcrReviewScreen({
         </p>
       ) : null}
 
-      <dl className="mt-3 grid gap-1.5 break-all rounded-lg border border-border bg-surface-subtle/40 p-2.5 font-mono text-[11px]">
-        <div>
-          <dt className="font-bold text-ink">
-            {t("ocrReview.safetyPanel.candidateHashKey")}
-          </dt>
-          <dd className="text-muted">
-            {aiWorkflow.candidate_hash ?? t("common.emptyDash")}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-bold text-ink">
-            {t("ocrReview.safetyPanel.safetyInputHashKey")}
-          </dt>
-          <dd className="text-muted">
-            {aiWorkflow.safety_input_hash ?? t("common.emptyDash")}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-bold text-ink">
-            {t("ocrReview.safetyPanel.finalApprovedHashKey")}
-          </dt>
-          <dd className="text-muted">
-            {aiWorkflow.final_approved_text_hash ??
-              t("ocrReview.safetyPanel.notConfirmedFinal")}
-          </dd>
-        </div>
-      </dl>
-
       {aiWorkflow.status === "FAILED" || aiWorkflow.safety_status === "FAILED"
         ? (() => {
             const safetyFailure =
               aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
               (aiWorkflow.proofread_text !== null &&
                 aiWorkflow.safety_status === "FAILED");
-            const failureEvent = [...aiWorkflow.provider_events]
-              .reverse()
-              .find(
-                (event) =>
-                  Boolean(event.error_code) &&
-                  (!event.stage || event.stage === aiWorkflow.stage),
-              );
             const failedStageEvent = [...aiWorkflow.review_history]
               .reverse()
               .find(
@@ -2920,24 +3199,9 @@ export function AdminOcrReviewScreen({
                 </p>
                 <p className="mt-1">{failureMessage}</p>
                 <p className="mt-1">
-                  {t("ocrReview.safetyPanel.failureCodeLine", {
-                    code: failureCode ?? "UNKNOWN",
-                  })}
-                  {failureEvent?.provider
-                    ? ` · Provider ${String(failureEvent.provider)}`
-                    : ""}
-                  {failureEvent?.model
-                    ? ` · Model ${String(failureEvent.model)}`
-                    : ""}
-                  {failureEvent?.duration_ms != null
-                    ? t("ocrReview.safetyPanel.httpStatusPart", {
-                        status: "",
-                      }).replace("HTTP ", "") &&
-                      ` · ${String(failureEvent.duration_ms)} ms`
-                    : ""}
                   {t("ocrReview.safetyPanel.attemptSuffix", {
                     attempts: formatNumber(aiWorkflow.attempts),
-                  })}
+                  }).replace(/^ · /, "")}
                   {` · ${formatDateTime(aiWorkflow.updated_at)}`}
                 </p>
                 <p className="mt-1">
@@ -3037,18 +3301,20 @@ export function AdminOcrReviewScreen({
         {aiWorkflow.findings.length ? (
           <ul className="mt-2 grid gap-2.5">
             {aiWorkflow.findings.map((finding, index) => {
-              const severity = String(
+              const rawSeverity = String(
                 finding.severity ?? "REVIEW",
               ).toUpperCase();
-              const category = String(
-                finding.category ?? "OTHER_SENSITIVE",
-              ).replaceAll("_", " ");
+              const severity = formatFindingSeverityLabel(rawSeverity);
+              const category = formatFindingCategoryLabel(finding.category);
+              const contentType = formatFindingContentTypeLabel(
+                finding.content_type,
+              );
               const evidence = String(finding.evidence_text ?? "");
               const compactEvidence =
                 evidence.length > 240
                   ? evidence.slice(0, 240).trimEnd() + "…"
                   : evidence;
-              const high = severity === "HIGH";
+              const high = rawSeverity === "HIGH";
               return (
                 <li key={String(finding.finding_id ?? index)}>
                   <details
@@ -3061,12 +3327,7 @@ export function AdminOcrReviewScreen({
                   >
                     <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-2 focus-visible:outline-primary">
                       <span className="text-xs font-extrabold">{category}</span>
-                      <span className="text-xs text-muted">
-                        {String(finding.content_type ?? "MENTION").replaceAll(
-                          "_",
-                          " ",
-                        )}
-                      </span>
+                      <span className="text-xs text-muted">{contentType}</span>
                       <span
                         className={
                           "rounded-full px-2 py-0.5 text-xs font-extrabold " +
@@ -3168,18 +3429,14 @@ export function AdminOcrReviewScreen({
                 >
                   <summary className="cursor-pointer text-xs font-bold">
                     {t("ocrReview.safetyPanel.scanStatusLine", {
-                      status: String(scan.status ?? "UNKNOWN"),
-                      suitability: String(
-                        scan.suitability ??
-                          t("ocrReview.safetyPanel.noSuitabilityFallback"),
+                      status: formatSafetyStatusLabel(
+                        typeof scan.status === "string" ? scan.status : null,
                       ),
+                      suitability: scan.suitability
+                        ? formatWorkflowSuitability(String(scan.suitability))
+                        : t("ocrReview.safetyPanel.noSuitabilityFallback"),
                       count: formatNumber(historicalFindings.length),
                     })}
-                    {scan.content_hash
-                      ? t("ocrReview.safetyPanel.scanHashPrefix", {
-                          hash: String(scan.content_hash).slice(0, 12),
-                        })
-                      : t("ocrReview.safetyPanel.noHashSuffix")}
                   </summary>
                   {historicalFindings.length ? (
                     <ul className="mt-2 grid gap-2">
@@ -3189,8 +3446,8 @@ export function AdminOcrReviewScreen({
                           key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
                         >
                           <p className="font-bold">
-                            {String(finding.category ?? "OTHER_SENSITIVE")} ·{" "}
-                            {String(finding.severity ?? "UNKNOWN")}
+                            {formatFindingCategoryLabel(finding.category)} ·{" "}
+                            {formatFindingSeverityLabel(finding.severity)}
                           </p>
                           <p
                             className="viread-learning-content"
@@ -3218,54 +3475,36 @@ export function AdminOcrReviewScreen({
         <summary className="cursor-pointer text-xs font-bold text-ink">
           {t("ocrReview.safetyPanel.provenanceHeading")}
         </summary>
-        <p className="mt-1.5 break-all font-mono text-[11px] text-muted">
-          {t("ocrReview.safetyPanel.provenanceRunPrefix", {
-            runId: String(
-              aiWorkflow.proofread_metadata.run_id ?? aiWorkflow.workflow_id,
-            ),
-            promptVersion: String(
-              aiWorkflow.proofread_metadata.prompt_version ??
-                t("common.emptyDash"),
-            ),
-            duration: String(
-              aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
-            ),
-            safetyPrompt: String(
-              aiWorkflow.safety_metadata.prompt_version ??
-                t("common.emptyDash"),
-            ),
-          })}
+        <p className="mt-1.5 text-xs text-muted">
+          {t("ocrReview.safetyPanel.attemptSuffix", {
+            attempts: formatNumber(aiWorkflow.attempts),
+          }).replace(/^ · /, "")}
+          {" · "}
+          {formatDateTime(aiWorkflow.updated_at)}
         </p>
         {aiWorkflow.provider_events.length ? (
           <ul className="mt-2 grid gap-1.5 text-[11px]">
             {aiWorkflow.provider_events.map((event, index) => (
               <li
                 className="rounded-md bg-white p-2 ring-1 ring-border/70"
-                key={`${String(event.provider ?? "provider")}-${index}`}
+                key={`ai-event-${index}`}
               >
                 <span className="font-bold">
-                  {String(event.provider ?? t("common.emptyDash"))}
+                  {event.stage === "CHILD_SAFETY_SCANNING"
+                    ? "Kiểm tra an toàn"
+                    : "Kiểm tra chính tả"}
                 </span>
-                {" · "}
-                {String(event.model ?? t("common.emptyDash"))}
                 {" · "}
                 {event.availability === true
                   ? t("ocrReview.safetyPanel.providerAvailable")
                   : event.availability === false
                     ? t("ocrReview.safetyPanel.providerUnavailable")
                     : t("ocrReview.safetyPanel.providerChecking")}
-                {t("ocrReview.safetyPanel.httpStatusPart", {
-                  status: String(event.http_status ?? t("common.emptyDash")),
-                })}
-                {" · "}
-                {String(event.duration_ms ?? 0)} ms
-                {event.output_mode ? ` · ${String(event.output_mode)}` : ""}
                 {Number(event.retry_count ?? 0) > 0
                   ? t("ocrReview.safetyPanel.fallbackRetryPart", {
                       count: String(event.retry_count),
                     })
                   : ""}
-                {event.error_code ? ` · ${String(event.error_code)}` : ""}
               </li>
             ))}
           </ul>
@@ -3321,6 +3560,55 @@ export function AdminOcrReviewScreen({
         })}
       />
 
+      {!queuedOcrJob || ocrWorkerStatus.justRecovered ? (
+        <OcrServiceStatusBanner
+          body={
+            ocrWorkerStatus.status === "unreachable"
+              ? t(
+                  "books.uploader.workerUnreachableBody",
+                  undefined,
+                  "Hệ thống đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng xử lý.",
+                )
+              : t(
+                  "books.uploader.workerOfflineBody",
+                  undefined,
+                  "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
+                )
+          }
+          className="mb-4"
+          isChecking={ocrWorkerStatus.isChecking}
+          justRecovered={ocrWorkerStatus.justRecovered}
+          onDismissRecovered={ocrWorkerStatus.dismissRecoveredNotice}
+          onRecheck={() => void ocrWorkerStatus.recheckNow()}
+          queuedCount={ocrWorkerStatus.queueDepth}
+          recheckLabel={t(
+            "books.uploader.recheckWorkerBtn",
+            undefined,
+            "Kiểm tra lại kết nối OCR",
+          )}
+          recoveredMessage={t(
+            "ocrReview.notices.ocrRecoveredNotice",
+            undefined,
+            "Dịch vụ xử lý OCR đã hoạt động trở lại.",
+          )}
+          status={ocrWorkerStatus.status}
+          title={
+            ocrWorkerStatus.status === "unreachable"
+              ? t(
+                  "books.uploader.workerUnreachableTitle",
+                  undefined,
+                  "Chưa kiểm tra được trạng thái dịch vụ OCR",
+                )
+              : t(
+                  "books.uploader.workerOfflineTitle",
+                  undefined,
+                  "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
+                )
+          }
+          variant="admin"
+        />
+      ) : null}
+
       {detail.verification_status === "VERIFIED" ? (
         <StatusMessage
           title={t("ocrReview.header.verifiedBannerTitle")}
@@ -3338,29 +3626,83 @@ export function AdminOcrReviewScreen({
       ) : null}
       {queuedOcrJob ? (
         <div
-          className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
+          className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
           data-testid="admin-review-ocr-queued-banner"
           role="status"
         >
-          <Clock3
-            aria-hidden="true"
-            className="mt-0.5 size-5 shrink-0 text-amber-700"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-extrabold">
-              {queuedOcrJob.worker_online === false
-                ? t("books.detail.ocrQueueOfflineBanner", {
-                    count: formatNumber(1),
-                  })
-                : t("books.detail.ocrQueueOnlineBanner", {
-                    count: formatNumber(1),
-                  })}
-            </p>
-            <p className="mt-1 text-xs text-amber-900">
-              {queuedOcrJob.worker_online === false
-                ? t("books.detail.ocrQueueOfflineHint")
-                : t("books.detail.ocrQueueOnlineHint")}
-            </p>
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <Clock3
+              aria-hidden="true"
+              className="mt-0.5 size-5 shrink-0 text-amber-700"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold">
+                {queuedOcrJob.worker_online === false
+                  ? t("books.detail.ocrQueueOfflineBanner", {
+                      count: formatNumber(1),
+                    })
+                  : t("books.detail.ocrQueueOnlineBanner", {
+                      count: formatNumber(1),
+                    })}
+              </p>
+              <p className="mt-1 text-xs text-amber-900">
+                {queuedOcrJob.worker_online === false
+                  ? t("books.detail.ocrQueueOfflineHint")
+                  : t("books.detail.ocrQueueOnlineHint")}
+              </p>
+              <AiProgressBar
+                active={!isQueuedJobOffline}
+                className="mt-2.5"
+                elapsedSeconds={
+                  isQueuedJobOffline
+                    ? undefined
+                    : queuedOcrBarProgress.elapsedSeconds
+                }
+                label={
+                  isQueuedJobOffline
+                    ? tCommon("aiProgress.waitingWorker")
+                    : tCommon("aiProgress.ocrExtracting")
+                }
+                percent={queuedOcrBarProgress.percent}
+                size="sm"
+                testId="admin-review-ocr-queued-progress"
+                tone={isQueuedJobOffline ? "warning" : "primary"}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              data-testid="admin-review-check-ocr-now"
+              disabled={busyQueuedJobAction !== null}
+              isLoading={busyQueuedJobAction === "check"}
+              onClick={() => void checkQueuedOcrJobNow()}
+              size="admin"
+              type="button"
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
+              {t(
+                "ocrReview.queuedBanner.checkNowBtn",
+                undefined,
+                "Kiểm tra lại ngay",
+              )}
+            </Button>
+            <Button
+              data-testid="admin-review-cancel-ocr-job"
+              disabled={busyQueuedJobAction !== null}
+              isLoading={busyQueuedJobAction === "cancel"}
+              onClick={() => void cancelQueuedOcrJob()}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              <X aria-hidden="true" className="size-3.5 shrink-0" />
+              {t(
+                "ocrReview.queuedBanner.cancelBtn",
+                undefined,
+                "Hủy yêu cầu chờ",
+              )}
+            </Button>
           </div>
         </div>
       ) : null}
@@ -3651,11 +3993,28 @@ export function AdminOcrReviewScreen({
                       {t("ocrReview.draft.stopTrackingBtn")}
                     </Button>
                   </div>
-                  <progress
-                    aria-label={t("ocrReview.draft.progressAria")}
-                    className="h-2 w-full accent-purple-700"
-                    max={aiProgress?.progress.total_chunks ?? 1}
-                    value={aiProgress?.progress.completed_chunks ?? 0}
+                  <AiProgressBar
+                    active={
+                      aiProgress?.status !== "READY_FOR_ADMIN_REVIEW" &&
+                      aiProgress?.status !== "FAILED"
+                    }
+                    detail={
+                      aiProgress && aiProgress.progress.total_chunks > 0
+                        ? `${formatNumber(aiProgress.progress.completed_chunks)}/${formatNumber(aiProgress.progress.total_chunks)}`
+                        : undefined
+                    }
+                    elapsedSeconds={aiCorrectBarProgress.elapsedSeconds}
+                    label={t("ocrReview.draft.progressAria")}
+                    percent={aiCorrectBarProgress.percent}
+                    size="sm"
+                    testId="ocr-review-ai-workflow-progress"
+                    tone={
+                      aiProgress?.status === "FAILED"
+                        ? "danger"
+                        : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
+                          ? "success"
+                          : "primary"
+                    }
                   />
                   <span className="text-[11px] text-purple-900">
                     {t("ocrReview.draft.suggestionOnlyNote")}
@@ -4297,332 +4656,6 @@ export function AdminOcrReviewScreen({
                             )}
                           </div>
                         </details>
-                        <details
-                          className="mt-2 rounded-control border border-border bg-canvas"
-                          open={word.word_index === selectedWord}
-                        >
-                          <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
-                            {t("ocrReview.wordsPanel.evidenceSummaryPrefix")}
-                            {getWordScoreLabel(word, detail.ocr_metadata, t)}
-                          </summary>
-                          <section
-                            aria-label={t(
-                              "ocrReview.wordsPanel.evidenceRegionAria",
-                              { num: formatNumber(word.word_index + 1) },
-                            )}
-                            className="grid gap-1 border-t border-border px-3 py-3 text-xs"
-                          >
-                            <h3 className="text-sm font-semibold">
-                              {t("ocrReview.wordsPanel.evidenceHeading")}
-                            </h3>
-                            <span>
-                              PaddleOCR:{" "}
-                              {getEngineEvidenceDisplay(
-                                word,
-                                "paddleocr",
-                                detail.ocr_metadata,
-                                t,
-                              )}
-                            </span>
-                            <span>
-                              VietOCR:{" "}
-                              {getEngineEvidenceDisplay(
-                                word,
-                                "vietocr",
-                                detail.ocr_metadata,
-                                t,
-                              )}
-                            </span>
-                            {typeof word.ocr_evidence?.engine_outputs
-                              .paddleocr !== "string" &&
-                            getLineEngineOutput(
-                              word,
-                              "paddleocr",
-                              detail.ocr_metadata,
-                            ) ? (
-                              <span>
-                                {t("ocrReview.wordsPanel.paddleRawLineLabel")}{" "}
-                                {getLineEngineOutput(
-                                  word,
-                                  "paddleocr",
-                                  detail.ocr_metadata,
-                                )}
-                              </span>
-                            ) : null}
-                            {typeof word.ocr_evidence?.engine_outputs
-                              .vietocr !== "string" &&
-                            getLineEngineOutput(
-                              word,
-                              "vietocr",
-                              detail.ocr_metadata,
-                            ) ? (
-                              <span>
-                                {t("ocrReview.wordsPanel.vietOcrRawLineLabel")}{" "}
-                                {getLineEngineOutput(
-                                  word,
-                                  "vietocr",
-                                  detail.ocr_metadata,
-                                )}
-                              </span>
-                            ) : null}
-                            <span>
-                              Tesseract:{" "}
-                              {getEngineEvidenceDisplay(
-                                word,
-                                "tesseract",
-                                detail.ocr_metadata,
-                                t,
-                              )}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.ocrSourceTokenLine", {
-                                value:
-                                  word.ocr_evidence?.source_text ??
-                                  t("ocrReview.wordsPanel.notRecorded"),
-                              })}
-                            </span>
-                            {word.ocr_evidence?.source_text &&
-                            normalizeVietnameseWord(
-                              word.ocr_evidence.source_text,
-                            ) !== normalizeVietnameseWord(word.text) ? (
-                              <span className="text-amber-900">
-                                {t(
-                                  "ocrReview.wordsPanel.editedWordEvidenceNote",
-                                  {
-                                    sourceText: word.ocr_evidence.source_text,
-                                    currentText: word.text,
-                                  },
-                                )}
-                              </span>
-                            ) : null}
-                            <span>
-                              {t("ocrReview.wordsPanel.alignmentLine", {
-                                value:
-                                  word.ocr_evidence?.alignment ??
-                                  t("ocrReview.wordsPanel.notComputed"),
-                              })}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.agreementScoreLabel")}{" "}
-                              {word.ocr_evidence?.engine_agreement_score ===
-                                null ||
-                              word.ocr_evidence?.engine_agreement_score ===
-                                undefined
-                                ? t("ocrReview.wordsPanel.notComputed")
-                                : t("ocrReview.wordsPanel.agreementHeuristic", {
-                                    score: Math.round(
-                                      word.ocr_evidence.engine_agreement_score *
-                                        100,
-                                    ),
-                                  })}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.referenceTextLabel")}{" "}
-                              {word.ocr_evidence?.reference_text ??
-                                t("ocrReview.wordsPanel.notProvided")}
-                            </span>
-                            <span>
-                              {t(
-                                "ocrReview.wordsPanel.verificationSourceLabel",
-                              )}{" "}
-                              {word.ocr_evidence?.verification_source ??
-                                t("ocrReview.wordsPanel.noneValue")}
-                            </span>
-                            <span>
-                              {t(
-                                "ocrReview.wordsPanel.calibratedAccuracyLabel",
-                              )}{" "}
-                              {word.ocr_score_source ===
-                                "ocr_calibrated_word_accuracy_v1" &&
-                              word.ocr_confidence !== null
-                                ? `${Math.round(word.ocr_confidence * 100)}%`
-                                : t(
-                                    "ocrReview.wordsPanel.notCalibratedEvidence",
-                                  )}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.draftEngineLabel")}{" "}
-                              {word.ocr_evidence?.selected_engine ??
-                                t("ocrReview.wordsPanel.notSelected")}
-                              {t("ocrReview.wordsPanel.tempSelectionSuffix")}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.selectionReasonLabel")}{" "}
-                              {word.ocr_evidence?.selection_reason ??
-                                t("ocrReview.wordsPanel.notRecorded")}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.geometryLabel", {
-                                label: getWordGeometryLabel(word, t),
-                              })}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.punctuationLabel", {
-                                label: getWordPunctuationLabel(word, t),
-                              })}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.bboxQualityLabel")}{" "}
-                              {word.ocr_evidence?.bbox_quality ??
-                                t("ocrReview.wordsPanel.notAssessed")}
-                            </span>
-                            <span>
-                              {t("ocrReview.wordsPanel.cropQualityLabel")}{" "}
-                              {word.ocr_evidence?.crop_quality ??
-                                t("ocrReview.wordsPanel.notProcessed")}
-                            </span>
-                            {word.ocr_evidence?.crop_evidence ? (
-                              <>
-                                <span>
-                                  {t("ocrReview.wordsPanel.cropPaddleLabel")}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .paddleocr_candidate === "string"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .paddleocr_candidate
-                                    : t("ocrReview.wordsPanel.noCropCandidate")}
-                                </span>
-                                <span>
-                                  {t("ocrReview.wordsPanel.cropVietOcrLabel")}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .vietocr_candidate === "string"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .vietocr_candidate
-                                    : t("ocrReview.wordsPanel.noCropCandidate")}
-                                </span>
-                                <span>
-                                  {t("ocrReview.wordsPanel.cropTesseractLabel")}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .tesseract_candidate === "string"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .tesseract_candidate
-                                    : t("ocrReview.wordsPanel.noTesseractCrop")}
-                                </span>
-                                <span>
-                                  {t("ocrReview.wordsPanel.adjudicationLabel")}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .adjudication_status === "string"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .adjudication_status
-                                    : t("ocrReview.wordsPanel.notRecorded")}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .adjudication_support === "string" &&
-                                  word.ocr_evidence.crop_evidence
-                                    .adjudication_support
-                                    ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
-                                    : ""}
-                                </span>
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .text_before_adjudication === "string" ? (
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.textBeforeAdjudication",
-                                    )}{" "}
-                                    <span
-                                      className="viread-learning-content"
-                                      dir="ltr"
-                                      lang="vi"
-                                    >
-                                      {
-                                        word.ocr_evidence.crop_evidence
-                                          .text_before_adjudication
-                                      }
-                                    </span>
-                                  </span>
-                                ) : null}
-                                <span>
-                                  {t(
-                                    "ocrReview.wordsPanel.paddleCropRawScoreLabel",
-                                  )}{" "}
-                                  {formatRawOcrEvidence(
-                                    word.ocr_evidence.crop_evidence
-                                      .paddle_crop_recognition_score,
-                                    t,
-                                  )}
-                                  {t(
-                                    "ocrReview.wordsPanel.notProbabilitySuffix",
-                                  )}
-                                </span>
-                                <span>
-                                  {t(
-                                    "ocrReview.wordsPanel.vietOcrCropRawScoreLabel",
-                                  )}{" "}
-                                  {formatRawOcrEvidence(
-                                    word.ocr_evidence.crop_evidence
-                                      .vietocr_crop_recognition_score,
-                                    t,
-                                  )}
-                                  {t(
-                                    "ocrReview.wordsPanel.notProbabilitySuffix",
-                                  )}
-                                </span>
-                                <span>
-                                  {t("ocrReview.wordsPanel.cropStatusLabel")}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .status === "string"
-                                    ? word.ocr_evidence.crop_evidence.status
-                                    : t("ocrReview.wordsPanel.notProcessed")}
-                                </span>
-                                <span>
-                                  {t(
-                                    "ocrReview.wordsPanel.vietOcrDecodingModeLabel",
-                                  )}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .vietocr_decoding_mode === "string"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .vietocr_decoding_mode
-                                    : t("ocrReview.wordsPanel.notApplicable")}
-                                </span>
-                                <span>
-                                  {t(
-                                    "ocrReview.wordsPanel.cropContrastStdLabel",
-                                  )}{" "}
-                                  {formatRawOcrEvidence(
-                                    word.ocr_evidence.crop_evidence
-                                      .contrast_std,
-                                    t,
-                                  )}
-                                </span>
-                                <span>
-                                  {t("ocrReview.wordsPanel.inkRatioLabel")}{" "}
-                                  {formatRawOcrEvidence(
-                                    word.ocr_evidence.crop_evidence.ink_ratio,
-                                    t,
-                                  )}
-                                </span>
-                                <span>
-                                  {t(
-                                    "ocrReview.wordsPanel.paddingClippedLabel",
-                                  )}{" "}
-                                  {typeof word.ocr_evidence.crop_evidence
-                                    .padding_clipped === "boolean"
-                                    ? word.ocr_evidence.crop_evidence
-                                        .padding_clipped
-                                      ? t("ocrReview.wordsPanel.yesLabel")
-                                      : t("ocrReview.wordsPanel.noLabel")
-                                    : t("ocrReview.wordsPanel.notAssessed")}
-                                </span>
-                              </>
-                            ) : null}
-                            <span>
-                              {t("ocrReview.wordsPanel.statusReasonLabel")}{" "}
-                              {word.ocr_evidence?.review_reason ??
-                                (colorGroup === "green"
-                                  ? t(
-                                      "ocrReview.wordsPanel.greenStatusFallback",
-                                    )
-                                  : t(
-                                      "ocrReview.wordsPanel.reviewStatusFallback",
-                                    ))}
-                            </span>
-                            <span>
-                              {getPaddleLineScoreLabel(
-                                detail.ocr_metadata,
-                                word.line_index,
-                                t,
-                              )}
-                            </span>
-                          </section>
-                        </details>
                       </div>
                     );
                   })
@@ -4649,7 +4682,7 @@ export function AdminOcrReviewScreen({
                       {t(
                         "ocrReview.safetyPanel.emptyTitle",
                         undefined,
-                        "Chưa có kết quả AI Safety cho revision này",
+                        "Chưa có kết quả kiểm tra an toàn cho bản này",
                       )}
                     </h2>
                     <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
@@ -4737,7 +4770,7 @@ export function AdminOcrReviewScreen({
                     type="button"
                   >
                     <span className="text-sm font-extrabold text-ink">
-                      Revision R{formatNumber(revision.revision_no)}
+                      Bản R{formatNumber(revision.revision_no)}
                       {revision.is_current_verified ? (
                         <span className="ms-1.5 text-xs font-semibold text-primary">
                           {t("ocrReview.revisionsPanel.currentSuffix")}
@@ -4824,6 +4857,19 @@ export function AdminOcrReviewScreen({
                     {t("ocrReview.revisionsPanel.reloadDataBtn")}
                   </Button>
                 </div>
+                {busy === "reprocess" || busy === "reupload" ? (
+                  <AiProgressBar
+                    active
+                    elapsedSeconds={reprocessBarProgress.elapsedSeconds}
+                    label={
+                      reprocessBarProgress.stageLabel ??
+                      tCommon("aiProgress.ocrExtracting")
+                    }
+                    percent={reprocessBarProgress.percent}
+                    size="sm"
+                    testId="ocr-review-reprocess-progress"
+                  />
+                ) : null}
               </div>
             </section>
 
@@ -4855,58 +4901,14 @@ export function AdminOcrReviewScreen({
                 aria-label={t("ocrReview.diagnostics.ariaLabel")}
                 className="mt-2.5"
               >
-                <p className="text-xs text-muted">
-                  {t("ocrReview.diagnostics.subtitle")}
+                <p className="text-xs font-semibold text-ink">
+                  {runtimeEvidence.verified ||
+                  runtimeEvidence.modelInferenceStatus === "healthy"
+                    ? "Mô hình nhận diện đang hoạt động"
+                    : "Cần kiểm tra mô hình"}
                 </p>
-                <dl className="mt-2.5 grid gap-2 text-xs sm:grid-cols-2">
-                  <div>
-                    <dt className="font-bold text-ink">
-                      {t("ocrReview.diagnostics.actualModel")}
-                    </dt>
-                    <dd className="text-muted">
-                      {runtimeEvidence.modelProfile}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-bold text-ink">
-                      {t("ocrReview.diagnostics.loadInferenceStatus")}
-                    </dt>
-                    <dd className="text-muted">
-                      {runtimeEvidence.modelLoadStatus}
-                      {" · "}
-                      {runtimeEvidence.modelInferenceStatus}
-                    </dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="font-bold text-ink">
-                      {t("ocrReview.diagnostics.verifiedSha")}
-                    </dt>
-                    <dd className="break-all font-mono text-[11px] text-muted">
-                      {runtimeEvidence.checkpointSha256 ??
-                        t("ocrReview.diagnostics.noCheckpointEvidence")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-bold text-ink">
-                      {t("ocrReview.diagnostics.fallbackLabel")}
-                    </dt>
-                    <dd className="text-muted">
-                      {runtimeEvidence.fallbackReason ??
-                        t("ocrReview.diagnostics.noFallbackRecorded")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-bold text-ink">
-                      {t("ocrReview.diagnostics.vietocrPackageLabel")}
-                    </dt>
-                    <dd className="text-muted">
-                      {runtimeEvidence.engineVersion ??
-                        t("ocrReview.diagnostics.unknownEngineVersion")}
-                    </dd>
-                  </div>
-                </dl>
                 {!runtimeEvidence.verified ? (
-                  <p className="mt-2 text-xs text-muted">
+                  <p className="mt-1 text-xs text-muted">
                     {t("ocrReview.diagnostics.unverifiedRuntimeWarning")}
                   </p>
                 ) : null}
