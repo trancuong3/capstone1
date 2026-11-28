@@ -1585,7 +1585,9 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               editedOcrText !== null ? editedOcrText : ocrState.result.ocr_text;
             const isUnmatchedWithText =
               !ocrState.result.matched &&
-              Boolean(effectiveOcrText.trim() || ocrState.result.ocr_text.trim());
+              Boolean(
+                effectiveOcrText.trim() || ocrState.result.ocr_text.trim(),
+              );
             const isOcrTextEdited =
               editedOcrText !== null &&
               editedOcrText.trim() !== ocrState.result.ocr_text.trim();

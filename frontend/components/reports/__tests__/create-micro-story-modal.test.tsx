@@ -177,9 +177,9 @@ describe("CreateMicroStoryModal", () => {
       />,
     );
 
-    expect(await screen.findByTestId("micro-story-quota-badge")).toHaveTextContent(
-      "2/2",
-    );
+    expect(
+      await screen.findByTestId("micro-story-quota-badge"),
+    ).toHaveTextContent("2/2");
     expect(screen.getByTestId("micro-story-selected-count")).toHaveTextContent(
       "4/5",
     );
@@ -237,7 +237,9 @@ describe("CreateMicroStoryModal", () => {
     );
 
     expect(
-      await screen.findByText(/Hôm nay bé đã tạo đủ số truyện tranh mini miễn phí/i),
+      await screen.findByText(
+        /Hôm nay bé đã tạo đủ số truyện tranh mini miễn phí/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("generate-micro-story-submit")).toBeDisabled();
     expect(service.generateStory).not.toHaveBeenCalled();

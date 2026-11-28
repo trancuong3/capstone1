@@ -104,7 +104,11 @@ export function buildLocalPreviewExplanation(
   rawWord: string,
   grade: number | null | undefined,
 ): WordExplainDTO {
-  const cleanWord = rawWord.normalize("NFC").trim().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "") || rawWord.trim();
+  const cleanWord =
+    rawWord
+      .normalize("NFC")
+      .trim()
+      .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "") || rawWord.trim();
   const normalized = cleanWord.toLowerCase();
   const gradeBand: GlossaryGradeBand =
     typeof grade === "number" && grade >= 3 ? "GRADE_3_5" : "GRADE_1_2";
@@ -179,7 +183,9 @@ export function createVocabularyNotebookService(): VocabularyNotebookService {
           method: "POST",
           body: {
             word: input.word,
-            ...(input.definition_vi ? { definition_vi: input.definition_vi } : {}),
+            ...(input.definition_vi
+              ? { definition_vi: input.definition_vi }
+              : {}),
             ...(input.example_sentence_vi
               ? { example_sentence_vi: input.example_sentence_vi }
               : {}),

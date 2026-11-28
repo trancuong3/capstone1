@@ -30,15 +30,15 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   applyGlobalTeacherVoiceSelection,
-  clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
   getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
-  lockSessionVoice,
+  isSyntheticClientVoiceSessionId,
   setVoicePolicyPreferences,
   subscribeVoiceLock,
   subscribeVoicePolicy,
@@ -51,6 +51,7 @@ import {
   SPEED_MIN,
   SPEED_STEP,
   getSpeechPreferences,
+  type setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import {
   fetchVoiceEngineHealth,
@@ -184,7 +185,7 @@ export function ReadingVoiceSettings({
     [appServices?.childService],
   );
   const selectedChildId = childId ?? appStore?.selectedChildId ?? null;
-  const { preferences, update } = useSpeechPreferences();
+  const { preferences } = useSpeechPreferences();
   const teacherPersona = useTeacherPersona();
   const policy = useSyncExternalStore(
     subscribeVoicePolicy,
@@ -254,40 +255,6 @@ export function ReadingVoiceSettings({
     void fetchVoiceEngineHealth(controller.signal);
   }, []);
 
-  const syncPausedSessionLock = useCallback(
-    (nextVoiceId?: string | null, nextSpeed?: number, modelVer?: string) => {
-      const activeLock = getActiveSessionVoiceLock();
-      if (!activeLock) return;
-      const updatedLock = lockSessionVoice(activeLock.sessionId, {
-        voiceId:
-          nextVoiceId !== undefined
-            ? nextVoiceId
-            : getSpeechPreferences().voiceId,
-        speed:
-          nextSpeed !== undefined ? nextSpeed : getSpeechPreferences().speed,
-        modelVersion: modelVer,
-        forceUpdate: true,
-      });
-      // Explicitly resync server-side SessionVoiceLock so subsequent playback
-      // never hits 409 SESSION_VOICE_LOCKED after an intentional paused voice change.
-      if (
-        updatedLock.voiceId !== activeLock.voiceId &&
-        typeof voiceStudio.updateSessionVoiceLock === "function"
-      ) {
-        void voiceStudio
-          .updateSessionVoiceLock({
-            sessionId: activeLock.sessionId,
-            voiceId: updatedLock.voiceId,
-          })
-          .then(() => {
-            clearPendingSessionVoiceSwitch(activeLock.sessionId);
-          })
-          .catch(() => undefined);
-      }
-    },
-    [voiceStudio],
-  );
-
   const buildVoiceContextKey = useCallback(
     (healthSnap = getCachedVoiceEngineHealth()) => {
       const currentPolicy = getVoicePolicyPreferences();
@@ -323,6 +290,23 @@ export function ReadingVoiceSettings({
                   (v) => resolveVoiceGender(v.voice_id, v.gender) === "male",
                 )
               : undefined;
+          const persistRemovedFallback =
+            selectedChildId &&
+            typeof childService.updateVoicePreferences === "function"
+              ? (
+                  cid: string,
+                  payload: Parameters<
+                    NonNullable<typeof childService.updateVoicePreferences>
+                  >[1],
+                ) => childService.updateVoicePreferences!(cid, payload)
+              : undefined;
+          const syncRemovedSessionLock =
+            typeof voiceStudio.updateSessionVoiceLock === "function"
+              ? (lockInput: {
+                  readonly sessionId: string;
+                  readonly voiceId: string;
+                }) => voiceStudio.updateSessionVoiceLock!(lockInput)
+              : undefined;
           if (sameGenderReplacement) {
             applyGlobalTeacherVoiceSelection({
               voiceId: sameGenderReplacement.voice_id,
@@ -334,10 +318,20 @@ export function ReadingVoiceSettings({
               region:
                 resolveVoiceRegion(sameGenderReplacement) ??
                 getVoicePolicyPreferences().region,
+              childId: selectedChildId,
+              persistToBackend: persistRemovedFallback,
+              syncActiveServerSessionLock: syncRemovedSessionLock,
             });
           } else {
-            update({ voiceId: null, gender: "female" });
-            syncPausedSessionLock(null);
+            applyGlobalTeacherVoiceSelection({
+              voiceId: data.default_voice_id,
+              storedVoiceId: null,
+              gender: "female",
+              region: "north",
+              childId: selectedChildId,
+              persistToBackend: persistRemovedFallback,
+              syncActiveServerSessionLock: syncRemovedSessionLock,
+            });
           }
         }
         setLoadState({ status: "ready", data });
@@ -346,10 +340,16 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update, syncPausedSessionLock, t, buildVoiceContextKey]);
+  }, [
+    voiceStudio,
+    selectedChildId,
+    childService,
+    t,
+    buildVoiceContextKey,
+  ]);
 
   function change(
-    value: Parameters<typeof update>[0],
+    value: Parameters<typeof setSpeechPreferences>[0],
     selectedOption?: VoiceOption,
   ) {
     previewGenerationRef.current += 1;
@@ -516,7 +516,11 @@ export function ReadingVoiceSettings({
     if (nextTab === "all") return;
     // During an active locked reading session, switching region tabs ONLY filters
     // the visible list so browsing regions never silently alters the locked voice.
-    if (getActiveSessionVoiceLock() !== null) {
+    const currentLock = getActiveSessionVoiceLock();
+    if (
+      currentLock !== null &&
+      !isSyntheticClientVoiceSessionId(currentLock.sessionId)
+    ) {
       return;
     }
     setVoicePolicyPreferences({ region: nextTab });
@@ -576,7 +580,12 @@ export function ReadingVoiceSettings({
 
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
-  const selectedVoiceId = preferences.voiceId ?? defaultVoiceId;
+  const selectedVoiceId =
+    preferences.voiceId ?? defaultVoiceId ?? getEffectiveVoiceId();
+  const hasRealReadingSessionLock = Boolean(
+    activeSessionLock &&
+    !isSyntheticClientVoiceSessionId(activeSessionLock.sessionId),
+  );
   const isYouthful = (voice: VoiceOption) =>
     ["young", "young_adult", "youthful"].includes(
       voice.age?.toLowerCase() ?? "",
@@ -667,7 +676,10 @@ export function ReadingVoiceSettings({
                   setIsSynthesizingPreview(true);
                   const previewText = adaptTextToTeacherPersona(
                     PREVIEW_TEXT,
-                    resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                    resolveVoiceGender(
+                      selectedVoiceId,
+                      selectedVoice?.gender ?? teacherPersona.gender,
+                    ),
                   );
                   void Promise.resolve()
                     .then(() => onPreview(previewText))
@@ -789,11 +801,11 @@ export function ReadingVoiceSettings({
                 ? t("settings.localOnlyMode")
                 : t("settings.localWithGoogleMode")}
             </div>
-            {activeSessionLock ||
+            {hasRealReadingSessionLock ||
             !isBrowserOnline ||
             isAndroidNativeSpeechAvailable() ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
-                {activeSessionLock ? (
+                {hasRealReadingSessionLock ? (
                   <span
                     data-testid="session-voice-lock-badge"
                     className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"

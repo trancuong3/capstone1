@@ -961,6 +961,7 @@ function ReadingSessionScreen({
   const retryResumeAfterAssistantAudioRef = useRef<RetryWordCandidate | null>(
     null,
   );
+  const isVoicePreviewPlayingRef = useRef(false);
   const retryCaptureStartedAtRef = useRef(0);
   const retrySpeechOnsetRef = useRef<number | null>(null);
   const retrySpeechObservedRef = useRef(false);

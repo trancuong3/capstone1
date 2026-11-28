@@ -12,12 +12,15 @@ import {
 } from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
+  approveSessionVoiceSwitch,
+  clearPendingSessionVoiceSwitch,
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
+  isSyntheticClientVoiceSessionId,
 } from "@/lib/reading/session-voice-lock";
 import {
   DEFAULT_SPEED,
@@ -268,7 +271,13 @@ export function createVoiceStudioService(): VoiceStudioService {
     async updateSessionVoiceLock({ sessionId, voiceId, signal }) {
       const cleanSessionId = sessionId.trim();
       const cleanVoiceId = voiceId.trim();
-      if (!cleanSessionId || !cleanVoiceId) return;
+      if (
+        !cleanSessionId ||
+        !cleanVoiceId ||
+        isSyntheticClientVoiceSessionId(cleanSessionId)
+      ) {
+        return;
+      }
       const policy = getVoicePolicyPreferences();
       await request(
         "/voice/session-lock",
@@ -295,6 +304,11 @@ export function createVoiceStudioService(): VoiceStudioService {
       const activeLock = options.bypassSessionLock
         ? null
         : getActiveSessionVoiceLock();
+      const sessionId =
+        activeLock?.sessionId &&
+        !isSyntheticClientVoiceSessionId(activeLock.sessionId)
+          ? activeLock.sessionId
+          : null;
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
@@ -326,7 +340,7 @@ export function createVoiceStudioService(): VoiceStudioService {
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
-          : inferModelVersionForVoiceId(cacheVoiceId);
+          : inferModelVersionForVoiceId(cacheVoiceId, policy.modelVersion);
       const cacheSpeed = resolvedRequestSpeed ?? speechPrefs.speed;
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
@@ -372,47 +386,65 @@ export function createVoiceStudioService(): VoiceStudioService {
         }
       }
 
-      const { payload, headers } = await requestWithHeaders(
-        "/voice/text-to-speech/timed",
-        {
-          method: "POST",
-          headers: {
-            Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
-            ...(hasPendingSessionVoiceSwitch(activeLock?.sessionId)
-              ? { "X-Voice-Lock-Update": "1" }
-              : {}),
+      const timedBody = JSON.stringify({
+        words,
+        ...(resolvedRequestVoiceId ? { voice_id: resolvedRequestVoiceId } : {}),
+        ...(resolvedRequestSpeed !== undefined
+          ? { speed: resolvedRequestSpeed }
+          : {}),
+        ...(options.audioFormat ? { audio_format: options.audioFormat } : {}),
+        ...(policy.providerMode !== "local_only"
+          ? { provider_mode: policy.providerMode }
+          : {}),
+        ...(policy.allowGoogleTtsFallback ? { allow_google_tts: true } : {}),
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...(options.bookId ? { book_id: options.bookId } : {}),
+        ...(options.pageId ? { page_id: options.pageId } : {}),
+        ...(options.pageRevisionId
+          ? { page_revision_id: options.pageRevisionId }
+          : {}),
+        ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
+      });
+      const sendTimedTts = (sendLockUpdate: boolean) =>
+        requestWithHeaders(
+          "/voice/text-to-speech/timed",
+          {
+            method: "POST",
+            headers: {
+              Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+              ...(sendLockUpdate ? { "X-Voice-Lock-Update": "1" } : {}),
+            },
+            body: timedBody,
           },
-          body: JSON.stringify({
-            words,
-            ...(resolvedRequestVoiceId
-              ? { voice_id: resolvedRequestVoiceId }
-              : {}),
-            ...(resolvedRequestSpeed !== undefined
-              ? { speed: resolvedRequestSpeed }
-              : {}),
-            ...(options.audioFormat
-              ? { audio_format: options.audioFormat }
-              : {}),
-            ...(policy.providerMode !== "local_only"
-              ? { provider_mode: policy.providerMode }
-              : {}),
-            ...(policy.allowGoogleTtsFallback
-              ? { allow_google_tts: true }
-              : {}),
-            ...(activeLock?.sessionId
-              ? { session_id: activeLock.sessionId }
-              : {}),
-            ...(options.bookId ? { book_id: options.bookId } : {}),
-            ...(options.pageId ? { page_id: options.pageId } : {}),
-            ...(options.pageRevisionId
-              ? { page_revision_id: options.pageRevisionId }
-              : {}),
-            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
-          }),
-        },
-        options.signal,
-        options.timeoutMs,
-      );
+          options.signal,
+          options.timeoutMs,
+        );
+      let sentLockUpdate = hasPendingSessionVoiceSwitch(sessionId);
+      let payload: unknown;
+      let headers: Headers;
+      try {
+        ({ payload, headers } = await sendTimedTts(sentLockUpdate));
+      } catch (error) {
+        const targetVoiceId = resolvedRequestVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        if (
+          sessionId &&
+          !sentLockUpdate &&
+          speechMeta.globalSelectionUpdatedAt > 0 &&
+          targetVoiceId === effectiveVoiceId &&
+          error instanceof ServiceError &&
+          error.status === 409 &&
+          error.providerCode === "SESSION_VOICE_LOCKED"
+        ) {
+          approveSessionVoiceSwitch(sessionId);
+          sentLockUpdate = true;
+          ({ payload, headers } = await sendTimedTts(true));
+        } else {
+          throw error;
+        }
+      }
+      if (sentLockUpdate && sessionId) {
+        clearPendingSessionVoiceSwitch(sessionId);
+      }
       const parsed = timedSpeechSchema.safeParse(payload);
       if (!parsed.success || parsed.data.words.length !== words.length) {
         throw failure(502);

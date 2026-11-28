@@ -360,30 +360,6 @@ export function AiTeacherVoiceSection({
     };
   }, [speechPlayer.state]);
 
-  useEffect(() => {
-    if (
-      process.env.NODE_ENV === "test" ||
-      localWorkerReady !== true ||
-      typeof speechPlayerRef.current.prefetch !== "function"
-    ) {
-      return;
-    }
-    const controller = new AbortController();
-    const greeting = adaptTextToTeacherPersona(
-      TEACHER_VOICE_PREVIEW_BASE_TEXT,
-      activeGender,
-    );
-    void speechPlayerRef.current
-      .prefetch(greeting, {
-        coaching: true,
-        signal: controller.signal,
-      })
-      .catch(() => undefined);
-    return () => {
-      controller.abort();
-    };
-  }, [activeGender, activeVoiceId, localWorkerReady, preferences.speed]);
-
   const persistChildVoice = useCallback(
     async (
       childId: string,

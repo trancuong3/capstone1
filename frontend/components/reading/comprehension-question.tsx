@@ -38,6 +38,7 @@ import {
   getEffectiveTeacherPersona,
   getEffectiveVoiceId,
   lockSessionVoice,
+  setActiveVoiceSession,
 } from "@/lib/reading/session-voice-lock";
 import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
@@ -336,6 +337,7 @@ export function ComprehensionQuestion({
     return () => {
       mountedRef.current = false;
       window.removeEventListener("pagehide", handlePageHide);
+      setActiveVoiceSession(null);
       cleanupVoice();
     };
   }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer, sessionId]);

@@ -98,7 +98,10 @@ export function CreateMicroStoryModal({
   }, [childrenProfiles, explicitChild, fetchedChildren]);
 
   const activeChild = useMemo(() => {
-    if (explicitChild && (!selectedChildId || selectedChildId === explicitChild.id)) {
+    if (
+      explicitChild &&
+      (!selectedChildId || selectedChildId === explicitChild.id)
+    ) {
       return explicitChild;
     }
     return (
@@ -239,7 +242,10 @@ export function CreateMicroStoryModal({
   }
 
   function handleAddCustomWord() {
-    const cleaned = customWordInput.normalize("NFC").trim().replace(/\s+/g, " ");
+    const cleaned = customWordInput
+      .normalize("NFC")
+      .trim()
+      .replace(/\s+/g, " ");
     if (!cleaned || cleaned.length < 2) return;
     const norm = normalizeWordKey(cleaned);
     if (!norm) return;
@@ -385,7 +391,10 @@ export function CreateMicroStoryModal({
           <div className="flex flex-wrap items-center justify-between gap-2">
             {preview ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-subtle px-3 py-1 text-xs font-extrabold text-ink">
-                <Sparkles aria-hidden="true" className="size-3.5 text-primary" />
+                <Sparkles
+                  aria-hidden="true"
+                  className="size-3.5 text-primary"
+                />
                 {preview.child_alias} ·{" "}
                 {t("gradeBadge", { grade: preview.child_grade })}
               </span>
@@ -424,7 +433,10 @@ export function CreateMicroStoryModal({
           <div className="flex flex-col gap-3 rounded-card border border-border bg-canvas/60 p-4">
             <p className="font-extrabold text-ink">{t("noChildrenTitle")}</p>
             <p className="text-muted">{t("noChildrenBody")}</p>
-            <ButtonLink className="sm:w-auto sm:self-start" href="/children/new">
+            <ButtonLink
+              className="sm:w-auto sm:self-start"
+              href="/children/new"
+            >
               {t("createChildAction")}
             </ButtonLink>
           </div>
@@ -537,10 +549,7 @@ export function CreateMicroStoryModal({
           /* Word customization & generation form */
           <>
             {isQuotaExceeded ? (
-              <StatusMessage
-                title={t("quotaExceededTitle")}
-                tone="warning"
-              >
+              <StatusMessage title={t("quotaExceededTitle")} tone="warning">
                 {t("quotaExceededBody", {
                   limit: activeQuota?.daily_limit ?? 2,
                   alias: activeChild?.alias ?? "",
@@ -591,9 +600,15 @@ export function CreateMicroStoryModal({
                       type="button"
                     >
                       {isSelected ? (
-                        <Check aria-hidden="true" className="size-3.5 shrink-0" />
+                        <Check
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
                       ) : (
-                        <Plus aria-hidden="true" className="size-3.5 shrink-0 text-muted" />
+                        <Plus
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 text-muted"
+                        />
                       )}
                       <span
                         className="viread-learning-content text-sm font-extrabold"

@@ -475,7 +475,10 @@ export function EntertainmentScreen({
       ? activeChildNotebook.storytelling_words
       : activeChildNotebook.items.map((item) => item.word);
     return candidates
-      .filter((w) => Boolean(w.trim()) && !difficultNormSet.has(w.trim().toLowerCase()))
+      .filter(
+        (w) =>
+          Boolean(w.trim()) && !difficultNormSet.has(w.trim().toLowerCase()),
+      )
       .slice(0, 3);
   }, [activeChildNotebook, recommendations?.focus_difficult_words]);
 

@@ -9,7 +9,14 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import type { SpeechPlayer } from "@/hooks/use-speech-player";
@@ -276,7 +283,10 @@ export function VocabularyNotebookDrawer({
               data-testid="notebook-storytelling-bridge"
             >
               <p className="flex items-center gap-1.5 text-xs font-extrabold text-amber-950">
-                <Sparkles aria-hidden="true" className="size-4 text-amber-600" />
+                <Sparkles
+                  aria-hidden="true"
+                  className="size-4 text-amber-600"
+                />
                 {tGlossary("storyPromptBanner")}{" "}
                 <span className="viread-learning-content" dir="ltr" lang="vi">
                   {storyWords.join(", ")}
@@ -366,7 +376,10 @@ export function VocabularyNotebookDrawer({
                             </>
                           ) : (
                             <>
-                              <Volume2 aria-hidden="true" className="size-3.5" />
+                              <Volume2
+                                aria-hidden="true"
+                                className="size-3.5"
+                              />
                               {tGlossary("listenItem")}
                             </>
                           )}

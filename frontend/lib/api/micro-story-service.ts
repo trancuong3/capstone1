@@ -85,9 +85,13 @@ export const microStoryGenerateResponseSchema = z.object({
 });
 
 export type MicroStoryQuotaDTO = z.infer<typeof microStoryQuotaSchema>;
-export type MicroStoryTargetWordDTO = z.infer<typeof microStoryTargetWordSchema>;
+export type MicroStoryTargetWordDTO = z.infer<
+  typeof microStoryTargetWordSchema
+>;
 export type MicroStoryPreviewDTO = z.infer<typeof microStoryPreviewSchema>;
-export type MicroStoryPageSummaryDTO = z.infer<typeof microStoryPageSummarySchema>;
+export type MicroStoryPageSummaryDTO = z.infer<
+  typeof microStoryPageSummarySchema
+>;
 export type MicroStoryComprehensionItemDTO = z.infer<
   typeof microStoryComprehensionItemSchema
 >;

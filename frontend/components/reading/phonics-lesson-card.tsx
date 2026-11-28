@@ -450,7 +450,9 @@ export function PhonicsLessonCard({
               <Button
                 className="w-auto!"
                 disabled={isPlayingPhonics || isListeningRetry}
-                onClick={isPlayingWord && onStopAudio ? onStopAudio : onPlayWord}
+                onClick={
+                  isPlayingWord && onStopAudio ? onStopAudio : onPlayWord
+                }
                 size="compact"
                 variant="secondary"
               >
@@ -830,10 +832,8 @@ export function PhonicsLessonCard({
             const stillSaved = updated.items.some(
               (entry) =>
                 entry.normalized_word ===
-                (
-                  currentExplanation?.normalized_word ||
-                  targetWord.toLowerCase()
-                ),
+                (currentExplanation?.normalized_word ||
+                  targetWord.toLowerCase()),
             );
             if (!stillSaved) {
               setSavedOverrideKey(null);

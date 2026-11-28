@@ -2286,13 +2286,19 @@ export function PictureDescriptionScreen({
                       handleInsertVocabWord(word);
                     } else if (calmSound) {
                       void speechPlayer
-                        .play(word, { wordSample: true, bypassSessionLock: true })
+                        .play(word, {
+                          wordSample: true,
+                          bypassSessionLock: true,
+                        })
                         .catch(() => undefined);
                     }
                   }}
                   type="button"
                 >
-                  <Sparkles aria-hidden="true" className="size-3 text-amber-600" />
+                  <Sparkles
+                    aria-hidden="true"
+                    className="size-3 text-amber-600"
+                  />
                   {word}
                 </button>
               ))

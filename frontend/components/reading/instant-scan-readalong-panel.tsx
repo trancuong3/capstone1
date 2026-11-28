@@ -394,14 +394,7 @@ export function InstantScanReadAlongPanel({
       setTtsMode("idle");
       setTtsError(t("scanInstant.panel.ttsError"));
     }
-  }, [
-    ocrText,
-    speechPlayer,
-    speechRecorder,
-    stopLiveRecognition,
-    t,
-    words,
-  ]);
+  }, [ocrText, speechPlayer, speechRecorder, stopLiveRecognition, t, words]);
 
   const handleSelectWord = useCallback(
     (index: number) => {
@@ -439,13 +432,7 @@ export function InstantScanReadAlongPanel({
       setTtsMode("idle");
       setTtsError(t("scanInstant.panel.ttsError"));
     }
-  }, [
-    selectedWord,
-    speechPlayer,
-    speechRecorder,
-    stopLiveRecognition,
-    t,
-  ]);
+  }, [selectedWord, speechPlayer, speechRecorder, stopLiveRecognition, t]);
 
   const handlePlaySelectedPhonics = useCallback(async () => {
     if (!activePhonicsLesson || !activePhonicsLesson.supported) return;
@@ -874,11 +861,9 @@ export function InstantScanReadAlongPanel({
               const wordState = alignmentSnapshot.statusByWordId.get(
                 word.word_id,
               );
-              const isPreviewMatch = alignmentSnapshot.previewMatchedWordIds.has(
-                word.word_id,
-              );
-              const isMatched =
-                wordState?.status === "MATCH" || isPreviewMatch;
+              const isPreviewMatch =
+                alignmentSnapshot.previewMatchedWordIds.has(word.word_id);
+              const isMatched = wordState?.status === "MATCH" || isPreviewMatch;
               const isRepeated = wordState?.status === "REPEATED";
               const isNeedsPractice =
                 wordState?.status === "SUBSTITUTE" ||

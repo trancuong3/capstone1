@@ -123,13 +123,19 @@ export function getTeacherPersonaForVoice(
 const QUOTED_SPAN_RE = /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
 
 const NON_TEACHER_CO_FOLLOWERS =
-  "(?!\\s+(?:bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
+  "(?!\\s+(?:thầy|Thầy|THẦY|bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
 
 const NON_TEACHER_THAY_FOLLOWERS =
-  "(?!\\s+(?:cô|Cô|thuốc|bói|đồ|tu|cúng|lang|pháp|phù\\s+thủy|địa|chùa)(?=$|[^\\p{L}]))";
+  "(?!\\s+(?:cô|Cô|CÔ|thuốc|bói|đồ|tu|cúng|lang|pháp|phù\\s+thủy|địa|chùa)(?=$|[^\\p{L}]))";
 
-const CO_GIAO_CAP_RE = new RegExp(`(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`, "gu");
-const CO_GIAO_LOW_RE = new RegExp(`(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`, "gu");
+const CO_GIAO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)Cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const CO_GIAO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
 const CO_CAP_RE = new RegExp(
   `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
   "gu",
@@ -140,11 +146,11 @@ const CO_LOW_RE = new RegExp(
 );
 
 const THAY_GIAO_CAP_RE = new RegExp(
-  `(^|[^\\p{L}])Thầy giáo(?=$|[^\\p{L}])`,
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)Thầy giáo(?=$|[^\\p{L}])`,
   "gu",
 );
 const THAY_GIAO_LOW_RE = new RegExp(
-  `(^|[^\\p{L}])thầy giáo(?=$|[^\\p{L}])`,
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)thầy giáo(?=$|[^\\p{L}])`,
   "gu",
 );
 const THAY_CAP_RE = new RegExp(

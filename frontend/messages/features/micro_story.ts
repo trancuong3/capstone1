@@ -21,7 +21,8 @@ export const microStoryVi = {
     "Bé mới có ít lịch sử từ khó nên hệ thống đã gợi ý thêm các từ luyện vần phù hợp Lớp {grade} (GDPT 2018).",
   targetWordsHeading: "Chọn 3–5 từ khó để lồng ghép tự nhiên vào truyện",
   selectedCountBadge: "Đã chọn {count}/5 từ",
-  minMaxWordsHint: "Hãy giữ từ 3 đến 5 từ để câu chuyện 4 trang vừa sức với bé.",
+  minMaxWordsHint:
+    "Hãy giữ từ 3 đến 5 từ để câu chuyện 4 trang vừa sức với bé.",
   sourceWeakWord: "Từ cần ôn",
   sourceColdStart: "Gợi ý lớp {grade}",
   sourceCustom: "Ba mẹ thêm",
@@ -39,7 +40,8 @@ export const microStoryVi = {
     "Hãy tạo hồ sơ cho bé trước để hệ thống chọn đúng từ khó và độ tuổi tiểu học.",
   createChildAction: "Tạo hồ sơ cho bé",
   loadingPreview: "Đang chuẩn bị danh sách từ khó và hạn mức hôm nay của bé...",
-  progressStageWords: "Đang chọn lọc 3–5 từ khó và kiểm tra an toàn nội dung...",
+  progressStageWords:
+    "Đang chọn lọc 3–5 từ khó và kiểm tra an toàn nội dung...",
   progressStageStory: "Đang viết cốt truyện 4 trang phù hợp độ tuổi của bé...",
   progressStageArt: "Đang vẽ 4 tranh minh họa đồng nhất không chứa chữ...",
   progressStageSave: "Đang lưu sách riêng tư và tạo câu hỏi đọc hiểu...",
@@ -78,7 +80,8 @@ export const microStoryEn = {
     "Because tricky-word history is still light, Grade {grade} Vietnamese phonics words were added.",
   targetWordsHeading: "Choose 3–5 target words to weave into the 4-page story",
   selectedCountBadge: "{count}/5 words selected",
-  minMaxWordsHint: "Keep between 3 and 5 words so the 4-page story stays balanced.",
+  minMaxWordsHint:
+    "Keep between 3 and 5 words so the 4-page story stays balanced.",
   sourceWeakWord: "Due review",
   sourceColdStart: "Grade {grade} pick",
   sourceCustom: "Parent custom",

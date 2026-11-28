@@ -320,6 +320,12 @@ function isLocalVoiceUnavailableHealth(): boolean {
   );
 }
 
+function resolveVoicePreviewTimeoutMs(): number {
+  return isLocalVoiceUnconfiguredHealth() || isLocalVoiceUnavailableHealth()
+    ? 4_500
+    : 12_000;
+}
+
 /**
  * Dynamic/uncached practice prompts (e.g. interpolated per-word prompts, private
  * book cues, or plain non-catalog prompts without explicit cache targets) are
@@ -2137,6 +2143,8 @@ export class TtsPlayback {
       readonly coaching?: boolean;
       readonly wordSample?: boolean;
       readonly speedScale?: number;
+      readonly bypassSessionLock?: boolean;
+      readonly cacheScope?: TtsCacheScope | null;
       readonly signal?: AbortSignal;
     } = {},
   ): Promise<void> => {
@@ -2150,11 +2158,16 @@ export class TtsPlayback {
     const voice = resolveOperationVoice(
       Infinity,
       options.speedScale ?? 1,
-      Boolean(this.defaultCacheContext?.bypassSessionLock),
+      Boolean(
+        options.bypassSessionLock ||
+        this.defaultCacheContext?.bypassSessionLock,
+      ),
     );
     const hasCacheTarget = Boolean(
       options.coaching ||
       options.wordSample ||
+      options.cacheScope === "CATALOG" ||
+      options.cacheScope === "COACHING" ||
       this.defaultCacheContext?.bookId ||
       this.defaultCacheContext?.pageId ||
       this.defaultCacheContext?.pageRevisionId,
@@ -2404,84 +2417,122 @@ export class TtsPlayback {
             options.wordSample ? "CATALOG" : "COACHING",
             true,
           );
+          let resolveSharedInFlight:
+            | ((
+                val: {
+                  readonly audio: Blob;
+                  readonly usedFallbackVoice: boolean;
+                  readonly cachedSpeed: number | null;
+                } | null,
+              ) => void)
+            | null = null;
+          let sharedInFlightPromise: Promise<{
+            readonly audio: Blob;
+            readonly usedFallbackVoice: boolean;
+            readonly cachedSpeed: number | null;
+          } | null> | null = null;
+          if (audioFormat === undefined) {
+            sharedInFlightPromise = new Promise((resolve) => {
+              resolveSharedInFlight = resolve;
+            });
+            this.inFlightShortPrefetch.set(shortKey, sharedInFlightPromise);
+          }
           let source: Blob;
           let forcedFallbackVoice = false;
           try {
-            source = await this.wait(
-              operation,
-              this.speech.synthesize(normalized, {
-                voiceId: operation.voice.requestedVoiceId ?? undefined,
-                speed: operation.voice.speed,
-                wordSample: Boolean(options.wordSample),
-                ...(audioFormat ? { audioFormat } : {}),
-                ...(operation.voice.bypassSessionLock
-                  ? { bypassSessionLock: true }
-                  : {}),
-                ...(operation.voice.utteranceKind === "voice_preview"
-                  ? { timeoutMs: 4_500 }
-                  : {}),
-                ...cacheMeta,
-                signal: operation.controller.signal,
-              }),
-            );
-          } catch (error) {
-            this.ensure(operation);
-            if (isAbort(error)) throw error;
-            if (
-              completedChunks === 0 &&
-              shouldRetryBackendWithGoogleTts(operation, error)
-            ) {
-              if (operation.voice.sessionId) {
-                approveSessionVoiceSwitch(operation.voice.sessionId);
-              }
-              const googleVoiceId = mapLocalVoiceToGoogleBackup(
-                operation.voice.requestedVoiceId,
-                operation.voice.region,
-              );
+            try {
               source = await this.wait(
                 operation,
                 this.speech.synthesize(normalized, {
-                  voiceId: googleVoiceId,
+                  voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
                   wordSample: Boolean(options.wordSample),
                   ...(audioFormat ? { audioFormat } : {}),
                   ...(operation.voice.bypassSessionLock
                     ? { bypassSessionLock: true }
                     : {}),
+                  ...(operation.voice.utteranceKind === "voice_preview"
+                    ? { timeoutMs: resolveVoicePreviewTimeoutMs() }
+                    : {}),
                   ...cacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
+            } catch (error) {
               this.ensure(operation);
-              this.promoteOperationToGoogleVoice(operation, googleVoiceId);
-              forcedFallbackVoice = true;
-            } else {
-              throw error;
+              if (isAbort(error)) throw error;
+              if (
+                completedChunks === 0 &&
+                shouldRetryBackendWithGoogleTts(operation, error)
+              ) {
+                if (operation.voice.sessionId) {
+                  approveSessionVoiceSwitch(operation.voice.sessionId);
+                }
+                const googleVoiceId = mapLocalVoiceToGoogleBackup(
+                  operation.voice.requestedVoiceId,
+                  operation.voice.region,
+                );
+                source = await this.wait(
+                  operation,
+                  this.speech.synthesize(normalized, {
+                    voiceId: googleVoiceId,
+                    speed: operation.voice.speed,
+                    wordSample: Boolean(options.wordSample),
+                    ...(audioFormat ? { audioFormat } : {}),
+                    ...(operation.voice.bypassSessionLock
+                      ? { bypassSessionLock: true }
+                      : {}),
+                    ...cacheMeta,
+                    signal: operation.controller.signal,
+                  }),
+                );
+                this.ensure(operation);
+                this.promoteOperationToGoogleVoice(operation, googleVoiceId);
+                forcedFallbackVoice = true;
+              } else {
+                throw error;
+              }
+            }
+            this.ensure(operation);
+            const resolvedKey = makeKey();
+            const sourceMeta = getSynthesizedAudioMeta(source);
+            const cachedSpeed = sourceMeta?.cachedSpeed ?? null;
+            const usedFallbackVoice =
+              forcedFallbackVoice || Boolean(sourceMeta?.usedFallbackVoice);
+            if (options.wordSample) {
+              source = await this.wait(
+                operation,
+                prepareWordSampleAudio(source),
+              );
+              if (sourceMeta) {
+                setSynthesizedAudioMeta(source, sourceMeta);
+              }
+            }
+            const cachedEntry = {
+              audio: source,
+              usedFallbackVoice,
+              cachedSpeed,
+            };
+            this.cacheShort(resolvedKey, cachedEntry);
+            resolveSharedInFlight?.(
+              resolvedKey === shortKey ? cachedEntry : null,
+            );
+            resolveSharedInFlight = null;
+            return {
+              audio: source,
+              usedFallbackVoice,
+              cachedSpeed,
+              key: resolvedKey,
+            };
+          } finally {
+            resolveSharedInFlight?.(null);
+            if (
+              sharedInFlightPromise &&
+              this.inFlightShortPrefetch.get(shortKey) === sharedInFlightPromise
+            ) {
+              this.inFlightShortPrefetch.delete(shortKey);
             }
           }
-          this.ensure(operation);
-          const resolvedKey = makeKey();
-          const sourceMeta = getSynthesizedAudioMeta(source);
-          const cachedSpeed = sourceMeta?.cachedSpeed ?? null;
-          const usedFallbackVoice =
-            forcedFallbackVoice || Boolean(sourceMeta?.usedFallbackVoice);
-          if (options.wordSample) {
-            source = await this.wait(operation, prepareWordSampleAudio(source));
-            if (sourceMeta) {
-              setSynthesizedAudioMeta(source, sourceMeta);
-            }
-          }
-          this.cacheShort(resolvedKey, {
-            audio: source,
-            usedFallbackVoice,
-            cachedSpeed,
-          });
-          return {
-            audio: source,
-            usedFallbackVoice,
-            cachedSpeed,
-            key: resolvedKey,
-          };
         };
 
         let nextPrefetch: Promise<{
@@ -3545,7 +3596,7 @@ export class TtsPlayback {
                   ? { bypassSessionLock: true }
                   : {}),
                 ...(operation.voice.utteranceKind === "voice_preview"
-                  ? { timeoutMs: 4_500 }
+                  ? { timeoutMs: resolveVoicePreviewTimeoutMs() }
                   : {}),
                 ...timedCacheMeta,
                 signal: operation.controller.signal,

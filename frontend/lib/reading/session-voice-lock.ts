@@ -244,6 +244,18 @@ export interface SessionVoiceLock {
   readonly modelVersion: string;
   readonly speed: number;
   readonly lockedAt: string;
+  readonly voiceSwitched?: boolean;
+}
+
+/**
+ * Returns true for client-only synthetic voice lock IDs (`practice_*`, `game_*`)
+ * that coordinate in-page UI/audit state without a server reading session lock.
+ */
+export function isSyntheticClientVoiceSessionId(
+  sessionId: string | null | undefined,
+): boolean {
+  const cleaned = (sessionId ?? "").trim();
+  return Boolean(cleaned) && /^(?:practice_|game_)/i.test(cleaned);
 }
 
 export interface SessionUtteranceAuditEntry {
@@ -519,6 +531,7 @@ function sanitizeSessionLock(raw: unknown): SessionVoiceLock | null {
     modelVersion,
     speed,
     lockedAt,
+    ...(rec.voiceSwitched === true ? { voiceSwitched: true } : {}),
   };
 }
 
@@ -546,6 +559,9 @@ export function getSessionVoiceLock(
     const parsed = sanitizeSessionLock(JSON.parse(raw));
     if (parsed) {
       memoryLocks.set(key, parsed);
+      if (parsed.voiceSwitched) {
+        voiceSwitchedSessions.add(parsed.sessionId);
+      }
       return parsed;
     }
   } catch {
@@ -640,6 +656,15 @@ export function lockSessionVoice(
   );
   const speed = clampSpeed(overrides?.speed ?? speechPrefs.speed);
 
+  const didSwitchVoice = Boolean(
+    !isSyntheticClientVoiceSessionId(cleanSessionId) &&
+    (voiceSwitchedSessions.has(cleanSessionId) ||
+      (existing &&
+        ((overrides?.forceUpdate && existing.voiceId !== resolvedVoiceId) ||
+          hasNewerGlobalPreference ||
+          existing.voiceSwitched === true))),
+  );
+
   const lock: SessionVoiceLock = {
     sessionId: cleanSessionId,
     provider,
@@ -649,6 +674,7 @@ export function lockSessionVoice(
     modelVersion,
     speed,
     lockedAt: new Date().toISOString(),
+    ...(didSwitchVoice ? { voiceSwitched: true } : {}),
   };
 
   memoryLocks.set(cleanSessionId, lock);
@@ -667,11 +693,7 @@ export function lockSessionVoice(
       // Keep in-memory lock active
     }
   }
-  if (
-    existing &&
-    ((overrides?.forceUpdate && existing.voiceId !== lock.voiceId) ||
-      hasNewerGlobalPreference)
-  ) {
+  if (didSwitchVoice) {
     voiceSwitchedSessions.add(cleanSessionId);
   }
   notifyLockListeners();
@@ -876,6 +898,7 @@ export function syncAllSessionVoiceLocks(input: {
   const lockedAt = new Date(input.updatedAt ?? Date.now()).toISOString();
   const provider = inferProviderFromVoiceId(input.voiceId);
   for (const sid of sessionIds) {
+    const isRealSession = !isSyntheticClientVoiceSessionId(sid);
     const updatedLock: SessionVoiceLock = {
       sessionId: sid,
       provider,
@@ -885,9 +908,12 @@ export function syncAllSessionVoiceLocks(input: {
       modelVersion: input.modelVersion,
       speed: input.speed,
       lockedAt,
+      ...(isRealSession ? { voiceSwitched: true } : {}),
     };
     memoryLocks.set(sid, updatedLock);
-    voiceSwitchedSessions.add(sid);
+    if (isRealSession) {
+      voiceSwitchedSessions.add(sid);
+    }
     if (typeof window !== "undefined") {
       try {
         window.sessionStorage.setItem(
@@ -1030,6 +1056,7 @@ export function applyGlobalTeacherVoiceSelection(
   // 5. Resync server-side SessionVoiceLock if an active reading session is locked
   if (
     prevActiveLock &&
+    !isSyntheticClientVoiceSessionId(prevActiveLock.sessionId) &&
     prevActiveLock.voiceId !== targetVoiceId &&
     typeof input.syncActiveServerSessionLock === "function"
   ) {
@@ -1301,8 +1328,22 @@ export function approveSessionVoiceSwitch(
   sessionId: string | null | undefined,
 ): void {
   const clean = (sessionId ?? "").trim();
-  if (clean) {
-    voiceSwitchedSessions.add(clean);
+  if (!clean || isSyntheticClientVoiceSessionId(clean)) return;
+  voiceSwitchedSessions.add(clean);
+  const existing = getSessionVoiceLock(clean);
+  if (existing && !existing.voiceSwitched) {
+    const next: SessionVoiceLock = { ...existing, voiceSwitched: true };
+    memoryLocks.set(clean, next);
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem(
+          `${LOCK_STORAGE_PREFIX}${clean}`,
+          JSON.stringify(next),
+        );
+      } catch {
+        // Ignore restricted sessionStorage
+      }
+    }
   }
 }
 
@@ -1310,8 +1351,31 @@ export function clearPendingSessionVoiceSwitch(
   sessionId: string | null | undefined,
 ): void {
   const clean = (sessionId ?? "").trim();
-  if (clean) {
-    voiceSwitchedSessions.delete(clean);
+  if (!clean) return;
+  voiceSwitchedSessions.delete(clean);
+  const existing = memoryLocks.get(clean);
+  if (existing?.voiceSwitched) {
+    const next: SessionVoiceLock = {
+      sessionId: existing.sessionId,
+      provider: existing.provider,
+      voiceId: existing.voiceId,
+      gender: existing.gender,
+      region: existing.region,
+      modelVersion: existing.modelVersion,
+      speed: existing.speed,
+      lockedAt: existing.lockedAt,
+    };
+    memoryLocks.set(clean, next);
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem(
+          `${LOCK_STORAGE_PREFIX}${clean}`,
+          JSON.stringify(next),
+        );
+      } catch {
+        // Ignore restricted sessionStorage
+      }
+    }
   }
 }
 
@@ -1319,7 +1383,9 @@ export function hasPendingSessionVoiceSwitch(
   sessionId: string | null | undefined,
 ): boolean {
   const clean = (sessionId ?? "").trim();
-  return clean ? voiceSwitchedSessions.has(clean) : false;
+  if (!clean || isSyntheticClientVoiceSessionId(clean)) return false;
+  if (voiceSwitchedSessions.has(clean)) return true;
+  return Boolean(getSessionVoiceLock(clean)?.voiceSwitched);
 }
 
 export function resetVoiceLockAndPolicyForTests(): void {

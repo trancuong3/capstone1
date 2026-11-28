@@ -51,7 +51,9 @@ vi.mock("@/lib/supabase/config", () => ({
 
 const CHILD_ID = TEST_CHILD_ID;
 
-function makeExplainDto(overrides: Partial<WordExplainDTO> = {}): WordExplainDTO {
+function makeExplainDto(
+  overrides: Partial<WordExplainDTO> = {},
+): WordExplainDTO {
   return {
     word: "lung linh",
     normalized_word: "lung linh",
@@ -161,14 +163,12 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
     const savedItem = makeFavoriteItem("lung linh", "01");
     const mockService: VocabularyNotebookService = {
       explainWord: vi.fn(async () => makeExplainDto()),
-      listNotebook: vi.fn(
-        async (): Promise<VocabularyNotebookListDTO> => ({
-          child_id: CHILD_ID,
-          total: 1,
-          storytelling_words: ["lung linh"],
-          items: [savedItem],
-        }),
-      ),
+      listNotebook: vi.fn(async (): Promise<VocabularyNotebookListDTO> => ({
+        child_id: CHILD_ID,
+        total: 1,
+        storytelling_words: ["lung linh"],
+        items: [savedItem],
+      })),
       saveWord: vi.fn(async () => savedItem),
       deleteWord: vi.fn(async () => ({ deleted: true, item_id: savedItem.id })),
     };
@@ -241,9 +241,10 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
     await user.click(saveBtn);
 
     await waitFor(() => {
-      expect(
-        screen.getByTestId("glossary-save-notebook-btn"),
-      ).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("glossary-save-notebook-btn")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     });
     expect(mockService.saveWord).toHaveBeenCalledWith(
       CHILD_ID,
@@ -270,14 +271,12 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
 
     const mockService: VocabularyNotebookService = {
       explainWord: vi.fn(),
-      listNotebook: vi.fn(
-        async (): Promise<VocabularyNotebookListDTO> => ({
-          child_id: CHILD_ID,
-          total: 2,
-          storytelling_words: ["lung linh", "rực rỡ"],
-          items: [itemA, itemB],
-        }),
-      ),
+      listNotebook: vi.fn(async (): Promise<VocabularyNotebookListDTO> => ({
+        child_id: CHILD_ID,
+        total: 2,
+        storytelling_words: ["lung linh", "rực rỡ"],
+        items: [itemA, itemB],
+      })),
       saveWord: vi.fn(),
       deleteWord: vi.fn(async (_cid, itemId) => ({
         deleted: true,
@@ -307,9 +306,9 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
     await waitFor(() => {
       expect(screen.getAllByTestId("notebook-word-item")).toHaveLength(2);
     });
-    expect(screen.getByTestId("notebook-storytelling-bridge")).toHaveTextContent(
-      "lung linh, rực rỡ",
-    );
+    expect(
+      screen.getByTestId("notebook-storytelling-bridge"),
+    ).toHaveTextContent("lung linh, rực rỡ");
 
     // Listen to "rực rỡ"
     await user.click(screen.getByTestId("notebook-listen-rực rỡ"));
@@ -333,14 +332,12 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
 
     const mockVocabService: VocabularyNotebookService = {
       explainWord: vi.fn(),
-      listNotebook: vi.fn(
-        async (): Promise<VocabularyNotebookListDTO> => ({
-          child_id: CHILD_ID,
-          total: 2,
-          storytelling_words: ["lung linh", "thơm ngát"],
-          items: [item1, item2],
-        }),
-      ),
+      listNotebook: vi.fn(async (): Promise<VocabularyNotebookListDTO> => ({
+        child_id: CHILD_ID,
+        total: 2,
+        storytelling_words: ["lung linh", "thơm ngát"],
+        items: [item1, item2],
+      })),
       saveWord: vi.fn(),
       deleteWord: vi.fn(),
     };
@@ -378,9 +375,9 @@ describe("Feature #6: PhonicsLessonCard Glossary Tab + Sổ Từ Hay + Game Brid
     );
 
     await waitFor(() => {
-      expect(
-        screen.getByTestId("hub-notebook-bonus-words"),
-      ).toHaveTextContent("lung linh");
+      expect(screen.getByTestId("hub-notebook-bonus-words")).toHaveTextContent(
+        "lung linh",
+      );
     });
     expect(screen.getByTestId("hub-notebook-bonus-words")).toHaveTextContent(
       "thơm ngát",

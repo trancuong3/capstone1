@@ -53,12 +53,10 @@ function makeSpeechPlayerMock(
     fallbackNotice: null,
     play: vi.fn().mockResolvedValue(undefined),
     playPhonicsLesson: vi.fn().mockResolvedValue(undefined),
-    playWithWordTimings: vi
-      .fn()
-      .mockImplementation(async (_words, options) => {
-        options.onWordChange?.(0);
-        options.onEnded?.();
-      }),
+    playWithWordTimings: vi.fn().mockImplementation(async (_words, options) => {
+      options.onWordChange?.(0);
+      options.onEnded?.();
+    }),
     pause: vi.fn(),
     resume: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
@@ -319,7 +317,10 @@ describe("BookScannerScreen unmatched instant Read-Along & 1-tap private save in
       if (path === "/reading/scan-page-ocr/jobs" && init?.method === "GET") {
         return Response.json({ worker_online: true, jobs: [] });
       }
-      if (path === "/books/my-books" && (!init?.method || init.method === "GET")) {
+      if (
+        path === "/books/my-books" &&
+        (!init?.method || init.method === "GET")
+      ) {
         return Response.json([
           {
             id: "99999999-1111-4222-8333-444444444444",
@@ -425,7 +426,9 @@ describe("BookScannerScreen unmatched instant Read-Along & 1-tap private save in
 
     await user.click(screen.getByTestId("save-scan-submit-btn"));
 
-    const openSavedLink = await screen.findByTestId("open-saved-scan-book-link");
+    const openSavedLink = await screen.findByTestId(
+      "open-saved-scan-book-link",
+    );
     expect(openSavedLink).toHaveAttribute(
       "href",
       `/books/${savedBookId}?pageId=${savedPageId}`,
