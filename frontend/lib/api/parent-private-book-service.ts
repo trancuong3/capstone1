@@ -257,6 +257,7 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         signal,
         {
           method: "POST",
+          timeoutMs: 60_000,
           body: {
             child_id: input.child_id ?? null,
             title: input.title?.trim() || null,
