@@ -276,12 +276,12 @@ describe("reading voice settings", () => {
       allowGoogleTtsFallback: false,
     });
 
-    // Switch region tabs: Miền Trung -> auto-selects Central voice
+    // Switch region tabs when unlocked: preserves current gender while updating region voice
     await user.click(screen.getByRole("button", { name: "Miền Trung" }));
     expect(getVoicePolicyPreferences().region).toBe("central");
     expect(getSpeechPreferences().voiceId).toBe("local_central_ngoc_tran");
 
-    // Switch region tabs: Miền Nam -> auto-selects Southern voice
+    // Switch region tabs: Miền Nam -> selects female South voice cleanly
     await user.click(screen.getByRole("button", { name: "Miền Nam" }));
     expect(getVoicePolicyPreferences().region).toBe("south");
     expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
@@ -374,5 +374,74 @@ describe("reading voice settings", () => {
   it("can be disabled while the microphone is recording", () => {
     setup({ disabled: true });
     expect(screen.getByRole("button", { name: /Giọng đọc/ })).toBeDisabled();
+  });
+
+  it("resets region to north on default voice button and preserves male gender when disabling Google TTS", async () => {
+    voiceStudioMock.listVoices.mockResolvedValue({
+      default_voice_id: "local_north_truc_ly",
+      voices: [
+        {
+          voice_id: "local_north_truc_ly",
+          name: "Cô Trúc Ly - Miền Bắc",
+          gender: "female",
+          region: "north",
+          region_label: "Miền Bắc",
+          provider: "local",
+        },
+        {
+          voice_id: "local_north_thien_minh",
+          name: "Thầy Thiên Minh - Miền Bắc",
+          gender: "male",
+          region: "north",
+          region_label: "Miền Bắc",
+          provider: "local",
+        },
+        {
+          voice_id: "local_central_quang_son",
+          name: "Thầy Quang Sơn - Miền Trung",
+          gender: "male",
+          region: "central",
+          region_label: "Miền Trung",
+          provider: "local",
+        },
+        {
+          voice_id: "google_vi_vn_neural2_d",
+          name: "Google Nam Bắc - Dự phòng",
+          gender: "male",
+          region: "north",
+          region_label: "Miền Bắc",
+          provider: "google",
+        },
+      ],
+    });
+
+    setVoicePolicyPreferences({
+      region: "central",
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+      allowGoogleTtsFallback: true,
+    });
+    setSpeechPreferences({ voiceId: "local_central_quang_son" });
+
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
+    await screen.findByRole("radio", { name: /Thầy Quang Sơn/ });
+
+    // Clicking "Dùng giọng mặc định" resets both voiceId AND region back to north
+    await user.click(
+      screen.getByRole("button", { name: "Dùng giọng mặc định" }),
+    );
+    expect(getSpeechPreferences().voiceId).toBeNull();
+    expect(getVoicePolicyPreferences().region).toBe("north");
+
+    // Selecting male Google voice then disabling Google TTS preserves male gender
+    await user.click(screen.getByRole("button", { name: "Tất cả vùng" }));
+    await user.click(screen.getByRole("radio", { name: /Google Nam Bắc/ }));
+    expect(getSpeechPreferences().voiceId).toBe("google_vi_vn_neural2_d");
+
+    await user.click(screen.getByRole("button", { name: /Chỉ máy này/ }));
+    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
+    expect(getSpeechPreferences().voiceId).toBe("local_north_thien_minh");
   });
 });

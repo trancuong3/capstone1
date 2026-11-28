@@ -46,6 +46,7 @@ export interface VoiceEngineHealthSnapshot {
     readonly tts_configured: boolean;
     readonly stt_cooldown?: boolean;
     readonly tts_cooldown?: boolean;
+    readonly error_code?: string | null;
     readonly model_id?: string | null;
     readonly voice_id?: string | null;
   };
@@ -425,8 +426,21 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
               configured: Boolean(elevenlabsRaw.configured),
               stt_configured: Boolean(elevenlabsRaw.stt_configured),
               tts_configured: Boolean(elevenlabsRaw.tts_configured),
-              stt_cooldown: Boolean(elevenlabsRaw.stt_cooldown),
-              tts_cooldown: Boolean(elevenlabsRaw.tts_cooldown),
+              ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
+                ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.tts_cooldown === "boolean"
+                ? { tts_cooldown: elevenlabsRaw.tts_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.error_code === "string" ||
+              elevenlabsRaw.error_code === null
+                ? {
+                    error_code:
+                      typeof elevenlabsRaw.error_code === "string"
+                        ? elevenlabsRaw.error_code
+                        : null,
+                  }
+                : {}),
               model_id:
                 typeof elevenlabsRaw.model_id === "string"
                   ? elevenlabsRaw.model_id

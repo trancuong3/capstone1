@@ -279,7 +279,10 @@ async def get_admin_ocr_job_status(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).get_job_status_payload(job_id)
+    return await OcrInferenceJobService(db).get_job_status_payload(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.get("/admin/catalog/{book_id}/ocr-jobs")
@@ -291,7 +294,10 @@ async def list_admin_book_ocr_jobs(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).list_book_jobs_payload(book_id)
+    return await OcrInferenceJobService(db).list_book_jobs_payload(
+        book_id,
+        admin_only=True,
+    )
 
 
 @router.post("/admin/ocr-jobs/{job_id}/retry")
@@ -303,7 +309,10 @@ async def retry_admin_ocr_job(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).retry_job(job_id)
+    return await OcrInferenceJobService(db).retry_job(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.delete("/admin/ocr-jobs/{job_id}")
@@ -315,7 +324,10 @@ async def cancel_admin_ocr_job(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).cancel_job(job_id)
+    return await OcrInferenceJobService(db).cancel_job(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.post(

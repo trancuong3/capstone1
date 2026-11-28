@@ -1387,10 +1387,13 @@ class DurableGlobalTasksTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(str(job_admin.Id), ids_a)
         self.assertNotIn(str(wf_admin.Id), ids_a)
 
-        # Honest progress check: ocr_a is indeterminate (progress_pct == None) & worker offline!
+        # Deterministic staged progress check: ocr_a reports waiting-for-worker staged % (2.0%)!
         ocr_a_item = next(t for t in data_a["tasks"] if t["id"] == str(ocr_a.Id))
-        self.assertIsNone(ocr_a_item["progress_pct"])
-        self.assertTrue(ocr_a_item["is_indeterminate"])
+        self.assertEqual(ocr_a_item["progress_pct"], 2.0)
+        self.assertFalse(ocr_a_item["is_indeterminate"])
+        self.assertEqual(ocr_a_item["progress_mode"], "staged")
+        self.assertEqual(ocr_a_item["portal"], "parent")
+        self.assertEqual(ocr_a_item["actor_id"], str(self.parent_a))
         self.assertEqual(ocr_a_item["status"], "WAITING_FOR_WORKER")
         self.assertEqual(ocr_a_item["status_label_vi"], "Chờ máy xử lý AI kết nối lại")
 

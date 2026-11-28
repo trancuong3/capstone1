@@ -1371,6 +1371,8 @@ class KaraokeSimpleImportService:
             profile.get("bpm") if profile and profile.get("bpm") is not None else derived_bpm
         )
 
+        from app.services.ai_task_progress import compute_karaoke_job_progress
+
         return SimpleProcessingStatusRead(
             song_id=detail.song_id,
             draft_version_id=draft.id if draft is not None else None,
@@ -1382,6 +1384,11 @@ class KaraokeSimpleImportService:
             job_id=summary.job_id if summary is not None else None,
             job_status=summary.status if summary is not None else None,
             job_stage=summary.stage if summary is not None else None,
+            progress_pct=compute_karaoke_job_progress(
+                status=summary.status if summary is not None else None,
+                stage=summary.stage if summary is not None else None,
+                lifecycle_state=lifecycle_state,
+            ),
             can_apply=can_apply,
             review_required=bool(detail.processing_review.required),
             reviewed=bool(detail.processing_review.reviewed),

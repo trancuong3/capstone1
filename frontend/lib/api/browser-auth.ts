@@ -26,7 +26,7 @@ export function resetBrowserAuthCache(): void {
   authListenerClient = null;
 }
 
-registerCacheResetListener(resetBrowserAuthCache);
+registerCacheResetListener(resetBrowserAuthCache, { onActorSwitch: false });
 
 export function invalidateBrowserTokenCache(): void {
   cachedTokenState = null;

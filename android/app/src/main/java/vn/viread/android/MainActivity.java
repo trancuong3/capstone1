@@ -193,10 +193,11 @@ public final class MainActivity extends Activity {
     private final Runnable deferredWebViewPauseRunnable = this::pauseWebViewAfterBackgroundEvent;
 
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
-        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            dispatchAndroidBackgroundEvent(false);
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
-                && (nativeSpeechBridge == null || !nativeSpeechBridge.isAudioSessionActive())) {
+        if (nativeSpeechBridge != null && nativeSpeechBridge.isAudioSessionActive()) {
+            return;
+        }
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS
+                || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
             dispatchAndroidBackgroundEvent(false);
         }
     };
@@ -1631,10 +1632,11 @@ public final class MainActivity extends Activity {
             oauthLoopbackServer.stop();
         }
         registerBecomingNoisyReceiver();
-        // Do NOT request permanent AUDIOFOCUS_GAIN in onResume(): ViReadNativeSpeechBridge
-        // acquires scoped AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK during active TTS and WebView
-        // manages its own HTML5 media audio focus. Requesting permanent focus here triggers
-        // self-inflicted AUDIOFOCUS_LOSS_TRANSIENT aborts against TTS/STT/WebView playback.
+        // Do NOT request permanent Activity-level AUDIOFOCUS_GAIN in onResume():
+        // Chromium WebView <audio> playback and ViReadNativeSpeechBridge TTS/STT
+        // each acquire scoped audio focus per utterance/capture, and holding a
+        // separate Activity AUDIOFOCUS_GAIN causes self-inflicted AUDIOFOCUS_LOSS
+        // / AUDIOFOCUS_LOSS_TRANSIENT callbacks that abort WebView TTS and native STT.
         if (webView != null) webView.onResume();
     }
 

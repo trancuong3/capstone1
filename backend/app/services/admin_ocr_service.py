@@ -1547,6 +1547,7 @@ class AdminOcrService:
             ).encode("utf-8")
         ).hexdigest()
         checkpoints = {
+            "tracking_mode": "remote_ocr_batch",
             "file_name": file_name,
             "source_format": source_format,
             "total_source_pages": safe_total,
@@ -1573,6 +1574,7 @@ class AdminOcrService:
                     progress_unit="trang" if safe_total > 0 else None,
                     initial_checkpoints=checkpoints,
                 )
+                job.Stage = "OCR"
             await self.db.commit()
             if created:
                 notify_smart_studio_worker()
@@ -4392,8 +4394,10 @@ class AdminOcrService:
             await self._close_upload_file(file)
         job_service = OcrInferenceJobService(self.db)
         job_ids: list[str] = []
+        created_page_ids: list[str] = []
         serialized_jobs: list[dict[str, object]] = []
         total_source_pages = 0
+        resolved_file_name: str | None = None
 
         try:
             with iter_rasterized_spooled_document(spooled) as (
@@ -4402,6 +4406,7 @@ class AdminOcrService:
                 source_sha256,
                 page_iter,
             ):
+                resolved_file_name = _file_name
                 def _next_page(it):
                     return next(it, None)
 
@@ -4429,6 +4434,8 @@ class AdminOcrService:
                                         detail="Upload identity already belongs to a different image",
                                     )
                                 job_ids.append(str(existing_job.Id))
+                                if existing_job.PageId is not None:
+                                    created_page_ids.append(str(existing_job.PageId))
                                 serialized_jobs.append(OcrInferenceJobService.serialize_job(existing_job))
                                 continue
 
@@ -4494,6 +4501,8 @@ class AdminOcrService:
                                     started_at=time.perf_counter(),
                                 )
                             job_ids.append(str(job.Id))
+                            if job.PageId is not None:
+                                created_page_ids.append(str(job.PageId))
                             serialized_jobs.append(OcrInferenceJobService.serialize_job(job))
                         except Exception:
                             await self.db.rollback()
@@ -4511,6 +4520,21 @@ class AdminOcrService:
         finally:
             spooled.close()
 
+        batch_tracking = (
+            await self.dispatch_batch_book_import_job(
+                actor_id,
+                book_id,
+                total_pages=total_source_pages,
+                file_name=resolved_file_name,
+                source_format=source_format,
+                ocr_job_ids=job_ids,
+                page_ids=created_page_ids,
+                idempotency_key=f"batch-doc:{book_id}:{upload_id}" if upload_id is not None else None,
+            )
+            if job_ids
+            else None
+        )
+
         worker_online = await job_service.has_online_worker()
         for item in serialized_jobs:
             item["worker_online"] = worker_online
@@ -4522,6 +4546,11 @@ class AdminOcrService:
             "queued_count": len(job_ids),
             "worker_online": worker_online,
             "jobs": serialized_jobs,
+            **(
+                {"smart_studio_job_id": batch_tracking["smart_studio_job_id"]}
+                if isinstance(batch_tracking, dict) and batch_tracking.get("smart_studio_job_id")
+                else {}
+            ),
         }
 
     async def enqueue_reprocess_job(self, actor_id: UUID, page_id: UUID) -> dict[str, object]:

@@ -90,6 +90,8 @@ export const localOcrPageScanJobSchema = z.object({
   job_id: z.string(),
   status: localOcrScanJobStatusSchema,
   worker_online: z.boolean(),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
+  worker_phase: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   file_name: z.string().nullable().optional(),

@@ -37,6 +37,7 @@ import {
 } from "@/components/admin/admin-ui";
 import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -44,6 +45,7 @@ import { Modal } from "@/components/common/modal";
 import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   getAdminOcrJob,
@@ -911,6 +913,7 @@ export function AdminOcrReviewScreen({
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -973,6 +976,81 @@ export function AdminOcrReviewScreen({
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const [illustrationStudioOpen, setIllustrationStudioOpen] = useState(false);
+
+  const aiCorrectRealPercent = useMemo(() => {
+    if (busy !== "ai_correct") return null;
+    if (
+      typeof aiWorkflow?.progress_pct === "number" &&
+      Number.isFinite(aiWorkflow.progress_pct)
+    ) {
+      return aiWorkflow.progress_pct;
+    }
+    const status = aiProgress?.status;
+    const completed = aiProgress?.progress.completed_chunks ?? 0;
+    const total = aiProgress?.progress.total_chunks ?? 0;
+    const ratio = total > 0 ? Math.min(1, completed / total) : 0;
+    if (status === "READY_FOR_ADMIN_REVIEW") return 100;
+    if (status === "CHILD_SAFETY_SCANNING") {
+      return total > 0 ? Math.round(55 + ratio * 38) : 65;
+    }
+    if (status === "PROOFREADING") {
+      return total > 0 ? Math.round(10 + ratio * 45) : 16;
+    }
+    if (status === "QUEUED") return 6;
+    return 10;
+  }, [aiProgress, aiWorkflow?.progress_pct, busy]);
+
+  const aiCorrectBarProgress = useAiProgress({
+    active: busy === "ai_correct",
+    realPercent: aiCorrectRealPercent,
+    progressMode:
+      aiProgress?.status === "READY_FOR_ADMIN_REVIEW" ? "measured" : "staged",
+    completed: aiProgress?.status === "READY_FOR_ADMIN_REVIEW",
+    failed: aiProgress?.status === "FAILED",
+    expectedDurationMs: 16_000,
+  });
+
+  const isQueuedJobOffline = Boolean(
+    queuedOcrJob &&
+    queuedOcrJob.worker_online === false &&
+    (queuedOcrJob.status === "QUEUED" ||
+      queuedOcrJob.status === "FAILED_RETRYABLE"),
+  );
+  const queuedOcrRealPercent = useMemo(() => {
+    if (!queuedOcrJob) return null;
+    if (isQueuedJobOffline) return 2;
+    if (
+      typeof queuedOcrJob.progress_pct === "number" &&
+      Number.isFinite(queuedOcrJob.progress_pct)
+    ) {
+      return queuedOcrJob.progress_pct;
+    }
+    if (queuedOcrJob.status === "RUNNING") return 55;
+    if (queuedOcrJob.status === "CLAIMED") return 30;
+    if (queuedOcrJob.status === "FAILED_RETRYABLE") return 15;
+    return 12;
+  }, [isQueuedJobOffline, queuedOcrJob]);
+
+  const queuedOcrBarProgress = useAiProgress({
+    active: Boolean(queuedOcrJob),
+    realPercent: queuedOcrRealPercent,
+    progressMode: isQueuedJobOffline ? "measured" : "staged",
+    expectedDurationMs: 14_000,
+  });
+
+  const reprocessStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.uploading") },
+      { atPct: 30, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 82, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const reprocessBarProgress = useAiProgress({
+    active: busy === "reprocess" || busy === "reupload",
+    stages: reprocessStages,
+    expectedDurationMs: 14_000,
+  });
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const draftEditVersionRef = useRef(0);
@@ -3361,6 +3439,24 @@ export function AdminOcrReviewScreen({
                 ? t("books.detail.ocrQueueOfflineHint")
                 : t("books.detail.ocrQueueOnlineHint")}
             </p>
+            <AiProgressBar
+              active={!isQueuedJobOffline}
+              className="mt-2.5"
+              elapsedSeconds={
+                isQueuedJobOffline
+                  ? undefined
+                  : queuedOcrBarProgress.elapsedSeconds
+              }
+              label={
+                isQueuedJobOffline
+                  ? tCommon("aiProgress.waitingWorker")
+                  : tCommon("aiProgress.ocrExtracting")
+              }
+              percent={queuedOcrBarProgress.percent}
+              size="sm"
+              testId="admin-review-ocr-queued-progress"
+              tone={isQueuedJobOffline ? "warning" : "primary"}
+            />
           </div>
         </div>
       ) : null}
@@ -3651,11 +3747,28 @@ export function AdminOcrReviewScreen({
                       {t("ocrReview.draft.stopTrackingBtn")}
                     </Button>
                   </div>
-                  <progress
-                    aria-label={t("ocrReview.draft.progressAria")}
-                    className="h-2 w-full accent-purple-700"
-                    max={aiProgress?.progress.total_chunks ?? 1}
-                    value={aiProgress?.progress.completed_chunks ?? 0}
+                  <AiProgressBar
+                    active={
+                      aiProgress?.status !== "READY_FOR_ADMIN_REVIEW" &&
+                      aiProgress?.status !== "FAILED"
+                    }
+                    detail={
+                      aiProgress && aiProgress.progress.total_chunks > 0
+                        ? `${formatNumber(aiProgress.progress.completed_chunks)}/${formatNumber(aiProgress.progress.total_chunks)}`
+                        : undefined
+                    }
+                    elapsedSeconds={aiCorrectBarProgress.elapsedSeconds}
+                    label={t("ocrReview.draft.progressAria")}
+                    percent={aiCorrectBarProgress.percent}
+                    size="sm"
+                    testId="ocr-review-ai-workflow-progress"
+                    tone={
+                      aiProgress?.status === "FAILED"
+                        ? "danger"
+                        : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
+                          ? "success"
+                          : "primary"
+                    }
                   />
                   <span className="text-[11px] text-purple-900">
                     {t("ocrReview.draft.suggestionOnlyNote")}
@@ -4824,6 +4937,19 @@ export function AdminOcrReviewScreen({
                     {t("ocrReview.revisionsPanel.reloadDataBtn")}
                   </Button>
                 </div>
+                {busy === "reprocess" || busy === "reupload" ? (
+                  <AiProgressBar
+                    active
+                    elapsedSeconds={reprocessBarProgress.elapsedSeconds}
+                    label={
+                      reprocessBarProgress.stageLabel ??
+                      tCommon("aiProgress.ocrExtracting")
+                    }
+                    percent={reprocessBarProgress.percent}
+                    size="sm"
+                    testId="ocr-review-reprocess-progress"
+                  />
+                ) : null}
               </div>
             </section>
 

@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils/cn";
 export interface PhonicsLessonCardProps {
   readonly lesson: PhonicsLessonPlan;
   readonly activeStepIndex: number | null;
+  readonly isAnalyzingAi?: boolean;
   readonly isPlayingPhonics?: boolean;
   readonly isPlayingWord?: boolean;
   readonly isListeningRetry?: boolean;
@@ -25,6 +26,7 @@ export interface PhonicsLessonCardProps {
 export function PhonicsLessonCard({
   lesson,
   activeStepIndex,
+  isAnalyzingAi = false,
   isPlayingPhonics = false,
   isPlayingWord = false,
   isListeningRetry = false,
@@ -49,11 +51,17 @@ export function PhonicsLessonCard({
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-bold text-amber-950">{lesson.message}</p>
+            <p className="text-sm font-bold text-amber-950">
+              {isAnalyzingAi
+                ? "AI đang phân tích cách đánh vần..."
+                : lesson.message}
+            </p>
             <p className="text-xs text-amber-900/80">
-              {t("phonics.unsupportedNotice", {
-                word: lesson.cleanPhrase || lesson.rawText,
-              })}
+              {isAnalyzingAi
+                ? `Đang tách vần và dấu cho từ “${lesson.cleanPhrase || lesson.rawText}”...`
+                : t("phonics.unsupportedNotice", {
+                    word: lesson.cleanPhrase || lesson.rawText,
+                  })}
             </p>
           </div>
           <div className="flex items-center gap-2">

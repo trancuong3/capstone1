@@ -2,15 +2,18 @@ import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { registerCacheResetListener } from "@/lib/api/read-cache";
+import { isServiceError } from "@/lib/api/service-error";
 import type {
   CapabilitiesHealthResponse,
   GlobalTaskActionResponse,
   GlobalTaskActorRole,
   GlobalTaskCreatePayload,
   GlobalTaskListResponse,
+  StudioTasksChangedDetail,
 } from "@/types/global-tasks";
 
 const actorRoleSchema = z.enum(["admin", "parent"]);
+const progressModeSchema = z.enum(["measured", "staged"]);
 
 const taskSourceSchema = z.enum([
   "smart_studio_job",
@@ -44,7 +47,9 @@ const globalTaskItemSchema = z.object({
   book_title: z.string().nullable().default(null),
   page_number: z.number().int().nullable().default(null),
   source_revision_id: z.string().nullable().default(null),
+  actor_id: z.string().nullable().optional(),
   actor_role: actorRoleSchema,
+  portal: actorRoleSchema.optional(),
   status: taskStatusSchema,
   status_label_vi: z.string(),
   stage: z.string(),
@@ -56,7 +61,8 @@ const globalTaskItemSchema = z.object({
   progress_total: z.number().int().nullable().default(null),
   progress_unit: z.string().nullable().default(null),
   progress_pct: z.number().nullable().default(null),
-  is_indeterminate: z.boolean().default(true),
+  progress_mode: progressModeSchema.optional(),
+  is_indeterminate: z.boolean().default(false),
   can_retry: z.boolean().default(false),
   can_cancel: z.boolean().default(false),
   result_href: z.string().nullable().default(null),
@@ -73,6 +79,7 @@ const globalTaskItemSchema = z.object({
 const globalTaskListSchema = z.object({
   actor_id: z.string(),
   actor_role: actorRoleSchema,
+  portal: actorRoleSchema.optional(),
   active_count: z.number().int().default(0),
   waiting_review_count: z.number().int().default(0),
   failed_count: z.number().int().default(0),
@@ -147,7 +154,8 @@ export function setCachedGlobalTasksSnapshot(
   if (!key) return;
   if (
     snapshot.actor_id !== actorId?.trim() ||
-    snapshot.actor_role !== actorRole
+    snapshot.actor_role !== actorRole ||
+    (snapshot.portal && snapshot.portal !== actorRole)
   ) {
     return;
   }
@@ -155,10 +163,29 @@ export function setCachedGlobalTasksSnapshot(
 }
 
 export const STUDIO_TASKS_CHANGED_EVENT = "viread:tasks-changed";
+export const ACTOR_SWITCH_BROADCAST_KEY = "viread:auth:actor-switch-ts";
 
-export function emitStudioTasksChanged(): void {
+export function emitStudioTasksChanged(
+  detail?: StudioTasksChangedDetail,
+): void {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(STUDIO_TASKS_CHANGED_EVENT));
+    window.dispatchEvent(
+      new CustomEvent<StudioTasksChangedDetail>(STUDIO_TASKS_CHANGED_EVENT, {
+        detail,
+      }),
+    );
+  }
+}
+
+export function broadcastActorSwitch(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      ACTOR_SWITCH_BROADCAST_KEY,
+      `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    );
+  } catch {
+    // Ignore restricted storage contexts.
   }
 }
 
@@ -168,29 +195,81 @@ export function clearGlobalTasksMemoryCache(): void {
 
 registerCacheResetListener(clearGlobalTasksMemoryCache);
 
+function isNotFoundFallbackEligible(error: unknown): boolean {
+  return isServiceError(error) && error.status === 404;
+}
+
+export interface GlobalTasksListOptions {
+  readonly portal?: GlobalTaskActorRole;
+  readonly activeOnly?: boolean;
+  readonly limit?: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface GlobalTasksActionOptions {
+  readonly portal?: GlobalTaskActorRole;
+}
+
 export interface GlobalTasksService {
-  listTasks(options?: {
-    readonly activeOnly?: boolean;
-    readonly limit?: number;
-    readonly signal?: AbortSignal;
-  }): Promise<GlobalTaskListResponse>;
+  listTasks(options?: GlobalTasksListOptions): Promise<GlobalTaskListResponse>;
   createTask(
     payload: GlobalTaskCreatePayload,
+    options?: GlobalTasksActionOptions,
   ): Promise<GlobalTaskActionResponse>;
-  retryTask(jobId: string): Promise<GlobalTaskActionResponse>;
-  cancelTask(jobId: string): Promise<GlobalTaskActionResponse>;
+  retryTask(
+    jobId: string,
+    options?: GlobalTasksActionOptions,
+  ): Promise<GlobalTaskActionResponse>;
+  cancelTask(
+    jobId: string,
+    options?: GlobalTasksActionOptions,
+  ): Promise<GlobalTaskActionResponse>;
   getCapabilities(signal?: AbortSignal): Promise<CapabilitiesHealthResponse>;
 }
 
 export function createGlobalTasksService(): GlobalTasksService {
   return {
     async listTasks(options = {}): Promise<GlobalTaskListResponse> {
-      const query = apiQuery({
+      const portal = options.portal;
+      const baseQuery = apiQuery({
         limit: options.limit ?? 40,
         active_only: options.activeOnly ? "true" : undefined,
       });
+
+      if (portal) {
+        try {
+          return await requestApi(
+            `/studio/${portal}/tasks${baseQuery}`,
+            globalTaskListSchema,
+            options.signal,
+            {
+              method: "GET",
+              bypassCache: true,
+            },
+          );
+        } catch (error) {
+          if (!isNotFoundFallbackEligible(error)) {
+            throw error;
+          }
+          const fallbackQuery = apiQuery({
+            portal,
+            limit: options.limit ?? 40,
+            active_only: options.activeOnly ? "true" : undefined,
+          });
+          return await requestApi(
+            `/studio/tasks${fallbackQuery}`,
+            globalTaskListSchema,
+            options.signal,
+            {
+              method: "GET",
+              bypassCache: true,
+            },
+          );
+        }
+      }
+
       return await requestApi(
-        `/studio/tasks${query}`,
+        `/studio/tasks${baseQuery}`,
         globalTaskListSchema,
         options.signal,
         {
@@ -202,7 +281,36 @@ export function createGlobalTasksService(): GlobalTasksService {
 
     async createTask(
       payload: GlobalTaskCreatePayload,
+      options?: GlobalTasksActionOptions,
     ): Promise<GlobalTaskActionResponse> {
+      const portal = options?.portal;
+      if (portal) {
+        try {
+          return await requestApi(
+            `/studio/${portal}/tasks`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+              body: payload,
+            },
+          );
+        } catch (error) {
+          if (!isNotFoundFallbackEligible(error)) {
+            throw error;
+          }
+          return await requestApi(
+            `/studio/tasks${apiQuery({ portal })}`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+              body: payload,
+            },
+          );
+        }
+      }
+
       return await requestApi(
         "/studio/tasks",
         globalTaskActionSchema,
@@ -214,9 +322,39 @@ export function createGlobalTasksService(): GlobalTasksService {
       );
     },
 
-    async retryTask(jobId: string): Promise<GlobalTaskActionResponse> {
+    async retryTask(
+      jobId: string,
+      options?: GlobalTasksActionOptions,
+    ): Promise<GlobalTaskActionResponse> {
+      const encodedId = encodeURIComponent(jobId);
+      const portal = options?.portal;
+      if (portal) {
+        try {
+          return await requestApi(
+            `/studio/${portal}/tasks/${encodedId}/retry`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+            },
+          );
+        } catch (error) {
+          if (!isNotFoundFallbackEligible(error)) {
+            throw error;
+          }
+          return await requestApi(
+            `/studio/tasks/${encodedId}/retry${apiQuery({ portal })}`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+            },
+          );
+        }
+      }
+
       return await requestApi(
-        `/studio/tasks/${encodeURIComponent(jobId)}/retry`,
+        `/studio/tasks/${encodedId}/retry`,
         globalTaskActionSchema,
         undefined,
         {
@@ -225,9 +363,39 @@ export function createGlobalTasksService(): GlobalTasksService {
       );
     },
 
-    async cancelTask(jobId: string): Promise<GlobalTaskActionResponse> {
+    async cancelTask(
+      jobId: string,
+      options?: GlobalTasksActionOptions,
+    ): Promise<GlobalTaskActionResponse> {
+      const encodedId = encodeURIComponent(jobId);
+      const portal = options?.portal;
+      if (portal) {
+        try {
+          return await requestApi(
+            `/studio/${portal}/tasks/${encodedId}/cancel`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+            },
+          );
+        } catch (error) {
+          if (!isNotFoundFallbackEligible(error)) {
+            throw error;
+          }
+          return await requestApi(
+            `/studio/tasks/${encodedId}/cancel${apiQuery({ portal })}`,
+            globalTaskActionSchema,
+            undefined,
+            {
+              method: "POST",
+            },
+          );
+        }
+      }
+
       return await requestApi(
-        `/studio/tasks/${encodeURIComponent(jobId)}/cancel`,
+        `/studio/tasks/${encodedId}/cancel`,
         globalTaskActionSchema,
         undefined,
         {
@@ -250,4 +418,33 @@ export function createGlobalTasksService(): GlobalTasksService {
       );
     },
   };
+}
+
+const defaultGlobalTasksService = createGlobalTasksService();
+
+export async function fetchGlobalTasks(
+  options: GlobalTasksListOptions & { readonly portal: GlobalTaskActorRole },
+): Promise<GlobalTaskListResponse> {
+  return defaultGlobalTasksService.listTasks(options);
+}
+
+export async function createGlobalTask(
+  payload: GlobalTaskCreatePayload,
+  options: { readonly portal: GlobalTaskActorRole },
+): Promise<GlobalTaskActionResponse> {
+  return defaultGlobalTasksService.createTask(payload, options);
+}
+
+export async function retryGlobalTask(
+  jobId: string,
+  options: { readonly portal: GlobalTaskActorRole },
+): Promise<GlobalTaskActionResponse> {
+  return defaultGlobalTasksService.retryTask(jobId, options);
+}
+
+export async function cancelGlobalTask(
+  jobId: string,
+  options: { readonly portal: GlobalTaskActorRole },
+): Promise<GlobalTaskActionResponse> {
+  return defaultGlobalTasksService.cancelTask(jobId, options);
 }

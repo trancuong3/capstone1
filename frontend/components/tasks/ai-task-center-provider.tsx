@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import {
+  ACTOR_SWITCH_BROADCAST_KEY,
   buildTaskActorCacheKey,
   clearGlobalTasksMemoryCache,
   createGlobalTasksService,
@@ -21,14 +22,17 @@ import {
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import type {
-  GlobalTaskActorRole,
-  GlobalTaskItem,
-  GlobalTaskListResponse,
+import {
+  ACTIVE_GLOBAL_TASK_STATUSES,
+  type GlobalTaskActorRole,
+  type GlobalTaskItem,
+  type GlobalTaskListResponse,
+  type StudioTasksChangedDetail,
 } from "@/types/global-tasks";
 
 export interface AiTaskCenterContextValue {
   readonly scopeKey: string | null;
+  readonly actorId: string | null;
   readonly actorRole: GlobalTaskActorRole | null;
   readonly tasks: readonly GlobalTaskItem[];
   readonly activeCount: number;
@@ -67,11 +71,11 @@ interface PanelState {
 export interface AiTaskCenterProviderProps {
   readonly actorId?: string | null;
   readonly actorRole?: GlobalTaskActorRole | null;
-  /** Resolve current authenticated user ID from browser Supabase session (e.g. Admin layout). */
+  /** Resolve current authenticated user ID from browser Supabase session (e.g. fallback outside SSR layout). */
   readonly resolveSessionActor?: boolean;
   readonly service?: GlobalTasksService;
   readonly enabled?: boolean;
-  /** When false, defers initial background GET /studio/tasks until panel opens, cache exists, or task event fires. */
+  /** When false, defers initial background GET until panel opens, cache exists, or task event fires. */
   readonly autoSyncOnMount?: boolean;
   readonly children: ReactNode;
 }
@@ -85,6 +89,52 @@ function clampPollMs(value: number | null | undefined): number {
     return DEFAULT_ACTIVE_POLL_MS;
   }
   return Math.max(MIN_POLL_MS, Math.min(MAX_POLL_MS, Math.round(value)));
+}
+
+/**
+ * Defense-in-depth scope check: reject any snapshot whose actor_id, actor_role,
+ * or portal does not match the active portal/user, and filter tasks + recompute counts.
+ */
+export function sanitizeScopedTaskFeed(
+  data: GlobalTaskListResponse,
+  expectedActorId: string,
+  expectedRole: GlobalTaskActorRole,
+): GlobalTaskListResponse | null {
+  const trimmedActorId = expectedActorId.trim();
+  if (!trimmedActorId) return null;
+  if (data.actor_id !== trimmedActorId) return null;
+  if (data.actor_role !== expectedRole) return null;
+  if (data.portal && data.portal !== expectedRole) return null;
+
+  const filteredTasks = data.tasks.filter((task) => {
+    if (task.actor_role !== expectedRole) return false;
+    if (task.portal && task.portal !== expectedRole) return false;
+    if (task.actor_id && task.actor_id !== trimmedActorId) return false;
+    return true;
+  });
+
+  const activeCount = filteredTasks.filter((task) =>
+    ACTIVE_GLOBAL_TASK_STATUSES.has(task.status),
+  ).length;
+  const waitingReviewCount = filteredTasks.filter(
+    (task) => task.status === "WAITING_FOR_REVIEW",
+  ).length;
+  const failedCount = filteredTasks.filter(
+    (task) => task.status === "FAILED" || task.status === "PARTIAL_SUCCESS",
+  ).length;
+  const completedCount = filteredTasks.filter(
+    (task) => task.status === "SUCCEEDED",
+  ).length;
+
+  return {
+    ...data,
+    portal: expectedRole,
+    tasks: filteredTasks,
+    active_count: activeCount,
+    waiting_review_count: waitingReviewCount,
+    failed_count: failedCount,
+    completed_count: completedCount,
+  };
 }
 
 export function AiTaskCenterProvider({
@@ -130,7 +180,7 @@ export function AiTaskCenterProvider({
   const activeAbortRef = useRef<AbortController | null>(null);
   const latestScopeRef = useRef<string | null>(scopeKey);
 
-  // Optionally resolve actor ID from Supabase browser auth when mounted outside AuthRuntimeContext.
+  // Optionally resolve actor ID from Supabase browser auth when mounted outside SSR layout.
   useEffect(() => {
     if (!resolveSessionActor || actorId !== undefined || !enabled) {
       return;
@@ -200,6 +250,26 @@ export function AiTaskCenterProvider({
     }
   }, [scopeKey]);
 
+  // Cross-tab logout / actor switch listener: immediately clear in-memory task feed.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== ACTOR_SWITCH_BROADCAST_KEY) return;
+      activeAbortRef.current?.abort();
+      activeAbortRef.current = null;
+      clearGlobalTasksMemoryCache();
+      setFeedState({
+        scopeKey: null,
+        data: null,
+        error: null,
+        isRefreshing: false,
+      });
+      setPanelState({ scopeKey: null, open: false });
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   const fetchTasksForScope = useCallback(
     async (
       targetScope: string,
@@ -211,7 +281,8 @@ export function AiTaskCenterProvider({
       activeAbortRef.current = controller;
 
       try {
-        const data = await resolvedService.listTasks({
+        const rawData = await resolvedService.listTasks({
+          portal: targetRole,
           limit: 40,
           signal: controller.signal,
         });
@@ -221,10 +292,26 @@ export function AiTaskCenterProvider({
         ) {
           return;
         }
-        setCachedGlobalTasksSnapshot(targetActorId, targetRole, data);
+        const sanitized = sanitizeScopedTaskFeed(
+          rawData,
+          targetActorId,
+          targetRole,
+        );
+        if (!sanitized) {
+          // Scope mismatch (e.g. token switched mid-flight): discard cleanly & wipe cache.
+          clearGlobalTasksMemoryCache();
+          setFeedState({
+            scopeKey: targetScope,
+            data: null,
+            error: null,
+            isRefreshing: false,
+          });
+          return;
+        }
+        setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
         setFeedState({
           scopeKey: targetScope,
-          data,
+          data: sanitized,
           error: null,
           isRefreshing: false,
         });
@@ -259,9 +346,16 @@ export function AiTaskCenterProvider({
       return null;
     }
     if (feedState.scopeKey === scopeKey && feedState.data) {
-      return feedState.data;
+      return sanitizeScopedTaskFeed(
+        feedState.data,
+        effectiveActorId,
+        actorRole,
+      );
     }
-    return getCachedGlobalTasksSnapshot(effectiveActorId, actorRole);
+    const cached = getCachedGlobalTasksSnapshot(effectiveActorId, actorRole);
+    return cached
+      ? sanitizeScopedTaskFeed(cached, effectiveActorId, actorRole)
+      : null;
   }, [
     actorRole,
     effectiveActorId,
@@ -288,8 +382,12 @@ export function AiTaskCenterProvider({
       const controller = new AbortController();
       activeAbortRef.current = controller;
       void resolvedService
-        .listTasks({ limit: 40, signal: controller.signal })
-        .then((data) => {
+        .listTasks({
+          portal: targetRole,
+          limit: 40,
+          signal: controller.signal,
+        })
+        .then((rawData) => {
           if (
             !isActive ||
             controller.signal.aborted ||
@@ -297,10 +395,25 @@ export function AiTaskCenterProvider({
           ) {
             return;
           }
-          setCachedGlobalTasksSnapshot(targetActorId, targetRole, data);
+          const sanitized = sanitizeScopedTaskFeed(
+            rawData,
+            targetActorId,
+            targetRole,
+          );
+          if (!sanitized) {
+            clearGlobalTasksMemoryCache();
+            setFeedState({
+              scopeKey: targetScope,
+              data: null,
+              error: null,
+              isRefreshing: false,
+            });
+            return;
+          }
+          setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
           setFeedState({
             scopeKey: targetScope,
-            data,
+            data: sanitized,
             error: null,
             isRefreshing: false,
           });
@@ -363,8 +476,16 @@ export function AiTaskCenterProvider({
     }
 
     function handleTaskChanged(event: Event) {
-      const detail = (event as CustomEvent<{ source?: string }>).detail;
+      const detail = (
+        event as CustomEvent<StudioTasksChangedDetail | undefined>
+      ).detail;
       if (detail?.source === "ai-task-center-provider") {
+        return;
+      }
+      if (detail?.portal && detail.portal !== targetRole) {
+        return;
+      }
+      if (detail?.actorId && detail.actorId !== targetActorId) {
         return;
       }
       triggerSync();
@@ -504,13 +625,20 @@ export function AiTaskCenterProvider({
       if (!scopeKey || !effectiveActorId || !actorRole) return;
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
-        await resolvedService.retryTask(jobId);
+        await resolvedService.retryTask(jobId, { portal: actorRole });
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
         if (typeof window !== "undefined") {
           window.dispatchEvent(
-            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
-              detail: { source: "ai-task-center-provider" },
-            }),
+            new CustomEvent<StudioTasksChangedDetail>(
+              STUDIO_TASKS_CHANGED_EVENT,
+              {
+                detail: {
+                  source: "ai-task-center-provider",
+                  actorId: effectiveActorId,
+                  portal: actorRole,
+                },
+              },
+            ),
           );
         }
       } finally {
@@ -535,13 +663,20 @@ export function AiTaskCenterProvider({
       if (!scopeKey || !effectiveActorId || !actorRole) return;
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
-        await resolvedService.cancelTask(jobId);
+        await resolvedService.cancelTask(jobId, { portal: actorRole });
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
         if (typeof window !== "undefined") {
           window.dispatchEvent(
-            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
-              detail: { source: "ai-task-center-provider" },
-            }),
+            new CustomEvent<StudioTasksChangedDetail>(
+              STUDIO_TASKS_CHANGED_EVENT,
+              {
+                detail: {
+                  source: "ai-task-center-provider",
+                  actorId: effectiveActorId,
+                  portal: actorRole,
+                },
+              },
+            ),
           );
         }
       } finally {
@@ -609,6 +744,7 @@ export function AiTaskCenterProvider({
   const contextValue = useMemo<AiTaskCenterContextValue>(
     () => ({
       scopeKey,
+      actorId: effectiveActorId,
       actorRole,
       tasks: scopedData?.tasks ?? [],
       activeCount,
@@ -634,6 +770,7 @@ export function AiTaskCenterProvider({
       cancelTask,
       clearForLogout,
       closePanel,
+      effectiveActorId,
       errorMessage,
       isOpen,
       isRefreshing,

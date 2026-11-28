@@ -765,22 +765,9 @@ class VoiceOrchestrator:
                         or self.elevenlabs.get_configured_voice_id()
                     )
                     el_model = self.elevenlabs.get_configured_model_id()
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                        and normalized_text
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=normalized_text,
-                            voice_id=voice_id,
-                            model_version=el_model,
-                            speed=speed,
-                            audio_bytes=el_audio.content,
-                            source_content_type=el_audio.content_type or "audio/mpeg",
-                        )
+                    # NEVER cache ElevenLabs cloud fallback audio under a `local_*`
+                    # voice_id in `tts_audio_cache_entries` so VieNeu precomputed
+                    # cache rows are never contaminated across providers/voices.
                     logger.info(
                         "tts_ok provider=elevenlabs reason=%s voice=%s ms=%.1f session=%s request_id=%s",
                         local_err.code,
@@ -1113,37 +1100,20 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
+                    el_timed_kwargs: dict[str, Any] = {
+                        "words": words,
+                        "requested_voice_id": el_voice_id,
+                        "speed": speed,
+                    }
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
+                        el_timed_kwargs["region"] = self._voice_region(voice_id)
                     try:
-                        el_timed = await self.elevenlabs.synthesize_timed(
-                            words=words,
-                            requested_voice_id=el_voice_id,
-                            speed=speed,
-                        )
+                        el_timed = await self.elevenlabs.synthesize_timed(**el_timed_kwargs)
                     except VoiceProviderError as el_err:
                         self._mark_elevenlabs_cooldown("tts", el_err)
                         raise
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                        and normalized_text
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=normalized_text,
-                            voice_id=voice_id,
-                            model_version=el_timed.model_version
-                            or self.elevenlabs.get_configured_model_id(),
-                            speed=speed,
-                            audio_bytes=el_timed.audio,
-                            source_content_type=el_timed.content_type or "audio/mpeg",
-                            duration_seconds=el_timed.duration_seconds,
-                            word_timings_json=[
-                                {"index": w.index, "start": w.start, "end": w.end}
-                                for w in el_timed.words
-                            ],
-                        )
+                    el_timed = replace(el_timed, region=self._voice_region(voice_id))
+                    # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
                     logger.info(
                         "tts_timed_ok provider=elevenlabs reason=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
                         local_err.code,
@@ -1398,41 +1368,20 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
+                    el_phonics_kwargs: dict[str, Any] = {
+                        "steps": steps,
+                        "requested_voice_id": el_voice_id,
+                        "speed": speed,
+                    }
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
+                        el_phonics_kwargs["region"] = self._voice_region(voice_id)
                     try:
-                        el_phonics = await self.elevenlabs.synthesize_phonics(
-                            steps=steps,
-                            requested_voice_id=el_voice_id,
-                            speed=speed,
-                        )
+                        el_phonics = await self.elevenlabs.synthesize_phonics(**el_phonics_kwargs)
                     except VoiceProviderError as el_err:
                         self._mark_elevenlabs_cooldown("tts", el_err)
                         raise
-                    if (
-                        cache_svc is not None
-                        and cache_target is not None
-                        and cache_target.can_store_on_miss
-                    ):
-                        await cache_svc.schedule_store_cached_audio(
-                            background_tasks=background_tasks,
-                            target=cache_target,
-                            normalized_text=phonics_key,
-                            voice_id=voice_id,
-                            model_version=el_phonics.model_version
-                            or self.elevenlabs.get_configured_model_id(),
-                            speed=speed,
-                            audio_bytes=el_phonics.audio,
-                            source_content_type=el_phonics.content_type or "audio/mpeg",
-                            duration_seconds=el_phonics.duration_seconds,
-                            word_timings_json=[
-                                {
-                                    "id": s.id,
-                                    "index": s.index,
-                                    "start": s.start,
-                                    "end": s.end,
-                                }
-                                for s in el_phonics.step_timings
-                            ],
-                        )
+                    el_phonics = replace(el_phonics, region=self._voice_region(voice_id))
+                    # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
                     logger.info(
                         "tts_phonics_ok provider=elevenlabs reason=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
                         local_err.code,

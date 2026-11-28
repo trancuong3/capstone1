@@ -24,6 +24,7 @@ import {
   AdminVireadFlow1Replacement,
   AdminVireadReliabilityPanel,
 } from "@/components/admin/admin-viread-flow1-replacement";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -31,6 +32,7 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -53,15 +55,125 @@ function trainingProfileName(profile: string, t: TranslateFn) {
   return profile;
 }
 
+const ACTIVE_TRAINING_JOB_STATUSES = new Set([
+  "QUEUED",
+  "LOCAL_RUNNING",
+  "FALLBACK_QUEUED_COLAB",
+  "COLAB_RUNNING",
+  "WAITING_FOR_DATA",
+  "WAITING_FOR_COLAB_WORKER",
+  "COLAB_SUBMITTING",
+  "COLAB_SUBMITTED",
+  "COLAB_EXECUTING",
+  "RUNNING",
+  "EVALUATING",
+]);
+
+const WAITING_TRAINING_JOB_STATUSES = new Set([
+  "QUEUED",
+  "FALLBACK_QUEUED_COLAB",
+  "WAITING_FOR_DATA",
+  "WAITING_FOR_COLAB_WORKER",
+]);
+
+function TrainingJobProgressBar({
+  job,
+  formatNumber,
+}: {
+  readonly job: VireadTrainingOverview["jobs"][number];
+  readonly formatNumber: (value: number) => string;
+}) {
+  const tCommon = useTranslations("common");
+  const isActive = ACTIVE_TRAINING_JOB_STATUSES.has(job.status);
+  const isWaiting = WAITING_TRAINING_JOB_STATUSES.has(job.status);
+  const rawProgressPct = job.progress.progress_pct;
+  const completedSteps = job.progress.completed_steps;
+  const totalSteps = job.progress.total_steps;
+  const hasBackendPct =
+    typeof rawProgressPct === "number" && Number.isFinite(rawProgressPct);
+  const hasSteps =
+    typeof completedSteps === "number" &&
+    typeof totalSteps === "number" &&
+    totalSteps > 0;
+  const realPercent = hasBackendPct
+    ? rawProgressPct
+    : hasSteps
+      ? (completedSteps / totalSteps) * 100
+      : isWaiting
+        ? 10
+        : null;
+  const progress = useAiProgress({
+    active: isActive,
+    realPercent,
+    progressMode: hasBackendPct || hasSteps ? "measured" : "staged",
+    expectedDurationMs: 60_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 20, label: tCommon("aiProgress.trainingModel") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
+
+  if (!isActive) return null;
+
+  const stageText =
+    typeof job.progress.stage === "string" && job.progress.stage.trim()
+      ? job.progress.stage
+      : isWaiting
+        ? tCommon("aiProgress.waitingWorker")
+        : (progress.stageLabel ?? tCommon("aiProgress.trainingModel"));
+  const detail = hasSteps
+    ? `${formatNumber(completedSteps)}/${formatNumber(totalSteps)}`
+    : undefined;
+
+  return (
+    <div className="mt-2.5">
+      <AiProgressBar
+        active
+        detail={detail}
+        elapsedSeconds={progress.elapsedSeconds}
+        label={stageText}
+        percent={progress.percent}
+        size="sm"
+        testId={`training-job-progress-${job.job_id}`}
+        tone={isWaiting ? "warning" : "primary"}
+      />
+    </div>
+  );
+}
+
 export function AdminVireadTrainingScreen() {
   const { vireadTraining } = useAdminServices();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
   const [activeTab, setActiveTab] = useState<TrainingTabKey>("overview");
   const [data, setData] = useState<VireadTrainingOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<
+    "triggerFlow2" | "evaluate" | null
+  >(null);
+  const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const triggerProgress = useAiProgress({
+    active: busy && busyAction === "triggerFlow2",
+    expectedDurationMs: 12_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 45, label: tCommon("aiProgress.trainingModel") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
+  const evaluateProgress = useAiProgress({
+    active: busy && busyAction === "evaluate",
+    expectedDurationMs: 15_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.connecting") },
+      { atPct: 40, label: tCommon("aiProgress.analyzing") },
+      { atPct: 80, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
   const [jobsPage, setJobsPage] = useState(1);
   const [runsPage, setRunsPage] = useState(1);
   const TRAINING_LIST_PAGE_SIZE = 5;
@@ -292,6 +404,7 @@ export function AdminVireadTrainingScreen() {
     if (!vireadTraining?.triggerFlow2 || busy) return;
     const actionId = ++actionRequestIdRef.current;
     setBusy(true);
+    setBusyAction("triggerFlow2");
     setMessage(null);
     try {
       const result = await vireadTraining.triggerFlow2();
@@ -382,6 +495,7 @@ export function AdminVireadTrainingScreen() {
     } finally {
       if (mountedRef.current && actionId === actionRequestIdRef.current) {
         setBusy(false);
+        setBusyAction(null);
       }
     }
   }
@@ -451,6 +565,8 @@ export function AdminVireadTrainingScreen() {
     if (!vireadTraining || busy) return;
     const actionId = ++actionRequestIdRef.current;
     setBusy(true);
+    setBusyAction("evaluate");
+    setEvaluatingJobId(jobId);
     setMessage(null);
     try {
       const result = await vireadTraining.requestEvaluation(
@@ -485,6 +601,8 @@ export function AdminVireadTrainingScreen() {
     } finally {
       if (mountedRef.current && actionId === actionRequestIdRef.current) {
         setBusy(false);
+        setBusyAction(null);
+        setEvaluatingJobId(null);
       }
     }
   }
@@ -1093,10 +1211,11 @@ export function AdminVireadTrainingScreen() {
                     </ul>
                   ) : null}
                   {vireadTraining?.triggerFlow2 ? (
-                    <div className="pt-2">
+                    <div className="space-y-2.5 pt-2">
                       <Button
                         disabled={busy}
                         fullWidth={false}
+                        isLoading={busy && busyAction === "triggerFlow2"}
                         onClick={() => void triggerFlow2()}
                         size="admin"
                         variant="primary"
@@ -1107,6 +1226,19 @@ export function AdminVireadTrainingScreen() {
                           "Tạo snapshot & Xếp hàng train Luồng 2",
                         )}
                       </Button>
+                      {busy && busyAction === "triggerFlow2" ? (
+                        <AiProgressBar
+                          active
+                          elapsedSeconds={triggerProgress.elapsedSeconds}
+                          label={
+                            triggerProgress.stageLabel ??
+                            tCommon("aiProgress.trainingModel")
+                          }
+                          percent={triggerProgress.percent}
+                          size="sm"
+                          testId="training-trigger-flow2-progress"
+                        />
+                      ) : null}
                     </div>
                   ) : null}
                   {hasWaitingColabJob ? (
@@ -1336,6 +1468,27 @@ export function AdminVireadTrainingScreen() {
                                 })
                               : ""}
                           </p>
+                          <TrainingJobProgressBar
+                            formatNumber={formatNumber}
+                            job={job}
+                          />
+                          {busy &&
+                          busyAction === "evaluate" &&
+                          evaluatingJobId === job.job_id ? (
+                            <div className="mt-2.5">
+                              <AiProgressBar
+                                active
+                                elapsedSeconds={evaluateProgress.elapsedSeconds}
+                                label={
+                                  evaluateProgress.stageLabel ??
+                                  tCommon("aiProgress.analyzing")
+                                }
+                                percent={evaluateProgress.percent}
+                                size="sm"
+                                testId={`training-eval-progress-${job.job_id}`}
+                              />
+                            </div>
+                          ) : null}
                           {job.status === "WAITING_FOR_COLAB_WORKER" ||
                           job.status === "FALLBACK_QUEUED_COLAB" ? (
                             <p className="mt-1 text-sm text-muted">

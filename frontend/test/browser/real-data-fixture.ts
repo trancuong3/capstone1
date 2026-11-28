@@ -323,7 +323,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   };
   const headers = {
     "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
-    "access-control-allow-headers": "authorization,content-type,accept",
+    "access-control-allow-headers":
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id,x-voice-lock-update",
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
@@ -677,6 +678,44 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           encouragement: "Bé cố gắng lên nhé!",
         },
         ai_cached: false,
+      });
+    }
+    if (request.method() === "POST" && path === "/voice/phonics/analyze") {
+      const body = (request.postDataJSON() ?? {}) as { text?: string };
+      const text = body.text ?? "";
+      return respond(route, {
+        supported: false,
+        source: "none",
+        raw_text: text,
+        clean_phrase: text,
+        syllables: [],
+        focus_syllable_index: 0,
+        focus_syllable: "",
+        steps: [],
+        message: "Chưa có mẫu đánh vần",
+        can_play_whole_word: true,
+      });
+    }
+    if (request.method() === "POST" && path === "/voice/text-to-speech") {
+      const bytes = 3200;
+      const audio = Buffer.alloc(44 + bytes);
+      audio.write("RIFF");
+      audio.writeUInt32LE(36 + bytes, 4);
+      audio.write("WAVE", 8);
+      audio.write("fmt ", 12);
+      audio.writeUInt32LE(16, 16);
+      audio.writeUInt16LE(1, 20);
+      audio.writeUInt16LE(1, 22);
+      audio.writeUInt32LE(16_000, 24);
+      audio.writeUInt32LE(32_000, 28);
+      audio.writeUInt16LE(2, 32);
+      audio.writeUInt16LE(16, 34);
+      audio.write("data", 36);
+      audio.writeUInt32LE(bytes, 40);
+      return route.fulfill({
+        status: 200,
+        headers: { ...headers, "content-type": "audio/wav" },
+        body: audio,
       });
     }
     const voicePrefsMatch =
@@ -1281,10 +1320,21 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         google_tts_available: false,
         voices: FIXTURE_LOCAL_VOICES,
       });
-    if (request.method() === "GET" && path === "/studio/tasks")
+    if (
+      request.method() === "GET" &&
+      (path === "/studio/tasks" ||
+        path === "/studio/parent/tasks" ||
+        path === "/studio/admin/tasks")
+    ) {
+      const portal =
+        path === "/studio/admin/tasks" ||
+        url.searchParams.get("portal") === "admin"
+          ? "admin"
+          : "parent";
       return respond(route, {
         actor_id: ids.parent,
-        actor_role: "parent",
+        actor_role: portal,
+        portal,
         active_count: 0,
         waiting_review_count: 0,
         failed_count: 0,
@@ -1293,6 +1343,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         recommended_poll_ms: null,
         tasks: [],
       });
+    }
     if (
       request.method() === "GET" &&
       /^\/studio\/books\/[^/]+\/assets$/.test(path)

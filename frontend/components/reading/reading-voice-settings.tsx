@@ -11,12 +11,14 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -28,7 +30,9 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   applyGlobalTeacherVoiceSelection,
+  clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
+  getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
@@ -166,6 +170,7 @@ export function ReadingVoiceSettings({
 }: ReadingVoiceSettingsProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("speech");
+  const tCommon = useTranslations("common");
   const formatSpeed = (speed: number): string =>
     `${formatNumber(speed, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
@@ -206,6 +211,24 @@ export function ReadingVoiceSettings({
     null,
   );
   const [previewError, setPreviewError] = useState(false);
+  const [isSynthesizingPreview, setIsSynthesizingPreview] = useState(false);
+  const voiceListProgress = useAiProgress({
+    active: isOpen && loadState.status === "loading",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.connecting") },
+      { atPct: 60, label: tCommon("aiProgress.processing") },
+      { atPct: 88, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const previewVoiceProgress = useAiProgress({
+    active: isSynthesizingPreview && !isPreviewing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 70, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
@@ -252,6 +275,9 @@ export function ReadingVoiceSettings({
           .updateSessionVoiceLock({
             sessionId: activeLock.sessionId,
             voiceId: updatedLock.voiceId,
+          })
+          .then(() => {
+            clearPendingSessionVoiceSwitch(activeLock.sessionId);
           })
           .catch(() => undefined);
       }
@@ -300,6 +326,7 @@ export function ReadingVoiceSettings({
     selectedOption?: VoiceOption,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
@@ -354,6 +381,7 @@ export function ReadingVoiceSettings({
 
   function selectTeacherGender(nextGender: VoiceGender) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
@@ -407,10 +435,12 @@ export function ReadingVoiceSettings({
     }>,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice of the same gender
+    // If Google TTS was disabled while a Google voice was chosen, downgrade
+    // cleanly to the matching region+gender local voice (treating default as null).
     const currentVoiceId = getSpeechPreferences().voiceId;
     if (
       currentVoiceId?.startsWith("google_") &&
@@ -418,16 +448,24 @@ export function ReadingVoiceSettings({
         !updated.allowGoogleTtsFallback)
     ) {
       const preservedGender = resolveVoiceGender(currentVoiceId);
-      const fallbackLocal = getDefaultVoiceIdForRegionAndGender(
+      const preservedRegion = inferRegionFromVoiceId(
+        currentVoiceId,
         updated.region,
+      );
+      const localFallbackId = getDefaultLocalVoiceIdForRegionAndGender(
+        preservedRegion,
         preservedGender,
       );
+      const defaultVoice =
+        loadState.status === "ready"
+          ? loadState.data.default_voice_id
+          : "local_north_truc_ly";
       applyGlobalTeacherVoiceSelection({
-        voiceId: fallbackLocal,
+        voiceId: localFallbackId,
         storedVoiceId:
-          fallbackLocal === "local_north_truc_ly" ? null : fallbackLocal,
+          localFallbackId === defaultVoice ? null : localFallbackId,
         gender: preservedGender,
-        region: updated.region,
+        region: preservedRegion,
         childId: selectedChildId,
         persistToBackend:
           selectedChildId &&
@@ -500,6 +538,7 @@ export function ReadingVoiceSettings({
 
   function close() {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
@@ -579,7 +618,10 @@ export function ReadingVoiceSettings({
               <Button
                 className="w-auto!"
                 size="compact"
-                onClick={() => change({ voiceId: null })}
+                onClick={() => {
+                  setVoicePolicyPreferences({ region: "north" });
+                  change({ voiceId: null });
+                }}
                 variant="quiet"
               >
                 {t("settings.useDefaultVoice")}
@@ -589,11 +631,13 @@ export function ReadingVoiceSettings({
                 size="compact"
                 onClick={() => {
                   const generation = ++previewGenerationRef.current;
-                  if (isPreviewing) {
+                  if (isPreviewing || isSynthesizingPreview) {
+                    setIsSynthesizingPreview(false);
                     onStopPreview();
                     return;
                   }
                   setPreviewError(false);
+                  setIsSynthesizingPreview(true);
                   const previewText = adaptTextToTeacherPersona(
                     PREVIEW_TEXT,
                     resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
@@ -607,6 +651,14 @@ export function ReadingVoiceSettings({
                         !(error instanceof Error && error.name === "AbortError")
                       )
                         setPreviewError(true);
+                    })
+                    .finally(() => {
+                      if (
+                        mountedRef.current &&
+                        generation === previewGenerationRef.current
+                      ) {
+                        setIsSynthesizingPreview(false);
+                      }
                     });
                 }}
                 variant="primary"
@@ -617,6 +669,18 @@ export function ReadingVoiceSettings({
                   : t("settings.preview")}
               </Button>
             </footer>
+            {isSynthesizingPreview && !isPreviewing ? (
+              <AiProgressBar
+                active
+                label={
+                  previewVoiceProgress.stageLabel ??
+                  tCommon("aiProgress.synthesizingVoice")
+                }
+                percent={previewVoiceProgress.percent}
+                size="compact"
+                testId="voice-preview-progress"
+              />
+            ) : null}
             {previewError ? (
               <p role="alert" className="text-body text-muted">
                 {t("settings.previewFailed")}
@@ -851,9 +915,23 @@ export function ReadingVoiceSettings({
             ) : null}
 
             {loadState.status === "loading" || loadState.status === "idle" ? (
-              <p className="text-body text-muted">
-                {t("settings.loadingVoices")}
-              </p>
+              <div className="space-y-2">
+                <p className="text-body text-muted">
+                  {t("settings.loadingVoices")}
+                </p>
+                {loadState.status === "loading" ? (
+                  <AiProgressBar
+                    active
+                    label={
+                      voiceListProgress.stageLabel ??
+                      tCommon("aiProgress.connecting")
+                    }
+                    percent={voiceListProgress.percent}
+                    size="compact"
+                    testId="voice-list-loading-progress"
+                  />
+                ) : null}
+              </div>
             ) : loadState.status === "error" ? (
               <div className="space-y-2">
                 <p className="text-body text-muted">
