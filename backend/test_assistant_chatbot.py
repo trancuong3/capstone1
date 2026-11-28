@@ -4,7 +4,8 @@ import asyncio
 import json
 import os
 import unittest
-from uuid import uuid4
+from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI
@@ -21,12 +22,14 @@ from app.api.routes.assistant import (
     resolve_assistant_actor,
     router as assistant_router,
 )
+from app.database.session import get_db
 from app.schemas.assistant import (
     AssistantChatRequest,
     AssistantHistoryTurn,
     AssistantNavigationOffer,
 )
 from app.services import assistant_kb
+from app.services import assistant_live_context
 from app.services.assistant_kb import (
     KB_ARTICLES,
     PAGE_CONTEXT_SPECS,
@@ -37,13 +40,20 @@ from app.services.assistant_kb import (
     _PARENT_STATIC_NAV_ALLOWLIST,
     _PUBLIC_ALLOWED_HREFS,
     _PUBLIC_ONLY,
+    _expand_vietnamese_shorthand,
     detect_disallowed_scope_request,
     detect_off_topic_request,
+    fold_vietnamese,
     is_navigation_href_allowed,
     is_quick_action_href_allowed,
     resolve_navigation_offer,
     retrieve_kb_matches,
     sanitize_scoped_path,
+)
+from app.services.assistant_live_context import (
+    build_live_grounding_block,
+    detect_live_context_intent,
+    fetch_live_assistant_context,
 )
 from app.services.assistant_service import (
     AssistantConfig,
@@ -1235,6 +1245,416 @@ class AssistantApiRouteTests(unittest.TestCase):
         )
         self.assertIn("STRICT ADMIN WORKSPACE ISOLATION RULES", captured_admin_system)
         self.assertNotIn("CHILD PROFILE GATE", captured_admin_system)
+
+
+class _FakeExecuteResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
+
+class _TenantIsolatedFakeDb:
+    """In-memory fake AsyncSession enforcing SQL WHERE inspection for tenant isolation tests."""
+
+    def __init__(
+        self,
+        *,
+        children_by_parent: dict[UUID, list[tuple[UUID, str, int]]],
+        sessions_by_child: dict[UUID, tuple[int, int]],
+        private_books_by_parent: dict[UUID, int],
+        catalog_books_count: int = 18,
+        total_private_books_count: int = 7,
+        active_parents_count: int = 42,
+        ocr_queued_running_count: int = 3,
+        ocr_failed_count: int = 1,
+    ) -> None:
+        self.children_by_parent = children_by_parent
+        self.sessions_by_child = sessions_by_child
+        self.private_books_by_parent = private_books_by_parent
+        self.catalog_books_count = catalog_books_count
+        self.total_private_books_count = total_private_books_count
+        self.active_parents_count = active_parents_count
+        self.ocr_queued_running_count = ocr_queued_running_count
+        self.ocr_failed_count = ocr_failed_count
+        self.queries_executed = 0
+
+    def _compile(self, stmt) -> str:
+        return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+    async def execute(self, stmt):
+        self.queries_executed += 1
+        sql = self._compile(stmt)
+        if "FROM childprofiles" in sql:
+            for parent_id, rows in self.children_by_parent.items():
+                if parent_id.hex in sql or str(parent_id) in sql:
+                    return _FakeExecuteResult(rows)
+            return _FakeExecuteResult([])
+        return _FakeExecuteResult([])
+
+    async def scalar(self, stmt):
+        self.queries_executed += 1
+        sql = self._compile(stmt)
+        if "FROM readingsessions" in sql:
+            for child_id, (total, seven_d) in self.sessions_by_child.items():
+                if child_id.hex in sql or str(child_id) in sql:
+                    return seven_d if "startedat >=" in sql else total
+            return 0
+        if "FROM books" in sql:
+            if "CATALOG" in sql:
+                return self.catalog_books_count
+            for parent_id, count in self.private_books_by_parent.items():
+                if parent_id.hex in sql or str(parent_id) in sql:
+                    return count
+            if "owner_parent_id" not in sql:
+                return self.total_private_books_count
+            return 0
+        if "FROM profiles" in sql:
+            return self.active_parents_count
+        if "FROM ocr_inference_jobs" in sql:
+            if "QUEUED" in sql:
+                return self.ocr_queued_running_count
+            return self.ocr_failed_count
+        return 0
+
+
+class CopilotV3LiveAndWave3Tests(unittest.TestCase):
+    def setUp(self) -> None:
+        clear_rate_limits()
+
+    def tearDown(self) -> None:
+        clear_rate_limits()
+
+    def test_schema_selected_child_id_validates_uuid_and_ignores_junk(self) -> None:
+        uid = uuid4()
+        valid_req = AssistantChatRequest(
+            message="Bé yếu từ nào?",
+            selected_child_id=f"  {uid.hex}  ",
+        )
+        self.assertEqual(valid_req.selected_child_id, str(uid))
+
+        for bad_value in ("not-a-uuid", "", "   ", "x" * 120, None):
+            req = AssistantChatRequest(
+                message="ViRead là gì?",
+                selected_child_id=bad_value,
+            )
+            self.assertIsNone(req.selected_child_id)
+
+    def test_parent_live_grounding_idor_rejection_and_zero_shared_cache_bleed(self) -> None:
+        parent_a = uuid4()
+        parent_b = uuid4()
+        child_a = uuid4()
+        child_b = uuid4()
+        fake_db = _TenantIsolatedFakeDb(
+            children_by_parent={
+                parent_a: [(child_a, "Bé Bông", 2)],
+                parent_b: [(child_b, "Bé Sóc", 4)],
+            },
+            sessions_by_child={
+                child_a: (11, 3),
+                child_b: (25, 6),
+            },
+            private_books_by_parent={
+                parent_a: 2,
+                parent_b: 9,
+            },
+        )
+        weak_words_by_child = {
+            child_a: ["trâu trắng", "sẻ nâu"],
+            child_b: ["bí mật nhà B"],
+        }
+
+        async def fake_weak_words(_db, child_id: UUID, *, parent_id=None, limit=5):
+            if parent_id == parent_a and child_id == child_a:
+                return weak_words_by_child[child_a][:limit]
+            if parent_id == parent_b and child_id == child_b:
+                return weak_words_by_child[child_b][:limit]
+            raise AssertionError(f"IDOR violation: parent {parent_id} queried child {child_id}")
+
+        app = FastAPI()
+        app.include_router(assistant_router, prefix="/assistant")
+        service = _make_service(gemini_key=None, groq_key=None, ollama_enabled=False)
+        active_actor = {"ctx": AssistantActorContext(role_scope="parent", subject_key=f"user:{parent_a}", actor_uuid=parent_a)}
+        app.dependency_overrides[get_assistant_service] = lambda: service
+        app.dependency_overrides[resolve_assistant_actor] = lambda: active_actor["ctx"]
+        app.dependency_overrides[get_db] = lambda: fake_db
+        client = TestClient(app)
+
+        with patch.object(assistant_live_context, "list_active_weak_words", side_effect=fake_weak_words):
+            # 1. Parent A asks about weak words while passing Parent B's child UUID -> strict IDOR rejection!
+            res_idor = client.post(
+                "/assistant/chat",
+                json={
+                    "message": "Bé yếu từ nào?",
+                    "current_path": "/dashboard",
+                    "selected_child_id": str(child_b),
+                },
+            )
+            self.assertEqual(res_idor.status_code, 200)
+            body_idor = res_idor.json()
+            self.assertTrue(body_idor["live_grounded"])
+            self.assertEqual(body_idor["provider_id"], "viread_live_parent")
+            self.assertFalse(body_idor["cached"])
+            self.assertIn("Bé Bông", body_idor["reply"])
+            self.assertIn("trâu trắng", body_idor["reply"])
+            self.assertNotIn("Bé Sóc", body_idor["reply"])
+            self.assertNotIn("bí mật nhà B", body_idor["reply"])
+            self.assertNotIn(str(child_a), body_idor["reply"])
+            self.assertNotIn(str(parent_a), body_idor["reply"])
+
+            # 2. Parent A asks progress -> Parent B asks the EXACT SAME prompt -> ZERO shared-cache bleed!
+            res_a = client.post(
+                "/assistant/chat",
+                json={
+                    "message": "Tuần này bé đọc mấy buổi?",
+                    "current_path": "/dashboard",
+                },
+            )
+            self.assertEqual(res_a.status_code, 200)
+            body_a = res_a.json()
+            self.assertTrue(body_a["live_grounded"])
+            self.assertFalse(body_a["cached"])
+            self.assertIn("Bé Bông", body_a["reply"])
+            self.assertIn("3", body_a["reply"])
+            self.assertEqual(service.response_cache.size(), 0)
+
+            active_actor["ctx"] = AssistantActorContext(
+                role_scope="parent",
+                subject_key=f"user:{parent_b}",
+                actor_uuid=parent_b,
+            )
+            res_b = client.post(
+                "/assistant/chat",
+                json={
+                    "message": "Tuần này bé đọc mấy buổi?",
+                    "current_path": "/dashboard",
+                },
+            )
+            self.assertEqual(res_b.status_code, 200)
+            body_b = res_b.json()
+            self.assertTrue(body_b["live_grounded"])
+            self.assertFalse(body_b["cached"])
+            self.assertIn("Bé Sóc", body_b["reply"])
+            self.assertIn("6", body_b["reply"])
+            self.assertNotIn("Bé Bông", body_b["reply"])
+
+            # 3. Private books count for Parent B
+            res_books = client.post(
+                "/assistant/chat",
+                json={
+                    "message": "Tôi có bao nhiêu sách đã tải lên?",
+                    "current_path": "/dashboard",
+                },
+            )
+            self.assertEqual(res_books.status_code, 200)
+            self.assertIn("9", res_books.json()["reply"])
+            self.assertTrue(res_books.json()["live_grounded"])
+
+    def test_parent_live_force_llm_injects_verified_summary_and_degrades_on_tier3(self) -> None:
+        parent_id = uuid4()
+        child_id = uuid4()
+        fake_db = _TenantIsolatedFakeDb(
+            children_by_parent={parent_id: [(child_id, "Bé Na", 1)]},
+            sessions_by_child={child_id: (5, 2)},
+            private_books_by_parent={parent_id: 1},
+        )
+        ctx = asyncio.run(
+            fetch_live_assistant_context(
+                fake_db,
+                role_scope="parent",
+                actor_uuid=parent_id,
+                selected_child_id=None,
+                intent="child_progress",
+            )
+        )
+        assert ctx is not None
+        block = build_live_grounding_block(ctx)
+        self.assertIn("<VERIFIED_OWN_ACCOUNT_SUMMARY>", block)
+        self.assertIn("Bé Na", block)
+        self.assertNotIn(str(child_id), block)
+        self.assertNotIn(str(parent_id), block)
+
+        captured_system = ""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal captured_system
+            body = json.loads(request.content.decode("utf-8"))
+            captured_system = body["systemInstruction"]["parts"][0]["text"]
+            return httpx.Response(
+                200,
+                json={"candidates": [{"content": {"parts": [{"text": "Bé Na tuần này đã đọc 2 buổi rất chăm chỉ!"}]}}]},
+            )
+
+        svc = _make_service(groq_key=None, ollama_enabled=False, transport=httpx.MockTransport(handler))
+        res_llm = asyncio.run(
+            svc.chat(
+                AssistantChatRequest(
+                    message="Tuần này bé đọc mấy buổi?",
+                    current_path="/dashboard",
+                    force_llm=True,
+                ),
+                role_scope="parent",
+                actor_uuid=parent_id,
+                live_context=ctx,
+            )
+        )
+        self.assertEqual(res_llm.source_tier, "tier_1_cloud")
+        self.assertTrue(res_llm.live_grounded)
+        self.assertIn("<VERIFIED_OWN_ACCOUNT_SUMMARY>", captured_system)
+        self.assertEqual(svc.response_cache.size(), 0)
+
+        # Tier 3 fallback preserves live_grounded deterministic reply
+        def fail_handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("offline", request=request)
+
+        svc_down = _make_service(transport=httpx.MockTransport(fail_handler))
+        res_t3 = asyncio.run(
+            svc_down.chat(
+                AssistantChatRequest(
+                    message="Tuần này bé đọc mấy buổi?",
+                    current_path="/dashboard",
+                    force_llm=True,
+                ),
+                role_scope="parent",
+                actor_uuid=parent_id,
+                live_context=ctx,
+            )
+        )
+        self.assertEqual(res_t3.source_tier, "tier_3_fallback")
+        self.assertEqual(res_t3.provider_id, "viread_live_parent_fallback")
+        self.assertTrue(res_t3.live_grounded)
+        self.assertIn("Bé Na", res_t3.reply)
+
+    def test_admin_live_ops_telemetry_is_aggregate_only_and_public_never_queries_db(self) -> None:
+        admin_id = uuid4()
+        parent_id = uuid4()
+        child_id = uuid4()
+        fake_db = _TenantIsolatedFakeDb(
+            children_by_parent={parent_id: [(child_id, "SecretChildName", 3)]},
+            sessions_by_child={child_id: (12, 4)},
+            private_books_by_parent={parent_id: 5},
+            catalog_books_count=24,
+            total_private_books_count=11,
+            active_parents_count=88,
+            ocr_queued_running_count=4,
+            ocr_failed_count=2,
+        )
+
+        # 1. Public NEVER detects live intent and NEVER touches get_db
+        for msg in (
+            "Nhà tôi có mấy bé?",
+            "Bé yếu từ nào?",
+            "Tình trạng hệ thống lúc này?",
+            "Bao nhiêu sách?",
+        ):
+            self.assertIsNone(detect_live_context_intent(msg, "public"))
+
+        app = FastAPI()
+        app.include_router(assistant_router, prefix="/assistant")
+        service = _make_service(gemini_key=None, groq_key=None, ollama_enabled=False)
+        active_actor = {"ctx": AssistantActorContext(role_scope="public", subject_key="ip:127.0.0.1", actor_uuid=None)}
+        app.dependency_overrides[get_assistant_service] = lambda: service
+        app.dependency_overrides[resolve_assistant_actor] = lambda: active_actor["ctx"]
+        app.dependency_overrides[get_db] = lambda: fake_db
+        client = TestClient(app)
+
+        pub_res = client.post(
+            "/assistant/chat",
+            json={"message": "Tình trạng hệ thống lúc này?", "current_path": "/"},
+        )
+        self.assertEqual(pub_res.status_code, 200)
+        self.assertFalse(pub_res.json()["live_grounded"])
+        self.assertEqual(fake_db.queries_executed, 0)
+
+        # 2. Admin receives aggregate-only ops telemetry with zero parent/child PII
+        active_actor["ctx"] = AssistantActorContext(
+            role_scope="admin",
+            subject_key=f"user:{admin_id}",
+            actor_uuid=admin_id,
+        )
+        adm_res = client.post(
+            "/assistant/chat",
+            json={"message": "Tình trạng hệ thống lúc này và có bao nhiêu sách / tác vụ OCR đang chờ?", "current_path": "/admin"},
+        )
+        self.assertEqual(adm_res.status_code, 200)
+        adm_body = adm_res.json()
+        self.assertTrue(adm_body["live_grounded"])
+        self.assertEqual(adm_body["provider_id"], "viread_live_admin")
+        self.assertIn("24", adm_body["reply"])
+        self.assertIn("88", adm_body["reply"])
+        self.assertIn("4", adm_body["reply"])
+        self.assertIn("2", adm_body["reply"])
+        self.assertNotIn("SecretChildName", adm_body["reply"])
+        self.assertNotIn(str(parent_id), adm_body["reply"])
+        self.assertTrue(all(a["href"].startswith("/admin") for a in adm_body["quick_actions"]))
+        self.assertEqual(service.response_cache.size(), 0)
+
+    def test_fetch_live_context_timeout_degrades_cleanly(self) -> None:
+        class _SlowDb:
+            async def execute(self, _stmt):
+                await asyncio.sleep(0.5)
+                return _FakeExecuteResult([])
+
+            async def scalar(self, _stmt):
+                await asyncio.sleep(0.5)
+                return 0
+
+        res = asyncio.run(
+            fetch_live_assistant_context(
+                _SlowDb(),
+                role_scope="parent",
+                actor_uuid=uuid4(),
+                selected_child_id=None,
+                intent="my_children",
+                timeout_seconds=0.05,
+            )
+        )
+        self.assertIsNone(res)
+
+    def test_wave3_kb_articles_and_vietnamese_shorthand_comprehension(self) -> None:
+        self.assertEqual(_expand_vietnamese_shorthand(fold_vietnamese("doi mk")), "doi mat khau")
+        self.assertEqual(_expand_vietnamese_shorthand(fold_vietnamese("ko nghe dc")), "khong nghe duoc")
+        self.assertEqual(_expand_vietnamese_shorthand(fold_vietnamese("k co tk")), "khong co tai khoan")
+        self.assertEqual(_expand_vietnamese_shorthand(fold_vietnamese("tai sach offline qr")), "tai sach offline ma qr")
+
+        # Parent Wave 3 KB + shorthand
+        qr_matches = retrieve_kb_matches("tai sach offline qr", role_scope="parent", current_path="/books")
+        self.assertTrue(qr_matches)
+        self.assertEqual(qr_matches[0].article.id, "offline_pack_and_printable_qr")
+
+        luc_bat_matches = retrieve_kb_matches("luc bat", role_scope="parent", current_path="/reading-preparation")
+        self.assertTrue(luc_bat_matches)
+        self.assertEqual(luc_bat_matches[0].article.id, "camera_line_spotlight_and_luc_bat")
+
+        tu_yeu_matches = retrieve_kb_matches("tu yeu", role_scope="parent", current_path="/entertainment")
+        self.assertTrue(tu_yeu_matches)
+        self.assertEqual(tu_yeu_matches[0].article.id, "entertainment_word_loop_autopilot")
+
+        pw_offer = resolve_navigation_offer("doi mk", role_scope="parent", current_path="/dashboard")
+        self.assertIsNotNone(pw_offer)
+        assert pw_offer is not None
+        self.assertEqual(pw_offer.href, "/settings")
+
+        # Admin Wave 3 KB
+        radar_matches = retrieve_kb_matches(
+            "Radar mẫu OCR khó (Hard-Sample Radar) ở đâu?",
+            role_scope="admin",
+            current_path="/admin/metadata-quality",
+        )
+        self.assertTrue(radar_matches)
+        self.assertEqual(radar_matches[0].article.id, "admin_ocr_hard_sample_radar")
+
+        # Scope & domain guards still hold with shorthand
+        for safe in ("doi mk", "tai sach offline qr", "luc bat", "tu yeu"):
+            self.assertFalse(detect_off_topic_request(safe, "parent"))
+        self.assertEqual(
+            detect_disallowed_scope_request("mo tk cua nguoi khac", role_scope="parent"),
+            "other_user",
+        )
 
 
 if __name__ == "__main__":

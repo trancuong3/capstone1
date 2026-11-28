@@ -17,6 +17,7 @@ import type {
   AssistantChatRequest,
   AssistantChatResponse,
   BandwidthProfile,
+  SendAssistantMessageInput,
 } from "@/types/assistant";
 
 const assistantQuickActionSchema = z.object({
@@ -66,6 +67,7 @@ const assistantChatResponseSchema = z.object({
   bandwidth_applied: z.enum(["low", "medium", "high"]),
   latency_ms: z.number().int().min(0),
   cached: z.boolean().optional().default(false),
+  live_grounded: z.boolean().optional().default(false),
   role_scope: z.enum(["public", "parent", "admin"]),
   quick_actions: z.array(assistantQuickActionSchema).max(3).default([]),
   suggested_prompts: z.array(z.string()).max(3).default([]),
@@ -126,11 +128,46 @@ function waitAbortAware(ms: number, signal: AbortSignal): Promise<boolean> {
   });
 }
 
+function buildOfflineAssistantReply(
+  request: Pick<
+    AssistantChatRequest,
+    "message" | "current_path" | "locale" | "bandwidth_profile"
+  >,
+): AssistantChatResponse {
+  const normalizedRoleScope = inferAssistantRoleScope(request.current_path);
+  const offline = resolveOfflineAssistantReply(
+    request.message,
+    request.current_path,
+    request.locale,
+    request.bandwidth_profile,
+  );
+  return {
+    ...offline,
+    live_grounded: false,
+    role_scope: normalizedRoleScope,
+    quick_actions: offline.quick_actions.filter((action) =>
+      isSafeAssistantQuickActionHref(
+        action.href,
+        request.current_path,
+        normalizedRoleScope,
+      ),
+    ),
+    navigation_offer: isSafeAssistantNavigationHref(
+      offline.navigation_offer?.href,
+      request.current_path,
+      normalizedRoleScope,
+    )
+      ? offline.navigation_offer
+      : null,
+  };
+}
+
 export async function sendAssistantMessage(
-  request: AssistantChatRequest,
+  request: SendAssistantMessageInput,
   options?: {
     readonly signal?: AbortSignal;
     readonly online?: boolean;
+    readonly selectedChildId?: string | null;
   },
 ): Promise<AssistantChatResponse> {
   const isOnline =
@@ -140,13 +177,31 @@ export async function sendAssistantMessage(
 
   const apiBaseUrl = getOptionalApiBaseUrl();
   if (!isOnline || !apiBaseUrl) {
-    return resolveOfflineAssistantReply(
-      request.message,
-      request.current_path,
-      request.locale,
-      request.bandwidth_profile,
-    );
+    return buildOfflineAssistantReply(request);
   }
+
+  const normalizedRoleScope = inferAssistantRoleScope(request.current_path);
+  const rawSelectedChildId =
+    request.selectedChildId ??
+    request.selected_child_id ??
+    options?.selectedChildId ??
+    null;
+  const trimmedSelectedChildId =
+    typeof rawSelectedChildId === "string" ? rawSelectedChildId.trim() : "";
+
+  const wireBody: AssistantChatRequest = {
+    message: request.message,
+    current_path: request.current_path,
+    locale: request.locale,
+    bandwidth_profile: request.bandwidth_profile,
+    history: request.history,
+    ...(request.force_llm !== undefined
+      ? { force_llm: request.force_llm }
+      : {}),
+    ...(normalizedRoleScope === "parent" && trimmedSelectedChildId.length > 0
+      ? { selected_child_id: trimmedSelectedChildId }
+      : {}),
+  };
 
   let token = await getOptionalAccessToken();
   const timeoutMs = BANDWIDTH_CLIENT_TIMEOUT_MS[request.bandwidth_profile];
@@ -168,7 +223,7 @@ export async function sendAssistantMessage(
     return fetch(`${apiBaseUrl}/assistant/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify(request),
+      body: JSON.stringify(wireBody),
       cache: "no-store",
       credentials: "omit",
       redirect: "error",
@@ -209,27 +264,16 @@ export async function sendAssistantMessage(
     }
 
     if (!response.ok) {
-      return resolveOfflineAssistantReply(
-        request.message,
-        request.current_path,
-        request.locale,
-        request.bandwidth_profile,
-      );
+      return buildOfflineAssistantReply(request);
     }
 
     const payload: unknown = await response.json();
     const parsed = assistantChatResponseSchema.safeParse(payload);
     if (!parsed.success) {
-      return resolveOfflineAssistantReply(
-        request.message,
-        request.current_path,
-        request.locale,
-        request.bandwidth_profile,
-      );
+      return buildOfflineAssistantReply(request);
     }
 
     const data = parsed.data;
-    const normalizedRoleScope = inferAssistantRoleScope(request.current_path);
     const safeQuickActions = data.quick_actions.filter((action) =>
       isSafeAssistantQuickActionHref(
         action.href,
@@ -247,6 +291,7 @@ export async function sendAssistantMessage(
 
     return {
       ...data,
+      live_grounded: Boolean(data.live_grounded),
       role_scope: normalizedRoleScope,
       quick_actions: safeQuickActions,
       navigation_offer: safeOffer,
@@ -258,12 +303,7 @@ export async function sendAssistantMessage(
     if (options?.signal?.aborted) {
       throw error;
     }
-    return resolveOfflineAssistantReply(
-      request.message,
-      request.current_path,
-      request.locale,
-      request.bandwidth_profile,
-    );
+    return buildOfflineAssistantReply(request);
   } finally {
     clearTimeout(timeoutId);
     options?.signal?.removeEventListener("abort", forwardAbort);

@@ -1,11 +1,11 @@
 # Unified Windows One-Click Launcher for ViRead Voice Worker (:8010), Cloudflare Tunnel, and CUDA OCR Worker (:8020).
-# Zero hardcoded secrets: reads tokens/URLs from parameters, environment variables, backend\.env, or F:\c1\tools\viread-workers.env.
+# Zero hardcoded secrets: reads tokens/URLs from parameters, environment variables, backend\.env, or <workspace>\tools\viread-workers.env.
 param(
     [Alias("OcrPythonExe")]
-    [string]$OcrVenvPython = $(if (Test-Path -LiteralPath "F:\c1\capstone1\.venv\Scripts\python.exe") { "F:\c1\capstone1\.venv\Scripts\python.exe" } else { "C:\Users\cuong\AppData\Local\Programs\Python\Python312\python.exe" }),
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
-    [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
-    [string]$TunnelRuntimeDir = "F:\c1\viread-staging-tunnels",
+    [string]$OcrVenvPython = "",
+    [string]$VoiceRuntimeDir = "",
+    [string]$OcrRuntimeDir = "",
+    [string]$TunnelRuntimeDir = "",
     [string]$CloudflaredExe = "C:\Program Files (x86)\cloudflared\cloudflared.exe",
     [string]$BindHost = "127.0.0.1",
     [int]$VoicePort = 8010,
@@ -34,6 +34,22 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $workspaceParent "tools\voice-runtime"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($OcrRuntimeDir)) {
+    $OcrRuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $workspaceParent "tools\ocr-runtime" }
+}
+if ([string]::IsNullOrWhiteSpace($TunnelRuntimeDir)) {
+    $TunnelRuntimeDir = Join-Path $workspaceParent "viread-staging-tunnels"
+}
 $voicePyExe = Join-Path $VoiceRuntimeDir ".venv\Scripts\python.exe"
 
 function Write-Section([string]$title) {
@@ -69,8 +85,7 @@ function Resolve-Setting([string]$explicitVal, [string]$envKey, [string]$fallbac
         $envCandidates.Add($LocalEnvFile.Trim())
     }
     $envCandidates.Add((Join-Path $repoRoot "backend\.env"))
-    $envCandidates.Add("F:\c1\tools\viread-workers.env")
-    $envCandidates.Add("F:\c1\capstone1\backend\.env")
+    $envCandidates.Add((Join-Path $workspaceParent "tools\viread-workers.env"))
 
     foreach ($candidateKey in @($envKey, $fallbackEnvKey)) {
         if (-not $candidateKey) { continue }
@@ -94,10 +109,19 @@ function Resolve-Setting([string]$explicitVal, [string]$envKey, [string]$fallbac
     return ""
 }
 
-if (-not $PSBoundParameters.ContainsKey("OcrVenvPython")) {
+if (-not $PSBoundParameters.ContainsKey("OcrVenvPython") -or [string]::IsNullOrWhiteSpace($OcrVenvPython)) {
     $configuredOcrPy = Resolve-Setting "" "VIREAD_OCR_PYTHON_EXE"
     if ($configuredOcrPy -and (Test-Path -LiteralPath $configuredOcrPy)) {
         $OcrVenvPython = $configuredOcrPy
+    } else {
+        $OcrVenvPython = @(
+            (Join-Path $repoRoot "backend\.venv\Scripts\python.exe"),
+            (Join-Path $repoRoot ".venv\Scripts\python.exe"),
+            (Join-Path $workspaceParent ".venv\Scripts\python.exe")
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($OcrVenvPython)) {
+            $OcrVenvPython = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+        }
     }
 }
 
@@ -186,7 +210,7 @@ print(json.dumps(info))
         if ($AllowCpuOcrFallback) {
             Write-CheckWarn "torch.cuda.is_available()=False in $OcrVenvPython (continuing due to -AllowCpuOcrFallback)"
         } else {
-            Write-CheckFail "OCR venv $OcrVenvPython does not have CUDA enabled (torch=$($ocrProbeJson.torch)). Use F:\c1\capstone1\.venv or pass -AllowCpuOcrFallback."
+            Write-CheckFail "OCR venv $OcrVenvPython does not have CUDA enabled (torch=$($ocrProbeJson.torch)). Use the repository CUDA .venv or pass -AllowCpuOcrFallback."
             exit 2
         }
     } else {

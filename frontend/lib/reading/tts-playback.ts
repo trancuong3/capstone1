@@ -72,6 +72,13 @@ import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
 } from "@/lib/reading/synthesized-audio-meta";
+import {
+  fetchStaticVoicePreviewBlob,
+  isStaticVoicePreviewEnabled,
+  resolveStaticVoicePreview,
+  STATIC_VOICE_PREVIEW_RACE_MS,
+  type StaticVoicePreviewEntry,
+} from "@/lib/reading/static-voice-previews";
 import type { TtsCacheScope } from "@/lib/reading/tts-audio-cache";
 import {
   isWavAudioBlob,
@@ -308,6 +315,12 @@ function canUseBrowserSpeechSynthesis(): boolean {
   );
 }
 
+function isAuthOrValidationError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { status?: unknown }).status;
+  return status === 401 || status === 403 || status === 422;
+}
+
 function isLocalVoiceUnconfiguredError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const rec = error as {
@@ -318,6 +331,21 @@ function isLocalVoiceUnconfiguredError(error: unknown): boolean {
   };
   const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${String(rec.message ?? "")}`;
   return combined.includes("LOCAL_VOICE_UNCONFIGURED");
+}
+
+function isLocalVoiceOutageError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if (isLocalVoiceUnconfiguredError(error)) return true;
+  const rec = error as {
+    code?: unknown;
+    providerCode?: unknown;
+    provider_code?: unknown;
+    message?: unknown;
+  };
+  const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${error instanceof Error ? error.message : String(rec.message ?? "")}`;
+  return /LOCAL_VOICE_UNCONFIGURED|LOCAL_VOICE_UNAVAILABLE|LOCAL_TTS_UNAVAILABLE|LOCAL_TTS_TIMEOUT|LOCAL_VOICE_TIMEOUT/i.test(
+    combined,
+  );
 }
 
 function recordIfLocalUnconfiguredError(error: unknown): boolean {
@@ -416,6 +444,23 @@ function isElevenLabsLiveTtsUsable(
   return true;
 }
 
+function hasPermittedCloudServerTts(
+  health: VoiceEngineHealthSnapshot | null,
+  voice?: ResolvedOperationVoice,
+): boolean {
+  if (isElevenLabsLiveTtsUsable(health, voice)) {
+    return true;
+  }
+  if (
+    canUseGoogleTtsFallback() &&
+    health?.google.tts_configured &&
+    !health.google.tts_cooldown
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function isHostedNoLiveServerTts(
   error?: unknown,
   voice?: ResolvedOperationVoice,
@@ -425,17 +470,22 @@ function isHostedNoLiveServerTts(
   if (!unconfigured) return false;
   const health =
     getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
-  if (isElevenLabsLiveTtsUsable(health, voice)) {
-    return false;
-  }
-  if (
-    canUseGoogleTtsFallback() &&
-    health?.google.tts_configured &&
-    !health.google.tts_cooldown
-  ) {
-    return false;
-  }
-  return true;
+  return !hasPermittedCloudServerTts(health, voice);
+}
+
+function isNoLiveServerTtsAvailable(
+  error?: unknown,
+  voice?: ResolvedOperationVoice,
+): boolean {
+  recordIfLocalUnconfiguredError(error);
+  const localOutage =
+    isLocalVoiceUnconfiguredHealth() ||
+    isLocalVoiceUnavailableHealth() ||
+    isLocalVoiceOutageError(error);
+  if (!localOutage) return false;
+  const health =
+    getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
+  return !hasPermittedCloudServerTts(health, voice);
 }
 
 function isNoLiveServerTtsKnown(voice?: ResolvedOperationVoice): boolean {
@@ -553,6 +603,7 @@ function canUseAllowedDeviceFallbackTts(
   // phonics, comprehension, and difficult words on ONE consistent gender-locked
   // voice + exact user speed instead of failing with "Giọng đánh vần đã khóa đang tạm bận".
   const wasmAvailable = hasWasmVietnameseTts();
+  const androidAvailable = isAndroidNativeSpeechAvailable();
   const sessionKey =
     voice && !voice.bypassSessionLock && voice.sessionId
       ? `${voice.sessionId}::${voice.cacheVoiceId}`
@@ -562,16 +613,16 @@ function canUseAllowedDeviceFallbackTts(
     : null;
   const hostedOnDeviceFallback =
     isHostedNoLiveServerTts(error, voice) &&
-    (isAndroidNativeSpeechAvailable() ||
-      wasmAvailable ||
-      hasVietnameseBrowserVoice());
+    (androidAvailable || wasmAvailable || hasVietnameseBrowserVoice());
   const wasmBusyFallback =
-    wasmAvailable &&
-    !isAndroidNativeSpeechAvailable() &&
-    isTransientBusyTtsError(error);
+    wasmAvailable && !androidAvailable && isTransientBusyTtsError(error);
+  // When local server TTS is unavailable (`local.available === false`) without
+  // `LOCAL_VOICE_UNCONFIGURED`, allow locked `local_only` device fallback ONLY
+  // for real on-device neural engines (`wasmAvailable || androidAvailable`) —
+  // never `window.speechSynthesis` in JSDOM (`wasmAvailable === false`).
   const offlineWasmOutageFallback =
-    wasmAvailable &&
-    (isHostedNoLiveServerTts(error, voice) ||
+    (wasmAvailable || androidAvailable) &&
+    (isNoLiveServerTtsAvailable(error, voice) ||
       isTechnicalServerOutage(error) ||
       wasmBusyFallback ||
       Boolean(alreadyPinnedDevice === "wasm_tts") ||
@@ -585,7 +636,7 @@ function canUseAllowedDeviceFallbackTts(
   ) {
     return false;
   }
-  if (isAndroidNativeSpeechAvailable()) {
+  if (androidAvailable) {
     return true;
   }
   if (offlineWasmOutageFallback) {
@@ -622,8 +673,7 @@ function shouldSkipBackendTtsForVoice(
   }
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured();
   const health =
-    getVoiceEngineHealthForRouting() ??
-    (permanentlyUnconfigured ? getCachedVoiceEngineHealth() : null);
+    getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
   if (!health && !permanentlyUnconfigured) return false;
   const requestedGender = resolveVoiceGender(
     voice.requestedVoiceId ?? voice.cacheVoiceId,
@@ -1403,7 +1453,208 @@ export class TtsPlayback {
     if (!key) return false;
     const pinned =
       getSessionDeviceTransport(key) ?? this.sessionDeviceTransport.get(key);
-    return Boolean(pinned && canUseAllowedDeviceFallbackTts(operation));
+    if (!pinned) return false;
+    if (canUseAllowedDeviceFallbackTts(operation)) return true;
+    const health =
+      getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
+    const serverLocalHealthy = Boolean(
+      health?.local.available && health.local.tts_ready,
+    );
+    return Boolean(
+      !serverLocalHealthy &&
+      !hasPermittedCloudServerTts(health) &&
+      ((pinned === "wasm_tts" && hasWasmVietnameseTts()) ||
+        (pinned === "android_native" && isAndroidNativeSpeechAvailable())),
+    );
+  }
+
+  private findShortCacheEntry(
+    voice: ResolvedOperationVoice,
+    normalizedText: string,
+    wordSample: boolean,
+  ): {
+    readonly audio: Blob;
+    readonly usedFallbackVoice: boolean;
+    readonly cachedSpeed: number | null;
+    readonly key: string;
+  } | null {
+    const exactKey = JSON.stringify([
+      voice.provider,
+      voice.cacheVoiceId,
+      voice.modelVersion,
+      voice.speed,
+      normalizedText,
+      wordSample,
+    ]);
+    const exact = this.shortCache.get(exactKey);
+    if (exact) {
+      return {
+        audio: exact.audio,
+        usedFallbackVoice: exact.usedFallbackVoice,
+        cachedSpeed: exact.cachedSpeed,
+        key: exactKey,
+      };
+    }
+    for (const [candidateKey, candidate] of this.shortCache.entries()) {
+      const resolvedSpeed =
+        candidate.cachedSpeed ??
+        getSynthesizedAudioMeta(candidate.audio)?.cachedSpeed ??
+        null;
+      if (
+        typeof resolvedSpeed !== "number" ||
+        !Number.isFinite(resolvedSpeed) ||
+        resolvedSpeed <= 0
+      ) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(candidateKey) as unknown[];
+        if (
+          Array.isArray(parsed) &&
+          parsed.length === 6 &&
+          parsed[0] === voice.provider &&
+          parsed[1] === voice.cacheVoiceId &&
+          parsed[2] === voice.modelVersion &&
+          parsed[4] === normalizedText &&
+          parsed[5] === wordSample
+        ) {
+          return {
+            audio: candidate.audio,
+            usedFallbackVoice: candidate.usedFallbackVoice,
+            cachedSpeed: resolvedSpeed,
+            key: candidateKey,
+          };
+        }
+      } catch {
+        // Ignore malformed cache key
+      }
+    }
+    return null;
+  }
+
+  private findTimedCacheEntry(
+    voice: ResolvedOperationVoice,
+    chunkWords: readonly string[],
+  ): {
+    readonly speech: TimedSpeech;
+    readonly key: string;
+  } | null {
+    const exactKey = JSON.stringify([
+      voice.provider,
+      voice.cacheVoiceId,
+      voice.modelVersion,
+      voice.speed,
+      chunkWords,
+    ]);
+    const exact = this.cache.get(exactKey);
+    if (exact) {
+      return { speech: exact, key: exactKey };
+    }
+    for (const [candidateKey, candidate] of this.cache.entries()) {
+      const resolvedSpeed =
+        candidate.cachedSpeed ??
+        getSynthesizedAudioMeta(candidate.audio)?.cachedSpeed ??
+        null;
+      if (
+        typeof resolvedSpeed !== "number" ||
+        !Number.isFinite(resolvedSpeed) ||
+        resolvedSpeed <= 0
+      ) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(candidateKey) as unknown[];
+        if (
+          Array.isArray(parsed) &&
+          parsed.length === 5 &&
+          parsed[0] === voice.provider &&
+          parsed[1] === voice.cacheVoiceId &&
+          parsed[2] === voice.modelVersion &&
+          Array.isArray(parsed[4]) &&
+          parsed[4].length === chunkWords.length &&
+          parsed[4].every((word, idx) => word === chunkWords[idx])
+        ) {
+          return {
+            speech:
+              candidate.cachedSpeed === resolvedSpeed
+                ? candidate
+                : { ...candidate, cachedSpeed: resolvedSpeed },
+            key: candidateKey,
+          };
+        }
+      } catch {
+        // Ignore malformed cache key
+      }
+    }
+    return null;
+  }
+
+  private shouldUseImmediateOfflineStaticPreview(
+    voice: ResolvedOperationVoice,
+  ): boolean {
+    if (isLocalVoiceUnconfiguredHealth()) {
+      return true;
+    }
+    if (!isLocalVoiceUnavailableHealth()) {
+      return false;
+    }
+    const routingHealth =
+      getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
+    const requestedGender = resolveVoiceGender(
+      voice.requestedVoiceId ?? voice.cacheVoiceId,
+    );
+    const hasElevenLabsPreviewRoute = Boolean(
+      routingHealth?.elevenlabs?.tts_configured &&
+      !routingHealth.elevenlabs.tts_cooldown &&
+      (requestedGender !== "male" ||
+        routingHealth.elevenlabs.male_tts_configured === true),
+    );
+    return !hasElevenLabsPreviewRoute;
+  }
+
+  private raceBackendWithStaticPreview<T>(
+    backendPromise: Promise<T>,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly kind: "backend"; readonly value: T }
+    | { readonly kind: "backend_error"; readonly error: unknown }
+    | { readonly kind: "timeout" }
+  > {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (
+        outcome:
+          | { readonly kind: "backend"; readonly value: T }
+          | { readonly kind: "backend_error"; readonly error: unknown }
+          | { readonly kind: "timeout" },
+      ) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        signal.removeEventListener("abort", onAbort);
+        resolve(outcome);
+      };
+      const onAbort = () => {
+        finish({ kind: "backend_error", error: stopped() });
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(() => {
+        timer = null;
+        finish({ kind: "timeout" });
+      }, STATIC_VOICE_PREVIEW_RACE_MS);
+      void backendPromise.then(
+        (value) => finish({ kind: "backend", value }),
+        (error: unknown) => finish({ kind: "backend_error", error }),
+      );
+    });
   }
 
   private pinSessionToDeviceTts(
@@ -3122,6 +3373,7 @@ export class TtsPlayback {
         }
 
         if (
+          !isStaticVoicePreviewEnabled() &&
           (!getBrowserOnlineStatus() ||
             isPermanentlyHostedLocalUnconfigured()) &&
           BUNDLED_PREVIEW_GREETING_RE.test(spokenText.trim()) &&
@@ -3249,14 +3501,18 @@ export class TtsPlayback {
           const shortKey = makeKey();
           const cachedShort =
             !isEphemeral && audioFormat === undefined
-              ? this.shortCache.get(shortKey)
-              : undefined;
+              ? this.findShortCacheEntry(
+                  operation.voice,
+                  normalized,
+                  Boolean(options.wordSample),
+                )
+              : null;
           if (cachedShort) {
             return {
               audio: cachedShort.audio,
               usedFallbackVoice: cachedShort.usedFallbackVoice,
               cachedSpeed: cachedShort.cachedSpeed,
-              key: shortKey,
+              key: cachedShort.key,
             };
           }
           const pendingPrefetch =
@@ -3408,6 +3664,126 @@ export class TtsPlayback {
           cachedSpeed: number | null;
           key: string;
         }> | null = null;
+
+        const staticPreview: StaticVoicePreviewEntry | null =
+          !isEphemeral &&
+          !options.wordSample &&
+          operation.voice.provider === "local" &&
+          isStaticVoicePreviewEnabled()
+            ? resolveStaticVoicePreview(
+                operation.voice.requestedVoiceId ??
+                  operation.voice.cacheVoiceId,
+                spokenText,
+              )
+            : null;
+        if (
+          staticPreview &&
+          !this.findShortCacheEntry(
+            operation.voice,
+            spokenText.normalize("NFC"),
+            false,
+          )
+        ) {
+          const playStaticPreviewBlob = async (blob: Blob): Promise<void> => {
+            recordTtsEngineUsage({
+              provider: "local",
+              fallbackUsed: false,
+              fallbackReason: null,
+              voiceId: staticPreview.voiceId,
+              voiceGender: resolveVoiceGender(staticPreview.voiceId),
+            });
+            recordActualUtterance({
+              provider: "local",
+              voiceId: staticPreview.voiceId,
+              region: staticPreview.region,
+              modelVersion: staticPreview.modelVersion,
+            });
+            this.setFallbackNotice(null);
+            const playbackRate = computeEffectivePlaybackRate(
+              operation.voice.speed,
+              staticPreview.cachedSpeed,
+            );
+            await this.playAudio(
+              operation,
+              blob,
+              undefined,
+              0,
+              (duration) =>
+                this.started(operation, () => options.onPlay?.(duration)),
+              undefined,
+              (time, duration) => options.onTimeUpdate?.(time, duration),
+              playbackRate,
+            );
+            this.ensure(operation);
+            options.onEnded?.();
+          };
+
+          if (this.shouldUseImmediateOfflineStaticPreview(operation.voice)) {
+            const staticBlob = await this.wait(
+              operation,
+              fetchStaticVoicePreviewBlob(
+                staticPreview,
+                operation.controller.signal,
+              ),
+            );
+            this.ensure(operation);
+            if (staticBlob) {
+              await playStaticPreviewBlob(staticBlob);
+              return;
+            }
+          } else {
+            const staticBlobPromise =
+              fetchStaticVoicePreviewBlob(staticPreview);
+            const backendPreviewPromise = fetchChunk(spokenText);
+            backendPreviewPromise.catch(() => undefined);
+            const raceOutcome = await this.raceBackendWithStaticPreview(
+              backendPreviewPromise,
+              operation.controller.signal,
+            );
+            this.ensure(operation);
+            if (raceOutcome.kind === "backend") {
+              const servedMeta = getSynthesizedAudioMeta(
+                raceOutcome.value.audio,
+              );
+              if (!servedMeta) {
+                recordTtsEngineUsage({
+                  provider: "local",
+                  fallbackUsed: raceOutcome.value.usedFallbackVoice,
+                  fallbackReason: null,
+                  voiceId: staticPreview.voiceId,
+                  voiceGender: resolveVoiceGender(staticPreview.voiceId),
+                });
+              }
+              useBrowserFallback = false;
+              nextPrefetch = Promise.resolve(raceOutcome.value);
+            } else if (raceOutcome.kind === "backend_error") {
+              if (
+                isAbort(raceOutcome.error) ||
+                isAuthOrValidationError(raceOutcome.error)
+              ) {
+                throw raceOutcome.error;
+              }
+              recordIfLocalUnconfiguredError(raceOutcome.error);
+              const staticBlob = await this.wait(operation, staticBlobPromise);
+              this.ensure(operation);
+              if (staticBlob) {
+                await playStaticPreviewBlob(staticBlob);
+                return;
+              }
+              nextPrefetch = Promise.reject(raceOutcome.error);
+              nextPrefetch.catch(() => undefined);
+            } else {
+              const staticBlob = await this.wait(operation, staticBlobPromise);
+              this.ensure(operation);
+              if (staticBlob) {
+                await playStaticPreviewBlob(staticBlob);
+                return;
+              }
+              nextPrefetch = backendPreviewPromise;
+              useBrowserFallback = false;
+            }
+          }
+        }
 
         for (let idx = 0; idx < chunks.length; idx += 1) {
           const chunk = chunks[idx];
@@ -4212,16 +4588,36 @@ export class TtsPlayback {
                 }
               }
               if (!synthesized) {
-                // If live server TTS is configured (not LOCAL_VOICE_UNCONFIGURED) and only
-                // `/text-to-speech/phonics` failed transiently, spell every step sequentially
-                // through `speech.synthesize` in the EXACT same locked voice & speed!
-                const isKnownDeadLocalWorker =
-                  !canUseGoogleTtsFallback() &&
-                  getVoiceEngineHealthForRouting()?.local.available === false &&
-                  canUseAllowedDeviceFallbackTts(operation, error);
-                if (!(
-                  isLocalVoiceUnconfiguredError(error) || isKnownDeadLocalWorker
-                )) {
+                const healthForPhonics =
+                  getVoiceEngineHealthForRouting() ??
+                  getCachedVoiceEngineHealth();
+                const isLocalOutageNoCloud =
+                  (isLocalVoiceOutageError(error) ||
+                    isLocalVoiceUnconfiguredHealth() ||
+                    isLocalVoiceUnavailableHealth()) &&
+                  !hasPermittedCloudServerTts(
+                    healthForPhonics,
+                    operation.voice,
+                  );
+                const hasCatalogWordCacheTarget =
+                  !isEphemeral &&
+                  Boolean(
+                    options.bookId ||
+                    options.pageId ||
+                    options.pageRevisionId ||
+                    options.cacheScope === "CATALOG" ||
+                    this.defaultCacheContext?.bookId ||
+                    this.defaultCacheContext?.pageId ||
+                    this.defaultCacheContext?.pageRevisionId,
+                  );
+                // If live server TTS is configured (not a local worker outage
+                // without permitted cloud TTS) and only `/text-to-speech/phonics`
+                // failed transiently, spell every step sequentially through
+                // `speech.synthesize` in the EXACT same locked voice & speed!
+                if (
+                  !isLocalVoiceUnconfiguredError(error) &&
+                  !isLocalOutageNoCloud
+                ) {
                   let stepSeqStarted = false;
                   let stepSeqElapsed = 0;
                   let stepSeqFailed = false;
@@ -4352,17 +4748,16 @@ export class TtsPlayback {
                   }
                 } else {
                   if (canUseAllowedDeviceFallbackTts(operation, error)) {
-                    const servedCachedWords =
-                      !isHostedNoLiveServerTts(error) &&
-                      (await tryPlayPhonicsViaCachedWordSynthesize());
-                    if (servedCachedWords) {
-                      return;
-                    }
                     this.pinSessionToDeviceTts(operation);
                     await playPhonicsViaBrowser();
                     return;
                   }
-                  if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                  if (
+                    (!isLocalOutageNoCloud ||
+                      (isLocalVoiceUnconfiguredError(error) &&
+                        hasCatalogWordCacheTarget)) &&
+                    (await tryPlayPhonicsViaCachedWordSynthesize())
+                  ) {
                     return;
                   }
                   if (
@@ -4790,10 +5185,12 @@ export class TtsPlayback {
           chunkWords: readonly string[],
           audioFormat?: TtsAudioFormat,
         ): Promise<TimedSpeech> => {
-          const key = makeTimedKeyForWords(chunkWords);
           if (!isEphemeral && audioFormat === undefined) {
-            const cached = this.cache.get(key);
-            if (cached) return cached;
+            const cachedHit = this.findTimedCacheEntry(
+              operation.voice,
+              chunkWords,
+            );
+            if (cachedHit) return cachedHit.speech;
           }
           let timed: TimedSpeech;
           try {
@@ -4855,6 +5252,132 @@ export class TtsPlayback {
         };
 
         let nextTimedPrefetch: Promise<TimedSpeech> | null = null;
+
+        const staticTimedPreview: StaticVoicePreviewEntry | null =
+          !isEphemeral &&
+          operation.voice.provider === "local" &&
+          isStaticVoicePreviewEnabled()
+            ? resolveStaticVoicePreview(
+                operation.voice.requestedVoiceId ??
+                  operation.voice.cacheVoiceId,
+                text,
+              )
+            : null;
+        if (
+          staticTimedPreview &&
+          chunks.length === 1 &&
+          !this.findTimedCacheEntry(operation.voice, chunks[0].words)
+        ) {
+          const playStaticTimedPreviewBlob = async (
+            blob: Blob,
+          ): Promise<void> => {
+            recordTtsEngineUsage({
+              provider: "local",
+              fallbackUsed: false,
+              fallbackReason: null,
+              voiceId: staticTimedPreview.voiceId,
+              voiceGender: resolveVoiceGender(staticTimedPreview.voiceId),
+            });
+            recordTimedUtterance({
+              provider: "local",
+              voiceId: staticTimedPreview.voiceId,
+              region: staticTimedPreview.region,
+              modelVersion: staticTimedPreview.modelVersion,
+            });
+            this.setFallbackNotice(null);
+            const playbackRate = computeEffectivePlaybackRate(
+              operation.voice.speed,
+              staticTimedPreview.cachedSpeed,
+            );
+            await this.playAudio(
+              operation,
+              blob,
+              staticTimedPreview.words,
+              0,
+              () =>
+                this.started(operation, () => {
+                  options.onPlay?.();
+                  if (!canMap && options.onPlay) {
+                    options.onWordChange?.(-1);
+                  }
+                }),
+              (index) => {
+                if (canMap) options.onWordChange?.(index);
+              },
+              undefined,
+              playbackRate,
+            );
+            this.ensure(operation);
+            options.onEnded?.();
+          };
+
+          if (this.shouldUseImmediateOfflineStaticPreview(operation.voice)) {
+            const staticBlob = await this.wait(
+              operation,
+              fetchStaticVoicePreviewBlob(
+                staticTimedPreview,
+                operation.controller.signal,
+              ),
+            );
+            this.ensure(operation);
+            if (staticBlob) {
+              await playStaticTimedPreviewBlob(staticBlob);
+              return;
+            }
+          } else {
+            const staticBlobPromise =
+              fetchStaticVoicePreviewBlob(staticTimedPreview);
+            const backendTimedPromise = fetchTimedChunk(chunks[0].words);
+            backendTimedPromise.catch(() => undefined);
+            const raceOutcome = await this.raceBackendWithStaticPreview(
+              backendTimedPromise,
+              operation.controller.signal,
+            );
+            this.ensure(operation);
+            if (raceOutcome.kind === "backend") {
+              const timedMeta = getSynthesizedAudioMeta(
+                raceOutcome.value.audio,
+              );
+              if (!timedMeta && !raceOutcome.value.provider) {
+                recordTtsEngineUsage({
+                  provider: "local",
+                  fallbackUsed: Boolean(raceOutcome.value.usedFallbackVoice),
+                  fallbackReason: null,
+                  voiceId: staticTimedPreview.voiceId,
+                  voiceGender: resolveVoiceGender(staticTimedPreview.voiceId),
+                });
+              }
+              useBrowserFallback = false;
+              nextTimedPrefetch = Promise.resolve(raceOutcome.value);
+            } else if (raceOutcome.kind === "backend_error") {
+              if (
+                isAbort(raceOutcome.error) ||
+                isAuthOrValidationError(raceOutcome.error)
+              ) {
+                throw raceOutcome.error;
+              }
+              recordIfLocalUnconfiguredError(raceOutcome.error);
+              const staticBlob = await this.wait(operation, staticBlobPromise);
+              this.ensure(operation);
+              if (staticBlob) {
+                await playStaticTimedPreviewBlob(staticBlob);
+                return;
+              }
+              nextTimedPrefetch = Promise.reject(raceOutcome.error);
+              nextTimedPrefetch.catch(() => undefined);
+            } else {
+              const staticBlob = await this.wait(operation, staticBlobPromise);
+              this.ensure(operation);
+              if (staticBlob) {
+                await playStaticTimedPreviewBlob(staticBlob);
+                return;
+              }
+              nextTimedPrefetch = backendTimedPromise;
+              useBrowserFallback = false;
+            }
+          }
+        }
+
         for (let idx = 0; idx < chunks.length; idx += 1) {
           const chunk = chunks[idx];
           await this.waitIfPaused(operation);
@@ -4913,9 +5436,16 @@ export class TtsPlayback {
             continue;
           }
           const key = makeTimedKeyForWords(chunk.words);
+          let matchedCacheKey = key;
           let synthesizedTimedOk = false;
           try {
-            let timed = this.cache.get(key);
+            const cachedHit = !isEphemeral
+              ? this.findTimedCacheEntry(operation.voice, chunk.words)
+              : null;
+            let timed = cachedHit?.speech;
+            if (cachedHit) {
+              matchedCacheKey = cachedHit.key;
+            }
             if (!timed) {
               if (
                 !nextTimedPrefetch &&
@@ -5005,13 +5535,13 @@ export class TtsPlayback {
                 throw playErr;
               }
               if (playErr instanceof CompressedAudioDecodeError) {
-                const stale = this.cache.get(key);
+                const stale = this.cache.get(matchedCacheKey);
                 if (stale) {
                   this.cacheBytes = Math.max(
                     0,
                     this.cacheBytes - stale.audio.size,
                   );
-                  this.cache.delete(key);
+                  this.cache.delete(matchedCacheKey);
                 }
                 const wavTimed = await fetchTimedChunk(chunk.words, "wav");
                 this.ensure(operation);
@@ -5049,13 +5579,13 @@ export class TtsPlayback {
               this.setFallbackNotice(AUTOPLAY_BLOCKED_NOTICE);
               throw error;
             }
-            const invalid = this.cache.get(key);
+            const invalid = this.cache.get(matchedCacheKey);
             if (invalid) {
               this.cacheBytes = Math.max(
                 0,
                 this.cacheBytes - invalid.audio.size,
               );
-              this.cache.delete(key);
+              this.cache.delete(matchedCacheKey);
             }
             const errProviderCode =
               typeof error === "object" && error !== null
@@ -5070,13 +5600,18 @@ export class TtsPlayback {
             const isUnconfiguredLocalErr =
               recordIfLocalUnconfiguredError(error) ||
               errProviderCode === "LOCAL_VOICE_UNCONFIGURED";
+            const healthForFallback =
+              getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
+            const isDeadLocalWorkerNoCloud =
+              isUnconfiguredLocalErr ||
+              isPermanentlyHostedLocalUnconfigured() ||
+              ((isLocalVoiceOutageError(error) ||
+                isLocalVoiceUnavailableHealth()) &&
+                !hasPermittedCloudServerTts(healthForFallback));
             // Prefer the same locked voice via the short endpoint before
-            // switching providers, unless local worker is unconfigured
-            // (avoiding a duplicate 503 roundtrip and preserving word timings via WASM/device TTS).
-            const isKnownDeadLocalWorker =
-              !canUseGoogleTtsFallback() &&
-              getVoiceEngineHealthForRouting()?.local.available === false &&
-              canUseAllowedDeviceFallbackTts(operation, error);
+            // switching providers, unless local worker is unconfigured or dead
+            // with no permitted cloud TTS (avoiding a duplicate 503/timeout
+            // roundtrip and preserving word timings via WASM/device TTS).
             if (
               completedChunks === 0 &&
               Boolean(options.bypassSessionLock) &&
@@ -5094,24 +5629,13 @@ export class TtsPlayback {
               });
               return;
             }
-            if (
-              !completedChunks &&
-              fallback &&
-              !(
-                isUnconfiguredLocalErr ||
-                isPermanentlyHostedLocalUnconfigured() ||
-                isKnownDeadLocalWorker
-              )
-            ) {
+            if (!completedChunks && fallback && !isDeadLocalWorkerNoCloud) {
               this.timedCooldownUntil = Date.now() + 15_000;
               await fallback();
               return;
             }
             if (
-              (!synthesizedTimedOk ||
-                !fallback ||
-                isUnconfiguredLocalErr ||
-                isKnownDeadLocalWorker) &&
+              (!synthesizedTimedOk || !fallback || isDeadLocalWorkerNoCloud) &&
               canUseAllowedDeviceFallbackTts(operation, error)
             ) {
               useBrowserFallback = true;

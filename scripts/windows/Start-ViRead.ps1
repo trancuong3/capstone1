@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
 if (-not $ConfigPath) {
     $ConfigPath = Join-Path $scriptDir "viread-host.config.json"
 }
@@ -50,7 +51,7 @@ if (-not (Test-Path $ConfigPath)) {
         $autoCfg.httpsPort = 9443
         $autoCfg.frontendPort = 3002
         $autoCfg.backendPort = 8002
-        $autoCfg.runtimeDir = "F:\c1\viread-local-voice-runtime"
+        $autoCfg.runtimeDir = Join-Path $workspaceParent "viread-local-voice-runtime"
     }
 
     $autoCfg | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $ConfigPath
@@ -78,7 +79,7 @@ $frontendEnvFile = if ($cfg.frontendEnvFile) { [string]$cfg.frontendEnvFile } el
 $ocrCloudEnabled = if ($null -ne $cfg.ocrCloudCorrectionEnabled) { [bool]$cfg.ocrCloudCorrectionEnabled } else { $false }
 $ocrWarmupEnabled = if ($null -ne $cfg.ocrWarmupEnabled) { [bool]$cfg.ocrWarmupEnabled } else { $false }
 $ocrDevice = if ($cfg.ocrDevice) { ([string]$cfg.ocrDevice).Trim().ToLowerInvariant() } else { "cpu" }
-$voiceRuntimeDir = if ($cfg.voiceRuntimeDir) { [string]$cfg.voiceRuntimeDir } else { "F:\c1\tools\voice-runtime" }
+$voiceRuntimeDir = if ($cfg.voiceRuntimeDir) { [string]$cfg.voiceRuntimeDir } elseif ($env:VIREAD_VOICE_RUNTIME_DIR) { $env:VIREAD_VOICE_RUNTIME_DIR } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) { $env:VIREAD_VOICE_RUNTIME_ROOT } else { Join-Path $workspaceParent "tools\voice-runtime" }
 $voiceWorkerPort = if ($cfg.voiceWorkerPort) { [int]$cfg.voiceWorkerPort } else { 8010 }
 $logRetentionMb = if ($cfg.logRetentionMb) { [int]$cfg.logRetentionMb } else { 20 }
 $maxLogBytes = $logRetentionMb * 1MB

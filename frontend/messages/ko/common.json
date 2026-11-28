@@ -167,7 +167,17 @@
     "quickActionGateIntro": "**{label}**을(를) 열기 전에 선택된 아이 프로필을 확인합니다.",
     "scopePublic": "게스트 지원",
     "scopeParent": "학부모 지원",
-    "scopeAdmin": "관리자 지원"
+    "scopeAdmin": "관리자 지원",
+    "voiceStartAria": "음성으로 질문 입력",
+    "voiceStopAria": "음성 입력 중지",
+    "voiceListening": "듣는 중…",
+    "copyReply": "복사",
+    "copiedReply": "복사됨",
+    "feedbackHelpful": "도움됨",
+    "feedbackNotHelpful": "도움 안 됨",
+    "feedbackThanks": "의견 감사합니다",
+    "liveParentBadge": "내 실시간 계정 데이터",
+    "liveAdminBadge": "실시간 시스템 지표"
   },
   "taskCenter": {
     "backgroundProcessing": "백그라운드 처리 중…",

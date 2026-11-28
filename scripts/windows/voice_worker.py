@@ -89,8 +89,11 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+_WORKSPACE_PARENT = _REPO_ROOT.parent
 VOICE_RUNTIME_ROOT = Path(
-    os.environ.get("VIREAD_VOICE_RUNTIME_DIR", r"F:\c1\tools\voice-runtime")
+    os.environ.get("VIREAD_VOICE_RUNTIME_DIR")
+    or os.environ.get("VIREAD_VOICE_RUNTIME_ROOT")
+    or str(_WORKSPACE_PARENT / "tools" / "voice-runtime")
 )
 HF_CACHE_DIR = Path(
     os.environ.get("HF_HOME", str(VOICE_RUNTIME_ROOT / "hf-cache"))
@@ -1127,6 +1130,8 @@ _PREWARM_COACHING_PHRASES_BY_VOICE: tuple[tuple[str, tuple[str, ...]], ...] = (
             "Con đọc tốt lắm.",
             "Mình cùng đọc tiếp nhé.",
             "Bây giờ con nghe câu hỏi nhé.",
+            "Con trả lời đúng rồi, giỏi quá!",
+            "Con chọn lại câu trả lời khác nhé.",
             "Con đọc từ trên màn hình nhé.",
         ),
     ),
@@ -1137,6 +1142,8 @@ _PREWARM_COACHING_PHRASES_BY_VOICE: tuple[tuple[str, tuple[str, ...]], ...] = (
             "Con đọc tốt lắm.",
             "Mình cùng đọc tiếp nhé.",
             "Bây giờ con nghe câu hỏi nhé.",
+            "Con trả lời đúng rồi, giỏi quá!",
+            "Con chọn lại câu trả lời khác nhé.",
             "Con đọc từ trên màn hình nhé.",
         ),
     ),

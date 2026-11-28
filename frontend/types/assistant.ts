@@ -46,6 +46,11 @@ export interface AssistantChatRequest {
   readonly bandwidth_profile: BandwidthProfile;
   readonly history: readonly AssistantHistoryTurn[];
   readonly force_llm?: boolean;
+  readonly selected_child_id?: string | null;
+}
+
+export interface SendAssistantMessageInput extends AssistantChatRequest {
+  readonly selectedChildId?: string | null;
 }
 
 export interface AssistantChatResponse {
@@ -56,6 +61,7 @@ export interface AssistantChatResponse {
   readonly bandwidth_applied: BandwidthProfile;
   readonly latency_ms: number;
   readonly cached: boolean;
+  readonly live_grounded?: boolean;
   readonly role_scope: AssistantRoleScope;
   readonly quick_actions: readonly AssistantQuickAction[];
   readonly suggested_prompts: readonly string[];
@@ -72,6 +78,8 @@ export interface AssistantMessage {
   readonly modelId?: string | null;
   readonly latencyMs?: number;
   readonly cached?: boolean;
+  readonly liveGrounded?: boolean;
+  readonly feedback?: "up" | "down";
   readonly roleScope?: AssistantRoleScope;
   readonly quickActions?: readonly AssistantQuickAction[];
   readonly suggestedPrompts?: readonly string[];

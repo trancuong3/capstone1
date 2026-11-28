@@ -12,6 +12,15 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+$defaultPythonExe = @(
+    (Join-Path $repoRoot "backend\.venv\Scripts\python.exe"),
+    (Join-Path $repoRoot ".venv\Scripts\python.exe"),
+    (Join-Path $workspaceParent ".venv\Scripts\python.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $defaultPythonExe) {
+    $defaultPythonExe = Join-Path $repoRoot "backend\.venv\Scripts\python.exe"
+}
 $startScript = Join-Path $scriptDir "Start-ViRead.ps1"
 $stopScript = Join-Path $scriptDir "Stop-ViRead.ps1"
 $statusScript = Join-Path $scriptDir "Get-ViReadStatus.ps1"
@@ -146,9 +155,9 @@ function Invoke-ScriptSelfTests {
                 frontendMode = "production"
                 apiProxyPrefix = "/_viread_api"
                 runtimeDir = (Join-Path $tmpRoot "rt-busy")
-                pythonExe = "F:\c1\capstone1\.venv\Scripts\python.exe"
-                backendEnvFile = "F:\c1\capstone1\backend\.env"
-                frontendEnvFile = "F:\c1\capstone1\frontend\.env.local"
+                pythonExe = $defaultPythonExe
+                backendEnvFile = (Join-Path $repoRoot "backend\.env")
+                frontendEnvFile = (Join-Path $repoRoot "frontend\.env.local")
             } | ConvertTo-Json | Set-Content -Encoding UTF8 $busyCfg
 
             $rc2 = Invoke-PsScriptExitCode $startScript @("-ConfigPath", $busyCfg, "-SkipFrontendBuild")
@@ -178,7 +187,7 @@ function Invoke-ScriptSelfTests {
             frontendMode = "production"
             apiProxyPrefix = "/_viread_api"
             runtimeDir = $rtPartial
-            pythonExe = "F:\c1\capstone1\.venv\Scripts\python.exe"
+            pythonExe = $defaultPythonExe
             backendEnvFile = $badEnv
             frontendEnvFile = $goodFeEnv
         } | ConvertTo-Json | Set-Content -Encoding UTF8 $partialCfg

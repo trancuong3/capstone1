@@ -28,13 +28,365 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
 import type {
   AssistantMessage,
+  AssistantNavigationOffer,
+  AssistantQuickAction,
   AssistantRoleScope,
+  AssistantSourceTier,
   AssistantVisibilityState,
 } from "@/types/assistant";
 
 const VISIBILITY_STORAGE_KEY = "viread:assistant:visibility";
+const HISTORY_STORAGE_PREFIX = "viread:assistant:history:v1:";
+const MAX_PERSISTED_MESSAGES = 12;
 const OPEN_ASSISTANT_EVENT = "viread:assistant:open";
 const PREFS_CHANGE_EVENT = "viread:assistant:prefs-changed";
+
+const VALID_SOURCE_TIERS: ReadonlySet<AssistantSourceTier> = new Set([
+  "cache",
+  "tier_0_kb",
+  "tier_1_cloud",
+  "tier_2_ollama",
+  "tier_3_fallback",
+  "offline",
+]);
+
+const VALID_ROLE_SCOPES: ReadonlySet<AssistantRoleScope> = new Set([
+  "public",
+  "parent",
+  "admin",
+]);
+
+const VALID_NAV_DECISIONS: ReadonlySet<
+  NonNullable<AssistantMessage["navigationDecision"]>
+> = new Set([
+  "pending",
+  "needs_child",
+  "needs_reading_exit_confirm",
+  "accepted",
+  "declined",
+]);
+
+const SENSITIVE_TOKEN_RE =
+  /\b(?:eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9._-]{16,}|sb_secret_[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{16,})\b/;
+
+function buildHistoryStorageKey(
+  roleScope: AssistantRoleScope,
+  userId: string | null,
+): string {
+  return `${HISTORY_STORAGE_PREFIX}${roleScope}:${userId ?? "guest"}`;
+}
+
+function isSafeInternalPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 180 &&
+    value.startsWith("/") &&
+    !value.startsWith("//") &&
+    !value.includes("://")
+  );
+}
+
+function containsSensitiveToken(value: unknown): boolean {
+  return typeof value === "string" && SENSITIVE_TOKEN_RE.test(value);
+}
+
+function sanitizeMessageForStorage(
+  raw: unknown,
+  expectedRoleScope?: AssistantRoleScope,
+): AssistantMessage | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  if (
+    typeof obj.id !== "string" ||
+    obj.id.length === 0 ||
+    obj.id.length > 128
+  ) {
+    return null;
+  }
+  if (obj.role !== "user" && obj.role !== "assistant") {
+    return null;
+  }
+  if (
+    typeof obj.content !== "string" ||
+    obj.content.trim().length === 0 ||
+    obj.content.length > 8000 ||
+    containsSensitiveToken(obj.content)
+  ) {
+    return null;
+  }
+
+  let roleScope: AssistantRoleScope | undefined;
+  if (obj.roleScope !== undefined) {
+    if (
+      typeof obj.roleScope !== "string" ||
+      !VALID_ROLE_SCOPES.has(obj.roleScope as AssistantRoleScope)
+    ) {
+      return null;
+    }
+    roleScope = obj.roleScope as AssistantRoleScope;
+    if (
+      expectedRoleScope &&
+      obj.role === "assistant" &&
+      roleScope !== expectedRoleScope
+    ) {
+      return null;
+    }
+  }
+
+  const messagePath = isSafeInternalPath(obj.messagePath)
+    ? obj.messagePath
+    : undefined;
+
+  const sourceTier =
+    typeof obj.sourceTier === "string" &&
+    VALID_SOURCE_TIERS.has(obj.sourceTier as AssistantSourceTier)
+      ? (obj.sourceTier as AssistantSourceTier)
+      : undefined;
+
+  const providerId =
+    typeof obj.providerId === "string" &&
+    obj.providerId.length > 0 &&
+    obj.providerId.length <= 64 &&
+    !containsSensitiveToken(obj.providerId)
+      ? obj.providerId
+      : undefined;
+
+  const modelId =
+    obj.modelId === null
+      ? null
+      : typeof obj.modelId === "string" &&
+          obj.modelId.length <= 128 &&
+          !containsSensitiveToken(obj.modelId)
+        ? obj.modelId
+        : undefined;
+
+  const latencyMs =
+    typeof obj.latencyMs === "number" &&
+    Number.isFinite(obj.latencyMs) &&
+    obj.latencyMs >= 0
+      ? obj.latencyMs
+      : undefined;
+
+  const cached = typeof obj.cached === "boolean" ? obj.cached : undefined;
+  const liveGrounded =
+    typeof obj.liveGrounded === "boolean" ? obj.liveGrounded : undefined;
+  const feedback =
+    obj.feedback === "up" || obj.feedback === "down" ? obj.feedback : undefined;
+
+  let quickActions: AssistantQuickAction[] | undefined;
+  if (Array.isArray(obj.quickActions)) {
+    quickActions = obj.quickActions
+      .filter(
+        (item): item is AssistantQuickAction =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          typeof (item as AssistantQuickAction).label === "string" &&
+          (item as AssistantQuickAction).label.trim().length > 0 &&
+          (item as AssistantQuickAction).label.length <= 80 &&
+          !containsSensitiveToken((item as AssistantQuickAction).label) &&
+          isSafeInternalPath((item as AssistantQuickAction).href),
+      )
+      .slice(0, 3)
+      .map((item) => ({ label: item.label, href: item.href }));
+  }
+
+  let suggestedPrompts: string[] | undefined;
+  if (Array.isArray(obj.suggestedPrompts)) {
+    suggestedPrompts = obj.suggestedPrompts
+      .filter(
+        (item): item is string =>
+          typeof item === "string" &&
+          item.trim().length > 0 &&
+          item.length <= 240 &&
+          !containsSensitiveToken(item),
+      )
+      .slice(0, 3);
+  }
+
+  let navigationOffer: AssistantNavigationOffer | null | undefined;
+  if (obj.navigationOffer === null) {
+    navigationOffer = null;
+  } else if (
+    obj.navigationOffer &&
+    typeof obj.navigationOffer === "object" &&
+    !Array.isArray(obj.navigationOffer)
+  ) {
+    const offer = obj.navigationOffer as Record<string, unknown>;
+    if (
+      typeof offer.label === "string" &&
+      offer.label.trim().length > 0 &&
+      offer.label.length <= 80 &&
+      !containsSensitiveToken(offer.label) &&
+      isSafeInternalPath(offer.href)
+    ) {
+      navigationOffer = {
+        label: offer.label,
+        href: offer.href,
+        ...(typeof offer.reason === "string" &&
+        offer.reason.length <= 160 &&
+        !containsSensitiveToken(offer.reason)
+          ? { reason: offer.reason }
+          : offer.reason === null
+            ? { reason: null }
+            : {}),
+        ...(typeof offer.requires_child_selection === "boolean"
+          ? { requires_child_selection: offer.requires_child_selection }
+          : {}),
+        ...(typeof offer.scenario_id === "string" &&
+        offer.scenario_id.length <= 64
+          ? { scenario_id: offer.scenario_id }
+          : offer.scenario_id === null
+            ? { scenario_id: null }
+            : {}),
+      };
+    }
+  }
+
+  const navigationDecision =
+    typeof obj.navigationDecision === "string" &&
+    VALID_NAV_DECISIONS.has(
+      obj.navigationDecision as NonNullable<
+        AssistantMessage["navigationDecision"]
+      >,
+    )
+      ? (obj.navigationDecision as AssistantMessage["navigationDecision"])
+      : undefined;
+
+  const canDeepenWithAi =
+    typeof obj.canDeepenWithAi === "boolean" ? obj.canDeepenWithAi : undefined;
+  const canRetryOnline =
+    typeof obj.canRetryOnline === "boolean" ? obj.canRetryOnline : undefined;
+  const sourcePrompt =
+    typeof obj.sourcePrompt === "string" &&
+    obj.sourcePrompt.trim().length > 0 &&
+    obj.sourcePrompt.length <= 1000 &&
+    !containsSensitiveToken(obj.sourcePrompt)
+      ? obj.sourcePrompt
+      : undefined;
+
+  return {
+    id: obj.id,
+    role: obj.role,
+    content: obj.content,
+    ...(messagePath !== undefined ? { messagePath } : {}),
+    ...(sourceTier !== undefined ? { sourceTier } : {}),
+    ...(providerId !== undefined ? { providerId } : {}),
+    ...(modelId !== undefined ? { modelId } : {}),
+    ...(latencyMs !== undefined ? { latencyMs } : {}),
+    ...(cached !== undefined ? { cached } : {}),
+    ...(liveGrounded !== undefined ? { liveGrounded } : {}),
+    ...(feedback !== undefined ? { feedback } : {}),
+    ...(roleScope !== undefined ? { roleScope } : {}),
+    ...(quickActions !== undefined ? { quickActions } : {}),
+    ...(suggestedPrompts !== undefined ? { suggestedPrompts } : {}),
+    ...(navigationOffer !== undefined ? { navigationOffer } : {}),
+    ...(navigationDecision !== undefined ? { navigationDecision } : {}),
+    ...(canDeepenWithAi !== undefined ? { canDeepenWithAi } : {}),
+    ...(canRetryOnline !== undefined ? { canRetryOnline } : {}),
+    ...(sourcePrompt !== undefined ? { sourcePrompt } : {}),
+  };
+}
+
+function removeStoredHistoryKey(key: string | null): void {
+  if (!key || typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors (private browsing / restricted storage).
+  }
+}
+
+function clearAllStoredHistoryKeys(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (key && key.startsWith(HISTORY_STORAGE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function clearForeignUserHistoryKeys(activeUser: string | null): void {
+  if (typeof window === "undefined") return;
+  const expectedSuffix = `:${activeUser ?? "guest"}`;
+  try {
+    const keysToRemove: string[] = [];
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (
+        key &&
+        key.startsWith(HISTORY_STORAGE_PREFIX) &&
+        !key.endsWith(expectedSuffix)
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function readStoredHistory(
+  key: string,
+  expectedRoleScope: AssistantRoleScope,
+): AssistantMessage[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      removeStoredHistoryKey(key);
+      return [];
+    }
+    const valid = parsed
+      .map((item) => sanitizeMessageForStorage(item, expectedRoleScope))
+      .filter((item): item is AssistantMessage => item !== null)
+      .slice(-MAX_PERSISTED_MESSAGES);
+    if (valid.length === 0) {
+      removeStoredHistoryKey(key);
+    }
+    return valid;
+  } catch {
+    removeStoredHistoryKey(key);
+    return [];
+  }
+}
+
+function writeStoredHistory(
+  key: string,
+  messages: readonly AssistantMessage[],
+  expectedRoleScope: AssistantRoleScope,
+): void {
+  if (typeof window === "undefined") return;
+  const sanitized = messages
+    .slice(-MAX_PERSISTED_MESSAGES)
+    .map((item) => sanitizeMessageForStorage(item, expectedRoleScope))
+    .filter((item): item is AssistantMessage => item !== null);
+  if (sanitized.length === 0) {
+    removeStoredHistoryKey(key);
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(sanitized));
+  } catch {
+    // Ignore quota / private-browsing errors.
+  }
+}
 
 export function openViReadAssistant(): void {
   if (typeof window === "undefined") return;
@@ -327,11 +679,14 @@ export function ViReadAssistantWidget() {
   const [activeUserId, setActiveUserId] = useState<string | null | undefined>(
     undefined,
   );
+  const [hydratedScopeKey, setHydratedScopeKey] = useState<string | null>(null);
   const shouldRetryOnRemountRef = useRef(false);
 
   const currentRoleScope = inferAssistantRoleScope(pathname);
   const prevRoleScopeRef = useRef<AssistantRoleScope>(currentRoleScope);
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
+  const activeScopeKeyRef = useRef<string | null>(null);
+  const skipNextRestoreRef = useRef(false);
 
   const visibility: AssistantVisibilityState = isOpen
     ? "open"
@@ -357,13 +712,18 @@ export function ViReadAssistantWidget() {
             prevUserIdRef.current !== undefined &&
             prevUserIdRef.current !== initialUserId
           ) {
+            skipNextRestoreRef.current = true;
+            clearAllStoredHistoryKeys();
             setMessages([]);
+          } else {
+            clearForeignUserHistoryKeys(initialUserId);
           }
           prevUserIdRef.current = initialUserId;
           setActiveUserId(initialUserId);
         })
         .catch(() => {
           if (!active || authEventReceived) return;
+          clearForeignUserHistoryKeys(null);
           prevUserIdRef.current = null;
           setActiveUserId(null);
         });
@@ -375,11 +735,14 @@ export function ViReadAssistantWidget() {
         const shouldResetHistory =
           event === "SIGNED_OUT" ||
           (prevUserIdRef.current !== undefined &&
-            prevUserIdRef.current !== nextUserId) ||
-          (event === "SIGNED_IN" && prevUserIdRef.current === undefined);
+            prevUserIdRef.current !== nextUserId);
         prevUserIdRef.current = nextUserId;
         if (shouldResetHistory) {
+          skipNextRestoreRef.current = true;
+          clearAllStoredHistoryKeys();
           setMessages([]);
+        } else {
+          clearForeignUserHistoryKeys(nextUserId);
         }
         setActiveUserId(nextUserId);
       });
@@ -400,11 +763,13 @@ export function ViReadAssistantWidget() {
   }, []);
 
   useEffect(() => {
-    const roleChanged = prevRoleScopeRef.current !== currentRoleScope;
+    const prevRoleScope = prevRoleScopeRef.current;
+    const prevUserId = prevUserIdRef.current;
+    const roleChanged = prevRoleScope !== currentRoleScope;
     const userChanged =
       activeUserId !== undefined &&
-      prevUserIdRef.current !== undefined &&
-      prevUserIdRef.current !== activeUserId;
+      prevUserId !== undefined &&
+      prevUserId !== activeUserId;
 
     if (roleChanged) {
       prevRoleScopeRef.current = currentRoleScope;
@@ -413,8 +778,80 @@ export function ViReadAssistantWidget() {
       prevUserIdRef.current = activeUserId;
     }
 
-    if (roleChanged || userChanged) {
+    if (activeUserId === undefined) {
+      if (roleChanged) {
+        removeStoredHistoryKey(activeScopeKeyRef.current);
+        activeScopeKeyRef.current = null;
+        setHydratedScopeKey(null);
+        setMessages([]);
+      }
+      return;
+    }
+
+    const nextScopeKey = buildHistoryStorageKey(currentRoleScope, activeUserId);
+    const previousScopeKey = activeScopeKeyRef.current;
+
+    if (previousScopeKey === null) {
+      activeScopeKeyRef.current = nextScopeKey;
+      if (roleChanged || userChanged || skipNextRestoreRef.current) {
+        skipNextRestoreRef.current = false;
+        clearAllStoredHistoryKeys();
+        setHydratedScopeKey(nextScopeKey);
+        setMessages([]);
+        return;
+      }
+      let active = true;
+      const restored = readStoredHistory(nextScopeKey, currentRoleScope);
+      queueMicrotask(() => {
+        if (!active || activeScopeKeyRef.current !== nextScopeKey) return;
+        setHydratedScopeKey(nextScopeKey);
+        if (restored.length > 0) {
+          setMessages((prev) => (prev.length > 0 ? prev : restored));
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    if (
+      roleChanged ||
+      userChanged ||
+      skipNextRestoreRef.current ||
+      previousScopeKey !== nextScopeKey
+    ) {
+      removeStoredHistoryKey(previousScopeKey);
+      if (userChanged || skipNextRestoreRef.current) {
+        clearAllStoredHistoryKeys();
+      }
+      skipNextRestoreRef.current = false;
+      activeScopeKeyRef.current = nextScopeKey;
+      setHydratedScopeKey(nextScopeKey);
       setMessages([]);
+    }
+  }, [activeUserId, currentRoleScope]);
+
+  useEffect(() => {
+    if (activeUserId === undefined || hydratedScopeKey === null) {
+      return;
+    }
+    const expectedScopeKey = buildHistoryStorageKey(
+      currentRoleScope,
+      activeUserId,
+    );
+    if (hydratedScopeKey !== expectedScopeKey) {
+      return;
+    }
+    writeStoredHistory(expectedScopeKey, messages, currentRoleScope);
+  }, [activeUserId, currentRoleScope, hydratedScopeKey, messages]);
+
+  const handleClearMessages = useCallback(() => {
+    setMessages([]);
+    removeStoredHistoryKey(activeScopeKeyRef.current);
+    if (activeUserId !== undefined) {
+      removeStoredHistoryKey(
+        buildHistoryStorageKey(currentRoleScope, activeUserId),
+      );
     }
   }, [activeUserId, currentRoleScope]);
 
@@ -605,6 +1042,7 @@ export function ViReadAssistantWidget() {
           isAdminRoute={isAdminRoute}
           isReadingRoute={isReadingRoute}
           messages={messages}
+          onClearMessages={handleClearMessages}
           onMessagesChange={setMessages}
           onUpdateVisibility={updateVisibility}
           pathname={pathname}

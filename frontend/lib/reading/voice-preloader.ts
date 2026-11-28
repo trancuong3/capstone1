@@ -36,6 +36,7 @@ import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   fetchVoiceEngineHealth,
+  getCachedVoiceEngineHealth,
   getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
@@ -480,7 +481,8 @@ function isLocalMockedSpeechHarness(): boolean {
  * permitted cloud server TTS is already healthy.
  */
 export function shouldWarmWasmTts(
-  health: VoiceEngineHealthSnapshot | null = getVoiceEngineHealthForRouting(),
+  health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth() ??
+    getCachedVoiceEngineHealth(),
 ): boolean {
   if (
     isAndroidNativeSpeechAvailable() ||
@@ -489,8 +491,9 @@ export function shouldWarmWasmTts(
   ) {
     return false;
   }
-  if (health) {
-    return !hasLiveServerTts(health);
+  const effectiveHealth = health ?? getCachedVoiceEngineHealth();
+  if (effectiveHealth) {
+    return !hasLiveServerTts(effectiveHealth);
   }
   if (isPermanentlyHostedLocalUnconfigured(null)) {
     return true;
@@ -503,7 +506,9 @@ export function warmWasmTtsIfNeeded(
   health?: VoiceEngineHealthSnapshot | null,
 ): Promise<boolean> {
   const resolvedHealth =
-    health === undefined ? getVoiceEngineHealthForRouting() : health;
+    health === undefined
+      ? (getFreshVoiceEngineHealth() ?? getCachedVoiceEngineHealth())
+      : health;
   if (!shouldWarmWasmTts(resolvedHealth)) {
     return Promise.resolve(false);
   }

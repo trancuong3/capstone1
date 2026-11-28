@@ -1,6 +1,6 @@
 """Offline/CLI precomputation script to populate `tts_audio_cache_entries` with 64 kbps MP3 clips.
 
-Prefer running with `F:\\c1\\tools\\voice-runtime\\.venv\\Scripts\\python.exe` (which includes
+Prefer running with `<workspace>\\tools\\voice-runtime\\.venv\\Scripts\\python.exe` (which includes
 PyAV `libmp3lame` for 12x WAV->MP3 64 kbps compression) while the local voice worker
 (`127.0.0.1:8010`) is running. Never prints secrets, JWTs, or DATABASE_URL.
 """
@@ -19,14 +19,23 @@ from typing import Any
 from uuid import UUID
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_PARENT = REPO_ROOT.parent
 BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 # Append voice-runtime site-packages as a fallback so PyAV (`av` / libmp3lame) is available
 # for 64 kbps MP3 compression without overriding backend ABI-pinned packages.
+_VOICE_RUNTIME_ROOT = Path(
+    os.getenv("VIREAD_VOICE_RUNTIME_DIR")
+    or os.getenv("VIREAD_VOICE_RUNTIME_ROOT")
+    or str(WORKSPACE_PARENT / "tools" / "voice-runtime")
+)
 _VOICE_SITE_PACKAGES = Path(
-    os.getenv("VIREAD_VOICE_RUNTIME_SITE_PACKAGES", r"F:\c1\tools\voice-runtime\.venv\Lib\site-packages")
+    os.getenv(
+        "VIREAD_VOICE_RUNTIME_SITE_PACKAGES",
+        str(_VOICE_RUNTIME_ROOT / ".venv" / "Lib" / "site-packages"),
+    )
 )
 if _VOICE_SITE_PACKAGES.is_dir() and str(_VOICE_SITE_PACKAGES) not in sys.path:
     sys.path.append(str(_VOICE_SITE_PACKAGES))

@@ -167,7 +167,17 @@
     "quickActionGateIntro": "לפני פתיחת **{label}**, נבדוק איזה פרופיל ילד נבחר.",
     "scopePublic": "עזרת אורחים",
     "scopeParent": "עזרת הורים",
-    "scopeAdmin": "עזרת ניהול"
+    "scopeAdmin": "עזרת ניהול",
+    "voiceStartAria": "שאילת שאלה בקול",
+    "voiceStopAria": "עצירת קלט קולי",
+    "voiceListening": "מאזין…",
+    "copyReply": "העתקה",
+    "copiedReply": "הועתק",
+    "feedbackHelpful": "מועיל",
+    "feedbackNotHelpful": "לא מועיל",
+    "feedbackThanks": "תודה על המשוב",
+    "liveParentBadge": "נתוני החשבון החיים שלך",
+    "liveAdminBadge": "מדדי מערכת בזמן אמת"
   },
   "taskCenter": {
     "backgroundProcessing": "מעבד ברקע…",

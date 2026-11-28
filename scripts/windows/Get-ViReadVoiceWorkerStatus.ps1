@@ -1,12 +1,24 @@
 # Report status of the standalone ViRead Local Voice Worker (never prints secrets).
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [string]$VoiceRuntimeDir = "",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8010,
     [switch]$AsJson
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $WorkspaceParent "tools\voice-runtime"
+    }
+}
 
 $stateFile = Join-Path $VoiceRuntimeDir "worker-state.json"
 $state = if (Test-Path $stateFile) { Get-Content $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }

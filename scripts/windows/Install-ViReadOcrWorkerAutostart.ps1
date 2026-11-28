@@ -6,18 +6,31 @@
     Registers '\ViRead-OcrWorker-AutoStart' for the current interactive user with:
       (a) AtLogOn trigger (clears pre-session stale stop sentinel at logon), and
       (b) Once + 10-minute RepetitionInterval (3650 days) watchdog trigger passing --respect-stop so mid-session supervisor deaths are revived within 10 minutes while honoring active autostart.stop sentinels.
-    Syncs runtime scripts into F:\c1\tools\ocr-runtime when invoked from the repository.
+    Syncs runtime scripts into <workspace>\tools\ocr-runtime when invoked from the repository.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$RuntimeDir = "F:\c1\tools\ocr-runtime",
+    [string]$RuntimeDir = "",
     [string]$TaskName = "ViRead-OcrWorker-AutoStart",
     [int]$WatchdogIntervalMinutes = 10
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$ScriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+$CandidateTwoUp = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+if (Test-Path -LiteralPath (Join-Path $CandidateTwoUp "scripts\windows")) {
+    $RepoRoot = $CandidateTwoUp
+    $WorkspaceParent = Split-Path -Parent $RepoRoot
+} else {
+    $WorkspaceParent = $CandidateTwoUp
+    $RepoRoot = Join-Path $WorkspaceParent "capstone1"
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
 New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $RuntimeDir "logs") -Force | Out-Null

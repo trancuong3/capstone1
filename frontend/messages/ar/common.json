@@ -167,7 +167,17 @@
     "quickActionGateIntro": "قبل فتح **{label}**، لنتحقق من ملف الطفل المحدد.",
     "scopePublic": "مساعدة الضيوف",
     "scopeParent": "مساعدة أولياء الأمور",
-    "scopeAdmin": "مساعدة الإدارة"
+    "scopeAdmin": "مساعدة الإدارة",
+    "voiceStartAria": "طرح السؤال بالصوت",
+    "voiceStopAria": "إيقاف الإدخال الصوتي",
+    "voiceListening": "جارٍ الاستماع…",
+    "copyReply": "نسخ",
+    "copiedReply": "تم النسخ",
+    "feedbackHelpful": "مفيد",
+    "feedbackNotHelpful": "غير مفيد",
+    "feedbackThanks": "شكراً على ملاحظاتك",
+    "liveParentBadge": "بيانات حسابك المباشرة",
+    "liveAdminBadge": "إحصاءات النظام المباشرة"
   },
   "taskCenter": {
     "backgroundProcessing": "جارٍ المعالجة في الخلفية…",

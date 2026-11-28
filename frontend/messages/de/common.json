@@ -167,7 +167,17 @@
     "quickActionGateIntro": "Vor dem Öffnen von **{label}** prüfen wir kurz das ausgewählte Kinderprofil.",
     "scopePublic": "Gästehilfe",
     "scopeParent": "Elternhilfe",
-    "scopeAdmin": "Admin-Hilfe"
+    "scopeAdmin": "Admin-Hilfe",
+    "voiceStartAria": "Frage per Sprache eingeben",
+    "voiceStopAria": "Spracheingabe beenden",
+    "voiceListening": "Hört zu…",
+    "copyReply": "Kopieren",
+    "copiedReply": "Kopiert",
+    "feedbackHelpful": "Hilfreich",
+    "feedbackNotHelpful": "Nicht hilfreich",
+    "feedbackThanks": "Danke für dein Feedback",
+    "liveParentBadge": "Deine aktuellen Kontodaten",
+    "liveAdminBadge": "Live-Systemkennzahlen"
   },
   "taskCenter": {
     "backgroundProcessing": "Hintergrundverarbeitung läuft…",

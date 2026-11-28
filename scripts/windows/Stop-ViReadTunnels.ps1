@@ -1,10 +1,16 @@
 # Safely stop ONLY cloudflared tunnel processes created by Start-ViReadTunnels.ps1 (verified by PID + StartTime).
 param(
-    [string]$RuntimeDir = "F:\c1\viread-staging-tunnels",
+    [string]$RuntimeDir = "",
     [string[]]$Services = @()
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = Join-Path $WorkspaceParent "viread-staging-tunnels"
+}
 
 $stateFile = Join-Path $RuntimeDir "tunnels-state.json"
 $urlsFile = Join-Path $RuntimeDir "tunnel-urls.json"

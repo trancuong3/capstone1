@@ -1,9 +1,15 @@
 # Safely stop the ViRead Local Image-Gen Sidecar Worker started by start-viread-image-gen-worker.ps1.
 param(
-    [string]$RuntimeDir = "F:\c1\tools\image-gen-runtime"
+    [string]$RuntimeDir = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_IMAGE_GEN_RUNTIME_DIR) { $env:VIREAD_IMAGE_GEN_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\image-gen-runtime" }
+}
 
 $stateFile = Join-Path $RuntimeDir "image-gen-worker-state.json"
 if (-not (Test-Path $stateFile)) {

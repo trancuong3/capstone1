@@ -167,7 +167,17 @@
     "quickActionGateIntro": "Avant d’ouvrir **{label}**, vérifions le profil enfant sélectionné.",
     "scopePublic": "Aide invité",
     "scopeParent": "Aide parent",
-    "scopeAdmin": "Aide admin"
+    "scopeAdmin": "Aide admin",
+    "voiceStartAria": "Poser une question à la voix",
+    "voiceStopAria": "Arrêter la saisie vocale",
+    "voiceListening": "Écoute en cours…",
+    "copyReply": "Copier",
+    "copiedReply": "Copié",
+    "feedbackHelpful": "Utile",
+    "feedbackNotHelpful": "Pas utile",
+    "feedbackThanks": "Merci pour votre avis",
+    "liveParentBadge": "Données en direct de votre compte",
+    "liveAdminBadge": "Mesures système en direct"
   },
   "taskCenter": {
     "backgroundProcessing": "Traitement en arrière-plan…",

@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/browser-auth";
 import {
   detectNetworkBandwidth,
+  normalizeQuery,
   resolveOfflineAssistantReply,
   resolvePageGuide,
 } from "@/lib/assistant/page-guides";
@@ -759,5 +760,250 @@ describe("assistant-service and bandwidth detection", () => {
       "high",
     );
     expect(pinLock.reply).toContain("4");
+  });
+
+  it("forwards selected_child_id ONLY in parent scope and parses live_grounded cleanly", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          reply: "Bé An đã đọc 3 buổi trong 7 ngày qua.",
+          source_tier: "tier_0_kb",
+          provider_id: "viread_live_parent",
+          model_id: "grounded-viread-live-v1",
+          bandwidth_applied: "high",
+          latency_ms: 18,
+          cached: false,
+          live_grounded: true,
+          role_scope: "parent",
+          quick_actions: [{ label: "Xem Tiến bộ", href: "/reports" }],
+          suggested_prompts: [],
+          navigation_offer: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    global.fetch = fetchMock;
+
+    const childUuid = "92000000-0000-4000-8000-000000000001";
+
+    // Parent scope with non-empty selectedChildId -> sends selected_child_id (and strips camelCase selectedChildId)
+    const parentLive = await sendAssistantMessage(
+      {
+        message: "Tuần này bé đọc mấy buổi?",
+        current_path: "/dashboard",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+        selectedChildId: `  ${childUuid}  `,
+      },
+      { online: true },
+    );
+    expect(parentLive.live_grounded).toBe(true);
+    const parentBody = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    ) as Record<string, unknown>;
+    expect(parentBody.selected_child_id).toBe(childUuid);
+    expect(parentBody).not.toHaveProperty("selectedChildId");
+
+    // Parent scope with blank/null selectedChildId -> omits selected_child_id
+    await sendAssistantMessage(
+      {
+        message: "Hôm nay bé nên đọc gì?",
+        current_path: "/dashboard",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+        selectedChildId: "   ",
+      },
+      { online: true },
+    );
+    const blankBody = JSON.parse(
+      String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"),
+    ) as Record<string, unknown>;
+    expect(blankBody).not.toHaveProperty("selected_child_id");
+
+    // Public scope (/login and /admin/login) -> NEVER forwards selected_child_id
+    for (const publicPath of ["/login", "/admin/login"]) {
+      await sendAssistantMessage(
+        {
+          message: "ViRead là gì?",
+          current_path: publicPath,
+          locale: "vi",
+          bandwidth_profile: "high",
+          history: [],
+          selectedChildId: childUuid,
+        },
+        { online: true },
+      );
+      const latestBody = JSON.parse(
+        String(
+          fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1]?.body ??
+            "{}",
+        ),
+      ) as Record<string, unknown>;
+      expect(latestBody).not.toHaveProperty("selected_child_id");
+    }
+
+    // Admin scope (/admin/health) -> NEVER forwards selected_child_id
+    await sendAssistantMessage(
+      {
+        message: "Thống kê vận hành",
+        current_path: "/admin/health",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+        selectedChildId: childUuid,
+      },
+      { online: true },
+    );
+    const adminBody = JSON.parse(
+      String(
+        fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1]?.body ??
+          "{}",
+      ),
+    ) as Record<string, unknown>;
+    expect(adminBody).not.toHaveProperty("selected_child_id");
+
+    // Defaults live_grounded to false when omitted by backend
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: "Hướng dẫn nhanh",
+          source_tier: "tier_0_kb",
+          provider_id: "viread_kb",
+          model_id: null,
+          bandwidth_applied: "low",
+          latency_ms: 5,
+          cached: false,
+          role_scope: "parent",
+          quick_actions: [],
+          suggested_prompts: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const defaultGrounded = await sendAssistantMessage(
+      {
+        message: "Cách bắt đầu đọc",
+        current_path: "/dashboard",
+        locale: "vi",
+        bandwidth_profile: "low",
+        history: [],
+      },
+      { online: true },
+    );
+    expect(defaultGrounded.live_grounded).toBe(false);
+  });
+
+  it("expands Vietnamese shorthand in normalizeQuery, covers Wave 3 + PR #227 offline guides, and preserves domain/scope guards", () => {
+    expect(normalizeQuery("doi mk")).toBe("doi mat khau");
+    expect(normalizeQuery("tai sach offline qr")).toBe(
+      "tai sach offline ma qr",
+    );
+    expect(normalizeQuery("ko mo dc hs gd ntn bn dt")).toBe(
+      "khong mo duoc ho so gia dinh nhu the nao bao nhieu dien thoai",
+    );
+
+    const changePwdShorthand = resolveOfflineAssistantReply(
+      "doi mk",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(changePwdShorthand.provider_id).toBe("viread_offline_guide");
+    expect(changePwdShorthand.live_grounded).toBe(false);
+    expect(changePwdShorthand.navigation_offer?.href).toBe("/settings");
+
+    const offlinePackQr = resolveOfflineAssistantReply(
+      "tai sach offline qr",
+      "/dashboard",
+      "vi",
+      "low",
+    );
+    expect(offlinePackQr.provider_id).toBe("viread_offline_guide");
+    expect(offlinePackQr.live_grounded).toBe(false);
+    expect(offlinePackQr.reply).toContain("QR");
+    expect(offlinePackQr.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/books",
+        requires_child_selection: true,
+        scenario_id: "offline_pack_and_printable_qr",
+      }),
+    );
+
+    const lucBat = resolveOfflineAssistantReply(
+      "luc bat",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(lucBat.provider_id).toBe("viread_offline_guide");
+    expect(lucBat.reply).toContain("H^-1");
+    expect(lucBat.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/reading-preparation",
+        requires_child_selection: true,
+        scenario_id: "camera_line_spotlight_and_luc_bat",
+      }),
+    );
+
+    const weakWordLoop = resolveOfflineAssistantReply(
+      "tu yeu",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(weakWordLoop.provider_id).toBe("viread_offline_guide");
+    expect(weakWordLoop.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/entertainment",
+        requires_child_selection: true,
+        scenario_id: "entertainment_word_loop_autopilot",
+      }),
+    );
+
+    const adminRadar = resolveOfflineAssistantReply(
+      "radar mau ocr kho",
+      "/admin/books",
+      "vi",
+      "high",
+    );
+    expect(adminRadar.provider_id).toBe("viread_offline_guide");
+    expect(adminRadar.live_grounded).toBe(false);
+    expect(adminRadar.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/admin/metadata-quality",
+        requires_child_selection: false,
+        scenario_id: "admin_ocr_hard_sample_radar",
+      }),
+    );
+
+    // Shorthand must NOT bypass scope or domain guards
+    const shorthandOtherUser = resolveOfflineAssistantReply(
+      "xem tk khac",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(shorthandOtherUser.provider_id).toBe("viread_scope_guard");
+    expect(shorthandOtherUser.navigation_offer).toBeNull();
+
+    const shorthandOffTopicWeather = resolveOfflineAssistantReply(
+      "thoi tiet ha noi ntn",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(shorthandOffTopicWeather.provider_id).toBe("viread_domain_guard");
+    expect(shorthandOffTopicWeather.navigation_offer).toBeNull();
+
+    const shorthandOffTopicCrypto = resolveOfflineAssistantReply(
+      "gia bitcoin bn",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(shorthandOffTopicCrypto.provider_id).toBe("viread_domain_guard");
+    expect(shorthandOffTopicCrypto.navigation_offer).toBeNull();
   });
 });

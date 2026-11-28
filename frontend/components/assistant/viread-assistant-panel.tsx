@@ -4,12 +4,17 @@ import {
   ArrowUpRight,
   Bot,
   Check,
+  Copy,
   EyeOff,
   Loader2,
+  Mic,
+  MicOff,
   Minus,
   RotateCcw,
   SendHorizontal,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   UserCheck,
   UserPlus,
   Wifi,
@@ -77,6 +82,69 @@ const BANDWIDTH_STORAGE_KEY = "viread:assistant:bandwidth";
 const PREFS_CHANGE_EVENT = "viread:assistant:prefs-changed";
 const SELECTED_CHILD_STORAGE_PREFIX = "viread:selected-child:";
 const DEFAULT_NETWORK_SNAPSHOT = "1|high||0|";
+
+const SPEECH_LOCALE_BCP47: Readonly<Record<string, string>> = {
+  vi: "vi-VN",
+  en: "en-US",
+  ar: "ar-SA",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+  he: "he-IL",
+  ja: "ja-JP",
+  ko: "ko-KR",
+  "zh-Hans": "zh-CN",
+  "zh-Hant": "zh-TW",
+};
+
+interface AssistantSpeechRecognitionAlternative {
+  readonly transcript?: string;
+}
+
+interface AssistantSpeechRecognitionResult {
+  readonly isFinal?: boolean;
+  readonly 0?: AssistantSpeechRecognitionAlternative;
+}
+
+interface AssistantSpeechRecognitionEvent {
+  readonly results?: ArrayLike<AssistantSpeechRecognitionResult>;
+}
+
+interface AssistantSpeechRecognitionInstance {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: AssistantSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort?: () => void;
+}
+
+type AssistantSpeechRecognitionCtor =
+  new () => AssistantSpeechRecognitionInstance;
+
+function getAssistantSpeechRecognitionCtor(): AssistantSpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const win = window as Window & {
+    SpeechRecognition?: AssistantSpeechRecognitionCtor;
+    webkitSpeechRecognition?: AssistantSpeechRecognitionCtor;
+  };
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
+}
+
+function subscribeSpeechSupportStore(): () => void {
+  return () => {};
+}
+
+function readSpeechSupportedSnapshot(): boolean {
+  return Boolean(getAssistantSpeechRecognitionCtor());
+}
+
+function resolveSpeechRecognitionLang(locale: string): string {
+  return SPEECH_LOCALE_BCP47[locale] ?? (locale || "vi-VN");
+}
 
 function hasValidSelectedChild(
   ctx: AssistantChildContextSnapshot | null,
@@ -296,6 +364,7 @@ export interface ViReadAssistantPanelProps {
   readonly isAdminRoute: boolean;
   readonly hasBottomNav: boolean;
   readonly messages: AssistantMessage[];
+  readonly onClearMessages?: () => void;
   readonly onMessagesChange: Dispatch<SetStateAction<AssistantMessage[]>>;
   readonly onUpdateVisibility: (next: AssistantVisibilityState) => void;
   readonly autoFocusTrigger: number;
@@ -308,6 +377,7 @@ export function ViReadAssistantPanel({
   isAdminRoute,
   hasBottomNav,
   messages,
+  onClearMessages,
   onMessagesChange,
   onUpdateVisibility,
   autoFocusTrigger,
@@ -315,6 +385,11 @@ export function ViReadAssistantPanel({
   const { locale, t } = useI18n();
   const router = useRouter();
 
+  const speechSupported = useSyncExternalStore(
+    subscribeSpeechSupportStore,
+    readSpeechSupportedSnapshot,
+    () => false,
+  );
   const bandwidthPref = useSyncExternalStore<BandwidthPreference>(
     subscribeBandwidthStore,
     readStoredBandwidthSnapshot,
@@ -332,6 +407,8 @@ export function ViReadAssistantPanel({
 
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [sendingElapsedSeconds, setSendingElapsedSeconds] = useState(0);
   const [sendingForceLlm, setSendingForceLlm] = useState(false);
   const [childContext, setChildContext] =
@@ -348,6 +425,11 @@ export function ViReadAssistantPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<AssistantSpeechRecognitionInstance | null>(
+    null,
+  );
+  const voiceBaseInputRef = useRef("");
+  const copyTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const pendingPromptRef = useRef<{
     readonly prompt: string;
@@ -360,6 +442,10 @@ export function ViReadAssistantPanel({
   );
   const effectiveChildContext =
     effectiveRoleScope === "parent" ? childContext : null;
+  const selectedChildIdForRequest =
+    effectiveRoleScope === "parent"
+      ? (effectiveChildContext?.selectedChildId ?? null)
+      : null;
   const latestRoleScopeRef = useRef<AssistantRoleScope>(effectiveRoleScope);
   const latestUserIdRef = useRef<string | null | undefined>(activeUserId);
   const prevRoleScopeRef = useRef<AssistantRoleScope>(effectiveRoleScope);
@@ -442,6 +528,13 @@ export function ViReadAssistantPanel({
 
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // Ignore stop errors from inactive recognition sessions.
+    }
+    recognitionRef.current = null;
+    setIsListening(false);
     pendingPromptRef.current = null;
     setIsSending(false);
     setSendingElapsedSeconds(0);
@@ -563,12 +656,139 @@ export function ViReadAssistantPanel({
     };
   }, [onUpdateVisibility]);
 
-  // Abort in-flight request on unmount.
+  // Abort in-flight request, stop voice input, and clear copy timer on unmount.
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
+      try {
+        if (recognitionRef.current?.abort) {
+          recognitionRef.current.abort();
+        } else {
+          recognitionRef.current?.stop();
+        }
+      } catch {
+        // Ignore cleanup errors.
+      }
+      recognitionRef.current = null;
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
     };
   }, []);
+
+  const stopVoiceRecognition = useCallback(() => {
+    const activeRecognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (activeRecognition) {
+      try {
+        activeRecognition.stop();
+      } catch {
+        // Ignore stop errors from inactive recognition sessions.
+      }
+    }
+    setIsListening(false);
+  }, []);
+
+  const toggleVoiceInput = useCallback(() => {
+    if (isSending) return;
+    if (isListening) {
+      stopVoiceRecognition();
+      return;
+    }
+
+    const Ctor = getAssistantSpeechRecognitionCtor();
+    if (!Ctor) {
+      return;
+    }
+
+    try {
+      const recognition = new Ctor();
+      recognition.lang = resolveSpeechRecognitionLang(locale);
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      voiceBaseInputRef.current = inputValue.trim();
+
+      recognition.onresult = (event) => {
+        const results = event.results;
+        if (!results || typeof results.length !== "number") {
+          return;
+        }
+        const parts: string[] = [];
+        for (let idx = 0; idx < results.length; idx += 1) {
+          const transcript = results[idx]?.[0]?.transcript?.trim();
+          if (transcript) {
+            parts.push(transcript);
+          }
+        }
+        const spoken = parts.join(" ").trim();
+        if (!spoken) return;
+        const base = voiceBaseInputRef.current;
+        const nextText = base ? `${base} ${spoken}` : spoken;
+        setInputValue(nextText.slice(0, 800));
+      };
+
+      recognition.onerror = () => {
+        recognitionRef.current = null;
+        if (mountedRef.current) {
+          setIsListening(false);
+        }
+      };
+
+      recognition.onend = () => {
+        recognitionRef.current = null;
+        if (mountedRef.current) {
+          setIsListening(false);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      setIsListening(true);
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+    }
+  }, [inputValue, isListening, isSending, locale, stopVoiceRecognition]);
+
+  const handleCopyMessage = useCallback(
+    (messageId: string, content: string) => {
+      try {
+        const writePromise = navigator.clipboard?.writeText(content);
+        if (writePromise && typeof writePromise.catch === "function") {
+          void writePromise.catch(() => {
+            // Ignore clipboard permission rejections.
+          });
+        }
+      } catch {
+        // Ignore unavailable clipboard API.
+      }
+      setCopiedMessageId(messageId);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        if (mountedRef.current) {
+          setCopiedMessageId((current) =>
+            current === messageId ? null : current,
+          );
+        }
+      }, 2000);
+    },
+    [],
+  );
+
+  const handleMessageFeedback = useCallback(
+    (messageId: string, feedback: "up" | "down") => {
+      onMessagesChange((prev) =>
+        prev.map((item) =>
+          item.id === messageId ? { ...item, feedback } : item,
+        ),
+      );
+    },
+    [onMessagesChange],
+  );
 
   const cycleBandwidthMode = useCallback(() => {
     const next = nextBandwidthPreference(bandwidthPref);
@@ -629,6 +849,7 @@ export function ViReadAssistantPanel({
     ) => {
       const trimmed = rawText.trim();
       if (!trimmed || isSending) return;
+      stopVoiceRecognition();
 
       const forceLlm = Boolean(options?.forceLlm);
       const skipUserEcho = Boolean(options?.skipUserEcho) || forceLlm;
@@ -677,6 +898,7 @@ export function ViReadAssistantPanel({
             bandwidth_profile: effectiveBandwidth,
             history: forceLlm ? [] : historyPayload,
             force_llm: forceLlm,
+            selectedChildId: selectedChildIdForRequest,
           },
           {
             signal: controller.signal,
@@ -725,6 +947,7 @@ export function ViReadAssistantPanel({
           modelId: result.model_id,
           latencyMs: result.latency_ms,
           cached: result.cached,
+          liveGrounded: Boolean(result.live_grounded),
           roleScope: requestScope,
           quickActions: result.quick_actions.filter((action) =>
             isSafeAssistantQuickActionHref(action.href, pathname, requestScope),
@@ -830,6 +1053,8 @@ export function ViReadAssistantPanel({
       networkInfo.online,
       onMessagesChange,
       pathname,
+      selectedChildIdForRequest,
+      stopVoiceRecognition,
       t,
     ],
   );
@@ -1189,14 +1414,19 @@ export function ViReadAssistantPanel({
   }
 
   const clearConversation = useCallback(() => {
+    stopVoiceRecognition();
     abortControllerRef.current?.abort();
     pendingPromptRef.current = null;
-    onMessagesChange([]);
+    if (onClearMessages) {
+      onClearMessages();
+    } else {
+      onMessagesChange([]);
+    }
     setRateLimitState(null);
     setSendingElapsedSeconds(0);
     setSendingForceLlm(false);
     setIsSending(false);
-  }, [onMessagesChange]);
+  }, [onClearMessages, onMessagesChange, stopVoiceRecognition]);
 
   const panelPositionClass = isReadingRoute
     ? "top-[7.25rem] end-2 sm:end-4"
@@ -1436,7 +1666,25 @@ export function ViReadAssistantPanel({
                   {isUser ? (
                     <p className="break-words">{msg.content}</p>
                   ) : (
-                    renderFormattedReply(msg.content)
+                    <>
+                      {msg.liveGrounded ? (
+                        <div className="mb-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                            data-testid="viread-assistant-live-badge"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="size-1.5 rounded-full bg-emerald-500"
+                            />
+                            {effectiveRoleScope === "admin"
+                              ? t("common.assistant.liveAdminBadge")
+                              : t("common.assistant.liveParentBadge")}
+                          </span>
+                        </div>
+                      ) : null}
+                      {renderFormattedReply(msg.content)}
+                    </>
                   )}
 
                   {safeNavigationOffer ? (
@@ -1835,15 +2083,92 @@ export function ViReadAssistantPanel({
                 </div>
               </div>
 
-              {!isUser && msg.sourceTier ? (
+              {!isUser ? (
                 <div className="mt-1 flex flex-wrap items-center gap-2 ps-9 text-[10px] text-muted">
-                  <span data-testid="viread-assistant-source-meta">
-                    {tierLabel(msg.sourceTier, msg.providerId)}
-                    {typeof msg.latencyMs === "number"
-                      ? ` · ${formatLatency(msg.latencyMs)}`
-                      : ""}
-                  </span>
-                  {msg.canDeepenWithAi && msg.sourcePrompt ? (
+                  {msg.sourceTier ? (
+                    <span data-testid="viread-assistant-source-meta">
+                      {tierLabel(msg.sourceTier, msg.providerId)}
+                      {typeof msg.latencyMs === "number"
+                        ? ` · ${formatLatency(msg.latencyMs)}`
+                        : ""}
+                    </span>
+                  ) : null}
+
+                  <button
+                    aria-label={
+                      copiedMessageId === msg.id
+                        ? t("common.assistant.copiedReply")
+                        : t("common.assistant.copyReply")
+                    }
+                    className={cn(
+                      "inline-flex items-center gap-0.5 rounded px-1 py-0.5 font-semibold transition-colors hover:bg-white hover:text-ink focus-visible:outline-2 focus-visible:outline-primary",
+                      copiedMessageId === msg.id
+                        ? "text-emerald-700"
+                        : "text-muted",
+                    )}
+                    data-testid="viread-assistant-copy-btn"
+                    onClick={() => handleCopyMessage(msg.id, msg.content)}
+                    title={
+                      copiedMessageId === msg.id
+                        ? t("common.assistant.copiedReply")
+                        : t("common.assistant.copyReply")
+                    }
+                    type="button"
+                  >
+                    {copiedMessageId === msg.id ? (
+                      <>
+                        <Check aria-hidden="true" className="size-2.5" />
+                        <span>{t("common.assistant.copiedReply")}</span>
+                      </>
+                    ) : (
+                      <Copy aria-hidden="true" className="size-2.5" />
+                    )}
+                  </button>
+
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      aria-label={t("common.assistant.feedbackHelpful")}
+                      aria-pressed={msg.feedback === "up"}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded p-0.5 transition-colors hover:bg-white hover:text-ink focus-visible:outline-2 focus-visible:outline-primary",
+                        msg.feedback === "up"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "text-muted",
+                      )}
+                      data-testid="viread-assistant-feedback-up"
+                      onClick={() => handleMessageFeedback(msg.id, "up")}
+                      title={t("common.assistant.feedbackHelpful")}
+                      type="button"
+                    >
+                      <ThumbsUp aria-hidden="true" className="size-2.5" />
+                    </button>
+                    <button
+                      aria-label={t("common.assistant.feedbackNotHelpful")}
+                      aria-pressed={msg.feedback === "down"}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded p-0.5 transition-colors hover:bg-white hover:text-ink focus-visible:outline-2 focus-visible:outline-primary",
+                        msg.feedback === "down"
+                          ? "bg-amber-50 text-amber-700"
+                          : "text-muted",
+                      )}
+                      data-testid="viread-assistant-feedback-down"
+                      onClick={() => handleMessageFeedback(msg.id, "down")}
+                      title={t("common.assistant.feedbackNotHelpful")}
+                      type="button"
+                    >
+                      <ThumbsDown aria-hidden="true" className="size-2.5" />
+                    </button>
+                    {msg.feedback === "up" ? (
+                      <span className="font-semibold text-emerald-700">
+                        {t("common.assistant.feedbackThanks")}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {msg.sourcePrompt &&
+                  msg.providerId !== "viread_scope_guard" &&
+                  msg.providerId !== "viread_domain_guard" &&
+                  (msg.canDeepenWithAi || msg.feedback === "down") ? (
                     <button
                       className="inline-flex items-center gap-0.5 font-bold text-primary underline-offset-2 hover:underline disabled:opacity-50"
                       disabled={isSending}
@@ -2028,12 +2353,45 @@ export function ViReadAssistantPanel({
           placeholder={
             isSending
               ? t("common.assistant.inputWaitingPlaceholder")
-              : t("common.assistant.inputPlaceholder")
+              : isListening
+                ? t("common.assistant.voiceListening")
+                : t("common.assistant.inputPlaceholder")
           }
           ref={inputRef}
           type="text"
           value={inputValue}
         />
+        {speechSupported ? (
+          <button
+            aria-label={
+              isListening
+                ? t("common.assistant.voiceStopAria")
+                : t("common.assistant.voiceStartAria")
+            }
+            aria-pressed={isListening}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-45",
+              isListening
+                ? "animate-pulse border-rose-300 bg-rose-50 text-rose-600"
+                : "border-border bg-canvas/60 text-muted hover:border-primary/40 hover:text-ink",
+            )}
+            data-testid="viread-assistant-voice-btn"
+            disabled={isSending}
+            onClick={toggleVoiceInput}
+            title={
+              isListening
+                ? t("common.assistant.voiceListening")
+                : t("common.assistant.voiceStartAria")
+            }
+            type="button"
+          >
+            {isListening ? (
+              <MicOff aria-hidden="true" className="size-3.5" />
+            ) : (
+              <Mic aria-hidden="true" className="size-3.5" />
+            )}
+          </button>
+        ) : null}
         <button
           aria-label={t("common.assistant.sendAria")}
           className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-45"

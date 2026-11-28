@@ -22,11 +22,14 @@ import {
   createVoiceStudioService,
   type VoiceOption,
 } from "@/lib/api/voice-studio-service";
+import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import {
   applyGlobalTeacherVoiceSelection,
   consumePendingUnboundVoicePersist,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
+  getEffectiveTeacherPersona,
   getEffectiveVoiceId,
   getVoicePolicyPreferences,
   GOOGLE_TTS_MODEL_VERSION,
@@ -49,6 +52,7 @@ import {
 import {
   getCachedVoiceEngineHealth,
   subscribeVoiceEngineHealth,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
@@ -63,6 +67,23 @@ export interface AiTeacherVoiceSectionProps {
   readonly selectedChild?: ChildProfileDTO | null;
   readonly onChildSettingsUpdated?: (updated: ChildProfileDTO) => void;
 }
+
+const OFFLINE_LOCAL_VOICE_HEALTH_SNAPSHOT: VoiceEngineHealthSnapshot = {
+  default_mode: "local_only",
+  default_voice_id: "local_north_truc_ly",
+  local: {
+    available: false,
+    stt_ready: false,
+    tts_ready: false,
+    tts_error_code: "LOCAL_TTS_UNAVAILABLE",
+  },
+  google: {
+    stt_configured: false,
+    tts_configured: false,
+    stt_cooldown: false,
+    tts_cooldown: false,
+  },
+};
 
 const REGIONS: readonly {
   readonly id: VoiceRegion;
@@ -318,6 +339,20 @@ export function AiTeacherVoiceSection({
         }
         if (typeof res.local_worker_ready === "boolean") {
           setLocalWorkerReady(res.local_worker_ready);
+          if (!res.local_worker_ready) {
+            const cachedHealth = getCachedVoiceEngineHealth();
+            const warmupHealth =
+              cachedHealth &&
+              !cachedHealth.local.available &&
+              !cachedHealth.local.tts_ready
+                ? cachedHealth
+                : OFFLINE_LOCAL_VOICE_HEALTH_SNAPSHOT;
+            const warmupGender = resolveVoiceGender(
+              getSpeechPreferences().voiceId ?? getEffectiveVoiceId(),
+              getEffectiveTeacherPersona().gender,
+            );
+            void warmWasmTtsIfNeeded(warmupGender, warmupHealth);
+          }
         }
       })
       .catch(() => {
@@ -480,13 +515,23 @@ export function AiTeacherVoiceSection({
         resolveVoiceGender(
           applied?.voiceId ?? input.voiceId ?? effectiveVoiceId,
         );
-      void warmWasmTtsIfNeeded(nextGender);
+      const warmupHealth =
+        localWorkerReady === false
+          ? voiceHealth &&
+            !voiceHealth.local.available &&
+            !voiceHealth.local.tts_ready
+            ? voiceHealth
+            : OFFLINE_LOCAL_VOICE_HEALTH_SNAPSHOT
+          : (voiceHealth ?? undefined);
+      void warmWasmTtsIfNeeded(nextGender, warmupHealth);
     },
     [
       effectiveVoiceId,
+      localWorkerReady,
       persistChildVoice,
       selectedChild?.id,
       stopPreview,
+      voiceHealth,
       voiceStudio,
     ],
   );
@@ -652,6 +697,8 @@ export function AiTeacherVoiceSection({
     }
   };
 
+  const hasOnDeviceOfflineTts =
+    detectBrowserWasmTtsSupport().supported || isAndroidNativeSpeechAvailable();
   const isLocalWorkerOffline =
     localWorkerReady !== null
       ? !localWorkerReady
@@ -1000,7 +1047,9 @@ export function AiTeacherVoiceSection({
                 {tParent("teacherVoice.policyOnlineBackup")}
               </button>
             </div>
-            {isLocalWorkerOffline && !googleBackupEnabled ? (
+            {isLocalWorkerOffline &&
+            !googleBackupEnabled &&
+            !hasOnDeviceOfflineTts ? (
               <p
                 className="rounded-control border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs leading-relaxed text-amber-950"
                 data-testid="teacher-voice-worker-offline-hint"

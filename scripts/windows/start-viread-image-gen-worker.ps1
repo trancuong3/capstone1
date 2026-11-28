@@ -1,7 +1,7 @@
 # Start the standalone ViRead Local Image-Gen Sidecar Worker on 127.0.0.1:8090.
-# Pins HF_HOME / TMP / TEMP / TORCH_HOME strictly to Drive F: (0 bytes written on Drive C:).
+# Pins HF_HOME / TMP / TEMP / TORCH_HOME strictly to RuntimeDir (0 bytes written on Drive C:).
 param(
-    [string]$RuntimeDir = "F:\c1\tools\image-gen-runtime",
+    [string]$RuntimeDir = "",
     [string]$PythonExe = "",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8090,
@@ -17,6 +17,10 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_IMAGE_GEN_RUNTIME_DIR) { $env:VIREAD_IMAGE_GEN_RUNTIME_DIR } else { Join-Path $workspaceParent "tools\image-gen-runtime" }
+}
 $workerScript = Join-Path $repoRoot "scripts\local_image_gen_worker.py"
 $effectivePython = if ($PythonExe -and $PythonExe.Trim()) {
     $PythonExe.Trim()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from functools import lru_cache
 import re
 import unicodedata
@@ -2365,6 +2366,177 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "How does Data Saver mode work?",
         ),
     ),
+    KbArticle(
+        id="offline_pack_and_printable_qr",
+        title_vi="Gói đọc ngoại tuyến (Offline Reading Pack) & Thẻ QR in sách",
+        title_en="Offline Reading Pack & Printable Book QR Cards",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/books", "/my-books", "/dashboard"),
+        keywords=(
+            "offline reading pack",
+            "goi doc ngoai tuyen",
+            "tai sach ngoai tuyen",
+            "tai sach offline",
+            "tai sach offline ma qr",
+            "doc sach khi mat mang",
+            "in the qr",
+            "the qr",
+            "ma qr sach",
+            "ma qr",
+            "printable qr",
+            "qr card",
+            "offline pack",
+        ),
+        short_answer_vi=(
+            "Gói đọc ngoại tuyến (Offline Reading Pack) & Thẻ QR in tại Kho sách (/books):\n"
+            "• Trên trang chi tiết sách hoặc Kho sách (/books), bấm Tải gói đọc ngoại tuyến để lưu chữ, trang sách và giọng đọc mẫu vào trình duyệt — bé đọc mượt ngay cả khi đi xa hoặc mất mạng.\n"
+            "• Dùng mục Thẻ QR in để xuất mã QR gắn lên bìa sách giấy gia đình, giúp ba mẹ quét mở ngay đúng cuốn sách đó trên ViRead."
+        ),
+        detailed_answer_vi=(
+            "Hướng dẫn dùng Offline Reading Pack & Thẻ QR in cho gia đình:\n"
+            "1. Lưu đọc ngoại tuyến: mở cuốn sách cần dùng ở Kho sách (/books) hoặc Sách của tôi (/my-books) và tải Offline Reading Pack trước khi mất mạng/đi du lịch.\n"
+            "2. Khi không có Wi-Fi/4G, dữ liệu trang sách đã tải và nhận diện giọng nói WASM trên thiết bị vẫn hoạt động ổn định.\n"
+            "3. Thẻ QR in (Printable QR): in mã QR cho từng đầu sách (dán lên sách giấy hoặc góc học tập) để quét camera mở thẳng đúng sách cho bé mà không phải tìm lại."
+        ),
+        short_answer_en=(
+            "Offline Reading Pack & Printable QR Cards in Books (/books):\n"
+            "• Download an Offline Reading Pack on a book's page to cache text, pages, and audio for reading without internet.\n"
+            "• Print QR cards to stick on physical books or study corners so parents can jump straight into the matching ViRead book."
+        ),
+        detailed_answer_en=(
+            "Using Offline Reading Packs & Printable QR Cards:\n"
+            "1. Download the Offline Reading Pack from Books (/books) or My Books (/my-books) while online.\n"
+            "2. Cached pages pair with on-device WASM speech recognition when offline.\n"
+            "3. Generate Printable QR Cards to label physical family books for instant one-scan opening."
+        ),
+        actions=(
+            KbAction("Mở Kho sách", "Browse Books", "/books"),
+            KbAction("Sách của tôi", "My Books", "/my-books"),
+        ),
+        followups_vi=(
+            "Nhận diện giọng nói WASM ngoại tuyến hoạt động thế nào?",
+            "Làm sao quét sách giấy bằng camera?",
+            "Chế độ tiết kiệm băng tần trên trợ lý?",
+        ),
+        followups_en=(
+            "How does offline WASM speech recognition work?",
+            "How do I scan a paper book?",
+            "How does Data Saver mode work?",
+        ),
+    ),
+    KbArticle(
+        id="camera_line_spotlight_and_luc_bat",
+        title_vi="Đèn chiếu từng dòng H⁻¹ trên sách giấy & Nhịp thơ Lục Bát 6–8",
+        title_en="Camera Line Spotlight (H⁻¹) & Lục Bát 6–8 Poetry Cadence",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/reading-preparation", "/reading", "/book-scanner"),
+        keywords=(
+            "den chieu tung dong",
+            "line spotlight",
+            "camera line spotlight",
+            "h^-1",
+            "homography",
+            "khong nhay dong",
+            "doc sach giay bang camera",
+            "tho luc bat",
+            "luc bat",
+            "nhip tho luc bat",
+            "luc bat 6 8",
+            "doc tho",
+            "poetry cadence",
+        ),
+        short_answer_vi=(
+            "Đèn chiếu từng dòng H⁻¹ & Nhịp thơ Lục Bát 6–8:\n"
+            "• Đèn chiếu từng dòng (Camera Line Spotlight dùng phép chiếu H⁻¹) giữ khung sáng bám đúng dòng chữ bé đang đọc trên trang sách giấy qua camera, giúp bé tiểu học không bị nhảy dòng hay hoa mắt.\n"
+            "• Với bài thơ Lục Bát (câu 6 – câu 8), ViRead tự căn ngắt nhịp 2/2/2 và 4/4 để giọng đọc mẫu và vệt tô sáng đi đúng nhịp điệu truyền thống."
+        ),
+        detailed_answer_vi=(
+            "Hỗ trợ đọc sách giấy và thơ tiếng Việt chuyên sâu trên ViRead:\n"
+            "1. Camera Line Spotlight (H⁻¹): khi đọc kèm trang sách giấy dưới camera (/reading-preparation → /reading), hệ thống căn chỉnh góc nghiêng trang sách theo thời gian thực (homography H⁻¹) và chiếu vệt sáng đúng dòng hiện tại để bé không đọc sót dòng.\n"
+            "2. Nhịp thơ Lục Bát 6–8: trình đọc tự nhận diện thể thơ lục bát, ngắt nghỉ đúng nhịp chẵn và theo dõi từ tô sáng mượt mà cho bé lớp 1–5."
+        ),
+        short_answer_en=(
+            "Camera Line Spotlight (H⁻¹) & Lục Bát 6–8 Poetry Cadence:\n"
+            "• Camera Line Spotlight uses real-time homography (H⁻¹) to highlight the exact line on a physical page under the camera so young readers don't skip lines.\n"
+            "• Lục Bát 6–8 poetry cadence guides voice highlighting and pauses naturally along traditional 6/8 Vietnamese verse rhythm."
+        ),
+        detailed_answer_en=(
+            "Physical-page focus and Vietnamese poetry support:\n"
+            "1. Camera Line Spotlight (H⁻¹) projects a steady line highlight aligned to your physical book page in real time (/reading-preparation → /reading).\n"
+            "2. Lục Bát 6–8 cadence adapts highlighting and TTS phrasing to traditional 6- and 8-syllable Vietnamese verse."
+        ),
+        actions=(
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
+            KbAction("Quét sách giấy", "Book Scanner", "/book-scanner"),
+        ),
+        followups_vi=(
+            "Cách chỉnh tốc độ đọc mẫu 0.85x cho bé đọc chậm?",
+            "Đọc đôi Duet Reading dùng như thế nào?",
+            "Từ bé đọc nhầm sẽ lưu ở đâu?",
+        ),
+        followups_en=(
+            "How do I set 0.85x voice speed for slow readers?",
+            "How does Duet Reading work?",
+            "Where are missed words saved?",
+        ),
+    ),
+    KbArticle(
+        id="entertainment_word_loop_autopilot",
+        title_vi="Vòng lặp từ yếu Entertainment v4.1 & Tự động ôn từ khó",
+        title_en="Entertainment v4.1 Weak-Word Loop & Autopilot Practice",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/entertainment", "/reports/difficult-words", "/karaoke"),
+        keywords=(
+            "vong lap tu yeu",
+            "tu yeu",
+            "tu kho",
+            "word loop",
+            "entertainment v4",
+            "on tu yeu",
+            "tu can luyen",
+            "tu dong on tu",
+            "autopilot tu yeu",
+            "2 luot noi",
+            "luyen tu yeu",
+            "active weak words",
+        ),
+        short_answer_vi=(
+            "Vòng lặp từ yếu Entertainment v4.1 kết nối hai chiều giữa Từ cần luyện (/reports/difficult-words) và Góc giải trí (/entertainment):\n"
+            "• Các từ bé đọc nhầm trong buổi đọc tự động đi vào hàng đợi luyện phát âm và được cài khéo vào Memory Game, Mô tả tranh AI & Karaoke.\n"
+            "• Bé cần đọc đúng 1 lượt ở phòng Từ cần luyện hoặc 2 lượt nói đúng trong ngữ cảnh trò chơi Góc giải trí để tốt nghiệp từ khó."
+        ),
+        detailed_answer_vi=(
+            "Cơ chế Vòng lặp từ yếu 2 chiều (Entertainment v4.1) giúp bé nhớ lâu mà không chán:\n"
+            "1. Thu thập tự động: từ bé vấp hoặc đọc sai (nhóm l/n, s/x, tr/ch, hỏi/ngã, từ láy) được xếp ưu tiên theo lịch lặp lại ngắt quãng (SRS).\n"
+            "2. Ôn trong trò chơi: Góc giải trí (/entertainment) và Karaoke (/karaoke) ưu tiên đưa chính các từ yếu của bé vào thẻ chơi hoặc gợi ý miêu tả tranh.\n"
+            "3. Tốt nghiệp từ khó: đạt 1 lượt đúng tại Từ cần luyện (/reports/difficult-words) hoặc 2 lượt phát âm đúng liên tiếp trong Góc giải trí sẽ đánh dấu từ đã thành thạo."
+        ),
+        short_answer_en=(
+            "Entertainment v4.1 Weak-Word Loop connects Difficult Words (/reports/difficult-words) and Entertainment (/entertainment):\n"
+            "• Words missed during reading sessions are automatically injected into Memory Game, AI Picture Description, and Karaoke.\n"
+            "• A word graduates after 1 isolated pass in Difficult Words or 2 spoken contextual passes in Entertainment."
+        ),
+        detailed_answer_en=(
+            "How the two-way Entertainment v4.1 Weak-Word Loop works:\n"
+            "1. Misread words are prioritized with spaced repetition across Vietnamese phonics patterns.\n"
+            "2. Entertainment games (/entertainment) and Karaoke (/karaoke) weave those active weak words into gameplay.\n"
+            "3. Mastery requires either 1 correct pass in Difficult Words (/reports/difficult-words) or 2 consecutive spoken passes inside Entertainment."
+        ),
+        actions=(
+            KbAction("Từ cần luyện", "Difficult Words", "/reports/difficult-words"),
+            KbAction("Góc giải trí", "Entertainment", "/entertainment"),
+        ),
+        followups_vi=(
+            "Memory Game và Mô tả tranh AI chơi thế nào?",
+            "Làm sao xem báo cáo tiến bộ của bé?",
+            "Bé đọc chậm nên chỉnh tốc độ nào?",
+        ),
+        followups_en=(
+            "How do Memory Game and AI Picture Description work?",
+            "Where can I check my child's progress report?",
+            "What voice speed helps a slow reader?",
+        ),
+    ),
     # ------------------------------------------------------------------ Additional Admin-only KB (strictly isolated!)
     KbArticle(
         id="admin_overview_workspace",
@@ -2524,6 +2696,61 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "How do OCR review and Child Safety work?",
             "How do I manage VietOCR Flow 2 training?",
             "Where are system-wide AI tasks?",
+        ),
+    ),
+    KbArticle(
+        id="admin_ocr_hard_sample_radar",
+        title_vi="Radar mẫu OCR khó (Hard-Sample Radar) & Cải thiện VietOCR",
+        title_en="Admin OCR Hard-Sample Radar & VietOCR Improvement",
+        scopes=_ADMIN_ONLY,
+        route_prefixes=("/admin/metadata-quality", "/admin/viread-training", "/admin/books"),
+        keywords=(
+            "radar mau ocr kho",
+            "mau ocr kho",
+            "hard sample radar",
+            "hard sample",
+            "ocr radar",
+            "ocr do tin cay thap",
+            "mau kho vietocr",
+            "admin ocr hard sample",
+            "ocr disagreement",
+        ),
+        short_answer_vi=(
+            "Radar mẫu OCR khó tại Chất lượng sách (/admin/metadata-quality) & Huấn luyện VietOCR (/admin/viread-training):\n"
+            "• Tự động gom các dòng/trang OCR có độ tin cậy thấp hoặc sai lệch lớn giữa Gemini, Qwen3-VL, VietOCR và Tesseract.\n"
+            "• Admin đối chiếu, sửa chuẩn rồi đánh dấu VERIFIED để đưa các mẫu khó sạch (đạt chuẩn Flow 2 hygiene) vào bộ huấn luyện VietOCR tiếp theo."
+        ),
+        detailed_answer_vi=(
+            "Quy trình xử lý Radar mẫu OCR khó dành cho Quản trị viên:\n"
+            "1. Phát hiện mẫu khó (/admin/metadata-quality): hệ thống lọc các trang sách có tỷ lệ sửa nhiều, tự tin OCR thấp hoặc bất đồng giữa các engine.\n"
+            "2. Duyệt & chuẩn hóa (/admin/books): mở trang chi tiết để đối chiếu ảnh gốc và lưu revision VERIFIED.\n"
+            "3. Huấn luyện lại (/admin/viread-training): các mẫu đã được Admin xác minh vượt qua kiểm tra Flow 2 hygiene (vocab 229 ký tự, NFC, crop EXIF-safe) sẽ sẵn sàng đồng bộ qua Apps Script Bridge."
+        ),
+        short_answer_en=(
+            "OCR Hard-Sample Radar in Book Quality (/admin/metadata-quality) & OCR Training (/admin/viread-training):\n"
+            "• Surfaces low-confidence pages and engine disagreements across Gemini, Qwen3-VL, VietOCR, and Tesseract.\n"
+            "• Admin-verified corrections pass Flow 2 hygiene checks to strengthen future VietOCR fine-tuning."
+        ),
+        detailed_answer_en=(
+            "Admin workflow for the OCR Hard-Sample Radar:\n"
+            "1. Inspect flagged low-confidence or high-disagreement pages in /admin/metadata-quality.\n"
+            "2. Compare raw scans against multi-engine candidates in /admin/books and mark revisions VERIFIED.\n"
+            "3. Sync hygiene-verified Flow 2 hard samples in /admin/viread-training via Apps Script Bridge."
+        ),
+        actions=(
+            KbAction("Chất lượng sách", "Quality Hub", "/admin/metadata-quality"),
+            KbAction("Huấn luyện VietOCR", "OCR Training", "/admin/viread-training"),
+            KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
+        ),
+        followups_vi=(
+            "Quy trình Flow 2 hygiene cần điều kiện gì?",
+            "Cách duyệt revision OCR từ NEEDS_REVIEW sang VERIFIED?",
+            "Kiểm tra sức khỏe worker ở /admin/health?",
+        ),
+        followups_en=(
+            "What are the Flow 2 hygiene requirements?",
+            "How do I verify an OCR revision?",
+            "How do I check worker health at /admin/health?",
         ),
     ),
 )
@@ -3559,6 +3786,31 @@ def fold_vietnamese(text: str) -> str:
     return " ".join(cleaned.split())
 
 
+_SHORTHAND_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bmk\b"), "mat khau"),
+    (re.compile(r"\bko\b"), "khong"),
+    (re.compile(r"\bk\b"), "khong"),
+    (re.compile(r"\bdc\b"), "duoc"),
+    (re.compile(r"\btk\b"), "tai khoan"),
+    (re.compile(r"\bhs\b"), "ho so"),
+    (re.compile(r"(?<!\bma )\bqr\b"), "ma qr"),
+    (re.compile(r"\bdt\b"), "dien thoai"),
+    (re.compile(r"\bgd\b"), "gia dinh"),
+    (re.compile(r"\bbn\b"), "bao nhieu"),
+    (re.compile(r"\bntn\b"), "nhu the nao"),
+)
+
+
+def _expand_vietnamese_shorthand(folded: str) -> str:
+    """Expand common Vietnamese chat shorthand on already-folded lowercase text."""
+    if not folded:
+        return ""
+    expanded = folded
+    for pattern, replacement in _SHORTHAND_REPLACEMENTS:
+        expanded = pattern.sub(replacement, expanded)
+    return " ".join(expanded.split())
+
+
 def _tokenize_meaningful(folded: str) -> list[str]:
     return [
         tok
@@ -3724,7 +3976,7 @@ def detect_disallowed_scope_request(
     role_scope: AssistantRoleScope,
 ) -> ScopeBoundaryReason | None:
     """Enforce strict 4-way role & tenant boundary checks before cache or LLM calls."""
-    folded = fold_vietnamese(message)
+    folded = _expand_vietnamese_shorthand(fold_vietnamese(message))
     if not folded:
         return None
     padded = f" {folded} "
@@ -4128,6 +4380,17 @@ _VIREAD_DOMAIN_ANCHORS: tuple[str, ...] = (
     "child profile",
     "phoneme",
     "certificate",
+    "offline pack",
+    "the qr",
+    "ma qr",
+    "printable qr",
+    "line spotlight",
+    "den chieu",
+    "luc bat",
+    "vong lap tu yeu",
+    "tu yeu",
+    "hard sample",
+    "mau ocr kho",
 )
 
 _GREETING_ONLY_PHRASES: frozenset[str] = frozenset(
@@ -4310,7 +4573,7 @@ def detect_off_topic_request(
 ) -> bool:
     """Deterministically detect clearly non-ViRead off-topic prompts without false-positiving on ViRead."""
     _ = role_scope
-    folded = fold_vietnamese(message)
+    folded = _expand_vietnamese_shorthand(fold_vietnamese(message))
     if not folded:
         return False
     padded = f" {folded} "
@@ -4410,7 +4673,16 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/admin/metadata-quality",
-        phrases=("chat luong sach", "child safety", "grade_1_to_5", "ban quyen", "metadata-quality", "metadata quality"),
+        phrases=(
+            "chat luong sach",
+            "child safety",
+            "grade_1_to_5",
+            "ban quyen",
+            "metadata-quality",
+            "metadata quality",
+            "radar mau ocr kho",
+            "hard sample",
+        ),
         label_vi="Đi đến Chất lượng sách (Admin)",
         label_en="Go to Book Quality Hub",
         reason_vi="Rà soát Child Safety, chính tả OCR, bản quyền và báo lỗi từ phụ huynh.",
@@ -4658,7 +4930,19 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/books",
-        phrases=("kho sach", "thu vien sach", "chon sach", "mo sach", "book catalog", "browse books"),
+        phrases=(
+            "kho sach",
+            "thu vien sach",
+            "chon sach",
+            "mo sach",
+            "book catalog",
+            "browse books",
+            "offline reading pack",
+            "offline pack",
+            "tai sach offline",
+            "the qr",
+            "ma qr",
+        ),
         label_vi="Đi đến Kho sách ViRead",
         label_en="Go to Books Library",
         reason_vi="Chọn sách tiếng Việt phù hợp độ tuổi và trình độ đọc của bé.",
@@ -4737,7 +5021,16 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/reports/difficult-words",
-        phrases=("tu can luyen", "tu doc sai", "tu doc nham", "tu kho", "hay vap tu", "difficult words"),
+        phrases=(
+            "tu can luyen",
+            "tu doc sai",
+            "tu doc nham",
+            "tu kho",
+            "tu yeu",
+            "vong lap tu yeu",
+            "hay vap tu",
+            "difficult words",
+        ),
         label_vi="Đi đến Từ cần luyện",
         label_en="Go to Difficult Words",
         reason_vi="Xem danh sách các từ bé hay vấp để luyện đọc lại riêng.",
@@ -4803,6 +5096,10 @@ _NAV_RULES: tuple[_NavRule, ...] = (
             "bat dau buoi doc",
             "duet reading",
             "doc doi",
+            "line spotlight",
+            "den chieu tung dong",
+            "tho luc bat",
+            "luc bat",
         ),
         label_vi="Đi đến Chuẩn bị buổi đọc & Kiểm tra micro",
         label_en="Go to Reading Preparation & Mic Check",
@@ -4866,7 +5163,7 @@ def resolve_navigation_offer(
         return None
     if detect_off_topic_request(message, role_scope=role_scope):
         return None
-    folded = fold_vietnamese(message)
+    folded = _expand_vietnamese_shorthand(fold_vietnamese(message))
     if not folded:
         return None
 
@@ -5057,6 +5354,31 @@ def _precompute_article_index(
     return folded_keywords, frozenset(article_tokens), frozenset(_bigrams(article_tokens))
 
 
+def _fuzzy_token_bonus(
+    unmatched_tokens: set[str],
+    article_tokens: frozenset[str],
+) -> float:
+    """Gentle prefix/similarity bonus for minor ViRead term typos without hurting off-topic guards."""
+    if not unmatched_tokens or not article_tokens:
+        return 0.0
+    hits = 0.0
+    for qtok in unmatched_tokens:
+        if len(qtok) < 4:
+            continue
+        best = 0.0
+        for atok in article_tokens:
+            if len(atok) < 4:
+                continue
+            if atok.startswith(qtok) or qtok.startswith(atok):
+                best = max(best, 0.55)
+                break
+            if len(qtok) >= 5 and len(atok) >= 5 and abs(len(qtok) - len(atok)) <= 2:
+                if SequenceMatcher(None, qtok, atok).ratio() >= 0.86:
+                    best = max(best, 0.45)
+        hits += best
+    return hits
+
+
 def retrieve_kb_matches(
     query: str,
     *,
@@ -5071,7 +5393,7 @@ def retrieve_kb_matches(
     instead of being falsely hijacked by a generic Tier 0 FAQ blurb.
     """
     clean_path = sanitize_scoped_path(current_path, role_scope)
-    folded_query = fold_vietnamese(query)
+    folded_query = _expand_vietnamese_shorthand(fold_vietnamese(query))
     if not folded_query:
         return []
     query_tokens = _tokenize_meaningful(folded_query)
@@ -5099,7 +5421,14 @@ def retrieve_kb_matches(
                 keyword_hits += 1
 
         matched_tokens = query_token_set & article_token_set
+        unmatched_tokens = query_token_set - article_token_set
+        fuzzy_hits = _fuzzy_token_bonus(unmatched_tokens, article_token_set)
         token_overlap = (
+            min(1.0, (len(matched_tokens) + fuzzy_hits) / len(query_token_set))
+            if query_token_set
+            else 0.0
+        )
+        exact_token_overlap = (
             len(matched_tokens) / len(query_token_set)
             if query_token_set
             else 0.0
@@ -5129,10 +5458,10 @@ def retrieve_kb_matches(
         if exact_faq_hit:
             direct_score = 1.0
         else:
-            unexplained_count = len(query_token_set - article_token_set)
+            unexplained_count = len(unmatched_tokens)
             long_query_penalty = max(0, len(query_token_set) - 6) * 0.06
             unexplained_penalty = unexplained_count * 0.16
-            coverage_factor = 0.40 + 0.60 * token_overlap
+            coverage_factor = 0.40 + 0.60 * exact_token_overlap
             base_direct = (
                 combined * coverage_factor - unexplained_penalty - long_query_penalty
             )
