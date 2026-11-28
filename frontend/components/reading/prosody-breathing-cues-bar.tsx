@@ -131,7 +131,10 @@ export function ProsodyBreathingCuesBar({
             : "min-h-11 w-full gap-2 rounded-xl px-4 py-2.5 hover:bg-sky-100/80",
         )}
       >
-        <Wind className="size-3.5 shrink-0 text-sky-700 sm:size-4" aria-hidden="true" />
+        <Wind
+          className="size-3.5 shrink-0 text-sky-700 sm:size-4"
+          aria-hidden="true"
+        />
         <span className="truncate">{tp("barToggleLabel")}</span>
         {!compact ? (
           <span

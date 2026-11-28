@@ -275,7 +275,7 @@ export function BookPageContent(props: BookPageContentProps) {
     >
       {hasWords ? (
         <p
-          className="viread-learning-content w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]"
+          className="viread-learning-content w-full max-w-[62ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.95]"
           dir="ltr"
           lang="vi"
         >
