@@ -37,7 +37,6 @@ export const PARENT_ASSISTANT_NAV_ALLOWLIST = new Set<string>([
   "/entertainment/sentence-shooter",
   "/entertainment/picture-description",
   "/karaoke",
-  "/device-permissions",
   "/help-support",
   "/book-reports",
   "/studio/tasks",

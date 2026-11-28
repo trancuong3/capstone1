@@ -442,7 +442,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "5. Tap Finish to save the session report and open AI Tutor comprehension questions."
         ),
         actions=(
-            KbAction("Kiểm tra quyền thiết bị", "Check Device Permissions", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & kiểm tra micro", "Reading Prep & Mic Check", "/reading-preparation"),
             KbAction("Mở Từ cần luyện", "Open Difficult Words", "/reports/difficult-words"),
         ),
         followups_vi=(
@@ -461,7 +461,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         title_vi="Khắc phục lỗi micro, camera và quyền thiết bị",
         title_en="Troubleshooting microphone, camera, and device permissions",
         scopes=_ALL_SCOPES,
-        route_prefixes=("/device-permissions", "/reading", "/book-scanner", "/entertainment"),
+        route_prefixes=("/reading-preparation", "/reading", "/book-scanner", "/entertainment"),
         keywords=(
             "micro",
             "microphone",
@@ -483,32 +483,32 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         ),
         short_answer_vi=(
             "Khắc phục nhanh lỗi Micro / Camera:\n"
-            "1. Mở trang Quyền thiết bị (/device-permissions) để kiểm tra trạng thái Micro và Camera ngay trong ViRead.\n"
+            "1. Mở Chuẩn bị buổi đọc (/reading-preparation) để kiểm tra micro (nhớ chọn hồ sơ bé trước) hoặc mở Quét sách (/book-scanner) để kiểm tra camera.\n"
             "2. Bấm biểu tượng ổ khóa trên thanh địa chỉ trình duyệt → chọn Cho phép (Allow) cho Microphone/Camera rồi tải lại trang.\n"
             "3. Đảm bảo đang truy cập qua HTTPS (hoặc localhost) và không có ứng dụng khác (Zoom, Meet, ghi âm) đang chiếm micro."
         ),
         detailed_answer_vi=(
             "Hướng dẫn xử lý khi Micro hoặc Camera không hoạt động trên ViRead:\n"
-            "1. Kiểm tra nhanh tại /device-permissions để xem trình duyệt đang Cấp phép, Từ chối hay chưa hỏi.\n"
+            "1. Kiểm tra ngay trong bước Chuẩn bị buổi đọc (/reading-preparation) cho micro hoặc Quét sách (/book-scanner) cho camera (chọn đúng hồ sơ bé trước khi vào).\n"
             "2. Trên Chrome/Edge máy tính: bấm biểu tượng cài đặt bên trái thanh URL → bật Microphone & Camera → tải lại trang.\n"
             "3. Trên điện thoại (Safari iOS / Chrome Android / ứng dụng ViRead Android): vào Cài đặt điện thoại → Ứng dụng → chọn trình duyệt hoặc ViRead → Quyền → bật Micro & Máy ảnh.\n"
             "4. Kiểm tra kết nối: trình duyệt chỉ cấp quyền micro/camera trên trang HTTPS (hoặc localhost khi chạy nội bộ) và khi không bị ứng dụng gọi video khác chiếm dụng."
         ),
         short_answer_en=(
             "Quick Mic / Camera fixes:\n"
-            "1. Open Device Permissions (/device-permissions) to test mic and camera status.\n"
+            "1. Test your mic inside Reading Preparation (/reading-preparation, after selecting a child profile) or test your camera inside Book Scanner (/book-scanner).\n"
             "2. Click the browser address-bar lock/settings icon → set Microphone & Camera to Allow, then reload.\n"
             "3. Confirm you are on HTTPS (or localhost) and no other app is holding the microphone."
         ),
         detailed_answer_en=(
             "Troubleshooting Microphone and Camera access in ViRead:\n"
-            "1. Visit /device-permissions to inspect current permission states.\n"
+            "1. Select a child profile first, then test microphone readiness in Reading Preparation (/reading-preparation) or camera access in Book Scanner (/book-scanner).\n"
             "2. Desktop Chrome/Edge: click the site-settings icon next to the URL, enable Microphone & Camera, and refresh.\n"
             "3. Mobile (iOS Safari / Android Chrome / ViRead Android app): open OS Settings → Apps → Browser/ViRead → Permissions → allow Microphone & Camera.\n"
             "4. Browsers require HTTPS (or localhost) and exclusive mic access (close Zoom/Meet/recording apps)."
         ),
         actions=(
-            KbAction("Kiểm tra Quyền thiết bị", "Open Device Permissions", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & kiểm tra micro", "Reading Prep & Mic Check", "/reading-preparation"),
             KbAction("Mở Trợ giúp & hỗ trợ", "Open Help & Support", "/help-support"),
         ),
         followups_vi=(
@@ -542,6 +542,9 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "hang cho ocr",
             "offline ocr",
             "dong gop ocr",
+            "quet nhanh hay sach cua toi",
+            "khac nhau giua quet sach",
+            "quick scan vs my books",
             "book scanner",
             "my books",
             "private book",
@@ -549,29 +552,29 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "upload pdf",
         ),
         short_answer_vi=(
-            "Quét sách giấy & quản lý Sách của tôi:\n"
-            "• Vào Quét sách (/book-scanner) để chụp nhanh trang sách giấy hoặc vào Sách của tôi (/my-books) để tải nhiều trang ảnh/PDF/DOCX thành cuốn sách riêng cho gia đình.\n"
-            "• Mẹo chụp rõ chữ: đặt sách phẳng, đủ sáng, tránh bóng tay và chụp thẳng góc.\n"
-            "• Nếu máy chủ OCR tạm ngoại tuyến, trang quét sẽ tự lưu vào Hàng chờ OCR và xử lý tự động khi hệ thống bật lại."
+            "So sánh Quét nhanh (/book-scanner) và Sách của tôi (/my-books):\n"
+            "• Quét sách (/book-scanner): chụp nhanh từng trang sách giấy bằng camera (cần chọn hồ sơ bé trước) để đọc ngay.\n"
+            "• Sách của tôi (/my-books): quản lý tủ sách gia đình (tải nhiều ảnh/PDF/DOCX tối đa 30 trang, chỉnh chữ OCR, dùng Smart Studio tạo bìa & tranh minh họa AI).\n"
+            "• Nếu máy chủ OCR tạm bận hoặc mất mạng, trang quét tự lưu an toàn vào Hàng chờ OCR và theo dõi tại /studio/tasks."
         ),
         detailed_answer_vi=(
-            "ViRead hỗ trợ số hóa sách giấy gia đình qua hai khu vực:\n"
-            "1. Quét sách (/book-scanner): chụp trực tiếp trang sách bằng camera hoặc chọn ảnh (JPG, PNG, WebP) để trích xuất văn bản tiếng Việt nhanh.\n"
-            "2. Sách của tôi (/my-books): tạo cuốn sách riêng tư cho gia đình, tải nhiều ảnh trang sách hoặc tệp PDF/DOCX (tối đa 30 trang/cuốn), mở chi tiết cuốn sách để chỉnh sửa chữ nhận diện, thêm/bớt trang hoặc xóa sách riêng bất cứ lúc nào.\n"
-            "3. Hàng chờ OCR ngoại tuyến (Offline OCR Queue): nếu worker OCR tạm bận hoặc mất kết nối, tác vụ được giữ an toàn trong Trung tâm tác vụ (góc trên thanh điều hướng) mà không mất ảnh đã tải.\n"
+            "ViRead hỗ trợ số hóa sách giấy gia đình qua hai khu vực bổ trợ nhau:\n"
+            "1. Quét nhanh (/book-scanner): chọn hồ sơ bé rồi chụp trực tiếp trang sách bằng camera hoặc chọn ảnh (JPG, PNG, WebP) để trích xuất văn bản tiếng Việt nhanh và đọc ngay.\n"
+            "2. Sách của tôi (/my-books) & Smart Studio: tạo cuốn sách riêng tư cho gia đình từ nhiều ảnh hoặc tệp PDF/DOCX (tối đa 30 trang/cuốn), chỉnh sửa chữ nhận diện, dùng Smart Studio tạo ảnh bìa & minh họa AI, thêm/bớt trang hoặc xóa sách riêng bất cứ lúc nào.\n"
+            "3. Hàng chờ OCR ngoại tuyến (Offline OCR Queue): nếu worker OCR tạm bận hoặc mất kết nối, tác vụ được giữ an toàn trong Trung tâm tác vụ (/studio/tasks) mà không mất ảnh đã tải.\n"
             "4. Đóng góp cải thiện OCR: ba mẹ có thể chủ động gửi bản sửa chữ đã kiểm tra để giúp nâng cao độ chính xác nhận diện tiếng Việt (tùy chọn, hoàn toàn tôn trọng quyền riêng tư)."
         ),
         short_answer_en=(
-            "Scanning paper books & My Books:\n"
-            "• Use Book Scanner (/book-scanner) to capture paper pages or My Books (/my-books) to upload images/PDF/DOCX as a private family book.\n"
-            "• For best OCR accuracy: keep pages flat, well-lit, and shoot straight-on.\n"
-            "• If the OCR worker is temporarily offline, pages stay safely in the Offline OCR Queue."
+            "Quick Scan (/book-scanner) vs Family Library (/my-books):\n"
+            "• Book Scanner (/book-scanner): quick camera/photo page capture (select a child profile first) for immediate reading.\n"
+            "• My Books (/my-books): manage your private family library (multi-page images/PDF/DOCX up to 30 pages, edit OCR text, Smart Studio AI covers & illustrations).\n"
+            "• If the OCR worker is temporarily offline, pages stay safely in the Offline OCR Queue tracked in /studio/tasks."
         ),
         detailed_answer_en=(
             "Digitizing your own paper books in ViRead:\n"
-            "1. Book Scanner (/book-scanner): capture a page with your camera or upload JPEG/PNG/WebP images for Vietnamese OCR.\n"
-            "2. My Books (/my-books): create private family books from multiple images, PDF, or DOCX files, review extracted text, and read them with your child.\n"
-            "3. Offline OCR Queue: if the OCR server is paused, uploads wait safely in the Global Task Center without losing progress.\n"
+            "1. Quick Scan (/book-scanner): select an active child profile, capture a page with your camera or upload JPEG/PNG/WebP images for fast Vietnamese OCR.\n"
+            "2. Family Library (/my-books) & Smart Studio: create private family books from multiple images, PDF, or DOCX files (up to 30 pages), edit extracted text, and generate AI covers/illustrations.\n"
+            "3. Offline OCR Queue: if the OCR server is paused or network drops, uploads wait safely in the AI Task Center (/studio/tasks) without losing progress.\n"
             "4. Optional OCR contribution: parents may opt in to share corrected text snippets to improve Vietnamese OCR accuracy."
         ),
         actions=(
@@ -662,45 +665,48 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         keywords=(
             "quan ly doc",
             "muc tieu",
+            "muc tieu tuan",
             "lich doc",
             "nhac doc",
             "email nhac doc",
             "ke hoach doc",
             "sach da luu",
             "thoi quen doc",
+            "thoi quen doc hang tuan",
             "reading management",
             "reading goal",
+            "weekly reading habit",
             "reminder",
             "schedule",
             "email reminder",
         ),
         short_answer_vi=(
-            "Quản lý thói quen đọc tại Quản lý đọc (/reading-management):\n"
-            "• Đặt mục tiêu số buổi/phút đọc hàng tuần cho từng bé.\n"
-            "• Tạo lịch nhắc đọc theo khung giờ và ngày trong tuần; ViRead gửi email nhắc tự động tới địa chỉ email đã xác minh của ba mẹ.\n"
-            "• Quản lý danh sách sách đã lưu để mở nhanh cho các buổi đọc tiếp theo."
+            "Xây dựng thói quen đọc hàng tuần tại Quản lý đọc (/reading-management) & Cài đặt (/settings):\n"
+            "• Đặt mục tiêu số buổi/phút đọc hàng tuần cho từng bé tại /reading-management.\n"
+            "• Tạo lịch nhắc đọc theo khung giờ và ngày trong tuần; bật/tắt tùy chọn email nhắc đọc trong /reading-management hoặc /settings (gửi tới email đã xác minh).\n"
+            "• Lưu sẵn danh sách sách muốn bé đọc trong tuần."
         ),
         detailed_answer_vi=(
-            "Trang Quản lý đọc (/reading-management) giúp duy trì thói quen đọc đều đặn:\n"
-            "1. Mục tiêu tuần: thiết lập mục tiêu số buổi hoặc số phút đọc mỗi tuần cho từng hồ sơ bé.\n"
-            "2. Lịch nhắc đọc qua email: chọn giờ nhắc, múi giờ và các ngày trong tuần. Ba mẹ có thể bật/tắt tạm dừng hoặc xóa lịch nhắc ngay trên thẻ lịch nhắc; email chỉ gửi đến địa chỉ đã xác minh và hiển thị trạng thái lần gửi.\n"
-            "3. Tủ sách đã lưu: đánh dấu những cuốn sách ba mẹ muốn bé đọc trong tuần."
+            "Duy trì thói quen đọc đều đặn cùng Quản lý đọc (/reading-management) và Cài đặt (/settings):\n"
+            "1. Mục tiêu tuần (/reading-management): thiết lập mục tiêu số buổi hoặc số phút đọc mỗi tuần riêng cho từng hồ sơ bé.\n"
+            "2. Lịch nhắc đọc qua email: chọn giờ nhắc, múi giờ và các ngày trong tuần tại /reading-management; có thể bật/tắt nhận email thông báo tổng thể trong Cài đặt (/settings). Email chỉ gửi đến địa chỉ đã xác minh và hiển thị trạng thái lần gửi.\n"
+            "3. Tủ sách đã lưu: đánh dấu những cuốn sách ba mẹ muốn bé đọc trong tuần để mở nhanh."
         ),
         short_answer_en=(
-            "Build a reading habit in Reading Management (/reading-management):\n"
-            "• Set weekly session/minute reading goals per child.\n"
-            "• Schedule recurring email reminders sent to your verified parent email.\n"
-            "• Keep bookmarked books ready for upcoming sessions."
+            "Build weekly reading habits in Reading Management (/reading-management) & Settings (/settings):\n"
+            "• Set weekly session/minute reading goals per child at /reading-management.\n"
+            "• Schedule recurring email reminders and toggle email notification preferences in /reading-management or /settings.\n"
+            "• Bookmark books ready for upcoming sessions."
         ),
         detailed_answer_en=(
-            "Reading Management (/reading-management) keeps family reading consistent:\n"
-            "1. Weekly Goals: define target sessions or reading minutes per child.\n"
-            "2. Email Reminders: pick days, time, and timezone. Reminders deliver to your verified account email and display delivery status.\n"
+            "Reading Management (/reading-management) and Settings (/settings) keep family reading consistent:\n"
+            "1. Weekly Goals: define target sessions or reading minutes per child at /reading-management.\n"
+            "2. Email Reminders: pick days, time, and timezone in /reading-management, and manage email delivery preferences in Settings (/settings). Reminders deliver to your verified account email.\n"
             "3. Saved Books: bookmark books you want your child to read next."
         ),
         actions=(
             KbAction("Mở Quản lý đọc", "Open Reading Management", "/reading-management"),
-            KbAction("Kiểm tra Hồ sơ ba mẹ", "Check Parent Profile", "/profile"),
+            KbAction("Mở Cài đặt", "Open Settings", "/settings"),
         ),
         followups_vi=(
             "Tại sao chưa nhận được email nhắc đọc?",
@@ -734,32 +740,37 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "mo ta tranh",
             "ke chuyen theo tranh",
             "picture description",
+            "be luoi doc",
+            "be ngai doc",
+            "be chan doc",
+            "reluctant reader",
+            "make reading fun",
             "entertainment",
             "language games",
         ),
         short_answer_vi=(
-            "Góc giải trí (/entertainment) có 4 hoạt động vừa học vừa chơi cho bé:\n"
+            "Với bé còn ngại đọc hoặc thích vừa học vừa chơi, ba mẹ chọn hồ sơ bé rồi mở Góc giải trí (/entertainment) với 4 hoạt động:\n"
             "• Karaoke thiếu nhi (/karaoke): hát theo lời chạy khớp nhịp giúp bé luyện phát âm & nhịp điệu.\n"
             "• Memory Game lật thẻ (/entertainment/memory-game): lật cặp thẻ chữ/hình tương ứng để rèn trí nhớ từ vựng và phản xạ mặt chữ.\n"
             "• Ghép câu (/entertainment/sentence-shooter): sắp xếp từ thành câu tiếng Việt hoàn chỉnh.\n"
             "• Mô tả tranh AI (/entertainment/picture-description): bé nhìn tranh, nói hoặc nhập câu kể chuyện và nhận nhận xét, gợi ý từ vựng + sao khen ngợi."
         ),
         detailed_answer_vi=(
-            "Khám phá 4 hoạt động trong Góc giải trí (/entertainment):\n"
+            "Khám phá 4 hoạt động trong Góc giải trí (/entertainment) — rất phù hợp để khởi động nhẹ nhàng cho bé chưa hào hứng đọc sách (nhớ chọn hồ sơ bé trước để lưu sao & tiến độ):\n"
             "1. Karaoke (/karaoke): chọn bài hát thiếu nhi, nghe nhạc nền và đọc/hát theo từng chữ tô sáng khớp thời gian.\n"
             "2. Memory Game lật thẻ (/entertainment/memory-game): tìm và ghép các cặp thẻ tương ứng để luyện ghi nhớ mặt chữ tiếng Việt, từ vựng và sự tập trung.\n"
             "3. Ghép câu — Sentence Shooter (/entertainment/sentence-shooter): rèn cấu trúc câu và ngữ pháp tiếng Việt qua từng vòng chơi sinh động.\n"
             "4. Mô tả tranh AI (/entertainment/picture-description): chọn tranh mẫu hoặc tải ảnh tranh lên, bé quan sát và kể lại bằng lời; AI gợi ý từ vựng, chấm điểm 1–10 (tối đa 3 sao) và khuyên cách mở rộng câu hay hơn."
         ),
         short_answer_en=(
-            "Entertainment (/entertainment) offers 4 playful language activities:\n"
+            "Great for reluctant readers! First select a child profile, then open Entertainment (/entertainment) for 4 playful activities:\n"
             "• Karaoke (/karaoke): sing along with synchronized lyrics.\n"
             "• Memory Game (/entertainment/memory-game): flip and match pairs to build vocabulary & character recall.\n"
             "• Sentence Shooter (/entertainment/sentence-shooter): build complete Vietnamese sentences.\n"
             "• Picture Description (/entertainment/picture-description): describe pictures and get AI vocabulary hints, stars, and friendly feedback."
         ),
         detailed_answer_en=(
-            "Four learning games inside Entertainment (/entertainment):\n"
+            "Four learning games inside Entertainment (/entertainment) — ideal for warming up reluctant readers (select a child profile first so stars and progress save to the right child):\n"
             "1. Karaoke (/karaoke): synchronized Vietnamese children's songs for rhythm and articulation.\n"
             "2. Memory Game (/entertainment/memory-game): card-flip matching game for Vietnamese word memory and focus.\n"
             "3. Sentence Shooter (/entertainment/sentence-shooter): arrange words into well-formed sentences.\n"
@@ -911,7 +922,16 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "an tro ly",
             "an chatbot",
             "tiet kiem du lieu",
+            "tiet kiem bang tan",
+            "mang cham",
+            "mang yeu",
+            "3g",
+            "mat mang",
             "che do ngoai tuyen",
+            "slow 3g",
+            "low bandwidth",
+            "data saver",
+            "offline mode",
             "viread assistant",
             "bandwidth mode",
             "hide assistant",
@@ -1346,28 +1366,32 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "phan quyen",
             "rls",
             "pham vi tai khoan",
+            "pham vi khach",
             "trang nguoi khac",
+            "khong vao duoc admin",
+            "guest scope",
+            "parent scope",
             "privacy",
             "security",
             "account scope",
         ),
         short_answer_vi=(
-            "Mỗi tài khoản ViRead được cách ly dữ liệu nghiêm ngặt (Supabase Auth + RLS): phụ huynh chỉ truy cập được trang, hồ sơ bé, sách riêng tư và báo cáo của chính mình — không thể xem tài khoản người khác hay khu vực quản trị."
+            "Mỗi tài khoản ViRead được cách ly dữ liệu nghiêm ngặt (Supabase Auth + RLS): khách chưa đăng nhập chỉ xem trang công khai (/login, /register), còn phụ huynh chỉ truy cập được hồ sơ bé, sách riêng tư (/my-books), tác vụ AI (/studio/tasks) và cài đặt (/settings) của chính mình — tuyệt đối không xem tài khoản người khác hay /admin/*."
         ),
         detailed_answer_vi=(
-            "Nguyên tắc an toàn & riêng tư của hệ thống ViRead:\n"
-            "1. Đúng phạm vi người dùng (Own-Scope): mọi hồ sơ bé, sách tự quét (/my-books), buổi đọc (/sessions), tác vụ AI (/studio/tasks) và cài đặt (/settings) chỉ thuộc về tài khoản đang đăng nhập.\n"
-            "2. Trợ lý AI bảo vệ quyền riêng tư: không bao giờ điều hướng bạn sang khu vực quản trị hoặc trang dữ liệu của người dùng khác.\n"
-            "3. Hỗ trợ trực tiếp khi gặp sự cố quyền truy cập tại Trợ giúp (/help-support)."
+            "Nguyên tắc an toàn, phân quyền & riêng tư của ViRead:\n"
+            "1. Phạm vi Khách (Guest) vs Phụ huynh (Parent): khách chưa đăng nhập chỉ dùng hướng dẫn chung và các trang công khai (/login, /register, /forgot-password); phụ huynh đã đăng nhập mới truy cập không gian gia đình của chính mình.\n"
+            "2. Đúng phạm vi người dùng (Own-Scope): mọi hồ sơ bé (/children), sách tự quét (/my-books), buổi đọc (/sessions), tác vụ AI (/studio/tasks) và cài đặt bảo mật (/settings) được bảo vệ theo tài khoản đang đăng nhập.\n"
+            "3. Chặn rò rỉ chéo: Trợ lý AI không bao giờ điều hướng hay tiết lộ khu vực quản trị (/admin/*) hoặc dữ liệu người dùng khác."
         ),
         short_answer_en=(
-            "ViRead strictly isolates every account's data: you can only view and navigate your own child profiles, private books, reading sessions, and settings — never another user's pages or admin tools."
+            "ViRead strictly isolates every account's data: signed-out guests stay on public auth routes, and parents only access their own child profiles, private books (/my-books), AI tasks (/studio/tasks), and settings (/settings) — never another user's data or /admin/*."
         ),
         detailed_answer_en=(
-            "ViRead security & isolation guarantees:\n"
-            "1. Strict own-scope access enforced across API and database layers.\n"
-            "2. The assistant only offers navigation to valid pages within your authorized scope.\n"
-            "3. Need account assistance? Visit Help & Support (/help-support)."
+            "ViRead security, guest vs parent boundaries & isolation guarantees:\n"
+            "1. Guest vs Parent Scope: signed-out guests only see public auth routes (/login, /register, /forgot-password), while signed-in parents manage their own family workspace.\n"
+            "2. Strict own-scope access enforced across API and Supabase RLS layers for /children, /my-books, /sessions, /studio/tasks, and /settings.\n"
+            "3. The assistant strictly blocks navigation to /admin/* or another user's private pages."
         ),
         actions=(
             KbAction("Cài đặt tài khoản", "Account Settings", "/settings"),
@@ -1421,6 +1445,253 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "Where do I check worker health?",
             "How does book OCR approval work?",
             "How do I manage VietOCR training?",
+        ),
+    ),
+    KbArticle(
+        id="child_selection_gate_and_switching",
+        title_vi="Cổng chọn hồ sơ bé & cách chuyển bé trước khi đọc/chơi",
+        title_en="Child selection gate & switching profiles before reading or games",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/dashboard", "/children", "/reading-preparation", "/books", "/entertainment"),
+        keywords=(
+            "cong chon be",
+            "chua chon be",
+            "tai sao phai chon be",
+            "bat buoc chon be",
+            "chon ho so be",
+            "chuyen be nhanh",
+            "doi be nhanh",
+            "chon be trong chatbot",
+            "child selection",
+            "child gate",
+            "why select child",
+            "select a child first",
+            "switch child inline",
+            "pick child",
+        ),
+        short_answer_vi=(
+            "Tại sao ViRead yêu cầu chọn hồ sơ bé trước khi mở Sách, Quét sách, Chuẩn bị đọc, Góc giải trí hay Karaoke?\n"
+            "• Mỗi bé (lớp 1–5) có lịch sử đọc, từ cần luyện, sao thưởng và báo cáo tiến bộ tách biệt để không bị lẫn dữ liệu.\n"
+            "• Nếu chưa chọn bé, bạn có thể chọn hoặc chuyển bé ngay trong khung Trợ lý ViRead khi bấm mở trang, trên thanh đầu trang hoặc tại Tổng quan (/dashboard) và Hồ sơ bé (/children)."
+        ),
+        detailed_answer_vi=(
+            "Cơ chế chọn hồ sơ bé thông minh trên ViRead giúp dữ liệu học tập của từng con luôn chính xác:\n"
+            "1. Các trang gắn trực tiếp với buổi học/chơi (/books, /book-scanner, /reading-preparation, /entertainment/*, /karaoke) cần biết bé nào đang tham gia để lưu đúng kết quả, từ cần luyện và sao thưởng.\n"
+            "2. Cách chọn nhanh: khi trợ lý gợi ý chuyển tới các trang trên mà bạn chưa chọn bé, bộ chọn bé ngay trong khung chat sẽ hiện ra để chọn chỉ với 1 chạm (hoặc tạo mới tại /children/new).\n"
+            "3. Bạn cũng có thể chuyển bé bất kỳ lúc nào ở bộ chuyển trên thanh đầu trang, trang Tổng quan (/dashboard) hoặc Hồ sơ bé (/children)."
+        ),
+        short_answer_en=(
+            "Why does ViRead ask you to select a child before Books, Scanner, Reading Prep, Entertainment, or Karaoke?\n"
+            "• Each child profile (Grades 1–5) keeps separate reading history, difficult words, stars, and progress analytics.\n"
+            "• Pick or switch a child inline inside the ViRead Assistant, from the header switcher, on Dashboard (/dashboard), or in Child Profiles (/children)."
+        ),
+        detailed_answer_en=(
+            "Smart child-profile gating keeps every child's learning metrics accurate:\n"
+            "1. Child-gated routes (/books, /book-scanner, /reading-preparation, /entertainment/*, /karaoke) require an active child so sessions, difficult words, and stars are recorded to the right child.\n"
+            "2. Inline picker: when opening a child-gated route from the assistant without an active child, you can pick a child inline right inside the chat widget (or create one at /children/new).\n"
+            "3. Switch anytime via the header switcher, Dashboard (/dashboard), or Child Profiles (/children)."
+        ),
+        actions=(
+            KbAction("Mở Hồ sơ bé", "Open Child Profiles", "/children"),
+            KbAction("Tạo hồ sơ bé mới", "Create Child Profile", "/children/new"),
+            KbAction("Về Tổng quan", "Open Dashboard", "/dashboard"),
+        ),
+        followups_vi=(
+            "Nhà có 2 bé học khác lớp thì chuyển đổi thế nào?",
+            "Làm sao bắt đầu 3 bước đầu tiên cho ba mẹ mới?",
+            "Mở kho sách để chọn truyện cho bé?",
+        ),
+        followups_en=(
+            "How do siblings switch profiles?",
+            "What are the 3 onboarding steps for new parents?",
+            "How do I browse books for my child?",
+        ),
+    ),
+    KbArticle(
+        id="new_parent_onboarding",
+        title_vi="Hướng dẫn 3 bước bắt đầu cho ba mẹ mới",
+        title_en="3-step quickstart onboarding for new parents",
+        scopes=_ALL_SCOPES,
+        route_prefixes=("/", "/dashboard", "/children/new", "/register"),
+        keywords=(
+            "ba me moi",
+            "nguoi moi",
+            "moi su dung",
+            "3 buoc bat dau",
+            "bat dau nhu the nao",
+            "lan dau su dung",
+            "huong dan nhanh",
+            "new parent",
+            "onboarding",
+            "3 steps",
+            "first time",
+            "quickstart",
+        ),
+        short_answer_vi=(
+            "3 bước bắt đầu cùng ViRead chỉ mất 2 phút:\n"
+            "1. Tạo hồ sơ bé (/children/new): nhập tên và chọn lớp (1–5).\n"
+            "2. Chọn hoặc quét sách: mở Kho sách (/books) hoặc chụp trang sách giấy tại Quét sách (/book-scanner) / Sách của tôi (/my-books).\n"
+            "3. Vào Chuẩn bị đọc (/reading-preparation): chọn phạm vi trang, giọng đọc mẫu, kiểm tra micro rồi bấm Bắt đầu đọc."
+        ),
+        detailed_answer_vi=(
+            "Lộ trình 3 bước dành cho phụ huynh mới dùng ViRead:\n"
+            "1. Tạo hồ sơ bé (/children/new): mỗi bé có hồ sơ theo lớp (1–5) để hệ thống gợi ý sách phù hợp và lưu tiến bộ riêng.\n"
+            "2. Chọn nguồn sách: duyệt truyện tiếng Việt trong Kho sách (/books) hoặc số hóa sách giấy gia đình bằng Quét sách (/book-scanner) hay Sách của tôi (/my-books).\n"
+            "3. Bắt đầu buổi đọc (/reading-preparation → /reading): kiểm tra micro, chọn tốc độ/giọng đọc mẫu Bắc–Trung–Nam, cùng bé đọc to và làm câu hỏi đọc hiểu AI Tutor cuối buổi."
+        ),
+        short_answer_en=(
+            "3-step ViRead quickstart for new parents:\n"
+            "1. Create a child profile (/children/new) with name and grade (1–5).\n"
+            "2. Pick a book in Books (/books) or scan/upload paper pages in Book Scanner (/book-scanner) / My Books (/my-books).\n"
+            "3. Open Reading Preparation (/reading-preparation) to pick pages, voice, and test mic, then start reading."
+        ),
+        detailed_answer_en=(
+            "Getting started with ViRead in 3 easy steps:\n"
+            "1. Create a child profile (/children/new) by Grade 1–5 so bookshelves and analytics stay personalized.\n"
+            "2. Choose a curated book in /books or digitize your own paper books in /book-scanner or /my-books.\n"
+            "3. In Reading Preparation (/reading-preparation), test the microphone, select model voice & page range, and launch an interactive reading session with post-reading AI Tutor questions."
+        ),
+        actions=(
+            KbAction("Tạo hồ sơ bé mới", "Create Child Profile", "/children/new"),
+            KbAction("Mở kho Sách", "Browse Books", "/books"),
+            KbAction("Chuẩn bị buổi đọc", "Reading Preparation", "/reading-preparation"),
+        ),
+        followups_vi=(
+            "Tại sao phải chọn hồ sơ bé trước khi đọc?",
+            "Bé đọc chậm nên chỉnh tốc độ thế nào?",
+            "Cách quét sách giấy bằng camera?",
+        ),
+        followups_en=(
+            "Why do I need to select a child first?",
+            "How do I slow down voice speed for a struggling reader?",
+            "How do I scan a paper book?",
+        ),
+    ),
+    KbArticle(
+        id="multi_child_family_switching",
+        title_vi="Gia đình có nhiều bé: chuyển đổi hồ sơ không lẫn dữ liệu",
+        title_en="Multi-child families: switching between siblings cleanly",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/children", "/dashboard", "/reports"),
+        keywords=(
+            "nhieu be",
+            "hai be",
+            "2 be",
+            "anh em",
+            "chi em",
+            "nhieu ho so",
+            "chuyen giua cac be",
+            "khong bi lan",
+            "lan du lieu",
+            "multi child",
+            "multiple children",
+            "siblings",
+            "switch between children",
+            "separate progress",
+        ),
+        short_answer_vi=(
+            "Với gia đình có 2 bé trở lên:\n"
+            "• Tạo hồ sơ riêng cho từng bé tại Hồ sơ bé (/children) — mỗi bé có tủ sách đã lưu, từ cần luyện, báo cáo tiến bộ và mục tiêu tuần độc lập.\n"
+            "• Trước mỗi buổi đọc hoặc trò chơi, đổi nhanh giữa các bé trên thanh đầu trang, Tổng quan (/dashboard) hoặc bộ chọn bé trong khung chat để dữ liệu không bao giờ bị lẫn."
+        ),
+        detailed_answer_vi=(
+            "Quản lý nhiều bé cùng học trên một tài khoản phụ huynh ViRead:\n"
+            "1. Tạo hồ sơ riêng cho từng bé (/children/new) theo đúng lớp (1–5) của từng bạn.\n"
+            "2. Chuyển đổi tức thì: dùng nút chọn bé trên thanh đầu trang, chọn thẻ bé trên Tổng quan (/dashboard), hoặc chọn bé ngay trong cửa sổ Trợ lý ViRead khi mở Sách/Giải trí.\n"
+            "3. Mọi chỉ số (Tốc độ, Đọc đúng, Từ cần luyện, Lịch sử phiên đọc, Mục tiêu tuần) tự động lọc và lưu riêng theo bé đang chọn."
+        ),
+        short_answer_en=(
+            "Managing siblings on one parent account:\n"
+            "• Create a separate profile per child in Child Profiles (/children) so each sibling has independent bookshelves, difficult words, reports, and weekly goals.\n"
+            "• Switch between siblings anytime via the header switcher, Dashboard (/dashboard), or the assistant's inline child picker."
+        ),
+        detailed_answer_en=(
+            "Multi-child families on ViRead:\n"
+            "1. Add each sibling (/children/new) with their own grade (Grades 1–5).\n"
+            "2. Switch cleanly using the top-bar child switcher, Dashboard cards (/dashboard), or the inline assistant child selector before reading or playing games.\n"
+            "3. Progress reports, difficult words, session history, and weekly goals stay strictly separated per child."
+        ),
+        actions=(
+            KbAction("Mở Hồ sơ bé", "Open Child Profiles", "/children"),
+            KbAction("Tạo thêm hồ sơ bé", "Add Another Child", "/children/new"),
+            KbAction("Về Tổng quan", "Open Dashboard", "/dashboard"),
+        ),
+        followups_vi=(
+            "Tại sao phải chọn hồ sơ bé trước khi mở sách?",
+            "Xem báo cáo tiến bộ riêng của từng bé ở đâu?",
+            "Đặt mục tiêu đọc riêng cho mỗi bé thế nào?",
+        ),
+        followups_en=(
+            "Why is child selection required before books or games?",
+            "Where do I view reports for each child?",
+            "How do I set weekly goals per child?",
+        ),
+    ),
+    KbArticle(
+        id="slow_struggling_reader_support",
+        title_vi="Hỗ trợ bé đọc chậm, hay vấp từ & luyện phát âm",
+        title_en="Supporting slow or struggling readers (0.85x speed & syllable hints)",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/reading-preparation", "/reading", "/reports/difficult-words"),
+        keywords=(
+            "be doc cham",
+            "doc yeu",
+            "doc vap",
+            "hay vap tu",
+            "gap kho khan",
+            "toc do 0.85x",
+            "0.85x",
+            "chinh toc do doc",
+            "cham lai",
+            "danh van",
+            "tach van",
+            "ho tro doc cham",
+            "slow reader",
+            "struggling reader",
+            "reading speed",
+            "0.85",
+            "syllable spelling",
+            "pronunciation hints",
+        ),
+        short_answer_vi=(
+            "Mẹo đồng hành với bé đọc chậm hoặc hay vấp từ:\n"
+            "• Giảm tốc độ giọng đọc mẫu xuống 0.85x trong Chuẩn bị đọc (/reading-preparation) hoặc nút điều chỉnh giọng đọc để bé nghe rõ từng tiếng.\n"
+            "• Chọn phạm vi ít trang mỗi buổi (1–2 trang), tận dụng gợi ý đánh vần/tách vần AI và bấm vào từ khó để nghe lại phát âm chuẩn.\n"
+            "• Sau buổi đọc, cho bé ôn lại các từ vừa vấp tại Từ cần luyện (/reports/difficult-words)."
+        ),
+        detailed_answer_vi=(
+            "Cách tùy chỉnh ViRead cho bé mới tập đọc hoặc còn đọc chậm:\n"
+            "1. Tốc độ đọc mẫu 0.85x: tại Chuẩn bị đọc (/reading-preparation) hoặc trong màn hình đọc, chọn tốc độ 0.85x để giọng đọc mẫu (TTS) chậm rãi, rõ thanh điệu cho bé nhẩm theo.\n"
+            "2. Hỗ trợ đánh vần AI & thử lại nhẹ nhàng: khi bé ngập ngừng hoặc đọc nhầm, hệ thống gợi ý tách vần/đánh vần và cho bé thử lại không áp lực, sau đó tự lưu từ khó.\n"
+            "3. Chia nhỏ mục tiêu: chọn khoảng 1–2 trang ở /reading-preparation để bé giữ tự tin.\n"
+            "4. Ôn tập trọng tâm: mở Từ cần luyện (/reports/difficult-words) để bé nghe mẫu và luyện đọc lại đúng những từ hay vấp."
+        ),
+        short_answer_en=(
+            "Tips for slow or struggling readers:\n"
+            "• Lower the model TTS voice speed to 0.85x in Reading Preparation (/reading-preparation) or reader voice controls.\n"
+            "• Pick short page ranges (1–2 pages), use gentle AI syllable-spelling hints, and tap tricky words to hear clear pronunciation.\n"
+            "• Drill missed words afterward in Difficult Words (/reports/difficult-words)."
+        ),
+        detailed_answer_en=(
+            "Adapting ViRead for slow or struggling readers:\n"
+            "1. 0.85x Model Voice Speed: set TTS speed to 0.85x in Reading Preparation (/reading-preparation) or the reader toolbar so tones and syllables are crystal clear.\n"
+            "2. Syllable Spelling AI & Gentle Retries: ViRead offers supportive syllable breakdowns and low-stress retries, automatically logging tricky words.\n"
+            "3. Short Sessions: select 1–2 pages in /reading-preparation to build confidence.\n"
+            "4. Targeted Practice: revisit missed words in Difficult Words (/reports/difficult-words)."
+        ),
+        actions=(
+            KbAction("Chuẩn bị đọc (chỉnh tốc độ 0.85x)", "Reading Prep (0.85x speed)", "/reading-preparation"),
+            KbAction("Ôn Từ cần luyện", "Open Difficult Words", "/reports/difficult-words"),
+        ),
+        followups_vi=(
+            "Bé chưa thích đọc sách thì nên thử trò chơi nào?",
+            "Làm sao xem các từ bé đọc nhầm sau buổi đọc?",
+            "Tại sao không đổi được giọng đọc giữa buổi đọc?",
+        ),
+        followups_en=(
+            "Which games help reluctant readers warm up?",
+            "Where are missed words saved after reading?",
+            "Why can't I switch voices mid-session?",
         ),
     ),
 )
@@ -1556,7 +1827,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         ),
         actions=(
             KbAction("Góc giải trí", "Entertainment", "/entertainment"),
-            KbAction("Kiểm tra thiết bị", "Device Check", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
         ),
     ),
     PageContextSpec(
@@ -1674,20 +1945,21 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         scopes=_PARENT_SCOPES,
         title_vi="Chuẩn bị buổi đọc",
         title_en="Reading Preparation",
-        greeting_vi="Sẵn sàng cho buổi đọc! Cần hỗ trợ chọn trang hay kiểm tra micro?",
-        greeting_en="Ready to read! Need help picking pages or testing the microphone?",
+        greeting_vi="Sẵn sàng cho buổi đọc! Cần hỗ trợ chọn bé, chọn trang, chỉnh tốc độ 0.85x hay kiểm tra micro?",
+        greeting_en="Ready to read! Need help picking a child, page range, 0.85x voice speed, or testing the mic?",
         prompts_vi=(
-            "Cách chọn phạm vi trang đọc phù hợp?",
+            "Cách chọn phạm vi trang và tốc độ 0.85x cho bé đọc chậm?",
             "Kiểm tra micro trước khi bé đọc?",
-            "Giọng đọc mẫu và chế độ đọc là gì?",
+            "Giọng đọc mẫu và Khóa giọng đọc theo buổi là gì?",
         ),
         prompts_en=(
-            "How do I pick a page range?",
+            "How do I pick pages or 0.85x speed for slow readers?",
             "How do I test the mic before reading?",
-            "How do model voice and reading modes work?",
+            "How do model voice and Session Voice Lock work?",
         ),
         actions=(
-            KbAction("Quyền thiết bị", "Device Permissions", "/device-permissions"),
+            KbAction("Mở kho Sách", "Browse Books", "/books"),
+            KbAction("Trợ giúp & hỗ trợ", "Help & Support", "/help-support"),
         ),
     ),
     PageContextSpec(
@@ -1699,16 +1971,16 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         greeting_en="Keeping this compact so your child stays focused. How can I help?",
         prompts_vi=(
             "Micro không nhận giọng bé phải làm sao?",
-            "Cách đổi giọng đọc mẫu (TTS)?",
+            "Cách đổi giọng đọc mẫu (TTS) hoặc tốc độ 0.85x?",
             "Từ bé đọc nhầm sẽ lưu ở đâu?",
         ),
         prompts_en=(
             "Mic isn't picking up my child's voice",
-            "How do I switch the model voice?",
+            "How do I switch model voice or 0.85x speed?",
             "Where are missed words saved?",
         ),
         actions=(
-            KbAction("Kiểm tra Micro", "Check Mic", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
             KbAction("Từ cần luyện", "Difficult Words", "/reports/difficult-words"),
         ),
     ),
@@ -1717,21 +1989,21 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         scopes=_PARENT_SCOPES,
         title_vi="Quét sách giấy",
         title_en="Book Scanner",
-        greeting_vi="Tôi có thể hướng dẫn chụp trang sách rõ chữ và cách hoạt động của hàng chờ OCR.",
-        greeting_en="I can share tips for clear page scans and how the OCR queue works.",
+        greeting_vi="Tôi có thể hướng dẫn chụp trang sách rõ chữ, so sánh với Sách của tôi và hàng chờ OCR.",
+        greeting_en="I can share tips for sharp page scans, My Books comparison, and the OCR queue.",
         prompts_vi=(
-            "Mẹo chụp trang sách để OCR chuẩn nhất?",
+            "Quét nhanh (/book-scanner) và Sách của tôi (/my-books) khác gì nhau?",
             "Hàng chờ OCR ngoại tuyến hoạt động thế nào?",
             "Camera không mở được thì xử lý sao?",
         ),
         prompts_en=(
-            "Tips for the sharpest OCR page scan?",
+            "How is Quick Scan different from My Books?",
             "How does the offline OCR queue work?",
             "Camera won't open — how to fix?",
         ),
         actions=(
             KbAction("Sách của tôi", "My Books", "/my-books"),
-            KbAction("Quyền thiết bị", "Device Permissions", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
         ),
     ),
     PageContextSpec(
@@ -1739,21 +2011,21 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         scopes=_PARENT_SCOPES,
         title_vi="Sách của tôi",
         title_en="My Books",
-        greeting_vi="Hỏi tôi về cách tải ảnh/PDF/DOCX sách gia đình hoặc chỉnh sửa nội dung quét.",
-        greeting_en="Ask me about uploading family books (images/PDF/DOCX) or reviewing scans.",
+        greeting_vi="Hỏi tôi về tải ảnh/PDF/DOCX, Smart Studio tạo bìa AI và hàng chờ OCR ngoại tuyến.",
+        greeting_en="Ask me about uploading images/PDF/DOCX, Smart Studio AI covers, and offline OCR queue.",
         prompts_vi=(
-            "Cách tải sách riêng từ ảnh hoặc PDF?",
-            "Hàng chờ OCR ngoại tuyến hoạt động ra sao?",
-            "Làm sao bắt đầu buổi đọc từ sách của tôi?",
+            "Quét nhanh (/book-scanner) và Sách của tôi (/my-books) khác gì nhau?",
+            "Smart Studio tạo ảnh bìa và minh họa thế nào?",
+            "Theo dõi tác vụ AI đang chạy ở đâu?",
         ),
         prompts_en=(
-            "How do I upload a book from images or PDF?",
-            "How does the offline OCR queue work?",
-            "How do I start reading my private book?",
+            "How is Quick Scan different from My Books?",
+            "How does Smart Studio create covers & art?",
+            "Where can I track running AI jobs?",
         ),
         actions=(
             KbAction("Mở Quét sách", "Open Scanner", "/book-scanner"),
-            KbAction("Kho sách chung", "Library Books", "/books"),
+            KbAction("Tác vụ AI", "AI Tasks", "/studio/tasks"),
         ),
     ),
     PageContextSpec(
@@ -1764,18 +2036,18 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         greeting_vi="Cần hướng dẫn giúp bé ôn phát âm các từ khó bằng micro tự động?",
         greeting_en="Need tips on practicing tricky words with audio and auto-mic?",
         prompts_vi=(
-            "Cách luyện phát âm từ khó cho bé?",
+            "Bé đọc chậm và hay vấp từ thì luyện thế nào?",
             "Micro không nhận giọng bé khi luyện từ?",
             "Xem báo cáo tiến bộ tổng hợp ở đâu?",
         ),
         prompts_en=(
-            "How do we practice difficult words?",
+            "How do we support a slow reader with difficult words?",
             "Mic isn't hearing my child during practice",
             "Where is the full progress report?",
         ),
         actions=(
             KbAction("Xem Tiến bộ", "View Progress", "/reports"),
-            KbAction("Quyền thiết bị", "Device Permissions", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
         ),
     ),
     PageContextSpec(
@@ -1952,6 +2224,28 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         ),
     ),
     PageContextSpec(
+        prefix="/children/new",
+        scopes=_PARENT_SCOPES,
+        title_vi="Tạo hồ sơ bé mới",
+        title_en="Create Child Profile",
+        greeting_vi="Bước 1 rất nhanh: nhập tên và chọn lớp (1–5) để tạo không gian đọc riêng cho bé!",
+        greeting_en="Quick Step 1: enter a name and grade (1–5) to create your child's own reading space!",
+        prompts_vi=(
+            "3 bước bắt đầu cho ba mẹ mới gồm gì?",
+            "Nhà có 2 bé học khác lớp thì chuyển đổi thế nào?",
+            "Sau khi tạo hồ sơ bé thì chọn sách ở đâu?",
+        ),
+        prompts_en=(
+            "What are the 3 onboarding steps for new parents?",
+            "How do siblings switch profiles?",
+            "Where do I pick a book after creating a profile?",
+        ),
+        actions=(
+            KbAction("Danh sách Hồ sơ bé", "Child Profiles", "/children"),
+            KbAction("Về Tổng quan", "Dashboard", "/dashboard"),
+        ),
+    ),
+    PageContextSpec(
         prefix="/children",
         scopes=_PARENT_SCOPES,
         title_vi="Hồ sơ bé",
@@ -1960,13 +2254,13 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         greeting_en="Manage Grade 1–5 child profiles with separate bookshelves, reports, and difficult words.",
         prompts_vi=(
             "Làm sao tạo hồ sơ cho bé?",
-            "Cách chuyển nhanh giữa các hồ sơ bé?",
-            "Cách bắt đầu buổi đọc đầu tiên?",
+            "Nhà có nhiều bé thì chuyển đổi giữa các bé thế nào?",
+            "Tại sao phải chọn hồ sơ bé trước khi đọc/chơi?",
         ),
         prompts_en=(
             "How do I create a child profile?",
-            "How do I switch between child profiles?",
-            "How do I start a reading session?",
+            "How do multi-child families switch siblings?",
+            "Why is child selection required before reading/games?",
         ),
         actions=(
             KbAction("Tạo hồ sơ bé mới", "Create Child Profile", "/children/new"),
@@ -2040,28 +2334,6 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         ),
     ),
     PageContextSpec(
-        prefix="/device-permissions",
-        scopes=_ALL_SCOPES,
-        title_vi="Quyền thiết bị",
-        title_en="Device Permissions",
-        greeting_vi="Kiểm tra nhanh quyền Micro và Camera để bé đọc to và quét sách giấy mượt mà.",
-        greeting_en="Check Microphone and Camera permissions for smooth reading and book scanning.",
-        prompts_vi=(
-            "Micro không nhận giọng bé phải làm sao?",
-            "Camera không mở được khi quét sách?",
-            "Cấp quyền micro trên điện thoại thế nào?",
-        ),
-        prompts_en=(
-            "Microphone isn't picking up my child's voice",
-            "Camera won't open in Book Scanner",
-            "How do I allow mic on mobile?",
-        ),
-        actions=(
-            KbAction("Trợ giúp & hỗ trợ", "Help & Support", "/help-support"),
-            KbAction("Về Tổng quan", "Dashboard", "/dashboard"),
-        ),
-    ),
-    PageContextSpec(
         prefix="/help-support",
         scopes=_ALL_SCOPES,
         title_vi="Trợ giúp & hỗ trợ",
@@ -2071,16 +2343,16 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         prompts_vi=(
             "Cách gửi phản hồi hoặc báo lỗi kỹ thuật?",
             "Làm sao báo lỗi chữ sai trong sách?",
-            "Trợ lý ViRead dùng AI phân tầng thế nào?",
+            "Mạng 3G chậm hoặc ngoại tuyến thì dùng thế nào?",
         ),
         prompts_en=(
             "How do I send support feedback?",
             "How do I report a typo in a book?",
-            "How does the tiered AI assistant work?",
+            "How does ViRead work on slow 3G or offline?",
         ),
         actions=(
             KbAction("Báo cáo sách", "Book Reports", "/book-reports"),
-            KbAction("Quyền thiết bị", "Device Permissions", "/device-permissions"),
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
         ),
     ),
     PageContextSpec(
@@ -2297,7 +2569,6 @@ _PARENT_STATIC_NAV_ALLOWLIST: frozenset[str] = frozenset(
         "/entertainment/sentence-shooter",
         "/entertainment/picture-description",
         "/karaoke",
-        "/device-permissions",
         "/help-support",
         "/book-reports",
         "/studio/tasks",
@@ -2463,6 +2734,8 @@ class _NavRule:
     label_en: str
     reason_vi: str
     reason_en: str
+    requires_child_selection: bool = False
+    scenario_id: str | None = None
 
 
 _NAV_RULES: tuple[_NavRule, ...] = (
@@ -2485,6 +2758,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Password & Settings",
         reason_vi="Tại trang Cài đặt, bạn có thể đổi mật khẩu và thiết lập bảo mật cho chính tài khoản của mình.",
         reason_en="Update your own password and account settings safely.",
+        requires_child_selection=False,
+        scenario_id="account_security_and_settings",
     ),
     _NavRule(
         href="/forgot-password",
@@ -2493,6 +2768,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Forgot Password",
         reason_vi="Nhập email đã đăng ký để nhận liên kết đặt lại mật khẩu an toàn.",
         reason_en="Request a secure password reset link via email.",
+        requires_child_selection=False,
+        scenario_id="account_security_and_settings",
     ),
     _NavRule(
         href="/profile",
@@ -2501,22 +2778,53 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Parent Profile",
         reason_vi="Cập nhật tên hiển thị, số điện thoại và thông tin cá nhân của bạn.",
         reason_en="Manage your parent account details.",
+        requires_child_selection=False,
+        scenario_id="account_security_and_settings",
     ),
     _NavRule(
         href="/children/new",
-        phrases=("tao ho so be", "them ho so be", "them be moi", "create child", "add child"),
+        phrases=(
+            "tao ho so be",
+            "them ho so be",
+            "them be moi",
+            "3 buoc bat dau",
+            "ba me moi",
+            "create child",
+            "add child",
+            "new parent",
+        ),
         label_vi="Đi đến Tạo hồ sơ bé mới",
         label_en="Go to Create Child Profile",
         reason_vi="Tạo nhanh hồ sơ đọc riêng theo tên và lớp (1–5) cho bé nhà bạn.",
         reason_en="Create a new child reading profile (Grades 1–5).",
+        requires_child_selection=False,
+        scenario_id="new_parent_onboarding",
     ),
     _NavRule(
         href="/children",
-        phrases=("ho so be", "danh sach be", "sua ho so be", "child profile", "children"),
+        phrases=(
+            "ho so be",
+            "danh sach be",
+            "sua ho so be",
+            "doi be",
+            "chuyen be",
+            "chon ho so be",
+            "nhieu be",
+            "chuyen giua cac be",
+            "tai sao phai chon be",
+            "chua chon be",
+            "child profile",
+            "children",
+            "switch child",
+            "select child",
+            "multi child",
+        ),
         label_vi="Đi đến trang Hồ sơ bé",
         label_en="Go to Child Profiles",
-        reason_vi="Xem và chỉnh sửa hồ sơ các bé trong gia đình bạn.",
-        reason_en="View and manage your child profiles.",
+        reason_vi="Xem, chuyển đổi và quản lý hồ sơ các bé trong gia đình bạn.",
+        reason_en="View, switch, and manage your child profiles.",
+        requires_child_selection=False,
+        scenario_id="child_selection_gate_and_switching",
     ),
     _NavRule(
         href="/book-scanner",
@@ -2525,14 +2833,18 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to AI Book Scanner",
         reason_vi="Chụp hoặc tải ảnh trang sách giấy để AI trích xuất chữ cho bé đọc.",
         reason_en="Scan printed book pages into interactive text.",
+        requires_child_selection=True,
+        scenario_id="quick_scan_vs_my_books",
     ),
     _NavRule(
         href="/studio/tasks",
-        phrases=("tac vu ai", "tien trinh ai", "tien trinh tac vu", "task center", "studio/tasks"),
+        phrases=("tac vu ai", "tien trinh ai", "tien trinh tac vu", "hang cho ocr", "task center", "studio/tasks"),
         label_vi="Đi đến Trung tâm tác vụ AI",
         label_en="Go to AI Task Center",
         reason_vi="Theo dõi tiến trình quét sách, tạo ảnh minh họa và audio của bạn.",
         reason_en="Track your active background AI jobs.",
+        requires_child_selection=False,
+        scenario_id="ai_task_center",
     ),
     _NavRule(
         href="/my-books",
@@ -2541,6 +2853,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to My Books",
         reason_vi="Mở tủ sách riêng gia đình bạn đã quét hoặc tạo minh họa.",
         reason_en="Open your private scanned & illustrated books.",
+        requires_child_selection=False,
+        scenario_id="quick_scan_vs_my_books",
     ),
     _NavRule(
         href="/books",
@@ -2549,6 +2863,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Books Library",
         reason_vi="Chọn sách tiếng Việt phù hợp độ tuổi và trình độ đọc của bé.",
         reason_en="Browse curated children's books.",
+        requires_child_selection=True,
+        scenario_id="books_and_reading_start",
     ),
     _NavRule(
         href="/entertainment/memory-game",
@@ -2557,6 +2873,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Memory Game",
         reason_vi="Chơi lật cặp thẻ giúp bé ghi nhớ từ vựng và mặt chữ vui nhộn.",
         reason_en="Play the memory card matching game.",
+        requires_child_selection=True,
+        scenario_id="reluctant_reader_games",
     ),
     _NavRule(
         href="/entertainment/sentence-shooter",
@@ -2565,6 +2883,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Sentence Shooter",
         reason_vi="Luyện sắp xếp từ thành câu tiếng Việt hoàn chỉnh.",
         reason_en="Practice building Vietnamese sentences.",
+        requires_child_selection=True,
+        scenario_id="reluctant_reader_games",
     ),
     _NavRule(
         href="/entertainment/picture-description",
@@ -2573,6 +2893,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Picture Description",
         reason_vi="Cho bé nhìn tranh kể chuyện và nhận nhận xét, gợi ý từ vựng AI.",
         reason_en="Describe pictures and receive AI feedback.",
+        requires_child_selection=True,
+        scenario_id="reluctant_reader_games",
     ),
     _NavRule(
         href="/karaoke",
@@ -2581,22 +2903,47 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Kids Karaoke",
         reason_vi="Hát theo lời bài hát chạy khớp nhịp để luyện phát âm.",
         reason_en="Sing along with synchronized lyrics.",
+        requires_child_selection=True,
+        scenario_id="reluctant_reader_games",
     ),
     _NavRule(
         href="/entertainment",
-        phrases=("giai tri", "goc giai tri", "tro choi", "entertainment"),
+        phrases=(
+            "giai tri",
+            "goc giai tri",
+            "tro choi",
+            "be ngai doc",
+            "be luoi doc",
+            "be chan doc",
+            "reluctant reader",
+            "entertainment",
+        ),
         label_vi="Đi đến Góc giải trí",
         label_en="Go to Entertainment",
         reason_vi="Khám phá Karaoke, Memory Game, Ghép câu và Mô tả tranh AI.",
         reason_en="Explore language games for kids.",
+        requires_child_selection=True,
+        scenario_id="reluctant_reader_games",
+    ),
+    _NavRule(
+        href="/book-reports",
+        phrases=("bao cao sach", "bao loi sach", "book reports"),
+        label_vi="Đi đến Báo cáo sách",
+        label_en="Go to Book Reports",
+        reason_vi="Theo dõi các báo lỗi chính tả hoặc nội dung sách bạn đã gửi.",
+        reason_en="Track your submitted book content reports.",
+        requires_child_selection=False,
+        scenario_id="reports_and_session_history",
     ),
     _NavRule(
         href="/reports/difficult-words",
-        phrases=("tu can luyen", "tu doc sai", "tu kho", "difficult words"),
+        phrases=("tu can luyen", "tu doc sai", "tu doc nham", "tu kho", "hay vap tu", "difficult words"),
         label_vi="Đi đến Từ cần luyện",
         label_en="Go to Difficult Words",
         reason_vi="Xem danh sách các từ bé hay vấp để luyện đọc lại riêng.",
         reason_en="Review tricky words from your child's sessions.",
+        requires_child_selection=False,
+        scenario_id="slow_struggling_reader_support",
     ),
     _NavRule(
         href="/reports",
@@ -2605,46 +2952,65 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Progress Reports",
         reason_vi="Xem tốc độ đọc, độ chính xác và xu hướng tiến bộ của bé.",
         reason_en="Inspect fluency & accuracy analytics.",
+        requires_child_selection=False,
+        scenario_id="reports_and_session_history",
     ),
     _NavRule(
         href="/sessions",
-        phrases=("lich su doc", "lich su buoi doc", "session history"),
+        phrases=("lich su doc", "lich su buoi doc", "lich su phien doc", "session history"),
         label_vi="Đi đến Lịch sử buổi đọc",
         label_en="Go to Reading Sessions",
         reason_vi="Xem lại các buổi đọc đã hoàn thành hoặc đang tạm dừng.",
         reason_en="Review completed or paused sessions.",
-    ),
-    _NavRule(
-        href="/device-permissions",
-        phrases=("quyen micro", "quyen thiet bi", "kiem tra micro", "khong nhan giong", "microphone", "device permissions"),
-        label_vi="Đi đến Kiểm tra quyền thiết bị",
-        label_en="Go to Device Permissions",
-        reason_vi="Kiểm tra nhanh quyền Micro và Camera trên trình duyệt.",
-        reason_en="Check microphone & camera permissions.",
+        requires_child_selection=False,
+        scenario_id="reports_and_session_history",
     ),
     _NavRule(
         href="/reading-management",
-        phrases=("quan ly doc", "reading management"),
+        phrases=("quan ly doc", "muc tieu tuan", "thoi quen doc", "reading management", "weekly reading"),
         label_vi="Đi đến Quản lý đọc",
         label_en="Go to Reading Management",
-        reason_vi="Tổng hợp chuẩn bị đọc, phiên đọc gần đây và từ cần luyện.",
-        reason_en="Open your family's reading hub.",
+        reason_vi="Đặt mục tiêu đọc hàng tuần, lịch nhắc email và sách đã lưu cho bé.",
+        reason_en="Set weekly goals, email reminders, and saved books.",
+        requires_child_selection=False,
+        scenario_id="weekly_reading_habits_and_reminders",
     ),
     _NavRule(
         href="/reading-preparation",
-        phrases=("chuan bi doc", "reading preparation"),
-        label_vi="Đi đến Chuẩn bị đọc",
-        label_en="Go to Reading Preparation",
-        reason_vi="Chọn phạm vi trang, giọng đọc mẫu và kiểm tra micro trước khi đọc.",
-        reason_en="Configure page range, voice & mic before reading.",
+        phrases=(
+            "chuan bi doc",
+            "reading preparation",
+            "quyen micro",
+            "quyen thiet bi",
+            "kiem tra micro",
+            "khong nhan giong",
+            "khong nghe",
+            "micro",
+            "microphone",
+            "device permissions",
+            "0.85x",
+            "toc do doc",
+            "chinh toc do",
+            "be doc cham",
+            "slow reader",
+            "bat dau buoi doc",
+        ),
+        label_vi="Đi đến Chuẩn bị buổi đọc & Kiểm tra micro",
+        label_en="Go to Reading Preparation & Mic Check",
+        reason_vi="Chọn phạm vi trang, tốc độ đọc mẫu (kể cả 0.85x) và kiểm tra micro trước khi đọc.",
+        reason_en="Configure page range, voice speed (including 0.85x) & mic check before reading.",
+        requires_child_selection=True,
+        scenario_id="reading_prep_and_mic_check",
     ),
     _NavRule(
         href="/help-support",
-        phrases=("tro giup", "ho tro", "lien he", "bao loi", "gop y", "help support"),
+        phrases=("tro giup", "ho tro", "lien he", "bao loi", "gop y", "slow 3g", "mang cham", "ngoai tuyen", "help support"),
         label_vi="Đi đến Trợ giúp & Hỗ trợ",
         label_en="Go to Help & Support",
         reason_vi="Xem hướng dẫn nhanh hoặc gửi phản hồi trực tiếp cho đội ngũ ViRead.",
         reason_en="Get support or contact the ViRead team.",
+        requires_child_selection=False,
+        scenario_id="troubleshooting_mic_bandwidth_offline",
     ),
     _NavRule(
         href="/dashboard",
@@ -2653,6 +3019,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Dashboard",
         reason_vi="Quay lại Bảng điều khiển chính để chọn bé và tiếp tục buổi đọc.",
         reason_en="Return to your main parent dashboard.",
+        requires_child_selection=False,
+        scenario_id="child_selection_gate_and_switching",
     ),
     _NavRule(
         href="/login",
@@ -2661,6 +3029,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Sign In",
         reason_vi="Đăng nhập vào tài khoản ViRead của bạn.",
         reason_en="Sign in to your ViRead account.",
+        requires_child_selection=False,
+        scenario_id="auth_login_register",
     ),
     _NavRule(
         href="/register",
@@ -2669,6 +3039,8 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         label_en="Go to Register",
         reason_vi="Tạo tài khoản phụ huynh ViRead mới.",
         reason_en="Create a new ViRead parent account.",
+        requires_child_selection=False,
+        scenario_id="auth_login_register",
     ),
 )
 
@@ -2712,6 +3084,8 @@ def resolve_navigation_offer(
                     if use_en
                     else "Hãy đăng nhập tài khoản của bạn trước, sau đó vào mục Cài đặt để đổi mật khẩu an toàn."
                 ),
+                requires_child_selection=False,
+                scenario_id="account_security_and_settings",
             )
         return None
 
@@ -2725,6 +3099,8 @@ def resolve_navigation_offer(
                 label=rule.label_en if use_en else rule.label_vi,
                 href=rule.href,
                 reason=rule.reason_en if use_en else rule.reason_vi,
+                requires_child_selection=rule.requires_child_selection,
+                scenario_id=rule.scenario_id,
             )
     return None
 

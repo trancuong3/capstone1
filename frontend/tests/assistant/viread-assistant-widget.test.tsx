@@ -7,7 +7,9 @@ import {
   ViReadAssistantWidget,
 } from "@/components/assistant/viread-assistant-widget";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { SELECTED_CHILD_LOCAL_EVENT } from "@/lib/cache/selected-child-storage";
 import { viMessages } from "@/messages/vi";
+import type { ChildProfileDTO } from "@/types/child";
 
 const navState = vi.hoisted(() => ({
   pathname: "/dashboard",
@@ -15,6 +17,8 @@ const navState = vi.hoisted(() => ({
 }));
 
 const sendAssistantMessageMock = vi.hoisted(() => vi.fn());
+const readAssistantChildContextMock = vi.hoisted(() => vi.fn());
+const selectChildFromAssistantMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navState.pathname,
@@ -34,6 +38,34 @@ vi.mock("@/lib/api/assistant-service", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/assistant/child-gate", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/assistant/child-gate")>();
+  return {
+    ...actual,
+    readAssistantChildContext: readAssistantChildContextMock,
+    selectChildFromAssistant: selectChildFromAssistantMock,
+  };
+});
+
+const PARENT_ID = "91000000-0000-4000-8000-000000000001";
+const CHILD_ONE: ChildProfileDTO = {
+  id: "92000000-0000-4000-8000-000000000001",
+  parent_id: PARENT_ID,
+  alias: "Bé An",
+  grade: 2,
+  settings: {},
+  created_at: "2026-11-27T10:00:00Z",
+};
+const CHILD_TWO: ChildProfileDTO = {
+  id: "92000000-0000-4000-8000-000000000002",
+  parent_id: PARENT_ID,
+  alias: "Bé Bình",
+  grade: 4,
+  settings: {},
+  created_at: "2026-11-27T10:05:00Z",
+};
+
 function renderWidget() {
   return render(
     <I18nProvider initialLocale="vi" initialMessages={viMessages}>
@@ -47,6 +79,14 @@ describe("ViReadAssistantWidget", () => {
     navState.pathname = "/dashboard";
     navState.routerPush.mockReset();
     sendAssistantMessageMock.mockReset();
+    readAssistantChildContextMock.mockReset();
+    selectChildFromAssistantMock.mockReset();
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [CHILD_ONE],
+      selectedChild: null,
+    });
     window.localStorage.clear();
     Object.defineProperty(window.navigator, "onLine", {
       configurable: true,
@@ -507,5 +547,416 @@ describe("ViReadAssistantWidget", () => {
     expect(
       screen.queryByTestId("viread-assistant-nav-yes"),
     ).not.toBeInTheDocument();
+  });
+
+  it("intercepts missing child with 1-child inline picker, keeps compact height, and navigates after picking", async () => {
+    navState.pathname = "/dashboard";
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [CHILD_ONE],
+      selectedChild: null,
+    });
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Mình mở **Kho sách** (`/books`) cho bé nhé!",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_kb",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 8,
+      cached: false,
+      role_scope: "parent",
+      quick_actions: [],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Kho sách ViRead",
+        href: "/books",
+        reason: "Chọn sách phù hợp trình độ của bé.",
+        requires_child_selection: true,
+        scenario_id: "books_catalog",
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const panel = await screen.findByTestId("viread-assistant-panel");
+    expect(panel.className).toContain("w-[min(352px,calc(100vw-1.5rem))]");
+    expect(panel.className).toContain("h-[min(420px,calc(100dvh-7.5rem))]");
+
+    const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
+    await user.type(input, "Mở kho sách{Enter}");
+
+    expect(
+      await screen.findByTestId("viread-assistant-child-required-notice"),
+    ).toHaveTextContent("Cần chọn hồ sơ bé trước khi mở trang này");
+
+    await user.click(screen.getByTestId("viread-assistant-nav-yes"));
+    expect(navState.routerPush).not.toHaveBeenCalled();
+
+    const picker = await screen.findByTestId("viread-assistant-child-picker");
+    expect(picker).toBeInTheDocument();
+    const childBtn = screen.getByTestId(
+      `viread-assistant-select-child-${CHILD_ONE.id}`,
+    );
+    expect(childBtn).toHaveTextContent("Bé An");
+    expect(childBtn).toHaveTextContent("Lớp 2");
+
+    await user.click(childBtn);
+    expect(selectChildFromAssistantMock).toHaveBeenCalledWith(
+      PARENT_ID,
+      CHILD_ONE,
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith("/books");
+  });
+
+  it("supports picking the 2nd child in multi-child families and switching active child via Đổi bé", async () => {
+    navState.pathname = "/dashboard";
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [CHILD_ONE, CHILD_TWO],
+      selectedChild: null,
+    });
+    sendAssistantMessageMock
+      .mockResolvedValueOnce({
+        reply: "Mở Memory Game giúp bé ôn mặt chữ vui nhé!",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 9,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Mở Memory Game lật thẻ",
+          href: "/entertainment/memory-game",
+          requires_child_selection: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        reply: "Chuyển sang Kho sách cho bé nhé!",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 6,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Mở Kho sách ViRead",
+          href: "/books",
+          requires_child_selection: true,
+        },
+      });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    await user.type(input, "Chơi Memory Game{Enter}");
+    await user.click(await screen.findByTestId("viread-assistant-nav-yes"));
+    await screen.findByTestId("viread-assistant-child-picker");
+
+    await user.click(
+      screen.getByTestId(`viread-assistant-select-child-${CHILD_TWO.id}`),
+    );
+    expect(selectChildFromAssistantMock).toHaveBeenCalledWith(
+      PARENT_ID,
+      CHILD_TWO,
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith(
+      "/entertainment/memory-game",
+    );
+
+    // Next offer shows active child badge for Bé Bình with "Đổi bé" trigger
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: CHILD_TWO.id,
+      children: [CHILD_ONE, CHILD_TWO],
+      selectedChild: CHILD_TWO,
+    });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(SELECTED_CHILD_LOCAL_EVENT));
+    });
+
+    await user.type(input, "Xem kho sách{Enter}");
+    expect(
+      await screen.findByTestId("viread-assistant-active-child-badge"),
+    ).toHaveTextContent("Đang chọn bé: Bé Bình");
+
+    await user.click(
+      screen.getByTestId("viread-assistant-switch-child-trigger"),
+    );
+    await screen.findByTestId("viread-assistant-child-picker");
+    await user.click(
+      screen.getByTestId(`viread-assistant-select-child-${CHILD_ONE.id}`),
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith("/books");
+  });
+
+  it("offers /children/new when parent has 0 child profiles", async () => {
+    navState.pathname = "/dashboard";
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [],
+      selectedChild: null,
+    });
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Mình mở Kho sách cho gia đình nhé!",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_kb",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 5,
+      cached: false,
+      role_scope: "parent",
+      quick_actions: [],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Kho sách ViRead",
+        href: "/books",
+        requires_child_selection: true,
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+    await user.type(input, "Mở kho sách{Enter}");
+    await user.click(await screen.findByTestId("viread-assistant-nav-yes"));
+
+    expect(
+      await screen.findByTestId("viread-assistant-child-empty"),
+    ).toBeInTheDocument();
+    expect(navState.routerPush).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("viread-assistant-create-child-btn"));
+    expect(navState.routerPush).toHaveBeenCalledWith("/children/new");
+  });
+
+  it("handles child context load failure with retry recovery and dashboard fallback", async () => {
+    navState.pathname = "/dashboard";
+    readAssistantChildContextMock
+      .mockResolvedValueOnce({
+        userId: PARENT_ID,
+        selectedChildId: null,
+        children: [],
+        selectedChild: null,
+        loadFailed: true,
+      })
+      .mockResolvedValueOnce({
+        userId: PARENT_ID,
+        selectedChildId: null,
+        children: [],
+        selectedChild: null,
+        loadFailed: true,
+      })
+      .mockResolvedValueOnce({
+        userId: PARENT_ID,
+        selectedChildId: null,
+        children: [CHILD_ONE],
+        selectedChild: null,
+      });
+
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Mình mở Kho sách nhé!",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_kb",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 5,
+      cached: false,
+      role_scope: "parent",
+      quick_actions: [],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Kho sách ViRead",
+        href: "/books",
+        requires_child_selection: true,
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+    await user.type(input, "Mở kho sách{Enter}");
+    await user.click(await screen.findByTestId("viread-assistant-nav-yes"));
+
+    expect(
+      await screen.findByTestId("viread-assistant-child-load-failed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("viread-assistant-go-dashboard-select"),
+    ).toBeInTheDocument();
+
+    // Retry recovers to child picker
+    await user.click(screen.getByTestId("viread-assistant-child-retry"));
+    expect(readAssistantChildContextMock).toHaveBeenLastCalledWith({
+      forceRefresh: true,
+    });
+    expect(
+      await screen.findByTestId("viread-assistant-child-picker"),
+    ).toBeInTheDocument();
+
+    // Fallback link navigates to /dashboard?focus=child-selection
+    await user.click(
+      screen.getByTestId("viread-assistant-go-dashboard-select"),
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith(
+      "/dashboard?focus=child-selection",
+    );
+  });
+
+  it("navigates immediately when child is already selected and intercepts missing-child Quick Action links", async () => {
+    navState.pathname = "/dashboard";
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: CHILD_ONE.id,
+      children: [CHILD_ONE],
+      selectedChild: CHILD_ONE,
+    });
+    sendAssistantMessageMock
+      .mockResolvedValueOnce({
+        reply: "Mở Kho sách cho Bé An ngay nhé!",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 4,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Mở Kho sách ViRead",
+          href: "/books",
+          requires_child_selection: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        reply: "Bạn có thể bấm nút bên dưới để mở Memory Game.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 4,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [
+          { label: "Mở Memory Game", href: "/entertainment/memory-game" },
+          { label: "Trang Admin", href: "/admin/books" },
+        ],
+        suggested_prompts: [],
+      });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    // 1. Child already selected -> clicking Có navigates immediately without picker
+    await user.type(input, "Mở kho sách{Enter}");
+    expect(
+      await screen.findByTestId("viread-assistant-active-child-badge"),
+    ).toHaveTextContent("Đang chọn bé: Bé An");
+    await user.click(screen.getByTestId("viread-assistant-nav-yes"));
+    expect(navState.routerPush).toHaveBeenCalledWith("/books");
+    expect(
+      screen.queryByTestId("viread-assistant-child-picker"),
+    ).not.toBeInTheDocument();
+
+    // 2. Child missing -> clicking Quick Action intercepts, blocks /admin/*, and opens picker
+    navState.routerPush.mockReset();
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [CHILD_ONE],
+      selectedChild: null,
+    });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(SELECTED_CHILD_LOCAL_EVENT));
+    });
+
+    await user.type(input, "Trò chơi cho bé{Enter}");
+    const quickLink = await screen.findByRole("link", {
+      name: "Mở Memory Game",
+    });
+    expect(
+      screen.queryByRole("link", { name: "Trang Admin" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(quickLink);
+    expect(navState.routerPush).not.toHaveBeenCalled();
+    await screen.findByTestId("viread-assistant-child-picker");
+    await user.click(
+      screen.getByTestId(`viread-assistant-select-child-${CHILD_ONE.id}`),
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith(
+      "/entertainment/memory-game",
+    );
+  });
+
+  it("enforces /reading/* exit confirmation before running child-selection gate", async () => {
+    navState.pathname = "/reading/session-123";
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: null,
+      children: [CHILD_ONE],
+      selectedChild: null,
+    });
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Bạn muốn quay lại Kho sách để chọn truyện khác?",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_kb",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 5,
+      cached: false,
+      role_scope: "parent",
+      quick_actions: [],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Kho sách ViRead",
+        href: "/books",
+        requires_child_selection: true,
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const panel = await screen.findByTestId("viread-assistant-panel");
+    expect(panel.className).toContain("h-[min(360px,calc(100dvh-8.5rem))]");
+
+    const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
+    await user.type(input, "Đổi sách khác{Enter}");
+
+    // Clicking Có on /reading/* shows exit confirmation first
+    await user.click(await screen.findByTestId("viread-assistant-nav-yes"));
+    expect(
+      await screen.findByTestId("viread-assistant-reading-exit-confirm"),
+    ).toBeInTheDocument();
+    expect(navState.routerPush).not.toHaveBeenCalled();
+
+    // Confirming exit STILL triggers child-selection gate before navigating!
+    await user.click(screen.getByTestId("viread-assistant-nav-confirm-exit"));
+    expect(navState.routerPush).not.toHaveBeenCalled();
+    expect(
+      await screen.findByTestId("viread-assistant-child-picker"),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByTestId(`viread-assistant-select-child-${CHILD_ONE.id}`),
+    );
+    expect(navState.routerPush).toHaveBeenCalledWith("/books");
   });
 });
