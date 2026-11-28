@@ -2184,6 +2184,229 @@ class TestVpackAndPackShardFlow2Support(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_vpack_single_flight_and_byte_json_parsing(self):
+        import concurrent.futures
+        import threading
+        import time as _time
+        from io import BytesIO
+        from PIL import Image
+        from app.services.training_storage import GoogleAppsScriptDriveStore, build_vpack_storage_ref
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        session = server.make_session()
+        raw_post = session.post
+        get_file_calls: list[str] = []
+        get_lock = threading.Lock()
+
+        def _spied_post(*args, **kwargs):
+            env = kwargs.get("json") or {}
+            if env.get("action") == "get_file":
+                payload = json.loads(env.get("payload_json") or "{}")
+                with get_lock:
+                    get_file_calls.append(str(payload.get("file_id") or ""))
+                # Simulate slight remote latency so all 4 threads race on the same pack.
+                _time.sleep(0.05)
+            resp = raw_post(*args, **kwargs)
+            resp_bytes = (
+                bytes(resp.content)
+                if isinstance(getattr(resp, "content", None), (bytes, bytearray))
+                else str(getattr(resp, "text", "") or "").encode("utf-8")
+            )
+            # Wrap response to prove _call_bridge parses response.content without touching .text
+            class _ByteOnlyResponse:
+                status_code = resp.status_code
+                headers = resp.headers
+                content = resp_bytes
+
+                @property
+                def text(self):
+                    raise AssertionError("response.text should not be accessed when response.content is bytes")
+
+                def close(self):
+                    resp.close()
+
+            return _ByteOnlyResponse()
+
+        session.post = _spied_post
+        store = GoogleAppsScriptDriveStore(
+            web_app_url=self.VALID_URL,
+            bridge_secret=self.SECRET,
+            session=session,
+            chunk_bytes=64 * 1024,
+            sleep_fn=lambda _s: None,
+        )
+        tar_entries: list[tuple[str, bytes]] = []
+        refs: list[tuple[str, str, bytes]] = []
+        for idx in range(4):
+            im = Image.new("RGB", (200, 48), (255, 255, 255))
+            im.paste((15, 20, 25), (10 + idx * 10, 10, 30 + idx * 10, 36))
+            buf = BytesIO()
+            im.save(buf, format="PNG")
+            img_bytes = buf.getvalue()
+            sha = hashlib.sha256(img_bytes).hexdigest()
+            tar_entries.append((f"{sha}.png", img_bytes))
+            refs.append((sha, img_bytes))
+
+        tar_raw = self._build_tar_bytes(tar_entries)
+        tar_sha = hashlib.sha256(tar_raw).hexdigest()
+        pack_id = store.put(
+            f"verified-samples/packs/pack-{tar_sha}.tar",
+            tar_raw,
+            content_type="application/x-tar",
+            expected_sha256=tar_sha,
+        ).drive_file_id
+        assert pack_id is not None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futs = [
+                pool.submit(store.get, build_vpack_storage_ref(pack_id, sha), expected_sha256=sha)
+                for sha, _raw in refs
+            ]
+            got = [fut.result() for fut in futs]
+
+        self.assertEqual(got, [raw for _sha, raw in refs])
+        self.assertEqual(len(get_file_calls), 1)
+
+    def test_ensure_locked_test_groups_prep_by_vpack_shard_preventing_thrash(self):
+        import asyncio
+        from io import BytesIO
+        from PIL import Image
+        from app.services import viread_ocr_training_service as training_svc
+        from app.services.training_storage import GoogleAppsScriptDriveStore, build_vpack_storage_ref
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        session = server.make_session()
+        raw_post = session.post
+        get_file_calls: list[str] = []
+
+        def _spied_post(*args, **kwargs):
+            env = kwargs.get("json") or {}
+            if env.get("action") == "get_file":
+                payload = json.loads(env.get("payload_json") or "{}")
+                get_file_calls.append(str(payload.get("file_id") or ""))
+            return raw_post(*args, **kwargs)
+
+        session.post = _spied_post
+        store = GoogleAppsScriptDriveStore(
+            web_app_url=self.VALID_URL,
+            bridge_secret=self.SECRET,
+            session=session,
+            chunk_bytes=64 * 1024,
+            sleep_fn=lambda _s: None,
+        )
+        router = TrainingArtifactStoreRouter(
+            drive_store_factory=lambda: store,
+            write_provider=StorageProvider.GOOGLE_DRIVE,
+        )
+
+        # Build 6 vpack shards (> LRU capacity 4) with 2 crops per shard interleaved by group_id.
+        holdout_rows_interleaved: list[dict] = []
+        shard_ids: list[str] = []
+        second_half: list[dict] = []
+        for s_idx in range(6):
+            tar_entries: list[tuple[str, bytes]] = []
+            pack_hashes: list[tuple[int, str]] = []
+            for j in range(2):
+                g_num = s_idx + 1 if j == 0 else s_idx + 7
+                im = Image.new("RGB", (240, 48), (255, 255, 255))
+                for x in range(10, 220, 14):
+                    im.paste(((s_idx * 17 + j * 9) % 100, 20, 20), (x, 10, x + 4, 38))
+                buf = BytesIO()
+                im.save(buf, format="PNG")
+                raw = buf.getvalue()
+                sha = hashlib.sha256(raw).hexdigest()
+                tar_entries.append((f"{sha}.png", raw))
+                pack_hashes.append((g_num, sha))
+            tar_raw = self._build_tar_bytes(tar_entries)
+            tar_sha = hashlib.sha256(tar_raw).hexdigest()
+            pack_id = store.put(
+                f"verified-samples/packs/pack-{tar_sha}.tar",
+                tar_raw,
+                content_type="application/x-tar",
+                expected_sha256=tar_sha,
+            ).drive_file_id
+            assert pack_id is not None
+            shard_ids.append(pack_id)
+            row_a = {
+                "sample_id": f"s-{pack_hashes[0][0]:02d}",
+                "source_flow": "FLOW1_VERIFIED",
+                "group_id": f"g-{pack_hashes[0][0]:02d}",
+                "image_storage_path": build_vpack_storage_ref(pack_id, pack_hashes[0][1]),
+                "image_sha256": pack_hashes[0][1],
+                "label": f"Xin chào lớp {pack_hashes[0][0]}",
+                "source_page_id": None,
+                "source_revision_id": None,
+                "provenance": {"verified_by_admin": True, "verification_source": "admin"},
+            }
+            row_b = {
+                "sample_id": f"s-{pack_hashes[1][0]:02d}",
+                "source_flow": "FLOW1_VERIFIED",
+                "group_id": f"g-{pack_hashes[1][0]:02d}",
+                "image_storage_path": build_vpack_storage_ref(pack_id, pack_hashes[1][1]),
+                "image_sha256": pack_hashes[1][1],
+                "label": f"Xin chào lớp {pack_hashes[1][0]}",
+                "source_page_id": None,
+                "source_revision_id": None,
+                "provenance": {"verified_by_admin": True, "verification_source": "admin"},
+            }
+            holdout_rows_interleaved.append(row_a)
+            second_half.append(row_b)
+        selected_rows = holdout_rows_interleaved + second_half
+
+        captured_imports: list = []
+
+        class _LockedRepo:
+            async def execute(self, sql, params=None):
+                return MagicMock(rowcount=1)
+
+            async def one(self, sql, params=None):
+                sql_s = " ".join(str(sql).split())
+                if "viread_ocr_dataset_versions" in sql_s and "LOCKED_TEST" in sql_s:
+                    return None
+                return None
+
+            async def all(self, sql, params=None):
+                return selected_rows
+
+            async def commit(self):
+                return None
+
+            async def rollback(self):
+                return None
+
+        async def _run():
+            svc = training_svc.VireadOcrTrainingService(MagicMock())
+            svc.repo = _LockedRepo()
+            svc._admin = AsyncMock()
+            svc._locked_test_readiness = AsyncMock(
+                side_effect=[
+                    {"status": "READY_TO_CREATE", "minimum_samples": 1, "minimum_groups": 1},
+                    {"status": "NEEDS_DATA"},
+                ]
+            )
+            svc._artifact_router = AsyncMock(return_value=router)
+            svc._release_read_txn = AsyncMock()
+
+            async def fake_register(_actor_id, payload, commit=True, preverified_storage_refs=None):
+                captured_imports.append(payload)
+                return {"id": str(uuid4()), "version_sha256": "e" * 64}
+
+            svc.register_dataset = AsyncMock(side_effect=fake_register)
+            svc._record_evaluation_cohort = AsyncMock()
+            with (
+                patch.object(training_svc, "MIN_LOCKED_PAIRS", 1),
+                patch.object(training_svc, "MIN_LOCKED_GROUPS", 1),
+            ):
+                res = await svc.ensure_locked_test(uuid4())
+            self.assertEqual(res["status"], "READY")
+
+        asyncio.run(_run())
+        self.assertEqual(len(get_file_calls), 6)
+        self.assertEqual(
+            [s.sample_id for s in captured_imports[0].samples],
+            [r["sample_id"] for r in selected_rows],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
