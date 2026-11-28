@@ -52,6 +52,7 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "isolated-test-admin-key")
 os.environ.setdefault("SUPABASE_STORAGE_BUCKET", "viread-test-catalog")
 os.environ.setdefault("SUPABASE_AVATAR_BUCKET", "viread-test-avatars")
 os.environ.setdefault("SUPABASE_PRIVATE_BOOKS_BUCKET", "viread-test-private")
+os.environ.setdefault("EMAIL_FROM_ADDRESS", "noreply@viread.test")
 os.environ.setdefault("VIREAD_LOCAL_VOICE_WORKER_AUTOSTART", "false")
 
 import cv2  # noqa: E402
@@ -600,7 +601,7 @@ class _ViReadInMemoryWorld:
                 Id=CATALOG_COVER_ASSET_ID,
                 BookId=CATALOG_BOOK_ID,
                 BookPageId=None,
-                OwnerId=ADMIN_ID,
+                OwnerId=None,
                 AssetRole="COVER",
                 SourceType="USER_UPLOAD",
                 StoragePath="catalog/books/cat1/cover.webp",
@@ -620,7 +621,7 @@ class _ViReadInMemoryWorld:
                 Id=CATALOG_ILLUS_ASSET_ID,
                 BookId=CATALOG_BOOK_ID,
                 BookPageId=CATALOG_PAGE_1_ID,
-                OwnerId=ADMIN_ID,
+                OwnerId=None,
                 AssetRole="PAGE_ILLUSTRATION",
                 SourceType="AI_GENERATED",
                 StoragePath="catalog/books/cat1/page1_illus.webp",
@@ -2432,7 +2433,7 @@ class Tier3IntegrationTests(unittest.IsolatedAsyncioTestCase, _BackendHarnessMix
                 raise HTTPException(status_code=401, detail="Invalid token")
             return TOKEN_TO_ACTOR[credentials.credentials]
 
-        with patch("app.api.routes.assistant.get_current_parent_id", side_effect=_slow_assistant_auth):
+        with patch("app.api.routes.assistant.get_current_parent_id", new=_slow_assistant_auth):
             async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
                 task_avatar = asyncio.create_task(
                     client.post(

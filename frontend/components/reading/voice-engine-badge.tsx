@@ -94,6 +94,7 @@ function resolveShortLabel(
     case "browser_wasm":
     case "catalog_cache":
     case "android_native":
+    case "elevenlabs_cloud":
     case "google_cloud":
     case "browser_default":
     case "idle":
@@ -106,11 +107,13 @@ function resolveShortLabel(
 export interface VoiceEngineBadgeProps {
   compact?: boolean;
   className?: string;
+  testIdPrefix?: string;
 }
 
 export function VoiceEngineBadge({
   compact = false,
   className = "",
+  testIdPrefix = "voice-engine",
 }: VoiceEngineBadgeProps) {
   const t = useTranslations("speech");
   const status = useSyncExternalStore(
@@ -124,7 +127,7 @@ export function VoiceEngineBadge({
 
   return (
     <div
-      data-testid="voice-engine-status-badge"
+      data-testid={`${testIdPrefix}-status-badge`}
       data-stt-tier={status.stt.tier}
       data-tts-tier={status.tts.tier}
       className={`inline-flex flex-wrap items-center gap-1.5 ${className}`}
@@ -134,7 +137,7 @@ export function VoiceEngineBadge({
       })}
     >
       <span
-        data-testid="voice-engine-stt-chip"
+        data-testid={`${testIdPrefix}-stt-chip`}
         title={buildTooltip("listen", status.stt, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${sttStyles.chip}`}
       >
@@ -149,7 +152,7 @@ export function VoiceEngineBadge({
       </span>
 
       <span
-        data-testid="voice-engine-tts-chip"
+        data-testid={`${testIdPrefix}-tts-chip`}
         title={buildTooltip("speak", status.tts, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${ttsStyles.chip}`}
       >

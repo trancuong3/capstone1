@@ -13,6 +13,7 @@ import {
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
 import {
   Component,
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -20,6 +21,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
@@ -36,7 +38,7 @@ import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay
 import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
-import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -47,7 +49,6 @@ import {
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -80,7 +81,10 @@ import {
 import {
   awaitSttReadyBeforeListening,
   awaitVoiceEnginesReadyBeforeListening,
+  getVoicePreloadState,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
+  subscribeVoicePreloadState,
   warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
@@ -165,7 +169,6 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { StatusBanner } from "@/components/reading/status-banner";
-import { TutorMessage } from "@/components/reading/tutor-message";
 import { OfflineOutboxStatusPill } from "@/components/offline/offline-pack-controls";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
@@ -183,6 +186,67 @@ import {
   installOfflineOutboxReconnectAutoDrain,
 } from "@/lib/offline/offline-session-outbox";
 import { saveOfflineSessionDescriptor } from "@/lib/offline/reading-pack-store";
+import { useReadingServices } from "@/hooks/use-reading-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useRecordingPlayback } from "@/hooks/use-recording-playback";
+import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
+import {
+  RealtimeAlignmentEngine,
+  timingsForTranscript,
+  tokenizeRealtimeText,
+  type RealtimeAlignmentSnapshot,
+  type RealtimeWordMismatch,
+} from "@/lib/reading/realtime-alignment";
+import {
+  isImplausibleSpeechSpeed,
+  sameCaptureScope,
+  type CaptureScope,
+} from "@/lib/reading/reading-evidence-pipeline";
+import {
+  sortRetryWordRecords,
+  type RetryWordRecord,
+} from "@/lib/reading/retry-recognition";
+import { isServiceError } from "@/lib/api/service-error";
+import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
+import { createSpeechService } from "@/lib/api/speech-service";
+import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
+import { useReadingPresence } from "@/hooks/use-reading-presence";
+import type {
+  SpeechPlayOptions,
+  WordTimedPlayOptions,
+} from "@/hooks/use-speech-player";
+import { EchoGuard } from "@/lib/reading/echo-guard";
+import {
+  InteractivePromptSelector,
+  mistakeCategoryToPromptCategory,
+} from "@/lib/reading/interactive-prompts";
+import {
+  isVoiceExitSentenceReinforcement,
+  SentenceReinforcementTracker,
+  shouldEscapeToUpcomingWords,
+  type ActiveSentenceReinforcement,
+} from "@/lib/reading/sentence-reinforcement";
+import { parseVoiceIntent } from "@/lib/reading/voice-intent";
+import type { SessionPhase } from "@/lib/reading/presence-monitor";
+import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
+import type { ChildProfileDTO } from "@/types/child";
+import type {
+  ReadingCompletionSummaryUI,
+  ReadingConnectionState,
+  ReadingPageDTO,
+  ReadingPageWordDTO,
+  ReadingReconnectDemoMode,
+  ReadingSessionState,
+  ReadingSessionPageProgressDTO,
+  ReadingUiState,
+  TutorAction,
+} from "@/types/reading";
+import {
+  compareTranscript,
+  type ComparisonResult,
+} from "@/lib/api/comparison-service";
 
 type ReadingDynamicPanelKey = "question" | "complete" | "phonics" | "picker";
 
@@ -468,67 +532,217 @@ const ReadingPagePickerModal = dynamic(
     loading: (loadingProps) => <ReadingPagePickerFallback {...loadingProps} />,
   },
 );
-import { useReadingServices } from "@/hooks/use-reading-services";
-import { useSpeechPlayer } from "@/hooks/use-speech-player";
-import { useRecordingPlayback } from "@/hooks/use-recording-playback";
-import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
-import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
-import {
-  RealtimeAlignmentEngine,
-  timingsForTranscript,
-  tokenizeRealtimeText,
-  type RealtimeAlignmentSnapshot,
-  type RealtimeWordMismatch,
-} from "@/lib/reading/realtime-alignment";
-import {
-  isImplausibleSpeechSpeed,
-  sameCaptureScope,
-  type CaptureScope,
-} from "@/lib/reading/reading-evidence-pipeline";
-import {
-  sortRetryWordRecords,
-  type RetryWordRecord,
-} from "@/lib/reading/retry-recognition";
-import { isServiceError } from "@/lib/api/service-error";
-import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
-import { createSpeechService } from "@/lib/api/speech-service";
-import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
-import { useReadingPresence } from "@/hooks/use-reading-presence";
-import type {
-  SpeechPlayOptions,
-  WordTimedPlayOptions,
-} from "@/hooks/use-speech-player";
-import { EchoGuard } from "@/lib/reading/echo-guard";
-import {
-  InteractivePromptSelector,
-  mistakeCategoryToPromptCategory,
-} from "@/lib/reading/interactive-prompts";
-import {
-  isVoiceExitSentenceReinforcement,
-  SentenceReinforcementTracker,
-  shouldEscapeToUpcomingWords,
-  type ActiveSentenceReinforcement,
-} from "@/lib/reading/sentence-reinforcement";
-import { parseVoiceIntent } from "@/lib/reading/voice-intent";
-import type { SessionPhase } from "@/lib/reading/presence-monitor";
-import type { BookDetailDTO } from "@/types/book";
-import type { ReadingDisplayMode } from "@/types/book-assets";
-import type { ChildProfileDTO } from "@/types/child";
-import type {
-  ReadingCompletionSummaryUI,
-  ReadingConnectionState,
-  ReadingPageDTO,
-  ReadingPageWordDTO,
-  ReadingReconnectDemoMode,
-  ReadingSessionState,
-  ReadingSessionPageProgressDTO,
-  ReadingUiState,
-  TutorAction,
-} from "@/types/reading";
-import {
-  compareTranscript,
-  type ComparisonResult,
-} from "@/lib/api/comparison-service";
+
+const ReadingVoiceSettings = dynamic(
+  () =>
+    import("@/components/reading/reading-voice-settings").then(
+      (mod) => mod.ReadingVoiceSettings,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <span
+        aria-hidden="true"
+        className="min-h-11 rounded-control bg-cream/80 lg:min-h-14"
+      />
+    ),
+  },
+);
+
+const TutorMessage = dynamic(
+  () =>
+    import("@/components/reading/tutor-message").then(
+      (mod) => mod.TutorMessage,
+    ),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
+interface DynamicPanelErrorBoundaryProps {
+  backHref?: string;
+  backLabel?: string;
+  children: ReactNode;
+  closeLabel: string;
+  description: string;
+  onClose?: () => void;
+  resetKey?: string | number | boolean | null;
+  retryLabel: string;
+  title: string;
+  variant: "compact" | "inline" | "floating" | "fullscreen";
+}
+
+interface DynamicPanelErrorBoundaryState {
+  hasError: boolean;
+  retryKey: number;
+}
+
+class DynamicPanelErrorBoundary extends Component<
+  DynamicPanelErrorBoundaryProps,
+  DynamicPanelErrorBoundaryState
+> {
+  state: DynamicPanelErrorBoundaryState = {
+    hasError: false,
+    retryKey: 0,
+  };
+
+  static getDerivedStateFromError(): Partial<DynamicPanelErrorBoundaryState> {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: DynamicPanelErrorBoundaryProps): void {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  private handleRetry = (): void => {
+    this.setState((prev) => ({
+      hasError: false,
+      retryKey: prev.retryKey + 1,
+    }));
+  };
+
+  render(): ReactNode {
+    if (!this.state.hasError) {
+      return (
+        <Fragment key={this.state.retryKey}>{this.props.children}</Fragment>
+      );
+    }
+
+    const {
+      backHref,
+      backLabel,
+      closeLabel,
+      description,
+      onClose,
+      retryLabel,
+      title,
+      variant,
+    } = this.props;
+
+    if (variant === "compact") {
+      return (
+        <div
+          className="inline-flex min-h-11 items-center gap-2 rounded-control border border-amber-300 bg-amber-50/90 px-3 py-1.5 text-xs font-semibold text-amber-950 lg:min-h-14"
+          data-testid="dynamic-panel-fallback-compact"
+          role="status"
+        >
+          <span className="truncate">{title}</span>
+          <button
+            className="inline-flex min-h-9 shrink-0 items-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-bold text-amber-950 hover:bg-amber-100"
+            onClick={this.handleRetry}
+            type="button"
+          >
+            {retryLabel}
+          </button>
+        </div>
+      );
+    }
+
+    if (variant === "floating") {
+      return (
+        <div
+          aria-live="polite"
+          className="pointer-events-none fixed inset-x-3 bottom-32 z-40 flex justify-center sm:inset-x-auto sm:right-6 sm:bottom-28 sm:max-w-md"
+          data-testid="dynamic-panel-fallback-floating"
+          role="status"
+        >
+          <div className="pointer-events-auto w-full rounded-card border border-amber-300 bg-paper/98 p-4 shadow-lg backdrop-blur-xs">
+            <StatusMessage title={title} tone="warning">
+              {description}
+            </StatusMessage>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                className="w-auto!"
+                onClick={this.handleRetry}
+                size="compact"
+                variant="secondary"
+              >
+                {retryLabel}
+              </Button>
+              {onClose ? (
+                <Button
+                  className="w-auto!"
+                  onClick={onClose}
+                  size="compact"
+                  variant="quiet"
+                >
+                  {closeLabel}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (variant === "fullscreen") {
+      return (
+        <section
+          className="mx-auto flex min-h-dvh w-full max-w-[960px] flex-col justify-center gap-4 p-6"
+          data-testid="dynamic-panel-fallback-fullscreen"
+        >
+          <StatusMessage title={title} tone="warning">
+            {description}
+          </StatusMessage>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              className="w-auto!"
+              onClick={this.handleRetry}
+              variant="primary"
+            >
+              {retryLabel}
+            </Button>
+            {onClose ? (
+              <Button className="w-auto!" onClick={onClose} variant="secondary">
+                {closeLabel}
+              </Button>
+            ) : null}
+            {backHref && backLabel ? (
+              <ButtonLink href={backHref} variant="secondary">
+                {backLabel}
+              </ButtonLink>
+            ) : null}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <div
+        className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3"
+        data-testid="dynamic-panel-fallback-inline"
+        role="status"
+      >
+        <StatusMessage title={title} tone="warning">
+          {description}
+        </StatusMessage>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button
+            className="w-auto!"
+            onClick={this.handleRetry}
+            size="compact"
+            variant="secondary"
+          >
+            {retryLabel}
+          </Button>
+          {onClose ? (
+            <Button
+              className="w-auto!"
+              onClick={onClose}
+              size="compact"
+              variant="quiet"
+            >
+              {closeLabel}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+}
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -842,67 +1056,39 @@ function ReadingSessionScreen({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
-  const [wasmDownloadState, setWasmDownloadState] = useState<{
-    percent: number | null;
-    file?: string;
-  } | null>(null);
+  const voicePreloadState = useSyncExternalStore(
+    subscribeVoicePreloadState,
+    getVoicePreloadState,
+    getVoicePreloadState,
+  );
   const [lucBatModeEnabled, setLucBatModeEnabled] = useState(false);
 
-  useEffect(() => {
-    const wasmClient = getBrowserWasmSttClient();
-    const unsubscribe = wasmClient.subscribeProgress(
-      (event: WasmSttProgressEvent) => {
-        const normalizedStage = event.stage.toLowerCase();
-        if (
-          normalizedStage === "ready" ||
-          normalizedStage === "completed" ||
-          normalizedStage === "done" ||
-          wasmClient.isReady()
-        ) {
-          setWasmDownloadState(null);
-          return;
-        }
-        const computedPercent =
-          typeof event.index === "number" &&
-          typeof event.total === "number" &&
-          event.total > 0
-            ? Math.max(
-                5,
-                Math.min(
-                  95,
-                  Math.round(((event.index + 1) / event.total) * 85),
-                ),
-              )
-            : null;
-        setWasmDownloadState({
-          percent: computedPercent,
-          file: event.file,
-        });
-      },
-    );
-    return unsubscribe;
-  }, []);
-
-  const isWasmDownloading = wasmDownloadState !== null;
-  useEffect(() => {
-    if (!isWasmDownloading) return;
-    const wasmClient = getBrowserWasmSttClient();
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      if (wasmClient.isReady() || Date.now() - startedAt > 95_000) {
-        setWasmDownloadState(null);
-      }
-    }, 350);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isWasmDownloading]);
+  const isWasmDownloading = voicePreloadState.wasmDownloadActive;
 
   const isTtsSynthesizing = speechPlayer.state === "loading";
-  const isReadingAiWait =
+  const rawReadingAiWait =
     (isBusy && !speechPlayer.isPlaying) ||
     isRetryingReports ||
     isTtsSynthesizing;
+  const [aiWaitLongRunning, setAiWaitLongRunning] = useState(false);
+  useEffect(() => {
+    if (!rawReadingAiWait) {
+      const resetTimer = window.setTimeout(() => {
+        setAiWaitLongRunning(false);
+      }, 0);
+      return () => {
+        window.clearTimeout(resetTimer);
+      };
+    }
+    const showTimer = window.setTimeout(() => {
+      setAiWaitLongRunning(true);
+    }, 550);
+    return () => {
+      window.clearTimeout(showTimer);
+    };
+  }, [rawReadingAiWait]);
+  const isReadingAiWait =
+    rawReadingAiWait && (isRetryingReports || aiWaitLongRunning);
   const sessionLoadProgress = useAiProgress({
     active: loadState.status === "loading" || !page,
     stages: [
@@ -914,10 +1100,10 @@ function ReadingSessionScreen({
   });
   const wasmModelProgress = useAiProgress({
     active: isWasmDownloading,
-    realPercent: wasmDownloadState?.percent ?? null,
+    realPercent: voicePreloadState.wasmDownloadPercent ?? null,
     progressMode:
-      wasmDownloadState?.percent !== null &&
-      wasmDownloadState?.percent !== undefined
+      voicePreloadState.wasmDownloadPercent !== null &&
+      voicePreloadState.wasmDownloadPercent !== undefined
         ? "measured"
         : "staged",
     stages: [
@@ -1239,7 +1425,41 @@ function ReadingSessionScreen({
     };
   }, [pageOptionsOpen]);
 
+  const isCompanionSpeaking =
+    speechPlayer.isPlaying &&
+    !isPlayingPageSample &&
+    !isPlayingPhonicsLesson &&
+    !isReadingWord &&
+    !isPlayingTutorAudio;
+
+  useEffect(() => {
+    if (!companionBubble || isCompanionSpeaking) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCompanionBubble(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [companionBubble, isCompanionSpeaking]);
+
+  useEffect(() => {
+    if (!latestTranscript || isMicRecording) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLatestTranscript(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isMicRecording, latestTranscript]);
+
   const finishStartedRef = useRef(false);
+  const lastFailedTtsActionRef = useRef<
+    "page_sample" | "word" | "phonics" | "tutor" | null
+  >(null);
   const retryReportSaveStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -1407,6 +1627,7 @@ function ReadingSessionScreen({
         () => speakGuarded(word.text, { wordSample: true }),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (err) {
       const isAbortError =
         typeof err === "object" &&
@@ -1414,6 +1635,7 @@ function ReadingSessionScreen({
         "name" in err &&
         (err as { name?: unknown }).name === "AbortError";
       if (!isAbortError) {
+        lastFailedTtsActionRef.current = "word";
         console.warn("Lỗi phát âm 1 từ:", err);
       }
     } finally {
@@ -1835,22 +2057,36 @@ function ReadingSessionScreen({
       }, 1000);
       return () => clearTimeout(timer);
     }
+    let cancelled = false;
     const finishDelayMs = getSessionStandbyRecognizer(sessionId) ? 0 : 400;
     const finishTimer = setTimeout(() => {
       if (assistantAudioPendingRef.current) {
-        setCountdown(null);
+        if (mountedRef.current) setCountdown(null);
         return;
       }
-      if (mountedRef.current) {
+      if (!mountedRef.current) return;
+      if (getSessionStandbyRecognizer(sessionId)) {
         setCountdown(null);
-        void startListeningRef.current().then((ok) => {
-          if (mountedRef.current && ok) {
-            setIsMicRecording(true);
-          }
-        });
       }
+      void Promise.race([
+        startListeningRef.current(),
+        new Promise<boolean>((resolve) =>
+          window.setTimeout(() => resolve(true), 450),
+        ),
+      ]).then((ok) => {
+        if (cancelled || !mountedRef.current) return;
+        setCountdown(null);
+        if (ok === true && isListeningActiveRef.current) {
+          setIsMicRecording(true);
+        } else if (ok === false) {
+          setIsMicRecording(false);
+        }
+      });
     }, finishDelayMs);
-    return () => clearTimeout(finishTimer);
+    return () => {
+      cancelled = true;
+      clearTimeout(finishTimer);
+    };
   }, [countdown, sessionId]);
 
   useEffect(() => {
@@ -3614,6 +3850,7 @@ function ReadingSessionScreen({
         wasListening,
       );
       if (!isCurrent()) return;
+      lastFailedTtsActionRef.current = null;
       clearPhonicsAutoHideTimer();
       setIsPhonicsAutoHiding(true);
       const expectedWordId = target.word_id;
@@ -3643,6 +3880,7 @@ function ReadingSessionScreen({
       }
     } catch {
       if (isCurrent()) {
+        lastFailedTtsActionRef.current = "phonics";
         setPhonicsStatusHint(t("session.phonicsLockedVoiceBusy"));
         if (shouldResumeRetry && retryModeRef.current) {
           retryProcessingRef.current = false;
@@ -4859,7 +5097,11 @@ function ReadingSessionScreen({
       ).slice(0, 40);
       if (
         (offlineSessionCtxRef.current !== null ||
-          (typeof navigator !== "undefined" && navigator.onLine === false)) &&
+          (typeof navigator !== "undefined" && navigator.onLine === false) ||
+          (isPermanentlyHostedLocalUnconfigured(
+            getVoiceEngineHealthForRouting(),
+          ) &&
+            shouldPreferWarmWasmBatchStt())) &&
         detectBrowserWasmSttSupport().supported
       ) {
         const wasmDecoded = await getBrowserWasmSttClient().transcribeBlob(
@@ -4871,6 +5113,15 @@ function ReadingSessionScreen({
         );
         if (!mountedRef.current || controller.signal.aborted) return null;
         const wasmText = wasmDecoded.text?.trim() ?? "";
+        if (wasmText) {
+          recordSttEngineUsage({
+            provider: "wasm",
+            fallbackUsed: !isPermanentlyHostedLocalUnconfigured(),
+            fallbackReason: isPermanentlyHostedLocalUnconfigured()
+              ? null
+              : "LOCAL_STT_UNAVAILABLE",
+          });
+        }
         return wasmText ? { text: wasmText, words: null } : null;
       }
 
@@ -4895,6 +5146,34 @@ function ReadingSessionScreen({
         words: transcript.words?.length ? transcript.words : null,
       };
     } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        try {
+          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+            recording,
+            {
+              signal: controller.signal,
+              timeoutMs: 12_000,
+              voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+            },
+          );
+          const wasmText = wasmRes.text.normalize("NFC").trim();
+          if (wasmText && mountedRef.current && !controller.signal.aborted) {
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: !isPermanentlyHostedLocalUnconfigured(),
+              fallbackReason: isPermanentlyHostedLocalUnconfigured()
+                ? null
+                : "LOCAL_STT_UNAVAILABLE",
+            });
+            return { text: wasmText, words: null };
+          }
+        } catch {
+          // Fall through cleanly to STT diagnostic handling below.
+        }
+      }
       if (!controller.signal.aborted) {
         if (isServiceError(error)) {
           if (isSttFallbackEligibleError(error)) {
@@ -5541,6 +5820,7 @@ function ReadingSessionScreen({
               text: fullText,
               onPlay: () => {
                 if (!isCurrentSample()) return;
+                lastFailedTtsActionRef.current = null;
                 setCurrentWordId(words[0].word_id);
               },
               onWordChange: (index) => {
@@ -5563,6 +5843,7 @@ function ReadingSessionScreen({
           ),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         if (mountedRef.current) {
@@ -5574,6 +5855,7 @@ function ReadingSessionScreen({
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
+        lastFailedTtsActionRef.current = "page_sample";
         setUiState("tts-error");
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
@@ -6479,6 +6761,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !isAbortErr
       ) {
+        lastFailedTtsActionRef.current = "tutor";
         setUiState("tts-error");
       }
     } finally {
@@ -6487,6 +6770,23 @@ function ReadingSessionScreen({
   }
 
   async function retryTutor() {
+    if (!tutorOpen && lastFailedTtsActionRef.current === "page_sample") {
+      lastFailedTtsActionRef.current = null;
+      await handleReadSample();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "phonics") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleSpellCurrentWord();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "word") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleReadCurrentWord();
+      return;
+    }
     if (!page || !currentWordId || isBusy) return;
     const word = page.words.find(
       (item) => item.word_id === currentWordId,
@@ -6573,6 +6873,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !isAbortErr
       ) {
+        lastFailedTtsActionRef.current = "tutor";
         setUiState("tts-error");
       }
     } finally {
@@ -7469,7 +7770,7 @@ function ReadingSessionScreen({
 
       let transcription;
       if (
-        localSttConfirmedDown &&
+        (localSttConfirmedDown || shouldPreferWarmWasmBatchStt()) &&
         detectBrowserWasmSttSupport().supported &&
         !skipColdWasmForCloudFallback
       ) {
@@ -7503,13 +7804,17 @@ function ReadingSessionScreen({
           if (serverErrText.includes("LOCAL_VOICE_UNCONFIGURED")) {
             markHostedLocalUnconfigured();
           }
+          const isWasmEligibleNetworkOrServerErr =
+            serverErr instanceof TypeError ||
+            (serverErr instanceof Error && serverErr.name === "TimeoutError") ||
+            (isServiceError(serverErr) &&
+              (serverErr.status >= 500 ||
+                serverErr.status === 0 ||
+                serverErr.status === 408 ||
+                serverErr.status === 429));
           if (
             detectBrowserWasmSttSupport().supported &&
-            isServiceError(serverErr) &&
-            (serverErr.status >= 500 ||
-              serverErr.status === 0 ||
-              serverErr.status === 408 ||
-              serverErr.status === 429)
+            isWasmEligibleNetworkOrServerErr
           ) {
             try {
               transcription = await tryWasmRetryTranscribe();
@@ -9269,18 +9574,8 @@ function ReadingSessionScreen({
   const hasUtilityTools = Boolean(
     showProsodyCuesBar || showCoReadingTrigger || canUseDuetMode,
   );
-  const hasTopBarContent = Boolean(
-    hasUtilityTools ||
-    isOfflinePackMode ||
-    pageProgress ||
-    canUseLucBatGuide ||
-    (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice ||
-    isWasmDownloading ||
-    isReadingAiWait,
-  );
 
-  const readingTopBar = hasTopBarContent ? (
+  const readingTopBar = (
     <div className="relative flex flex-col gap-1 border-b border-border/70 pb-1">
       {isOfflinePackMode ? (
         <div
@@ -9305,7 +9600,7 @@ function ReadingSessionScreen({
       ) : null}
 
       {pageProgress || hasUtilityTools ? (
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           {pageProgress ? (
             <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
               <Button
@@ -9542,8 +9837,13 @@ function ReadingSessionScreen({
               ) : null}
             </div>
           ) : null}
+          <VoiceEngineBadge className="shrink-0" compact />
         </div>
-      ) : null}
+      ) : (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <VoiceEngineBadge className="ms-auto shrink-0" compact />
+        </div>
+      )}
       {canUseLucBatGuide ? (
         <div className="flex flex-col gap-1.5 pt-0.5">
           <div className="flex flex-wrap items-center gap-2">
@@ -9684,7 +9984,7 @@ function ReadingSessionScreen({
       {isWasmDownloading ? (
         <AiProgressBar
           active
-          detail={wasmDownloadState?.file}
+          detail={voicePreloadState.wasmDownloadFile ?? undefined}
           label={
             wasmModelProgress.stageLabel ??
             tCommon("aiProgress.downloadingSpeechModel")
@@ -9709,7 +10009,7 @@ function ReadingSessionScreen({
         />
       ) : null}
     </div>
-  ) : null;
+  );
 
   return (
     <ReadingDynamicFallbackContext.Provider value={dynamicFallbackContextValue}>
@@ -9770,16 +10070,25 @@ function ReadingSessionScreen({
           exitHref={detailHref}
           onExit={() => setConfirmFinish(true)}
           voiceSettings={
-            <ReadingVoiceSettings
-              childId={
-                loadState.status === "ready" ? loadState.data.child.id : null
-              }
-              disabled={isMicRecording}
-              fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
-              onPreview={handleVoicePreview}
-              onStopPreview={stopAssistantAudio}
-            />
+            <DynamicPanelErrorBoundary
+              closeLabel={tCommon("actions.close")}
+              description={t("session.openFailedDescription")}
+              resetKey={sessionId}
+              retryLabel={tCommon("actions.retry")}
+              title={tCommon("states.unavailable")}
+              variant="compact"
+            >
+              <ReadingVoiceSettings
+                childId={
+                  loadState.status === "ready" ? loadState.data.child.id : null
+                }
+                disabled={isMicRecording}
+                fallbackNotice={speechPlayer.fallbackNotice}
+                isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+                onPreview={handleVoicePreview}
+                onStopPreview={stopAssistantAudio}
+              />
+            </DynamicPanelErrorBoundary>
           }
           isCurrentWordMispronounced={Boolean(
             currentWordId && mispronouncedWordIds.has(currentWordId),
@@ -9867,10 +10176,19 @@ function ReadingSessionScreen({
           onSpellWord={handleSpellCurrentWord}
           phonicsPanel={
             activePhonicsLesson ? (
-              <ReadingSubpanelErrorBoundary
-                fallback={(err, reset) => (
-                  <ReadingPhonicsFallback error={err} onResetBoundary={reset} />
-                )}
+              <DynamicPanelErrorBoundary
+                closeLabel={tCommon("actions.close")}
+                description={t("session.openFailedDescription")}
+                onClose={() => {
+                  stopAssistantAudio();
+                  setActivePhonicsLesson(null);
+                  setActivePhonicsStepIndex(null);
+                  setPhonicsStatusHint(null);
+                }}
+                resetKey={activePhonicsLesson.wordId}
+                retryLabel={tCommon("actions.retry")}
+                title={tCommon("states.unavailable")}
+                variant="inline"
               >
                 <PhonicsLessonCard
                   activeStepIndex={activePhonicsStepIndex}
@@ -9900,7 +10218,7 @@ function ReadingSessionScreen({
                   pageId={page.page_id}
                   statusHint={phonicsStatusHint}
                 />
-              </ReadingSubpanelErrorBoundary>
+              </DynamicPanelErrorBoundary>
             ) : null
           }
           onSkipRetryWord={skipRetryWord}
@@ -9922,13 +10240,7 @@ function ReadingSessionScreen({
           assistedWordIds={assistedWordIds}
           companionBubble={companionBubble}
           onDismissCompanion={() => setCompanionBubble(null)}
-          isCompanionSpeaking={
-            speechPlayer.isPlaying &&
-            !isPlayingPageSample &&
-            !isPlayingPhonicsLesson &&
-            !isReadingWord &&
-            !isPlayingTutorAudio
-          }
+          isCompanionSpeaking={isCompanionSpeaking}
           comparisonResult={comparisonResult}
           sentenceReinforcementPanel={
             activeSentenceReinforcement ? (
@@ -10154,16 +10466,26 @@ function ReadingSessionScreen({
             }
           />
         ) : uiState === "tts-error" || tutorOpen ? (
-          <TutorMessage
-            action={tutorAction}
-            isPlaying={speechPlayer.isPlaying}
-            isRetrying={isBusy}
-            nonBlocking={uiState === "tts-error" && !tutorOpen}
+          <DynamicPanelErrorBoundary
+            closeLabel={tCommon("actions.close")}
+            description={t("session.openFailedDescription")}
             onClose={closeTutor}
-            onRetry={() => void retryTutor()}
-            ttsFailed={uiState === "tts-error"}
-            word={currentWord}
-          />
+            resetKey={`${uiState}:${tutorOpen}:${tutorAction?.action_id ?? ""}`}
+            retryLabel={tCommon("actions.retry")}
+            title={tCommon("states.unavailable")}
+            variant="floating"
+          >
+            <TutorMessage
+              action={tutorAction}
+              isPlaying={speechPlayer.isPlaying}
+              isRetrying={isBusy}
+              nonBlocking={uiState === "tts-error" && !tutorOpen}
+              onClose={closeTutor}
+              onRetry={() => void retryTutor()}
+              ttsFailed={uiState === "tts-error"}
+              word={currentWord}
+            />
+          </DynamicPanelErrorBoundary>
         ) : null}
 
         {coReadingOpen ? (

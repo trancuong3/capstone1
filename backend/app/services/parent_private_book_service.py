@@ -33,9 +33,12 @@ from app.policies.book_access import (
     MODERATION_SUSPENDED,
     VISIBILITY_PARENT_PRIVATE,
     admin_submission_image_url,
+    admin_submission_image_url_async,
     is_private_book_readable_by,
     private_page_image_url,
+    private_page_image_urls_async,
     private_submission_image_url,
+    private_submission_image_urls_async,
 )
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
 from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
@@ -142,6 +145,10 @@ def _derive_default_scan_book_title(clean_text: str, now: datetime) -> str:
                 return f"{clipped or candidate[:72]}…"
             return candidate
     return f"Trang chụp ngày {now.strftime('%d/%m/%Y')}"
+
+_ORIGINAL_PRIVATE_PAGE_IMAGE_URL = private_page_image_url
+_ORIGINAL_PRIVATE_SUBMISSION_IMAGE_URL = private_submission_image_url
+_ORIGINAL_ADMIN_SUBMISSION_IMAGE_URL = admin_submission_image_url
 
 
 def _safe_media_type(path: str) -> str:
@@ -436,6 +443,7 @@ class ParentPrivateBookService:
         sub: ParentBookPageSubmission,
         *,
         base_url: str | None = None,
+        prebuilt_image_url: str | None = None,
     ) -> ParentPageSubmissionRead:
         can_add = _can_add_submission(book, sub)
         can_req = (
@@ -448,6 +456,17 @@ class ParentPrivateBookService:
             book.LifecycleStatus == "ACTIVE"
             and book.ModerationStatus == MODERATION_ACTIVE
             and sub.WorkflowStatus in ("CHECK_FAILED", "NEEDS_RECHECK")
+        )
+        resolved_image_url = (
+            prebuilt_image_url
+            if prebuilt_image_url is not None
+            else private_submission_image_url(
+                sub.BookId,
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+                owner_id=sub.OwnerParentId,
+            )
         )
         from app.services.ai_task_progress import compute_parent_submission_progress
 
@@ -469,13 +488,7 @@ class ParentPrivateBookService:
             source_format=sub.SourceFormat,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=private_submission_image_url(
-                sub.BookId,
-                sub.Id,
-                base_url=base_url,
-                storage_path=sub.SourceStoragePath,
-                owner_id=sub.OwnerParentId,
-            ),
+            image_url=resolved_image_url,
             source_type=sub.SourceType,  # type: ignore[arg-type]
             source_type_label=SOURCE_TYPE_LABELS.get(sub.SourceType, sub.SourceType),
             source_note=sub.SourceNote,
@@ -517,6 +530,53 @@ class ParentPrivateBookService:
             created_at=sub.CreatedAt,
             updated_at=sub.UpdatedAt,
         )
+
+    async def _serialize_submissions_async(
+        self,
+        book: Book,
+        subs: list[ParentBookPageSubmission],
+        *,
+        base_url: str | None = None,
+    ) -> list[ParentPageSubmissionRead]:
+        if not subs:
+            return []
+        if private_submission_image_url is not _ORIGINAL_PRIVATE_SUBMISSION_IMAGE_URL:
+            return [
+                self._serialize_submission(book, sub, base_url=base_url)
+                for sub in subs
+            ]
+        book_id = book.Id
+        sign_items = [
+            (sub.Id, sub.SourceStoragePath, sub.OwnerParentId)
+            for sub in subs
+        ]
+        dtos = [
+            self._serialize_submission(
+                book, sub, base_url=base_url, prebuilt_image_url=""
+            )
+            for sub in subs
+        ]
+        rollback_fn = getattr(self.repo, "rollback", None)
+        if inspect.iscoroutinefunction(rollback_fn):
+            await rollback_fn()
+        urls = await private_submission_image_urls_async(
+            book_id,
+            sign_items,
+            base_url=base_url,
+        )
+        return [
+            dto.model_copy(update={"image_url": url})
+            for dto, url in zip(dtos, urls)
+        ]
+
+    async def _serialize_submission_async(
+        self,
+        book: Book,
+        sub: ParentBookPageSubmission,
+        *,
+        base_url: str | None = None,
+    ) -> ParentPageSubmissionRead:
+        return (await self._serialize_submissions_async(book, [sub], base_url=base_url))[0]
 
     def _serialize_book_summary(
         self,
@@ -1300,6 +1360,16 @@ class ParentPrivateBookService:
                 reason="parent_book_poll_nudge",
             )
 
+        book_id_val = book.Id
+        book_owner_id = book.OwnerParentId
+        page_items = [
+            (page.Id, page.CurrentVerifiedRevisionId, page.ImagePath)
+            for page, _rev in pages_rows
+        ]
+        sub_items = [
+            (sub.Id, sub.SourceStoragePath, sub.OwnerParentId)
+            for sub in submissions
+        ]
         VietnameseReadabilityRead = None
         analyse_vietnamese_readability = None
         if not summary_only:
@@ -1342,14 +1412,7 @@ class ParentPrivateBookService:
                     current_verified_revision_id=page.CurrentVerifiedRevisionId,
                     verified_text=v_text,
                     verified_text_preview=v_text[:240],
-                    image_url=private_page_image_url(
-                        book.Id,
-                        page.Id,
-                        revision_id=page.CurrentVerifiedRevisionId,
-                        base_url=base_url,
-                        storage_path=page.ImagePath,
-                        owner_id=book.OwnerParentId,
-                    ),
+                    image_url="",
                     readability=page_readability,
                     created_at=page.CreatedAt,
                 )
@@ -1378,13 +1441,67 @@ class ParentPrivateBookService:
             ocr_contribution=contrib_map.get(book.Id),
             readability=book_readability,
         )
+        submissions_dto = [
+            self._serialize_submission(
+                book, sub, base_url=base_url, prebuilt_image_url=""
+            )
+            for sub in submissions
+        ]
+        rollback_fn = getattr(self.repo, "rollback", None)
+        if inspect.iscoroutinefunction(rollback_fn):
+            await rollback_fn()
+        if page_items:
+            if private_page_image_url is not _ORIGINAL_PRIVATE_PAGE_IMAGE_URL:
+                page_urls = [
+                    await asyncio.to_thread(
+                        private_page_image_url,
+                        book_id_val,
+                        page_id,
+                        revision_id=rev_id,
+                        base_url=base_url,
+                        storage_path=storage_path,
+                        owner_id=book_owner_id,
+                    )
+                    for page_id, rev_id, storage_path in page_items
+                ]
+            else:
+                page_urls = await private_page_image_urls_async(
+                    book_id_val,
+                    page_items,
+                    base_url=base_url,
+                    owner_id=book_owner_id,
+                )
+            pages_dto = [
+                dto.model_copy(update={"image_url": url})
+                for dto, url in zip(pages_dto, page_urls)
+            ]
+        if sub_items:
+            if private_submission_image_url is not _ORIGINAL_PRIVATE_SUBMISSION_IMAGE_URL:
+                sub_urls = [
+                    await asyncio.to_thread(
+                        private_submission_image_url,
+                        book_id_val,
+                        sub_id,
+                        base_url=base_url,
+                        storage_path=storage_path,
+                        owner_id=sub_owner_id,
+                    )
+                    for sub_id, storage_path, sub_owner_id in sub_items
+                ]
+            else:
+                sub_urls = await private_submission_image_urls_async(
+                    book_id_val,
+                    sub_items,
+                    base_url=base_url,
+                )
+            submissions_dto = [
+                dto.model_copy(update={"image_url": url})
+                for dto, url in zip(submissions_dto, sub_urls)
+            ]
         return ParentPrivateBookDetailRead(
             book=summary,
             pages=pages_dto,
-            submissions=[
-                self._serialize_submission(book, sub, base_url=base_url)
-                for sub in submissions
-            ],
+            submissions=submissions_dto,
         )
 
     async def update_book(
@@ -1985,7 +2102,7 @@ class ParentPrivateBookService:
                     pass
             raise
 
-        return self._serialize_submission(locked_book, sub, base_url=base_url)
+        return await self._serialize_submission_async(locked_book, sub, base_url=base_url)
 
     async def _rasterize_single_spooled_page(
         self, upload: UploadFile
@@ -2070,21 +2187,30 @@ class ParentPrivateBookService:
         source_file_name, source_format, page_img = await self._rasterize_single_spooled_page(
             upload
         )
-        new_sha = hashlib.sha256(page_img.image_bytes).hexdigest()
+        page_bytes = page_img.image_bytes
+        page_content_type = page_img.content_type
+        page_extension = page_img.extension
+        page_width = page_img.width
+        page_height = page_img.height
+        del page_img
+        gc.collect()
+        new_sha = hashlib.sha256(page_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
-            f"replace-{uuid4().hex[:8]}.{page_img.extension}"
+            f"replace-{uuid4().hex[:8]}.{page_extension}"
         )
         uploaded_new_storage = False
         try:
             await asyncio.to_thread(
                 upload_object,
                 new_storage_path,
-                page_img.image_bytes,
-                page_img.content_type,
+                page_bytes,
+                page_content_type,
                 bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
                 upsert=False,
             )
+            del page_bytes
+            gc.collect()
             uploaded_new_storage = True
             locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
             if locked_book is None:
@@ -2118,8 +2244,8 @@ class ParentPrivateBookService:
                     SourceFormat=source_format,
                     SourceStoragePath=new_storage_path,
                     SourceSha256=new_sha,
-                    ImageWidth=page_img.width,
-                    ImageHeight=page_img.height,
+                    ImageWidth=page_width,
+                    ImageHeight=page_height,
                     SourceType=eff_source_type,
                     SourceNote=eff_source_note,
                     SubmissionVersion=1,
@@ -2138,8 +2264,8 @@ class ParentPrivateBookService:
                 sub.SourceFormat = source_format
                 sub.SourceStoragePath = new_storage_path
                 sub.SourceSha256 = new_sha
-                sub.ImageWidth = page_img.width
-                sub.ImageHeight = page_img.height
+                sub.ImageWidth = page_width
+                sub.ImageHeight = page_height
                 sub.TargetPageNumber = int(locked_page.PageNumber)
                 sub.SourceType = eff_source_type
                 sub.SourceNote = eff_source_note
@@ -2183,7 +2309,7 @@ class ParentPrivateBookService:
                     pass
             raise
 
-        resp = self._serialize_submission(locked_book, sub, base_url=base_url)
+        resp = await self._serialize_submission_async(locked_book, sub, base_url=base_url)
         await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
         return resp
 
@@ -2280,16 +2406,19 @@ class ParentPrivateBookService:
         # Idempotency replay check BEFORE reading/uploading bytes
         existing = await self.repo.get_submissions_by_idempotency(actor_id, book_id, normalized_key)
         if existing:
+            existing_batch_id = existing[0].BatchId
+            existing_source_format = existing[0].SourceFormat
+            existing_total = len(existing)
+            serialized_existing = await self._serialize_submissions_async(
+                book, existing, base_url=base_url
+            )
             return ParentSubmitPagesResponse(
                 book_id=book_id,
-                batch_id=existing[0].BatchId,
-                source_format=existing[0].SourceFormat,
-                total_pages=len(existing),
+                batch_id=existing_batch_id,
+                source_format=existing_source_format,
+                total_pages=existing_total,
                 replayed_idempotency=True,
-                submissions=[
-                    self._serialize_submission(book, sub, base_url=base_url)
-                    for sub in existing
-                ],
+                submissions=serialized_existing,
             )
 
         await self.repo.rollback()
@@ -2413,16 +2542,19 @@ class ParentPrivateBookService:
                 book_after = await self.repo.get_owned_private_book(book_id, actor_id)
                 if book_after is None:
                     raise HTTPException(status_code=404, detail="Resource not found")
+                replayed_batch_id = replayed[0].BatchId
+                replayed_source_format = replayed[0].SourceFormat
+                replayed_total = len(replayed)
+                serialized_replayed = await self._serialize_submissions_async(
+                    book_after, replayed, base_url=base_url
+                )
                 return ParentSubmitPagesResponse(
                     book_id=book_id,
-                    batch_id=replayed[0].BatchId,
-                    source_format=replayed[0].SourceFormat,
-                    total_pages=len(replayed),
+                    batch_id=replayed_batch_id,
+                    source_format=replayed_source_format,
+                    total_pages=replayed_total,
                     replayed_idempotency=True,
-                    submissions=[
-                        self._serialize_submission(book_after, sub, base_url=base_url)
-                        for sub in replayed
-                    ],
+                    submissions=serialized_replayed,
                 )
             raise
         except Exception:
@@ -2440,16 +2572,16 @@ class ParentPrivateBookService:
         for row in created_rows:
             await self.db.refresh(row)
 
+        serialized_created = await self._serialize_submissions_async(
+            locked_book, created_rows, base_url=base_url
+        )
         return ParentSubmitPagesResponse(
             book_id=book_id,
             batch_id=batch_id,
             source_format=source_format,
             total_pages=len(created_rows),
             replayed_idempotency=False,
-            submissions=[
-                self._serialize_submission(locked_book, sub, base_url=base_url)
-                for sub in created_rows
-            ],
+            submissions=serialized_created,
         )
 
     async def get_submission(
@@ -2477,7 +2609,7 @@ class ParentPrivateBookService:
                 created_at=sub.UpdatedAt or sub.CreatedAt,
                 reason="parent_submission_poll_nudge",
             )
-        return self._serialize_submission(book, sub, base_url=base_url)
+        return await self._serialize_submission_async(book, sub, base_url=base_url)
 
     async def accept_spelling(
         self,
@@ -2513,7 +2645,7 @@ class ParentPrivateBookService:
         sub.UpdatedAt = now
         await self.repo.commit()
         await self.db.refresh(sub)
-        return self._serialize_submission(book, sub, base_url=base_url)
+        return await self._serialize_submission_async(book, sub, base_url=base_url)
 
     async def edit_submission(
         self,
@@ -2563,7 +2695,7 @@ class ParentPrivateBookService:
             changed = True
 
         if not changed:
-            dto = self._serialize_submission(book, sub, base_url=base_url)
+            dto = await self._serialize_submission_async(book, sub, base_url=base_url)
             await self.repo.rollback()
             return dto
 
@@ -2599,7 +2731,7 @@ class ParentPrivateBookService:
         await self.repo.commit()
         await self.db.refresh(sub)
         self._dispatch_post_ocr_if_ready([sub])
-        return self._serialize_submission(book, sub, base_url=base_url)
+        return await self._serialize_submission_async(book, sub, base_url=base_url)
 
     async def replace_submission_file(
         self,
@@ -2629,10 +2761,17 @@ class ParentPrivateBookService:
         source_file_name, source_format, page = await self._rasterize_single_spooled_page(
             upload
         )
-        new_sha = hashlib.sha256(page.image_bytes).hexdigest()
+        page_bytes = page.image_bytes
+        page_content_type = page.content_type
+        page_extension = page.extension
+        page_width = page.width
+        page_height = page.height
+        del page
+        gc.collect()
+        new_sha = hashlib.sha256(page_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{submission_id}/"
-            f"v-{uuid4().hex[:8]}.{page.extension}"
+            f"v-{uuid4().hex[:8]}.{page_extension}"
         )
         old_storage_path: str | None = None
         locked_book: Book | None = None
@@ -2641,11 +2780,13 @@ class ParentPrivateBookService:
             await asyncio.to_thread(
                 upload_object,
                 new_storage_path,
-                page.image_bytes,
-                page.content_type,
+                page_bytes,
+                page_content_type,
                 bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
                 upsert=False,
             )
+            del page_bytes
+            gc.collect()
             uploaded_new = True
             locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
             if locked_book is None:
@@ -2665,8 +2806,8 @@ class ParentPrivateBookService:
             sub.SourceFormat = source_format
             sub.SourceStoragePath = new_storage_path
             sub.SourceSha256 = new_sha
-            sub.ImageWidth = page.width
-            sub.ImageHeight = page.height
+            sub.ImageWidth = page_width
+            sub.ImageHeight = page_height
             if source_type is not None:
                 if source_type not in VALID_SOURCE_TYPES:
                     raise HTTPException(status_code=422, detail="Loại nguồn sử dụng không hợp lệ.")
@@ -2737,7 +2878,7 @@ class ParentPrivateBookService:
         )
         if locked_book is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        response_dto = self._serialize_submission(locked_book, sub, base_url=base_url)
+        response_dto = await self._serialize_submission_async(locked_book, sub, base_url=base_url)
         await self.repo.rollback()
         if should_delete_old and old_storage_path:
             try:
@@ -2825,7 +2966,7 @@ class ParentPrivateBookService:
         await self.repo.commit()
         await self.db.refresh(sub)
         self._dispatch_post_ocr_if_ready(post_ocr_ready or [sub])
-        return self._serialize_submission(book, sub, base_url=base_url)
+        return await self._serialize_submission_async(book, sub, base_url=base_url)
 
     async def retry_failed_submissions(
         self,
@@ -3015,7 +3156,7 @@ class ParentPrivateBookService:
             )
         if sub.WorkflowStatus == "PENDING_ADMIN":
             # Idempotent if already awaiting Admin on exact same snapshot
-            dto = self._serialize_submission(book, sub, base_url=base_url)
+            dto = await self._serialize_submission_async(book, sub, base_url=base_url)
             await self.repo.rollback()
             return dto
         if sub.WorkflowStatus != "NEEDS_ADMIN_REVIEW":
@@ -3082,7 +3223,7 @@ class ParentPrivateBookService:
         )
         await self.repo.commit()
         await self.db.refresh(sub)
-        return self._serialize_submission(book, sub, base_url=base_url)
+        return await self._serialize_submission_async(book, sub, base_url=base_url)
 
     # ------------------------------------------------------------------
     # Transactional Add Page to Private Book Gate (Section 3.8)
@@ -3222,14 +3363,20 @@ class ParentPrivateBookService:
             raise HTTPException(status_code=404, detail="Resource not found")
 
         if sub_snap.WorkflowStatus == "ADDED_TO_BOOK" and sub_snap.CommittedPageId and sub_snap.CommittedRevisionId:
-            existing_page = await self.repo.get_committed_page(book_id, sub_snap.CommittedPageId)
+            committed_page_id = sub_snap.CommittedPageId
+            committed_rev_id = sub_snap.CommittedRevisionId
+            existing_page = await self.repo.get_committed_page(book_id, committed_page_id)
+            page_number = int(existing_page[0].PageNumber) if existing_page else 1
             readable = await self.repo.is_private_book_readable(book_id, actor_id)
+            serialized_sub = await self._serialize_submission_async(
+                book_snap, sub_snap, base_url=base_url
+            )
             return ParentAddPageResponse(
                 book_id=book_id,
-                page_id=sub_snap.CommittedPageId,
-                page_number=int(existing_page[0].PageNumber) if existing_page else 1,
-                revision_id=sub_snap.CommittedRevisionId,
-                submission=self._serialize_submission(book_snap, sub_snap, base_url=base_url),
+                page_id=committed_page_id,
+                page_number=page_number,
+                revision_id=committed_rev_id,
+                submission=serialized_sub,
                 book_readable_for_children=readable,
             )
 
@@ -3273,14 +3420,20 @@ class ParentPrivateBookService:
                 raise HTTPException(status_code=404, detail="Resource not found")
 
             if sub.WorkflowStatus == "ADDED_TO_BOOK" and sub.CommittedPageId and sub.CommittedRevisionId:
-                existing_page = await self.repo.get_committed_page(book_id, sub.CommittedPageId)
+                committed_page_id = sub.CommittedPageId
+                committed_rev_id = sub.CommittedRevisionId
+                existing_page = await self.repo.get_committed_page(book_id, committed_page_id)
+                page_number = int(existing_page[0].PageNumber) if existing_page else 1
                 readable = await self.repo.is_private_book_readable(book_id, actor_id)
+                serialized_sub = await self._serialize_submission_async(
+                    book, sub, base_url=base_url
+                )
                 idempotent_resp = ParentAddPageResponse(
                     book_id=book_id,
-                    page_id=sub.CommittedPageId,
-                    page_number=int(existing_page[0].PageNumber) if existing_page else 1,
-                    revision_id=sub.CommittedRevisionId,
-                    submission=self._serialize_submission(book, sub, base_url=base_url),
+                    page_id=committed_page_id,
+                    page_number=page_number,
+                    revision_id=committed_rev_id,
+                    submission=serialized_sub,
                     book_readable_for_children=readable,
                 )
                 await self.repo.rollback()
@@ -3441,12 +3594,13 @@ class ParentPrivateBookService:
         # Re-hydrate book & sub in case best-effort Flow 2 recruitment rolled back the session (which expires all instances).
         await self._refresh_after_commit(book, sub)
         readable = await self.repo.is_private_book_readable(committed_book_id, actor_id)
+        serialized_sub = await self._serialize_submission_async(book, sub, base_url=base_url)
         return ParentAddPageResponse(
             book_id=committed_book_id,
             page_id=committed_page_id,
             page_number=page_number,
             revision_id=committed_rev_id,
-            submission=self._serialize_submission(book, sub, base_url=base_url),
+            submission=serialized_sub,
             book_readable_for_children=readable,
         )
 
@@ -3761,7 +3915,9 @@ class ParentPrivateBookService:
             if isinstance(item, dict)
         ]
 
-        return AdminUserBookSubmissionDetailRead(
+        sub_id_val = sub.Id
+        sub_storage_path = sub.SourceStoragePath
+        detail_dto = AdminUserBookSubmissionDetailRead(
             submission_id=sub.Id,
             request_id=latest_req.Id if latest_req else None,
             book_id=book.Id,
@@ -3780,11 +3936,7 @@ class ParentPrivateBookService:
             source_sha256=sub.SourceSha256,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=admin_submission_image_url(
-                sub.Id,
-                base_url=base_url,
-                storage_path=sub.SourceStoragePath,
-            ),
+            image_url="",
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
             request_status=latest_req.Status if latest_req else None,
@@ -3836,6 +3988,23 @@ class ParentPrivateBookService:
             created_at=sub.CreatedAt,
             updated_at=sub.UpdatedAt,
         )
+        rollback_fn = getattr(self.repo, "rollback", None)
+        if inspect.iscoroutinefunction(rollback_fn):
+            await rollback_fn()
+        if admin_submission_image_url is not _ORIGINAL_ADMIN_SUBMISSION_IMAGE_URL:
+            resolved_url = await asyncio.to_thread(
+                admin_submission_image_url,
+                sub_id_val,
+                base_url=base_url,
+                storage_path=sub_storage_path,
+            )
+        else:
+            resolved_url = await admin_submission_image_url_async(
+                sub_id_val,
+                base_url=base_url,
+                storage_path=sub_storage_path,
+            )
+        return detail_dto.model_copy(update={"image_url": resolved_url})
 
     async def admin_read_submission_image(
         self, actor_id: UUID, submission_id: UUID

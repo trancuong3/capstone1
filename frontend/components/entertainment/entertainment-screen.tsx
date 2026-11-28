@@ -293,7 +293,6 @@ export function EntertainmentScreen({
     void speechPlayer
       .play(cleaned, {
         wordSample: true,
-        speedScale: 0.92,
         bypassSessionLock: true,
       })
       .catch(() => undefined);

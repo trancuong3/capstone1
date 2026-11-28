@@ -1444,28 +1444,6 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         generated_at: timestamp,
       });
     }
-    const warmupStoryMatch =
-      request.method() === "GET"
-        ? /^\/learning\/children\/([^/]+)\/warmup-story$/.exec(path)
-        : null;
-    if (warmupStoryMatch) {
-      const targetChildId = decodeURIComponent(warmupStoryMatch[1]);
-      return respond(route, {
-        child_id: targetChildId,
-        local_date: "2026-10-08",
-        has_due_words: true,
-        target_words: ["mèo", "nắng"],
-        title_vi: "Nắng sớm bên hiên",
-        sentences: [
-          "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà.",
-          "Bé mỉm cười đọc sách cùng chú mèo ngoan.",
-        ],
-        full_text:
-          "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà. Bé mỉm cười đọc sách cùng chú mèo ngoan.",
-        source: "RULE_BASED",
-        cached: false,
-      });
-    }
     const vocabNotebookMatch =
       request.method() === "GET"
         ? /^\/vocabulary\/children\/([^/]+)\/notebook$/.exec(path)

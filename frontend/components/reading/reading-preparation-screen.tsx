@@ -16,9 +16,8 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
-import { MinimalPairSandbox } from "@/components/reading/minimal-pair-sandbox";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
-import { WarmupMicroStoryCard } from "@/components/reading/warmup-micro-story-card";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
@@ -621,14 +620,6 @@ export function ReadingPreparationScreen({
         </div>
       </article>
 
-      <WarmupMicroStoryCard bookId={data.book.id} childId={data.child.id} />
-
-      <MinimalPairSandbox
-        childAlias={data.child.alias}
-        childId={data.child.id}
-        compact
-      />
-
       <section
         aria-labelledby="microphone-check-title"
         className="rounded-card border border-border bg-white p-3.5 sm:p-5"
@@ -686,22 +677,25 @@ export function ReadingPreparationScreen({
                   : "Giọng đọc & nhận diện giọng nói sẽ sẵn sàng ngay khi bé đọc."}
             </span>
           </div>
-          <ReadingVoiceSettings
-            childId={data.child.id}
-            disabled={isStarting}
-            fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
-            onPreview={(sample) =>
-              speechPlayer.play(sample, {
-                coaching: true,
-                cacheScope: "COACHING",
-                isPrivateBook: false,
-                bypassSessionLock: true,
-                utteranceKind: "voice_preview",
-              })
-            }
-            onStopPreview={speechPlayer.stop}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <VoiceEngineBadge compact />
+            <ReadingVoiceSettings
+              childId={data.child.id}
+              disabled={isStarting}
+              fallbackNotice={speechPlayer.fallbackNotice}
+              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+              onPreview={(sample) =>
+                speechPlayer.play(sample, {
+                  coaching: true,
+                  cacheScope: "COACHING",
+                  isPrivateBook: false,
+                  bypassSessionLock: true,
+                  utteranceKind: "voice_preview",
+                })
+              }
+              onStopPreview={speechPlayer.stop}
+            />
+          </div>
         </div>
       </section>
 

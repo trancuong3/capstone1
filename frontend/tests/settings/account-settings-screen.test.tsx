@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { AccountSettingsScreen } from "@/components/settings/account-settings-screen";
+import { createProfileService } from "@/lib/api/profile-service";
 import { LOCALE_COOKIE_NAME } from "@/lib/i18n/locales";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 import { viMessages } from "@/messages/vi";
@@ -34,6 +36,18 @@ vi.mock("@/lib/supabase/client", () => ({
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
+
+vi.mock("@/lib/api/profile-service", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/api/profile-service")>();
+  return {
+    ...actual,
+    createProfileService: vi.fn(
+      (...args: Parameters<typeof actual.createProfileService>) =>
+        actual.createProfileService(...args),
+    ),
+  };
+});
 
 const profileFixture: ParentProfileDTO = {
   id: authSessionFixture.user.id,
@@ -181,5 +195,29 @@ describe("AccountSettingsScreen", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Mật khẩu đã được cập nhật",
     );
+  });
+
+  it("reuses AppServicesProvider profileService instead of creating a duplicate instance", async () => {
+    const authService = createAuthServiceFixture();
+    authService.getCurrentUser.mockResolvedValue({
+      ...authSessionFixture.user,
+      providers: ["email"],
+    });
+    vi.mocked(createProfileService).mockClear();
+
+    render(
+      withAuthFixture(
+        <AppServicesProvider>
+          <AccountSettingsScreen />
+        </AppServicesProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Cài đặt tài khoản" }),
+    ).toBeInTheDocument();
+    expect(createProfileService).toHaveBeenCalledTimes(1);
   });
 });

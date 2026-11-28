@@ -1,3 +1,4 @@
+import { getAbortReason, raceWithSignal } from "@/lib/api/cold-start-retry";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
 import {
@@ -39,9 +40,16 @@ export function isTimeoutError(error: unknown): boolean {
 
 export async function extractSpeechProviderCode(
   response: Response,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
   try {
-    const payload: unknown = await response.clone().json();
+    const jsonPromise = response.clone().json();
+    const payload: unknown = signal
+      ? await raceWithSignal(jsonPromise, signal)
+      : await jsonPromise;
     if (typeof payload !== "object" || payload === null) {
       return undefined;
     }
@@ -57,7 +65,10 @@ export async function extractSpeechProviderCode(
     if ("code" in payload && typeof payload.code === "string") {
       return payload.code;
     }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     // Non-JSON error bodies must not be reflected to the UI.
   }
   return undefined;

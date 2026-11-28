@@ -133,6 +133,9 @@ describe("Next.js HTTP security headers", () => {
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "1");
     vi.resetModules();
     const { default: prodConfig } = await import("@/next.config");
+    expect(prodConfig.experimental).toEqual({
+      optimizePackageImports: ["lucide-react"],
+    });
     expect(prodConfig.experimental?.devMemoryThresholdRestart).toBeUndefined();
     expect(prodConfig.experimental?.serverComponentsHmrCache).toBeUndefined();
     expect(prodConfig.experimental?.webpackMemoryOptimizations).toBeUndefined();
@@ -141,6 +144,9 @@ describe("Next.js HTTP security headers", () => {
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "");
     vi.resetModules();
     const { default: normalDevConfig } = await import("@/next.config");
+    expect(normalDevConfig.experimental).toEqual({
+      optimizePackageImports: ["lucide-react"],
+    });
     expect(
       normalDevConfig.experimental?.devMemoryThresholdRestart,
     ).toBeUndefined();

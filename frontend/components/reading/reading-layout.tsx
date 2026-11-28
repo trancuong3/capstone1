@@ -187,14 +187,20 @@ export function ReadingLayout({
     activeReadingMode ??
     (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const suppressSecondaryBanners = Boolean(phonicsPanel) && !retryMode;
+  const showCompanionBubble =
+    !retryMode &&
+    !suppressSecondaryBanners &&
+    Boolean(companionBubble) &&
+    !sentenceReinforcementPanel;
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
     isPlayingSample ||
     isReadingWord ||
-    (!suppressSecondaryBanners && isMicRecording && isCurrentWordMispronounced);
-  const showCompanionBubble =
-    !retryMode && !suppressSecondaryBanners && Boolean(companionBubble);
+    (!suppressSecondaryBanners &&
+      !showCompanionBubble &&
+      isMicRecording &&
+      isCurrentWordMispronounced);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
@@ -340,14 +346,16 @@ export function ReadingLayout({
             data-reading-feedback="true"
             className={cn(
               "mx-auto mb-1 w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-1.5 sm:space-y-1.5",
-              phonicsPanel || retryMode || sentenceReinforcementPanel
-                ? "max-h-[38dvh] sm:max-h-[34dvh]"
-                : "max-h-[14dvh] sm:max-h-[18dvh]",
+              retryMode
+                ? "max-h-[24dvh] sm:max-h-[30dvh]"
+                : phonicsPanel || sentenceReinforcementPanel
+                  ? "max-h-[32dvh] sm:max-h-[34dvh]"
+                  : "max-h-[14dvh] sm:max-h-[18dvh]",
             )}
           >
             {retryMode ? (
               <div
-                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-3 rounded-card border border-border bg-white px-4 py-2.5"
+                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-2 rounded-card border border-border bg-white px-3 py-1.5 sm:gap-3 sm:px-4 sm:py-2"
                 aria-live="polite"
               >
                 <div className="min-w-0 flex-1">
@@ -391,7 +399,7 @@ export function ReadingLayout({
                   </p>
 
                   <p
-                    className="viread-learning-content mt-1.5 w-fit max-w-full break-words rounded-control bg-warning-surface px-3 py-1 text-xl font-extrabold text-ink"
+                    className="viread-learning-content mt-1 w-fit max-w-full break-words rounded-control bg-warning-surface px-2.5 py-0.5 text-lg font-extrabold text-ink sm:px-3 sm:py-1 sm:text-xl"
                     dir="ltr"
                     lang="vi"
                   >
@@ -403,7 +411,7 @@ export function ReadingLayout({
 
                   {retryContextPhrase ? (
                     <p
-                      className="viread-learning-content mt-1.5 break-words text-base font-bold text-ink sm:text-lg"
+                      className="viread-learning-content mt-1 break-words text-sm font-bold text-ink sm:mt-1.5 sm:text-lg"
                       dir="ltr"
                       lang="vi"
                     >

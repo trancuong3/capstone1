@@ -235,6 +235,40 @@ async def spool_upload_file(
         raise
 
 
+def spool_bytes_document(
+    *,
+    file_name: str,
+    content_type: str | None,
+    data: bytes,
+) -> SpooledUploadDocument:
+    """Write bytes into a SpooledTemporaryFile in chunks for streaming rasterization."""
+    spool: tempfile.SpooledTemporaryFile[bytes] = tempfile.SpooledTemporaryFile(
+        max_size=_UPLOAD_SPOOL_RAM_THRESHOLD_BYTES,
+        mode="w+b",
+    )
+    try:
+        total = len(data)
+        header_bytes = bytes(data[:8192])
+        source_sha256 = hashlib.sha256(data).hexdigest()
+        for offset in range(0, total, _UPLOAD_SPOOL_CHUNK_BYTES):
+            spool.write(data[offset : offset + _UPLOAD_SPOOL_CHUNK_BYTES])
+        spool.seek(0)
+        return SpooledUploadDocument(
+            file_name=file_name,
+            content_type=content_type,
+            byte_length=total,
+            source_sha256=source_sha256,
+            spool_file=spool,
+            header_bytes=header_bytes,
+        )
+    except Exception:
+        try:
+            spool.close()
+        except Exception:
+            pass
+        raise
+
+
 def _detect_format_by_magic(data: bytes) -> SourceDocumentFormat | None:
     if data.lstrip()[:5] == b"%PDF-":
         return "PDF"
@@ -479,16 +513,25 @@ def _assert_pil_image_within_pixel_budget(image: Image.Image) -> None:
 
 def _flatten_to_rgb(image: Image.Image) -> Image.Image:
     transposed = ImageOps.exif_transpose(image)
-    if transposed.mode in ("RGBA", "LA") or (
-        transposed.mode == "P" and "transparency" in transposed.info
-    ):
-        rgba = transposed.convert("RGBA")
-        canvas = Image.new("RGB", rgba.size, (255, 255, 255))
-        canvas.paste(rgba, mask=rgba.getchannel("A"))
-        return canvas
-    if transposed.mode != "RGB":
-        return transposed.convert("RGB")
-    return transposed
+    owns_transposed = transposed is not image
+    try:
+        if transposed.mode in ("RGBA", "LA") or (
+            transposed.mode == "P" and "transparency" in transposed.info
+        ):
+            rgba = transposed.convert("RGBA")
+            try:
+                canvas = Image.new("RGB", rgba.size, (255, 255, 255))
+                canvas.paste(rgba, mask=rgba.getchannel("A"))
+                return canvas
+            finally:
+                rgba.close()
+        if transposed.mode != "RGB":
+            return transposed.convert("RGB")
+        owns_transposed = False
+        return transposed
+    finally:
+        if owns_transposed:
+            transposed.close()
 
 
 def _resolve_rasterizer_output_format() -> Literal["jpeg", "png"]:
@@ -538,8 +581,11 @@ def _normalize_pil_frame(
 
         if target_format == "png":
             png_buffer = BytesIO()
-            canvas.save(png_buffer, format="PNG", optimize=True)
-            png_bytes = png_buffer.getvalue()
+            try:
+                canvas.save(png_buffer, format="PNG", optimize=True)
+                png_bytes = png_buffer.getvalue()
+            finally:
+                png_buffer.close()
             if len(png_bytes) <= MAX_PAGE_IMAGE_BYTES:
                 return png_bytes, "image/png", "png", width, height
 
@@ -548,8 +594,11 @@ def _normalize_pil_frame(
             qualities = (92, default_q, 75)
         for quality in qualities:
             jpeg_buffer = BytesIO()
-            canvas.save(jpeg_buffer, format="JPEG", quality=quality, optimize=True)
-            jpeg_bytes = jpeg_buffer.getvalue()
+            try:
+                canvas.save(jpeg_buffer, format="JPEG", quality=quality, optimize=True)
+                jpeg_bytes = jpeg_buffer.getvalue()
+            finally:
+                jpeg_buffer.close()
             if len(jpeg_bytes) <= MAX_PAGE_IMAGE_BYTES:
                 return jpeg_bytes, "image/jpeg", "jpg", width, height
 
@@ -609,6 +658,8 @@ def _iter_image_pages(
                     width=w,
                     height=h,
                 )
+                del out_bytes
+                gc.collect()
     except HTTPException:
         raise
     except Image.DecompressionBombError as exc:
@@ -794,32 +845,44 @@ def _iter_pdf_with_pymupdf(source: bytes | Path) -> Iterator[RasterizedDocumentP
             )
 
         for idx in range(page_count):
-            page = doc[idx]
-            rect = page.rect
-            scale = _compute_safe_pdf_render_scale(
-                float(rect.width),
-                float(rect.height),
-                render_dpi=render_dpi,
-                max_edge=max_edge,
-            )
-            pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-            if (
-                pix.width <= 0
-                or pix.height <= 0
-                or pix.width > MAX_PAGE_IMAGE_DIMENSION
-                or pix.height > MAX_PAGE_IMAGE_DIMENSION
-                or (pix.width * pix.height) > MAX_PAGE_IMAGE_PIXELS
-            ):
-                raise HTTPException(
-                    status_code=422,
-                    detail="PDF page dimensions exceed safe rendering limits",
-                )
-            pil_image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            del pix
+            page = None
+            pix = None
+            pil_image = None
             try:
+                page = doc[idx]
+                rect = page.rect
+                scale = _compute_safe_pdf_render_scale(
+                    float(rect.width),
+                    float(rect.height),
+                    render_dpi=render_dpi,
+                    max_edge=max_edge,
+                )
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+                if (
+                    pix.width <= 0
+                    or pix.height <= 0
+                    or pix.width > MAX_PAGE_IMAGE_DIMENSION
+                    or pix.height > MAX_PAGE_IMAGE_DIMENSION
+                    or (pix.width * pix.height) > MAX_PAGE_IMAGE_PIXELS
+                ):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="PDF page dimensions exceed safe rendering limits",
+                    )
+                pil_image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                pix = None
                 out_bytes, ctype, ext, w, h = _normalize_pil_frame(pil_image)
             finally:
-                pil_image.close()
+                if pil_image is not None:
+                    pil_image.close()
+                pix = None
+                page = None
+                tools = getattr(pymupdf, "TOOLS", None)
+                if tools is not None and callable(getattr(tools, "store_shrink", None)):
+                    try:
+                        tools.store_shrink(100)
+                    except Exception:
+                        pass
             yield RasterizedDocumentPage(
                 source_page=idx + 1,
                 image_bytes=out_bytes,
@@ -1154,29 +1217,31 @@ def _iter_docx_pages(source: bytes | BinaryIO) -> Iterator[RasterizedDocumentPag
                             embedded_rgb = _flatten_to_rgb(raw_embedded)
                     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
                         continue
-                    max_img_h = max(300, max_y - _MARGIN_Y)
-                    scale = min(
-                        1.0,
-                        content_width / float(max(embedded_rgb.width, 1)),
-                        max_img_h / float(max(embedded_rgb.height, 1)),
-                    )
-                    target_w = max(1, int(round(embedded_rgb.width * scale)))
-                    target_h = max(1, int(round(embedded_rgb.height * scale)))
-                    if (target_w, target_h) != embedded_rgb.size:
-                        resized = embedded_rgb.resize(
-                            (target_w, target_h), Image.Resampling.LANCZOS
+                    try:
+                        max_img_h = max(300, max_y - _MARGIN_Y)
+                        scale = min(
+                            1.0,
+                            content_width / float(max(embedded_rgb.width, 1)),
+                            max_img_h / float(max(embedded_rgb.height, 1)),
                         )
+                        target_w = max(1, int(round(embedded_rgb.width * scale)))
+                        target_h = max(1, int(round(embedded_rgb.height * scale)))
+                        if (target_w, target_h) != embedded_rgb.size:
+                            resized = embedded_rgb.resize(
+                                (target_w, target_h), Image.Resampling.LANCZOS
+                            )
+                            embedded_rgb.close()
+                            embedded_rgb = resized
+                        if cursor_y + target_h > max_y and current_has_content:
+                            finished = advance_page()
+                            if finished is not None:
+                                yield finished
+                        assert current_img is not None
+                        current_img.paste(embedded_rgb, (_MARGIN_X, cursor_y))
+                        cursor_y += target_h + 24
+                        mark_drawn()
+                    finally:
                         embedded_rgb.close()
-                        embedded_rgb = resized
-                    if cursor_y + target_h > max_y and current_has_content:
-                        finished = advance_page()
-                        if finished is not None:
-                            yield finished
-                    assert current_img is not None
-                    current_img.paste(embedded_rgb, (_MARGIN_X, cursor_y))
-                    embedded_rgb.close()
-                    cursor_y += target_h + 24
-                    mark_drawn()
 
             elif child.tag.endswith("}tbl"):
                 table = Table(child, doc)
@@ -1353,9 +1418,9 @@ def iter_rasterized_spooled_document(
             page_iter = _iter_image_pages(spooled.spool_file, detected)
 
         def _bounded_iter() -> Iterator[RasterizedDocumentPage]:
+            assert page_iter is not None
             count = 0
             try:
-                assert page_iter is not None
                 for page in page_iter:
                     count += 1
                     if count > MAX_DOCUMENT_PAGES:
@@ -1367,7 +1432,10 @@ def iter_rasterized_spooled_document(
             finally:
                 close_inner = getattr(page_iter, "close", None)
                 if callable(close_inner):
-                    close_inner()
+                    try:
+                        close_inner()
+                    except Exception:
+                        pass
 
         bounded_iter = _bounded_iter()
         yield clean_name, detected, spooled.source_sha256, bounded_iter
@@ -1393,6 +1461,75 @@ def iter_rasterized_spooled_document(
                     pass
             except Exception:
                 pass
+
+
+@contextmanager
+def iter_rasterized_document_pages(
+    *,
+    filename: str | None = None,
+    content_type: str | None = None,
+    data: bytes | BinaryIO | SpooledUploadDocument,
+) -> Iterator[tuple[str, SourceDocumentFormat, str, Iterator[RasterizedDocumentPage]]]:
+    """Stream 1..30 rasterized pages from bytes, binary stream, or SpooledUploadDocument."""
+    if isinstance(data, SpooledUploadDocument):
+        with iter_rasterized_spooled_document(data) as yielded:
+            yield yielded
+        return
+    if isinstance(data, (bytes, bytearray)):
+        spooled = spool_bytes_document(
+            file_name=filename or "",
+            content_type=content_type,
+            data=bytes(data),
+        )
+        try:
+            with iter_rasterized_spooled_document(spooled) as yielded:
+                yield yielded
+        finally:
+            spooled.close()
+        return
+
+    spool: tempfile.SpooledTemporaryFile[bytes] = tempfile.SpooledTemporaryFile(
+        max_size=_UPLOAD_SPOOL_RAM_THRESHOLD_BYTES,
+        mode="w+b",
+    )
+    hasher = hashlib.sha256()
+    total = 0
+    header_buf = bytearray()
+    spooled_doc: SpooledUploadDocument | None = None
+    try:
+        data.seek(0)
+        while True:
+            chunk = data.read(_UPLOAD_SPOOL_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_DOCUMENT_BYTES:
+                raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
+            hasher.update(chunk)
+            if len(header_buf) < 8192:
+                need = 8192 - len(header_buf)
+                header_buf.extend(chunk[:need])
+            spool.write(chunk)
+        spool.seek(0)
+        spooled_doc = SpooledUploadDocument(
+            file_name=filename or "",
+            content_type=content_type,
+            byte_length=total,
+            source_sha256=hasher.hexdigest(),
+            spool_file=spool,
+            header_bytes=bytes(header_buf),
+        )
+    except Exception:
+        try:
+            spool.close()
+        except Exception:
+            pass
+        raise
+    try:
+        with iter_rasterized_spooled_document(spooled_doc) as yielded:
+            yield yielded
+    finally:
+        spooled_doc.close()
 
 
 def rasterize_uploaded_document(

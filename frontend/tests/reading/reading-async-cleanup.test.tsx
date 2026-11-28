@@ -20,10 +20,16 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook, speechSynthesizeMock } = vi.hoisted(() => ({
-  servicesHook: vi.fn<() => ReadingServices>(),
-  speechSynthesizeMock: vi.fn(),
-}));
+const { servicesHook, speechSynthesizeMock, dynamicChunkFailureFlags } =
+  vi.hoisted(() => ({
+    servicesHook: vi.fn<() => ReadingServices>(),
+    speechSynthesizeMock: vi.fn(),
+    dynamicChunkFailureFlags: {
+      phonics: false,
+      voiceSettings: false,
+      tutor: false,
+    },
+  }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
 }));
@@ -33,6 +39,60 @@ vi.mock("@/lib/api/speech-service", () => ({
     transcribe: vi.fn(),
   }),
 }));
+vi.mock("@/components/reading/phonics-lesson-card", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/components/reading/phonics-lesson-card")
+    >();
+  return {
+    ...actual,
+    PhonicsLessonCard: (
+      props: Parameters<typeof actual.PhonicsLessonCard>[0],
+    ) => {
+      if (dynamicChunkFailureFlags.phonics) {
+        throw new Error(
+          "ChunkLoadError: Loading chunk phonics-lesson-card failed",
+        );
+      }
+      return <actual.PhonicsLessonCard {...props} />;
+    },
+  };
+});
+vi.mock(
+  "@/components/reading/reading-voice-settings",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/components/reading/reading-voice-settings")
+      >();
+    return {
+      ...actual,
+      ReadingVoiceSettings: (
+        props: Parameters<typeof actual.ReadingVoiceSettings>[0],
+      ) => {
+        if (dynamicChunkFailureFlags.voiceSettings) {
+          throw new Error(
+            "ChunkLoadError: Loading chunk reading-voice-settings failed",
+          );
+        }
+        return <actual.ReadingVoiceSettings {...props} />;
+      },
+    };
+  },
+);
+vi.mock("@/components/reading/tutor-message", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/reading/tutor-message")>();
+  return {
+    ...actual,
+    TutorMessage: (props: Parameters<typeof actual.TutorMessage>[0]) => {
+      if (dynamicChunkFailureFlags.tutor) {
+        throw new Error("ChunkLoadError: Loading chunk tutor-message failed");
+      }
+      return <actual.TutorMessage {...props} />;
+    },
+  };
+});
 
 // Typed, test-local responses only. The application provider still uses
 // unavailable Reading/AI services; these fixtures exercise existing UI handlers.
@@ -296,7 +356,11 @@ describe("Reading action cleanup with a typed service boundary", () => {
         sessionId={TEST_SESSION_ID}
       />,
     );
-    const retry = await screen.findByRole("button", { name: "Thử nghe lại" });
+    const retry = await screen.findByRole(
+      "button",
+      { name: "Thử nghe lại" },
+      { timeout: 5000 },
+    );
     fireEvent.click(retry);
     await waitFor(() => {
       expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
@@ -312,5 +376,69 @@ describe("Reading action cleanup with a typed service boundary", () => {
     expect(services.tutorService.retryReadExample).not.toHaveBeenCalled();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(view.container).toBeEmptyDOMElement();
+  });
+
+  it("isolates ChunkLoadError on PhonicsLessonCard, ReadingVoiceSettings, and TutorMessage without crashing ReadingScreen", async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      dynamicChunkFailureFlags.phonics = true;
+      dynamicChunkFailureFlags.voiceSettings = true;
+      dynamicChunkFailureFlags.tutor = true;
+
+      const services = createReadingFixtures();
+      servicesHook.mockReset().mockReturnValue(services);
+
+      render(
+        <ReadingScreen
+          initialUiState="tts-error"
+          reconnectMode="recover"
+          sessionId={TEST_SESSION_ID}
+        />,
+      );
+
+      // Active reading session shell remains mounted despite ReadingVoiceSettings + TutorMessage failing
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("dynamic-panel-fallback-compact"),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByTestId("dynamic-panel-fallback-floating"),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.getByRole("button", { name: "Nghe đánh vần" }),
+      ).toBeInTheDocument();
+
+      // Trigger PhonicsLessonCard -> isolated inline fallback instead of crashing ReadingScreen
+      fireEvent.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
+      const inlineFallback = await screen.findByTestId(
+        "dynamic-panel-fallback-inline",
+      );
+      expect(inlineFallback).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Nghe đánh vần" }),
+      ).toBeInTheDocument();
+
+      // Recover PhonicsLessonCard when chunk becomes available and user clicks Retry
+      dynamicChunkFailureFlags.phonics = false;
+      fireEvent.click(
+        inlineFallback.querySelector("button") as HTMLButtonElement,
+      );
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("dynamic-panel-fallback-inline"),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        screen.getAllByRole("button", { name: "Nghe đánh vần" }).length,
+      ).toBeGreaterThanOrEqual(2);
+    } finally {
+      dynamicChunkFailureFlags.phonics = false;
+      dynamicChunkFailureFlags.voiceSettings = false;
+      dynamicChunkFailureFlags.tutor = false;
+      consoleErrorSpy.mockRestore();
+    }
   });
 });

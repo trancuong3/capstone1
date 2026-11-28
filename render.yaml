@@ -81,6 +81,8 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      - key: CORS_ALLOWED_ORIGIN_REGEX
+        sync: false
       - key: VIREAD_OCR_WORKER_TOKEN
         sync: false
       - key: VIREAD_OCR_REMOTE_WORKER_URL

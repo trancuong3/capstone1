@@ -33,8 +33,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.router import api_router
 from app.database.config import (
     APP_ENVIRONMENT,
+    CORS_ALLOWED_ORIGIN_REGEX,
     CORS_ALLOWED_ORIGINS,
     DATABASE_CONNECT_TIMEOUT,
+    is_allowed_cors_origin,
 )
 from app.database.integrity import postgres_integrity_error_metadata
 from app.database.session import (
@@ -567,7 +569,11 @@ async def lifespan(_app: FastAPI):
 
     stop_local_voice_bootstrap = asyncio.Event()
     local_voice_bootstrap_task = None
-    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled:
+    if (
+        APP_ENVIRONMENT != "test"
+        and not heavy_workers_disabled
+        and not _is_production_runtime()
+    ):
         arm_local_voice_worker_autostart(True)
         local_voice_bootstrap_task = asyncio.create_task(
             ensure_local_voice_worker_running(stop_event=stop_local_voice_bootstrap),
@@ -729,6 +735,13 @@ async def lifespan(_app: FastAPI):
             pass
 
         try:
+            from app.api.deps import aclose_auth_http_clients
+
+            await aclose_auth_http_clients()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
             from app.services.ocr_ai.runtime import aclose_ocr_ai_http_clients
 
             await aclose_ocr_ai_http_clients()
@@ -744,7 +757,8 @@ async def lifespan(_app: FastAPI):
 def _is_production_runtime() -> bool:
     """Return True when running on production/Render runtimes, False in test/dev."""
     env_name = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
-    return env_name == "production" or bool((os.getenv("RENDER") or "").strip())
+    render_raw = (os.getenv("RENDER") or "").strip().lower()
+    return env_name == "production" or render_raw not in {"", "0", "false", "no", "off"}
 
 
 _prod_docs_disabled = _is_production_runtime()
@@ -940,7 +954,11 @@ async def database_connection_exception_handler(
 def _cors_error_headers(request: Request) -> dict[str, str]:
     """Attach explicit CORS headers on unhandled 500s that bypass CORSMiddleware."""
     origin = (request.headers.get("origin") or "").strip()
-    if origin and origin in CORS_ALLOWED_ORIGINS:
+    if origin and is_allowed_cors_origin(
+        origin,
+        allowed_origins=CORS_ALLOWED_ORIGINS,
+        origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
+    ):
         return {
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
@@ -1033,6 +1051,7 @@ async def database_api_exception_handler(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(CORS_ALLOWED_ORIGINS),
+    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

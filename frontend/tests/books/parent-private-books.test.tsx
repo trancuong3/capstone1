@@ -1019,6 +1019,179 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     ).toBeEnabled();
   });
 
+  it("retains open create form and typed input across initial auth hydration ('' -> user-1) but resets on user switch", async () => {
+    const booksByUser: Record<string, ParentPrivateBookSummaryDTO[]> = {
+      "user-1": [makeBookSummary({ title: "Sách Của User 1" })],
+      "user-2": [
+        makeBookSummary({
+          id: "aa000000-0000-4000-8000-000000000077",
+          title: "Sách Của User 2",
+        }),
+      ],
+    };
+    let activeUser = "";
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (
+        url.pathname === "/books/my-books/paged" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        const list = booksByUser[activeUser] ?? [];
+        return Response.json({
+          items: list,
+          total: list.length,
+          limit: 9,
+          offset: 0,
+        });
+      }
+      throw new Error(`Unexpected fetch ${url.pathname}`);
+    });
+
+    const initializingAuth: AuthRuntimeState = {
+      initializationFailure: null,
+      isPasswordRecovery: false,
+      lastEvent: null,
+      mode: "supabase",
+      status: "initializing",
+      session: null,
+    };
+
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <AuthRuntimeContext.Provider value={initializingAuth}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Tạo sách riêng/ }));
+    const titleInput = screen.getByLabelText(/Tên sách/);
+    await user.type(titleInput, "Sách Đang Nhập");
+    expect(titleInput).toHaveValue("Sách Đang Nhập");
+
+    // Async auth hydrates "" -> "user-1": form MUST stay open with typed value intact!
+    activeUser = "user-1";
+    rerender(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("user-1")}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(await screen.findByText("Sách Của User 1")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Tên sách/)).toHaveValue("Sách Đang Nhập");
+
+    // Switching from "user-1" -> "user-2": MUST remount/reset form & clear User 1 books!
+    activeUser = "user-2";
+    rerender(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("user-2")}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(await screen.findByText("Sách Của User 2")).toBeInTheDocument();
+    expect(screen.queryByText("Sách Của User 1")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Tên sách/)).not.toBeInTheDocument();
+  });
+
+  it("retains live blob: URLs across '' -> user-1 hydration in ParentPrivateBookManager but revokes on user switch", async () => {
+    let blobSeq = 0;
+    const revokeSpy = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => `blob:live-retention-${++blobSeq}`),
+        revokeObjectURL: revokeSpy,
+      }),
+    );
+
+    const detailUser1: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({ title: "Sách Ảnh User 1" }),
+      pages: [],
+      submissions: [makeSubmission({ source_file_name: "trang1.png" })],
+    };
+    const detailUser2: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({ title: "Sách Ảnh User 2" }),
+      pages: [],
+      submissions: [],
+    };
+    let activeUser = "user-1";
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png-bytes"], { type: "image/png" }), {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}`) {
+        return Response.json(
+          activeUser === "user-1" ? detailUser1 : detailUser2,
+        );
+      }
+      throw new Error(`Unexpected fetch ${url.pathname}`);
+    });
+
+    const initializingAuth: AuthRuntimeState = {
+      initializationFailure: null,
+      isPasswordRecovery: false,
+      lastEvent: null,
+      mode: "supabase",
+      status: "initializing",
+      session: null,
+    };
+
+    const { rerender } = render(
+      <AuthRuntimeContext.Provider value={initializingAuth}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    const imgBefore = await screen.findByAltText(/trang1\.png/);
+    expect(imgBefore).toHaveAttribute("src", "blob:live-retention-1");
+    expect(revokeSpy).not.toHaveBeenCalled();
+
+    // Hydrate "" -> "user-1": ParentPrivateBookManagerContent stays mounted and live blob: URL MUST NOT be revoked!
+    rerender(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("user-1")}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Sách Ảnh User 1")).toBeInTheDocument();
+    });
+    expect(screen.getByAltText(/trang1\.png/)).toHaveAttribute(
+      "src",
+      "blob:live-retention-1",
+    );
+    expect(revokeSpy).not.toHaveBeenCalledWith("blob:live-retention-1");
+
+    // Switching "user-1" -> "user-2": MUST remount and revoke the prior user's live blob: URL!
+    activeUser = "user-2";
+    rerender(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("user-2")}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(await screen.findByText("Sách Ảnh User 2")).toBeInTheDocument();
+    expect(screen.queryByAltText(/trang1\.png/)).not.toBeInTheDocument();
+    expect(revokeSpy).toHaveBeenCalledWith("blob:live-retention-1");
+  });
+
   it("suppresses ParentAccountDropdown warnings on direct acceptSpelling, addPage, and requestAdminReview without opening the task drawer and without re-triggering on bumped updated_at", async () => {
     clearGlobalTasksMemoryCache();
     resetTaskAlertAckMemoryCache();

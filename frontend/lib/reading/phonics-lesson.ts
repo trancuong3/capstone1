@@ -779,13 +779,28 @@ export function buildPhonicsLesson(
           highlightRange: fullSyllableRange,
           pauseAfterMs: 420,
         });
-      } else {
+      } else if (isCheckedCoda) {
+        // Canonical SGK / mandatory `"mốt"` form for checked codas (p/t/c/ch):
+        // Step 2 stays `"mờ, ốt."` and Step 3 applies `"sắc, mốt."`.
         steps.push({
           id: "onset_blend",
           index: steps.length,
           kind: "onset_blend",
           displayText: `${onsetObj.spoken} + ${spokenRhyme}`,
           spokenText: `${onsetObj.spoken}, ${spokenRhyme}.`,
+          highlightPart: "onset_and_rhyme",
+          highlightRange: fullSyllableRange,
+          pauseAfterMs: 420,
+        });
+      } else {
+        // Unchecked compound rhymes with non-ngang tones (e.g. `"chuyện"`):
+        // explicitly blend the base untoned syllable `"chờ + uyên → chuyên"` before tone step.
+        steps.push({
+          id: "onset_blend",
+          index: steps.length,
+          kind: "onset_blend",
+          displayText: `${onsetObj.spoken} + ${spokenRhyme} → ${parts.untonedSyllable}`,
+          spokenText: `${onsetObj.spoken}, ${spokenRhyme}, ${parts.untonedSyllable}.`,
           highlightPart: "onset_and_rhyme",
           highlightRange: fullSyllableRange,
           pauseAfterMs: 420,

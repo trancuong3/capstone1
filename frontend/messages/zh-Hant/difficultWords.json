@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "已開啟單字「{word}」的第#{attempt}次練習。",
     "unknownBookSource": "未指定書籍來源"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "60秒語音熱身",
-    "title": "最小對立詞工坊與聲調鏡",
-    "subtitle": "幫助 {alias} 聽辨並練習容易混淆的聲調、聲母與韻尾。",
-    "openButton": "打開60秒工坊",
-    "collapseButton": "收起",
-    "unavailableHint": "暫時無法載入最小對立詞練習，請稍後再試。",
-    "pairCounter": "詞組 {current}/{total}",
-    "listenWord": "試聽",
-    "speakWord": "跟讀",
-    "listening": "正在聆聽...",
-    "spokenMatch": "太棒了！目標詞發音清晰準確！",
-    "spokenContrast": "聽起來接近「{heard}」——先聽示範再慢速讀一遍吧！",
-    "spokenRetry": "還沒聽清楚，請靠近麥克風慢速再讀一次！",
-    "earChallengeButton": "聽音辨詞",
-    "earCorrect": "答對啦！耳力真敏銳！",
-    "earRetry": "差一點點，再聽一次試試看！",
-    "nextPairButton": "下一組",
-    "nonClinicalDisclaimer": "基於自動語音辨識的閱讀輔助練習建議（非醫學或語言治療診斷）。"
   }
 }

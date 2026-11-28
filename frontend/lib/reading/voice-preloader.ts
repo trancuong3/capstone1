@@ -20,7 +20,9 @@ import {
 import {
   detectBrowserWasmTtsSupport,
   getBrowserWasmTtsClient,
+  type WasmTtsProgressEvent,
 } from "@/lib/reading/browser-wasm-tts";
+import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import {
   getAndroidSpeechCapabilities,
   isAndroidNativeSpeechAvailable,
@@ -39,6 +41,8 @@ import {
   getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
+  recordSttEngineUsage,
+  recordTtsEngineUsage,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -54,6 +58,10 @@ export interface VoicePreloadState {
   readonly ttsStatus: VoiceEnginePreloadStatus;
   readonly sttEngineLabel: string | null;
   readonly sttProgressStage: string | null;
+  readonly ttsProgressStage: string | null;
+  readonly wasmDownloadActive: boolean;
+  readonly wasmDownloadPercent: number | null;
+  readonly wasmDownloadFile: string | null;
   readonly startedAt: number | null;
   readonly readyAt: number | null;
 }
@@ -73,6 +81,10 @@ const INITIAL_STATE: VoicePreloadState = {
   ttsStatus: "idle",
   sttEngineLabel: null,
   sttProgressStage: null,
+  ttsProgressStage: null,
+  wasmDownloadActive: false,
+  wasmDownloadPercent: null,
+  wasmDownloadFile: null,
   startedAt: null,
   readyAt: null,
 };
@@ -84,6 +96,9 @@ let wasmInitPromise: Promise<boolean> | null = null;
 let wasmTtsInitPromise: Promise<boolean> | null = null;
 let wasmTtsWarmGender: VoiceGender | null = null;
 let wasmProgressUnsub: (() => void) | null = null;
+let wasmTtsProgressUnsub: (() => void) | null = null;
+let sttProgressFraction: number | null = null;
+let ttsProgressFraction: number | null = null;
 let pendingTtsWarmOptions: PreloadReadingVoiceOptions | null = null;
 let warmTtsAbortController: AbortController | null = null;
 const prefetchedTtsKeys = new Set<string>();
@@ -105,6 +120,27 @@ function warmAudioUnlockSafely(): void {
   }
 }
 
+function computeAggregateWasmProgress(): {
+  readonly active: boolean;
+  readonly percent: number | null;
+} {
+  const parts: number[] = [];
+  if (sttProgressFraction !== null) parts.push(sttProgressFraction);
+  if (ttsProgressFraction !== null) parts.push(ttsProgressFraction);
+  if (parts.length === 0) {
+    return { active: false, percent: null };
+  }
+  const active = parts.some((p) => p < 1);
+  if (!active) {
+    return { active: false, percent: 100 };
+  }
+  const avg = parts.reduce((sum, p) => sum + p, 0) / parts.length;
+  return {
+    active: true,
+    percent: Math.min(99, Math.max(1, Math.round(avg * 100))),
+  };
+}
+
 function updateState(patch: Partial<VoicePreloadState>): void {
   const next: VoicePreloadState = { ...state, ...patch };
   if (
@@ -112,6 +148,10 @@ function updateState(patch: Partial<VoicePreloadState>): void {
     next.ttsStatus === state.ttsStatus &&
     next.sttEngineLabel === state.sttEngineLabel &&
     next.sttProgressStage === state.sttProgressStage &&
+    next.ttsProgressStage === state.ttsProgressStage &&
+    next.wasmDownloadActive === state.wasmDownloadActive &&
+    next.wasmDownloadPercent === state.wasmDownloadPercent &&
+    next.wasmDownloadFile === state.wasmDownloadFile &&
     next.startedAt === state.startedAt &&
     next.readyAt === state.readyAt
   ) {
@@ -119,6 +159,38 @@ function updateState(patch: Partial<VoicePreloadState>): void {
   }
   state = next;
   listeners.forEach((fn) => fn());
+}
+
+function recordWasmSttBadgeIfOffline(): void {
+  if (isAndroidNativeSpeechAvailable()) return;
+  const health = getFreshVoiceEngineHealth();
+  if (health?.local.available && health.local.stt_ready) return;
+  const unconfigured = isPermanentlyHostedLocalUnconfigured(health);
+  recordSttEngineUsage({
+    provider: "wasm",
+    fallbackUsed: !unconfigured && health?.local.configured !== false,
+    fallbackReason:
+      unconfigured || health?.local.configured === false
+        ? null
+        : "LOCAL_STT_UNAVAILABLE",
+  });
+}
+
+function recordWasmTtsBadgeIfOffline(gender: VoiceGender): void {
+  if (isAndroidNativeSpeechAvailable()) return;
+  const health = getFreshVoiceEngineHealth();
+  if (hasLiveServerTts(health)) return;
+  const unconfigured = isPermanentlyHostedLocalUnconfigured(health);
+  recordTtsEngineUsage({
+    provider: "wasm_tts",
+    fallbackUsed: !unconfigured && health?.local.configured !== false,
+    fallbackReason:
+      unconfigured || health?.local.configured === false
+        ? null
+        : "LOCAL_TTS_UNAVAILABLE",
+    voiceId: getEffectiveVoiceId(),
+    voiceGender: gender,
+  });
 }
 
 export function getVoicePreloadState(): VoicePreloadState {
@@ -188,45 +260,90 @@ function warmBrowserSpeechVoices(): Promise<boolean> {
 function startWasmSttWarmup(): Promise<boolean> {
   const wasmClient = getBrowserWasmSttClient();
   if (wasmClient.isReady()) {
+    sttProgressFraction = 1;
+    const agg = computeAggregateWasmProgress();
     updateState({
       sttStatus: "ready",
       sttEngineLabel: "Offline (WASM)",
       sttProgressStage: "ready",
+      wasmDownloadActive: agg.active,
+      wasmDownloadPercent: agg.percent,
+      wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
     });
+    recordWasmSttBadgeIfOffline();
     return Promise.resolve(true);
   }
   if (wasmInitPromise) {
     return wasmInitPromise;
   }
+  sttProgressFraction = 0.05;
+  const initialAgg = computeAggregateWasmProgress();
   updateState({
     sttStatus: "loading",
     sttEngineLabel: "Offline (WASM)",
     sttProgressStage: "loading",
+    wasmDownloadActive: initialAgg.active,
+    wasmDownloadPercent: initialAgg.percent,
   });
   wasmProgressUnsub?.();
   wasmProgressUnsub = wasmClient.subscribeProgress(
     (evt: WasmSttProgressEvent) => {
+      const evRecord = evt as {
+        stage: string;
+        file?: string;
+        index?: number;
+        total?: number;
+      };
+      if (
+        typeof evRecord.index === "number" &&
+        typeof evRecord.total === "number" &&
+        evRecord.total > 0
+      ) {
+        sttProgressFraction = Math.min(
+          0.98,
+          Math.max(0.05, (evRecord.index + 0.5) / evRecord.total),
+        );
+      } else if (evRecord.stage === "ready") {
+        sttProgressFraction = 1;
+      }
+      const agg = computeAggregateWasmProgress();
       updateState({
         sttStatus: evt.stage === "ready" ? "ready" : "loading",
         sttEngineLabel: "Offline (WASM)",
         sttProgressStage: evt.stage,
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active
+          ? (evRecord.file ?? state.wasmDownloadFile)
+          : null,
       });
     },
   );
   wasmInitPromise = wasmClient
     .init()
     .then(() => {
+      sttProgressFraction = 1;
+      const agg = computeAggregateWasmProgress();
       updateState({
         sttStatus: "ready",
         sttEngineLabel: "Offline (WASM)",
         sttProgressStage: "ready",
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
       });
+      recordWasmSttBadgeIfOffline();
       return true;
     })
     .catch(() => {
+      sttProgressFraction = null;
+      const agg = computeAggregateWasmProgress();
       updateState({
         sttStatus: "degraded",
         sttProgressStage: "error",
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
       });
       return false;
     })
@@ -250,17 +367,85 @@ function startWasmTtsWarmup(gender?: VoiceGender): Promise<boolean> {
   }
   const client = getBrowserWasmTtsClient();
   if (client.isReady(resolvedGender)) {
+    ttsProgressFraction = 1;
+    const agg = computeAggregateWasmProgress();
+    updateState({
+      ttsStatus: "ready",
+      ttsProgressStage: "ready",
+      wasmDownloadActive: agg.active,
+      wasmDownloadPercent: agg.percent,
+      wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
+      readyAt: state.readyAt ?? Date.now(),
+    });
+    recordWasmTtsBadgeIfOffline(resolvedGender);
     return Promise.resolve(true);
   }
   if (wasmTtsInitPromise && wasmTtsWarmGender === resolvedGender) {
     return wasmTtsInitPromise;
   }
   wasmTtsWarmGender = resolvedGender;
+  ttsProgressFraction = 0.05;
+  const startAgg = computeAggregateWasmProgress();
+  updateState({
+    ttsStatus: "loading",
+    ttsProgressStage: "loading-tts-model",
+    wasmDownloadActive: startAgg.active,
+    wasmDownloadPercent: startAgg.percent,
+  });
+  wasmTtsProgressUnsub?.();
+  wasmTtsProgressUnsub = client.subscribeProgress(
+    (evt: WasmTtsProgressEvent) => {
+      if (
+        typeof evt.index === "number" &&
+        typeof evt.total === "number" &&
+        evt.total > 0
+      ) {
+        ttsProgressFraction = Math.min(
+          0.98,
+          Math.max(0.05, (evt.index + 0.5) / evt.total),
+        );
+      }
+      const agg = computeAggregateWasmProgress();
+      updateState({
+        ttsProgressStage: evt.stage,
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active
+          ? (evt.file ?? state.wasmDownloadFile)
+          : null,
+      });
+    },
+  );
   const req = client
     .init({ gender: resolvedGender })
-    .then(() => true)
-    .catch(() => false)
+    .then(() => {
+      ttsProgressFraction = 1;
+      const agg = computeAggregateWasmProgress();
+      updateState({
+        ttsStatus: "ready",
+        ttsProgressStage: "ready",
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
+        readyAt: Date.now(),
+      });
+      recordWasmTtsBadgeIfOffline(resolvedGender);
+      return true;
+    })
+    .catch(() => {
+      ttsProgressFraction = null;
+      const agg = computeAggregateWasmProgress();
+      updateState({
+        ttsProgressStage: "error",
+        wasmDownloadActive: agg.active,
+        wasmDownloadPercent: agg.percent,
+        wasmDownloadFile: agg.active ? state.wasmDownloadFile : null,
+      });
+      return false;
+    })
     .finally(() => {
+      wasmTtsProgressUnsub?.();
+      wasmTtsProgressUnsub = null;
       if (wasmTtsInitPromise === req && !client.isReady(resolvedGender)) {
         wasmTtsInitPromise = null;
       }
@@ -278,6 +463,18 @@ function isHostedBrowserOrigin(): boolean {
   );
 }
 
+function isLocalMockedSpeechHarness(): boolean {
+  if (typeof window === "undefined" || isHostedBrowserOrigin()) {
+    return false;
+  }
+  const win = window as unknown as {
+    SpeechRecognition?: unknown;
+    webkitSpeechRecognition?: unknown;
+  };
+  const ctor = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+  return isInjectedTestSpeechRecognition(ctor);
+}
+
 /**
  * Returns true only when browser WASM Vietnamese TTS actually needs warmup:
  * never on native Android WebView, and never on localhost/E2E when local or
@@ -289,6 +486,7 @@ export function shouldWarmWasmTts(
 ): boolean {
   if (
     isAndroidNativeSpeechAvailable() ||
+    isLocalMockedSpeechHarness() ||
     !detectBrowserWasmTtsSupport().supported
   ) {
     return false;
@@ -506,8 +704,10 @@ export function preloadReadingVoiceEngines(
 
   const run = async (): Promise<void> => {
     const isAndroid = isAndroidNativeSpeechAvailable();
+    const isMockedLocalHarness = isLocalMockedSpeechHarness();
     const wasmSupported =
       !isAndroid &&
+      !isMockedLocalHarness &&
       options.warmWasmStt !== false &&
       detectBrowserWasmSttSupport().supported;
 
@@ -530,6 +730,7 @@ export function preloadReadingVoiceEngines(
 
     const wasmTtsSupported =
       !isAndroid &&
+      !isMockedLocalHarness &&
       options.warmTts !== false &&
       detectBrowserWasmTtsSupport().supported;
     const isHostedOrigin = isHostedBrowserOrigin();
@@ -787,6 +988,32 @@ export async function awaitVoiceEnginesReadyBeforeListening(
   return { sttReady, ttsReady };
 }
 
+export function shouldPreferWarmWasmBatchStt(): boolean {
+  if (
+    isAndroidNativeSpeechAvailable() ||
+    !detectBrowserWasmSttSupport().supported ||
+    !getBrowserWasmSttClient().isReady()
+  ) {
+    return false;
+  }
+  const health = getFreshVoiceEngineHealth();
+  const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
+  if (!permanentlyUnconfigured) {
+    if (!health) return false;
+    if (health.local.available && health.local.stt_ready) return false;
+  }
+  const policy = getVoicePolicyPreferences();
+  const cloudAllowed =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleSttFallback;
+  const liveCloudStt = Boolean(
+    cloudAllowed &&
+    ((health?.google.stt_configured && !health.google.stt_cooldown) ||
+      (health?.elevenlabs?.stt_configured && !health.elevenlabs.stt_cooldown)),
+  );
+  return !liveCloudStt;
+}
+
 export function resetVoicePreloaderForTests(): void {
   state = INITIAL_STATE;
   activePreloadPromise = null;
@@ -795,6 +1022,10 @@ export function resetVoicePreloaderForTests(): void {
   wasmTtsWarmGender = null;
   wasmProgressUnsub?.();
   wasmProgressUnsub = null;
+  wasmTtsProgressUnsub?.();
+  wasmTtsProgressUnsub = null;
+  sttProgressFraction = null;
+  ttsProgressFraction = null;
   pendingTtsWarmOptions = null;
   warmTtsAbortController?.abort();
   warmTtsAbortController = null;

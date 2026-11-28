@@ -35,17 +35,12 @@ from app.services.child_progress.phonology_profiler import (
     classify_syllable_confusion,
     compute_phonological_patterns,
 )
-from app.services.child_progress_service import ChildProgressService
 from app.services.family_pedagogy_service import (
     FamilyPedagogyService,
     clear_fallback_memory_pins,
     hash_parent_pin,
     sniff_verified_audio_mime,
     verify_parent_pin_constant_time,
-)
-from app.services.warmup_micro_story_service import (
-    build_rule_based_micro_story,
-    validate_micro_story_candidate,
 )
 
 
@@ -156,45 +151,6 @@ class PhonologyProfilerTests(unittest.TestCase):
         self.assertGreaterEqual(len(pat["minimal_pairs"]), 2)
 
 
-class WarmupMicroStoryValidationTests(unittest.TestCase):
-    def test_rule_based_story_weaves_all_target_words_and_passes_safety(self) -> None:
-        title, sentences = build_rule_based_micro_story(
-            grade=2,
-            child_alias="An",
-            target_words=["cánh cò", "lũy tre"],
-        )
-        validated = validate_micro_story_candidate(
-            title_vi=title,
-            sentences=sentences,
-            target_words=["cánh cò", "lũy tre"],
-        )
-        self.assertIsNotNone(validated)
-        assert validated is not None
-        self.assertEqual(len(validated[1]), 2)
-
-    def test_rejects_story_missing_target_word_or_containing_unsafe_tokens(self) -> None:
-        self.assertIsNone(
-            validate_micro_story_candidate(
-                title_vi="Truyện ngắn",
-                sentences=[
-                    "Buổi sáng bé đi học rất vui vẻ.",
-                    "Bé đọc sách dưới ánh nắng ấm áp.",
-                ],
-                target_words=["hương lúa"],
-            )
-        )
-        self.assertIsNone(
-            validate_micro_story_candidate(
-                title_vi="Truyện",
-                sentences=[
-                    "Bé xem đường dẫn https://example.com với từ hương lúa.",
-                    "Câu chuyện kinh dị có từ hương lúa.",
-                ],
-                target_words=["hương lúa"],
-            )
-        )
-
-
 class FamilyPedagogySecurityAndPassportTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         clear_fallback_memory_pins()
@@ -287,34 +243,6 @@ class FamilyPedagogySecurityAndPassportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("warm_streak_3", unlocked_keys)
         self.assertIn("book_explorer_3", unlocked_keys)
         self.assertIn("word_courage_5", unlocked_keys)
-
-    async def test_phonology_sandbox_service_returns_curated_starters_when_clean(self) -> None:
-        parent_id = uuid4()
-        child_id = uuid4()
-
-        class _FakeProgressRepo:
-            async def owned_child(self, cid, pid):
-                return SimpleNamespace(Id=cid) if cid == child_id and pid == parent_id else None
-
-            async def sessions(self, cid, since):
-                return []
-
-            async def reports(self, cid, since):
-                return []
-
-            async def word_retries(self, cid, since):
-                return []
-
-            async def answers(self, cid, since):
-                return []
-
-            async def release(self):
-                return None
-
-        svc = ChildProgressService(_FakeProgressRepo())  # type: ignore[arg-type]
-        sandbox = await svc.get_phonology_sandbox(child_id, parent_id, days=30)
-        self.assertFalse(sandbox.has_recurring_patterns)
-        self.assertGreaterEqual(len(sandbox.recommended_pairs), 3)
 
 
 if __name__ == "__main__":

@@ -811,7 +811,9 @@ test.describe("Vercel Reading Flow Overhaul: Zero-Layout-Shift Highlighting & Vo
     await expect(dialog).toBeVisible();
 
     await dialog
-      .getByRole("button", { name: /Máy này \+ Google dự phòng/ })
+      .getByRole("button", {
+        name: /Tự động linh hoạt|Máy này \+ Google dự phòng/,
+      })
       .click();
     await dialog.getByRole("button", { name: "Đóng hộp thoại" }).click();
     await expect(dialog).toBeHidden();

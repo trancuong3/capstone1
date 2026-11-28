@@ -26,6 +26,7 @@ import {
 import { getVoicePolicyPreferences } from "@/lib/reading/session-voice-lock";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 import {
+  getCachedVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
@@ -130,6 +131,8 @@ const MIN_NEW_VOICED_INTERIM_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.08);
 const WS_PCM_CHUNK_SAMPLES = 1024; // 64ms @ 16kHz mono Int16 LE (2048 bytes)
 const WS_FLUSH_FALLBACK_TIMEOUT_MS = 1_800;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
+const STANDBY_PRE_ROLL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 1.5);
+const STANDBY_QUIET_RMS_CAP = Math.max(INITIAL_NOISE_FLOOR * 1.8, 0.006);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
 const MAX_FLUSH_TRAILING_SILENCE_SAMPLES = Math.floor(
   TARGET_SAMPLE_RATE * 0.16,
@@ -957,15 +960,83 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.audioGraphReadyPromise = null;
       this.resetSegmentState();
     } else {
-      // Preserve calibrated `noiseFloor` and rolling `preRoll` collected during standby!
+      // Preserve calibrated `noiseFloor` and rolling `preRoll` collected during standby,
+      // and immediately promote to active speech if the child already started talking right
+      // as countdown hit 0 so Sentence 1 is never missed.
       const preservedPreRoll = this.preRoll;
+      const preservedFloor = this.noiseFloor;
       this.resetSegmentState();
-      this.preRoll = preservedPreRoll;
+      this.noiseFloor = preservedFloor;
+      const onsetThreshold = Math.max(
+        MIN_SPEECH_RMS_ONSET,
+        preservedFloor * 2.0,
+      );
+      const recentStart = Math.max(
+        0,
+        preservedPreRoll.length - TARGET_SAMPLE_RATE,
+      );
+      let foundOnset = false;
+      let onsetOffset = recentStart;
+      let voicedFrames = 0;
+      let maxRms = 0;
+      let peakVal = 0;
+      let sumSqTotal = 0;
+      const frameLen = 320;
+      for (
+        let off = recentStart;
+        off + frameLen <= preservedPreRoll.length;
+        off += frameLen
+      ) {
+        let fSumSq = 0;
+        let fPeak = 0;
+        for (let j = 0; j < frameLen; j += 1) {
+          const s = preservedPreRoll[off + j];
+          fSumSq += s * s;
+          const a = Math.abs(s);
+          if (a > fPeak) fPeak = a;
+        }
+        const fRms = Math.sqrt(fSumSq / frameLen);
+        const frameActive =
+          fRms >= onsetThreshold || fPeak >= onsetThreshold * 3.0;
+        if (frameActive) {
+          voicedFrames += 1;
+          if (!foundOnset) {
+            foundOnset = true;
+            onsetOffset = Math.max(0, off - PRE_ROLL_SAMPLES);
+          }
+        }
+        if (foundOnset) {
+          sumSqTotal += fSumSq;
+          if (fRms > maxRms) maxRms = fRms;
+          if (fPeak > peakVal) peakVal = fPeak;
+        }
+      }
+      // Require sustained speech (>= 60ms = 3 frames) before eager promotion so a single
+      // 20ms ambient bump remains in `preRoll` instead of false-triggering speech onset.
+      if (foundOnset && voicedFrames >= 3 && maxRms >= onsetThreshold) {
+        const speechSlice = preservedPreRoll.slice(onsetOffset);
+        this.inSpeech = true;
+        this.preRoll = new Float32Array(0);
+        this.speechChunks = [speechSlice];
+        this.speechSamples = speechSlice.length;
+        this.voicedSamples = Math.max(0, preservedPreRoll.length - onsetOffset);
+        this.segmentPreRollSamples = Math.min(PRE_ROLL_SAMPLES, onsetOffset);
+        this.segmentOnsetAt =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+        this.segmentSumSq = sumSqTotal;
+        this.segmentPeak = peakVal;
+      } else {
+        this.preRoll =
+          preservedPreRoll.length > PRE_ROLL_SAMPLES
+            ? preservedPreRoll.slice(preservedPreRoll.length - PRE_ROLL_SAMPLES)
+            : preservedPreRoll;
+      }
     }
     this.attachLifecycleListeners();
 
     const policy = getVoicePolicyPreferences();
-    const freshHealth = getVoiceEngineHealthForRouting();
+    const freshHealth =
+      getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
     const localHealthy =
       freshHealth !== null &&
       freshHealth.local.available &&
@@ -1014,6 +1085,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         (!freshHealth ||
           !freshHealth.google.stt_configured ||
           freshHealth.google.stt_cooldown);
+      const warmWasmImmediate =
+        !androidSttReady &&
+        detectBrowserWasmSttSupport().supported &&
+        getBrowserWasmSttClient().isReady() &&
+        !backendGoogleSttAvailable &&
+        confirmedLocalDown;
 
       // Priority when Local Worker is unavailable (strict Offline-First):
       // 1. Android Native STT (100% on-device streaming on Android APK WebView).
@@ -1035,7 +1112,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
 
       if (
-        (confirmedLocalDown || withinEmergencyCooldown) &&
+        (confirmedLocalDown || withinEmergencyCooldown || warmWasmImmediate) &&
         detectBrowserWasmSttSupport().supported
       ) {
         if (confirmedLocalDown) {
@@ -2525,18 +2602,21 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const isVoicedFrame = rms >= holdThreshold || peak >= holdThreshold * 3.0;
 
     if (!this.active && this.standbyMode) {
-      // Standby countdown calibration: track background noiseFloor and preRoll
-      // only — never trigger speech onset or uploads until countdown hits 0.
-      this.noiseFloor = Math.min(
-        MAX_NOISE_FLOOR,
-        Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.95 + rms * 0.05),
-      );
+      // Standby countdown calibration: only adapt noiseFloor on genuinely quiet frames
+      // so speech beginning before `0` never inflates onsetThreshold, while buffering
+      // up to 1.5s of preRoll for seamless first-word capture.
+      if (rms < STANDBY_QUIET_RMS_CAP) {
+        this.noiseFloor = Math.min(
+          MAX_NOISE_FLOOR,
+          Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.95 + rms * 0.05),
+        );
+      }
       const merged = new Float32Array(this.preRoll.length + chunk.length);
       merged.set(this.preRoll, 0);
       merged.set(chunk, this.preRoll.length);
       this.preRoll =
-        merged.length > PRE_ROLL_SAMPLES
-          ? merged.slice(merged.length - PRE_ROLL_SAMPLES)
+        merged.length > STANDBY_PRE_ROLL_SAMPLES
+          ? merged.slice(merged.length - STANDBY_PRE_ROLL_SAMPLES)
           : merged;
       return;
     }

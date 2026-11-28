@@ -1,4 +1,4 @@
-"""Deterministic Vietnamese phonological & tonal confusion profiler + Minimal-Pair Sandbox.
+"""Deterministic Vietnamese phonological & tonal confusion profiler.
 
 Analyzes real oral reading mispronunciations across:
 1. `readingcomparisonreports.alignment` (`SUBSTITUTE` pairs within reached words)
@@ -252,7 +252,7 @@ def _pattern_display_vi(category: PhonologicalCategory, unit_a: str, unit_b: str
         lb = TONE_LABELS_VI.get(unit_b, unit_b)
         return (
             f"Cặp {la} ↔ {lb}",
-            f"Bé đôi khi đọc nhầm giữa {la} và {lb} trên cùng một vần; luyện nghe – lặp lại cặp từ tối thiểu 60 giây trước khi vào bài sẽ giúp tai nghe phân biệt độ cao rõ hơn.",
+            f"Bé đôi khi đọc nhầm giữa {la} và {lb} trên cùng một vần; ba mẹ có thể cùng bé luyện đọc chậm từng tiếng rõ dấu để tai nghe phân biệt độ cao rõ hơn.",
         )
     if category == "ONSET":
         return (
@@ -491,24 +491,3 @@ def compute_phonological_patterns(
         )
     )
     return results[:limit]
-
-
-def default_starter_minimal_pairs() -> list[dict[str, str]]:
-    """Fallback 60s warm-up minimal pairs when a child does not yet have >=3 recurring confusion sessions."""
-    starters = [
-        ("TONE:hoi<->nga", CURATED_MINIMAL_PAIRS["TONE:hoi<->nga"][0]),
-        ("ONSET:l<->n", CURATED_MINIMAL_PAIRS["ONSET:l<->n"][0]),
-        ("CODA:n<->ng", CURATED_MINIMAL_PAIRS["CODA:n<->ng"][0]),
-    ]
-    return [
-        {
-            "pattern_key": p_key,
-            "word_a": w_a,
-            "word_b": w_b,
-            "target_word": w_a,
-            "contrast_word": w_b,
-            "hint_vi": hint,
-            "origin": "CURATED_GRADE1",
-        }
-        for p_key, (w_a, w_b, hint) in starters
-    ]

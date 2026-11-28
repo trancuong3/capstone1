@@ -1035,8 +1035,17 @@ class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
         ]
         with (
             patch.object(repo, "profile_role", AsyncMock(return_value="parent")),
-            patch.object(repo, "session", AsyncMock(return_value=SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID))),
-            patch.object(repo, "child_belongs_to_parent", AsyncMock(return_value=True)),
+            patch.object(
+                repo,
+                "session_with_ownership_and_book",
+                AsyncMock(
+                    return_value=(
+                        SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID),
+                        SimpleNamespace(Id=BOOK_ID),
+                        True,
+                    )
+                ),
+            ),
             patch.object(repo, "comparison_reports", AsyncMock(return_value=reports)),
             patch.object(repo, "events_for_session", AsyncMock(return_value=[])),
             patch.object(repo, "session_page_rows", AsyncMock(return_value=[])),
@@ -1044,13 +1053,13 @@ class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
                 p1: SimpleNamespace(Id=p1, BookId=BOOK_ID, PageNumber=1),
                 p2: SimpleNamespace(Id=p2, BookId=BOOK_ID, PageNumber=2),
             })) as pages_batch,
-            patch.object(repo, "revisions_by_ids", AsyncMock(return_value={
+            patch.object(repo, "revision_snapshots", AsyncMock(return_value={
                 (p1, r1): SimpleNamespace(Id=r1, PageId=p1),
                 (p2, r2): SimpleNamespace(Id=r2, PageId=p2),
             })) as revs_batch,
-            patch.object(repo, "revision_words_by_revision_ids", AsyncMock(return_value={
-                r1: [SimpleNamespace(Id=w1)],
-                r2: [SimpleNamespace(Id=w2)],
+            patch.object(repo, "revision_word_ids_by_revisions", AsyncMock(return_value={
+                r1: {w1},
+                r2: {w2},
             })) as words_batch,
             patch.object(repo, "page_by_id", AsyncMock(side_effect=AssertionError("N+1 page_by_id"))),
             patch.object(repo, "revision_snapshot", AsyncMock(side_effect=AssertionError("N+1 revision_snapshot"))),

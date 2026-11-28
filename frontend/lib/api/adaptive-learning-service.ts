@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
+import { ServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   CompleteMagicRhythmChantInput,
   CompleteMagicRhythmChantResponseDTO,
@@ -15,7 +17,6 @@ import type {
   MagicRhythmChantDTO,
   MagicWordQuestDTO,
   ParentEntertainmentAnalyticsDTO,
-  WarmupMicroStoryDTO,
 } from "@/types/adaptive-learning";
 
 const skillDomainSchema = z.enum([
@@ -47,7 +48,7 @@ const crossGameRecommendationSchema = z.object({
   priority: z.number().int(),
 });
 
-const entertainmentRecommendationsSchema = z.object({
+export const entertainmentRecommendationsSchema = z.object({
   child_id: z.string().min(1),
   child_alias: z.string(),
   child_grade: z.number().int(),
@@ -102,7 +103,7 @@ const karaokeWeakSegmentSummarySchema = z.object({
   tip_vi: z.string(),
 });
 
-const parentEntertainmentAnalyticsSchema = z.object({
+export const parentEntertainmentAnalyticsSchema = z.object({
   child_id: z.string().min(1),
   child_alias: z.string(),
   child_grade: z.number().int(),
@@ -219,18 +220,26 @@ const dailyFiveMinuteTrainCompleteResponseSchema = z.object({
   completed_at: z.string(),
 });
 
-const warmupMicroStorySchema = z.object({
-  child_id: z.string().min(1),
-  local_date: z.string(),
-  has_due_words: z.boolean(),
-  target_words: z.array(z.string()).default([]),
-  title_vi: z.string(),
-  sentences: z.array(z.string()).default([]),
-  full_text: z.string(),
-  source: z.enum(["AI", "RULE_BASED"]),
-  cached: z.boolean().default(false),
-});
+function assertNonEmptyChildId(childId: string): string {
+  const normalized = childId.trim();
+  if (!normalized) {
+    throw new ServiceError({
+      code: "VALIDATION_ERROR",
+      message: translateRuntime("entertainment.hub.recommendationLoadError"),
+      status: 422,
+      request_id: "",
+      retryable: false,
+    });
+  }
+  return normalized;
+}
 
+function normalizeWindowDays(windowDays: number): number {
+  if (typeof windowDays !== "number" || !Number.isFinite(windowDays)) {
+    return 30;
+  }
+  return Math.min(90, Math.max(7, Math.floor(windowDays)));
+}
 export const magicQuestProviderTierSchema = z.enum([
   "GEMINI",
   "GROQ",
@@ -356,10 +365,6 @@ export interface AdaptiveLearningService {
     childId: string,
     payload: DailyFiveMinuteTrainCompleteRequestDTO,
   ): Promise<DailyFiveMinuteTrainCompleteResponseDTO>;
-  getWarmupStory(
-    childId: string,
-    options?: { readonly refresh?: boolean },
-  ): Promise<WarmupMicroStoryDTO>;
   createMagicWordQuest(
     childId: string,
     input?: CreateMagicWordQuestInput,
@@ -384,7 +389,7 @@ export interface AdaptiveLearningService {
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
   return {
-    getRecommendations(
+    async getRecommendations(
       childId: string,
       teacherGender?: "female" | "male",
       options?: {
@@ -392,49 +397,54 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         readonly signal?: AbortSignal;
       },
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       const suffix = teacherGender
         ? `?teacher_gender=${encodeURIComponent(teacherGender)}`
         : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/recommendations${suffix}`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/recommendations${suffix}`,
         entertainmentRecommendationsSchema,
         options?.signal,
         options?.bypassCache ? { bypassCache: true } : undefined,
       );
     },
-    getParentAnalytics(
+    async getParentAnalytics(
       childId: string,
       windowDays = 30,
       teacherGender?: "female" | "male",
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
+      const normalizedWindowDays = normalizeWindowDays(windowDays);
       const genderParam = teacherGender
         ? `&teacher_gender=${encodeURIComponent(teacherGender)}`
         : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}${genderParam}`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/parent-analytics?window_days=${normalizedWindowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
       );
     },
-    getDailyFiveMinuteTrain(
+    async getDailyFiveMinuteTrain(
       childId: string,
       teacherGender?: "female" | "male",
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       const suffix = teacherGender
         ? `?teacher_gender=${encodeURIComponent(teacherGender)}`
         : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/daily-five-minute-train${suffix}`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/daily-five-minute-train${suffix}`,
         dailyFiveMinuteTrainSchema,
         undefined,
         { bypassCache: true },
       );
     },
-    completeDailyFiveMinuteTrain(
+    async completeDailyFiveMinuteTrain(
       childId: string,
       payload: DailyFiveMinuteTrainCompleteRequestDTO,
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/daily-five-minute-train/complete`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/daily-five-minute-train/complete`,
         dailyFiveMinuteTrainCompleteResponseSchema,
         undefined,
         {
@@ -443,11 +453,12 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         },
       );
     },
-    createMagicWordQuest(
+    async createMagicWordQuest(
       childId: string,
       input: CreateMagicWordQuestInput = {},
       signal?: AbortSignal,
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       const body = {
         ...(input.focus_words ? { focus_words: input.focus_words } : {}),
         ...(input.teacher_gender
@@ -456,7 +467,7 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         ...(input.refresh !== undefined ? { refresh: input.refresh } : {}),
       };
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/magic-word-quest`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/magic-word-quest`,
         magicWordQuestSchema,
         signal,
         {
@@ -466,13 +477,14 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         },
       );
     },
-    completeMagicWordQuest(
+    async completeMagicWordQuest(
       childId: string,
       payload: CompleteMagicWordQuestInput,
       signal?: AbortSignal,
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/magic-word-quest/complete`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/magic-word-quest/complete`,
         completeMagicWordQuestResponseSchema,
         signal,
         {
@@ -482,11 +494,12 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         },
       );
     },
-    createMagicRhythmChant(
+    async createMagicRhythmChant(
       childId: string,
       input: CreateMagicRhythmChantInput = {},
       signal?: AbortSignal,
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       const body = {
         ...(input.focus_words ? { focus_words: input.focus_words } : {}),
         ...(input.teacher_gender
@@ -495,7 +508,7 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         ...(input.refresh !== undefined ? { refresh: input.refresh } : {}),
       };
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/magic-rhythm-chant`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/magic-rhythm-chant`,
         magicRhythmChantSchema,
         signal,
         {
@@ -505,13 +518,14 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         },
       );
     },
-    completeMagicRhythmChant(
+    async completeMagicRhythmChant(
       childId: string,
       payload: CompleteMagicRhythmChantInput,
       signal?: AbortSignal,
     ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/magic-rhythm-chant/complete`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/magic-rhythm-chant/complete`,
         completeMagicRhythmChantResponseSchema,
         signal,
         {
@@ -519,13 +533,6 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
           body: payload,
           bypassCache: true,
         },
-      );
-    },
-    getWarmupStory(childId: string, options?: { readonly refresh?: boolean }) {
-      const suffix = options?.refresh ? "?refresh=true" : "";
-      return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/warmup-story${suffix}`,
-        warmupMicroStorySchema,
       );
     },
   };

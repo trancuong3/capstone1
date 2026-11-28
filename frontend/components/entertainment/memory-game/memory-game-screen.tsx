@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
@@ -92,6 +93,7 @@ import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   awaitSttReadyBeforeListening,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
 } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type {
@@ -805,7 +807,7 @@ export function MemoryGameScreen({
         .play(
           adapted,
           options?.wordSample
-            ? { wordSample: true, speedScale: 0.92, bypassSessionLock: true }
+            ? { wordSample: true, bypassSessionLock: true }
             : {
                 coaching: true,
                 utteranceKind: "game_prompt",
@@ -893,10 +895,10 @@ export function MemoryGameScreen({
             (!routingHealth.local.available || !routingHealth.local.stt_ready));
         const wasmSupported = detectBrowserWasmSttSupport().supported;
         let transcript = "";
-
         if (
           ((localSttDown && !cloudSttAllowed) ||
-            isServerSttConfirmedUnavailable()) &&
+            isServerSttConfirmedUnavailable() ||
+            shouldPreferWarmWasmBatchStt()) &&
           wasmSupported
         ) {
           try {
@@ -2170,6 +2172,7 @@ export function MemoryGameScreen({
           <p className="text-body text-muted">{t("memoryGame.lead")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <VoiceEngineBadge compact />
           <ReadingVoiceSettings
             childId={child.id}
             disabled={isListeningVoice}

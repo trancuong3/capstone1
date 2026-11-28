@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowLeft, ChevronDown, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button, ButtonLink } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
@@ -45,6 +46,9 @@ export function SessionDetailScreen({
 }) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const appStore = useContext(AppStoreContext);
+  const activeSelectedChildId =
+    appStore?.selectedChildId ?? requestedChildId ?? null;
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -82,7 +86,12 @@ export function SessionDetailScreen({
         if (book.id !== detail.book_id || child.id !== detail.child_id)
           throw new Error("Invalid historical book response");
         if (active) {
-          hydrateTeacherVoiceFromChildProfile(child);
+          if (
+            !activeSelectedChildId ||
+            detail.child_id === activeSelectedChildId
+          ) {
+            hydrateTeacherVoiceFromChildProfile(child);
+          }
           setState({ status: "ready", detail, child, book });
         }
       } catch (error) {
@@ -102,7 +111,13 @@ export function SessionDetailScreen({
     return () => {
       active = false;
     };
-  }, [childService, requestKey, sessionId, sessionService]);
+  }, [
+    activeSelectedChildId,
+    childService,
+    requestKey,
+    sessionId,
+    sessionService,
+  ]);
 
   if (state.status === "loading")
     return (

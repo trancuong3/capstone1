@@ -19,9 +19,9 @@ export interface ChildVoicePreferencesPayload {
 }
 
 export interface ChildService {
-  list(): Promise<ChildProfileDTO[]>;
+  list(signal?: AbortSignal): Promise<ChildProfileDTO[]>;
   create(request: ChildProfileCreateDTO): Promise<ChildProfileDTO>;
-  get(childId: string): Promise<ChildProfileDTO>;
+  get(childId: string, signal?: AbortSignal): Promise<ChildProfileDTO>;
   update(
     childId: string,
     request: ChildProfilePatchDTO,
@@ -51,10 +51,10 @@ const emptyMutationSchema = z.void();
 async function requestChildApi<T>(
   path: string,
   schema: ZodType<T>,
-  options?: RequestApiOptions,
+  options?: RequestApiOptions & { readonly signal?: AbortSignal },
 ): Promise<T> {
   try {
-    return await requestApi(path, schema, undefined, options);
+    return await requestApi(path, schema, options?.signal, options);
   } catch (error) {
     if (
       error instanceof ServiceError &&
@@ -86,8 +86,10 @@ async function runChildMutation<T>(operation: () => Promise<T>): Promise<T> {
 
 export function createChildService(): ChildService {
   return {
-    async list(): Promise<ChildProfileDTO[]> {
-      return requestChildApi("/profiles/children", childProfileListSchema);
+    async list(signal?: AbortSignal): Promise<ChildProfileDTO[]> {
+      return requestChildApi("/profiles/children", childProfileListSchema, {
+        signal,
+      });
     },
 
     async create(requestBody: ChildProfileCreateDTO): Promise<ChildProfileDTO> {
@@ -108,10 +110,11 @@ export function createChildService(): ChildService {
       );
     },
 
-    async get(childId: string): Promise<ChildProfileDTO> {
+    async get(childId: string, signal?: AbortSignal): Promise<ChildProfileDTO> {
       return requestChildApi(
         `/profiles/children/${encodeURIComponent(childId)}`,
         childProfileSchema,
+        { signal },
       );
     },
 
