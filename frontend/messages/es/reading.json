@@ -496,5 +496,12 @@
     "subtitle": "Amplía vocabulario y oraciones directamente desde la página recién leída.",
     "pictureCta": "Describir ilustración",
     "shooterCta": "Armar oraciones"
+  },
+  "lucBat": {
+    "toggleLabel": "Cadencia poetica Luc Bat 6-8",
+    "toggleActive": "Cadencia Luc Bat activa",
+    "coupletBadge": "{count} pareado(s) (6-8)",
+    "beatGuide": "Ritmo 2/2/2 (verso de 6) · 2/2/2/2 (verso de 8)",
+    "rhymePairLabel": "Rima interna en 6a silaba: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

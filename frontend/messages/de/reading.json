@@ -496,5 +496,12 @@
     "subtitle": "Vertiefen Sie Wortschatz und Satzbau direkt mit der eben gelesenen Buchseite.",
     "pictureCta": "Seitenbild beschreiben",
     "shooterCta": "Seitensätze bauen"
+  },
+  "lucBat": {
+    "toggleLabel": "Luc-Bat 6-8 Versrhythmus",
+    "toggleActive": "Luc-Bat-Rhythmus aktiv",
+    "coupletBadge": "{count} Verspaar(e) (6-8)",
+    "beatGuide": "Sprechtakt 2/2/2 (6 Silben) · 2/2/2/2 (8 Silben)",
+    "rhymePairLabel": "Binnenreim der 6. Silbe: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

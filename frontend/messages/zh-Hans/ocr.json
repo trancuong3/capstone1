@@ -102,7 +102,12 @@
     "captureAndScan": "立即拍摄并扫描",
     "autoScanOn": "自动扫描：开启",
     "autoScanOff": "自动扫描：关闭",
-    "fallbackUploadAction": "使用相机拍照 / 选择清晰图片"
+    "fallbackUploadAction": "使用相机拍照 / 选择清晰图片",
+    "spotlightModeOn": "纸质书逐行聚光灯：已开启",
+    "spotlightModeOff": "纸质书逐行聚光灯：已关闭",
+    "spotlightLineBadge": "第 {current}/{total} 行聚光",
+    "spotlightPrevLine": "上一行",
+    "spotlightNextLine": "下一行"
   },
   "review": {
     "title": "核对书页内容",

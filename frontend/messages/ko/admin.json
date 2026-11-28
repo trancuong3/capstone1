@@ -1293,7 +1293,24 @@
       "rejected": "이 페이지 버전이 거절되었습니다.",
       "suspendedWithTitle": "개별 도서 \"{title}\"이(가) 일시 중지되었습니다. 소유 가정이 즉시 읽을 수 없습니다."
     },
-    "kpiAria": "사용자 도서 검수 대기열 개요"
+    "kpiAria": "사용자 도서 검수 대기열 개요",
+    "subtabHardRadar": "OCR 난해 샘플 레이더",
+    "hardRadar": {
+      "heading": "OCR 난해 샘플 레이더 (읽기 막힘 -> Flow 2)",
+      "privacyNotice": "공개 카탈로그 도서와 Flow 2 동의가 확인된 개인 도서만 집계합니다 (개인정보 필터링 및 완전 익명화).",
+      "loading": "OCR 신뢰도와 읽기 재시도 신호를 분석 중…",
+      "loadError": "OCR 난해 샘플 레이더를 불러오지 못했습니다.",
+      "totalCandidates": "우선 검토 대상 단어",
+      "catalogCount": "카탈로그 도서 단어",
+      "consentedPrivateCount": "Flow 2 동의 도서 단어",
+      "empty": "낮은 OCR 신뢰도와 읽기 재시도가 겹치는 항목이 없습니다.",
+      "scopeCatalog": "카탈로그 도서",
+      "scopeConsentedPrivate": "Flow 2 동의됨",
+      "scoreLabel": "우선순위 {score}/100",
+      "pageLineMeta": "{page}쪽 · {line}번째 줄",
+      "signalSummary": "OCR 신뢰도: {conf}% · 재시도 실패: {retries} · 정렬 불일치: {mismatches} · 익명 세션: {sessions}",
+      "inspectOcrAction": "OCR 페이지 열기"
+    }
   },
   "flow2": {
     "filters": {

@@ -102,7 +102,12 @@
     "captureAndScan": "Chụp & Quét ngay",
     "autoScanOn": "Tự động quét: ĐANG BẬT",
     "autoScanOff": "Tự động quét: ĐANG TẮT",
-    "fallbackUploadAction": "Chụp bằng Camera máy / Chọn ảnh nét"
+    "fallbackUploadAction": "Chụp bằng Camera máy / Chọn ảnh nét",
+    "spotlightModeOn": "Đèn chiếu từng dòng sách giấy: ĐANG BẬT",
+    "spotlightModeOff": "Đèn chiếu từng dòng sách giấy: ĐANG TẮT",
+    "spotlightLineBadge": "Chiếu dòng {current}/{total}",
+    "spotlightPrevLine": "Dòng trước",
+    "spotlightNextLine": "Dòng tiếp"
   },
   "review": {
     "title": "Rà soát nội dung trang sách",

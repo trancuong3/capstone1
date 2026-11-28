@@ -433,6 +433,7 @@ class ReadingPageWordRead(BaseModel):
     word_index: int = Field(ge=0)
     text: str
     bbox: tuple[float, float, float, float]
+    line_index: int = Field(default=0, ge=0)
 
 
 class ReadingPageRead(BaseModel):
@@ -443,6 +444,13 @@ class ReadingPageRead(BaseModel):
     width: int = Field(ge=1)
     height: int = Field(ge=1)
     words: list[ReadingPageWordRead]
+
+
+class CameraSpotlightLineRead(BaseModel):
+    line_index: int = Field(ge=0)
+    text: str
+    word_count: int = Field(ge=1)
+    points: list[tuple[float, float]] = Field(min_length=4, max_length=4)
 
 
 class CameraPageMatchRead(BaseModel):
@@ -461,6 +469,112 @@ class CameraPageMatchRead(BaseModel):
     message: str
     confidence: float = Field(ge=0, le=1)
     matched_page: ReadingPageRead | None = None
+    homography_matrix: list[float] | None = None
+    page_quad: list[tuple[float, float]] | None = None
+    spotlight_lines: list[CameraSpotlightLineRead] = Field(default_factory=list)
+
+
+class OfflineReadingPackBookRead(BaseModel):
+    book_id: UUID
+    title: str
+    author: str | None = None
+    min_grade: int = Field(ge=1, le=5)
+    max_grade: int = Field(ge=1, le=5)
+    visibility_scope: Literal["CATALOG", "PARENT_PRIVATE"] = "CATALOG"
+    page_count: int = Field(ge=1)
+
+
+class OfflineReadingPackResponse(BaseModel):
+    pack_version: int = 1
+    generated_at: datetime
+    book: OfflineReadingPackBookRead
+    pages: list[ReadingPageDTO]
+
+
+class OfflineReadingSyncPageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: UUID
+    page_revision_id: UUID
+    completed: bool = True
+    transcript: str | None = Field(default=None, max_length=12000)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class OfflineReadingSyncEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: UUID
+    page_revision_id: UUID
+    word_id: UUID | None = None
+    type: Literal[
+        "OMISSION",
+        "REPETITION",
+        "LONG_PAUSE",
+        "MISPRONUNCIATION",
+        "SUBSTITUTION",
+        "SELF_CORRECTION",
+        "READ_EXAMPLE",
+        "WORD_RETRY",
+    ] = "WORD_RETRY"
+    status: Literal[
+        "DETECTED",
+        "IGNORED_BY_GATE",
+        "FEEDBACK_GIVEN",
+        "CANDIDATE",
+        "CONFIRMED",
+        "FAILED",
+        "UNCERTAIN",
+        "DISMISSED",
+    ] = "CONFIRMED"
+    start_ms: int = Field(default=0, ge=0, le=2147483647)
+    end_ms: int | None = Field(default=None, ge=0, le=2147483647)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "OfflineReadingSyncEventInput":
+        if self.end_ms is not None and self.end_ms < self.start_ms:
+            raise ValueError("end_ms must be greater than or equal to start_ms")
+        encoded = json.dumps(
+            self.metadata,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > 16 * 1024:
+            raise ValueError("Offline event metadata must not exceed 16 KiB")
+        return self
+
+
+class OfflineReadingSyncRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_sync_id: str = Field(min_length=4, max_length=128)
+    child_id: UUID
+    book_id: UUID
+    started_at: datetime
+    ended_at: datetime | None = None
+    pages: list[OfflineReadingSyncPageInput] = Field(min_length=1, max_length=120)
+    events: list[OfflineReadingSyncEventInput] = Field(default_factory=list, max_length=500)
+
+    @field_validator("client_sync_id")
+    @classmethod
+    def normalize_client_sync_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned or any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+            raise ValueError("Invalid client_sync_id")
+        return cleaned
+
+
+class OfflineReadingSyncResponse(BaseModel):
+    session_id: UUID
+    idempotent_replay: bool = False
+    synced_pages_count: int = Field(ge=0)
+    synced_reports_count: int = Field(ge=0)
+    synced_events_count: int = Field(ge=0)
+    skipped_page_ids: list[UUID] = Field(default_factory=list)
 
 
 class LocalOcrWordRead(BaseModel):

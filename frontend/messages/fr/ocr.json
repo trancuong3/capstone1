@@ -102,7 +102,12 @@
     "captureAndScan": "Capturer et numériser",
     "autoScanOn": "Numérisation auto : ACTIVÉE",
     "autoScanOff": "Scan automatique : DÉSACTIVÉ",
-    "fallbackUploadAction": "Prendre une photo / Choisir une image nette"
+    "fallbackUploadAction": "Prendre une photo / Choisir une image nette",
+    "spotlightModeOn": "Projecteur de ligne livre papier : ACTIVE",
+    "spotlightModeOff": "Projecteur de ligne livre papier : DESACTIVE",
+    "spotlightLineBadge": "Ligne {current}/{total}",
+    "spotlightPrevLine": "Ligne prec.",
+    "spotlightNextLine": "Ligne suiv."
   },
   "review": {
     "title": "Vérifier le texte de la page",

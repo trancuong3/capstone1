@@ -47,6 +47,13 @@ import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { createFamilyPedagogyService } from "@/lib/api/family-pedagogy-service";
 import { clearAndroidScheduledReminders } from "@/lib/reading/native-reminder-bridge";
 import {
+  clearAllOfflineReadingPacks,
+  clearOfflineReadingPacksForUser,
+  listPendingOfflineSessions,
+  subscribeOfflinePackChanges,
+  syncPendingOfflineSessions,
+} from "@/lib/offline/offline-reading-pack";
+import {
   clearChildModeLockForUser,
   isChildModeLockedForUser,
   isParentProtectedRoute,
@@ -369,14 +376,47 @@ export function AppShell({ children }: AppShellProps) {
       clearUserCache(prevId);
       clearChildModeLockForUser(prevId);
       void clearAndroidScheduledReminders();
+      void clearOfflineReadingPacksForUser(prevId);
       clearStoredScanJobIds(user?.id ?? null);
       if (!user?.id) {
         clearUserCache();
+        void clearAllOfflineReadingPacks();
       }
       broadcastActorSwitch();
     }
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let disposed = false;
+    const flushIfPendingOnline = async () => {
+      if (
+        disposed ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        return;
+      }
+      const pending = await listPendingOfflineSessions(userId);
+      if (!disposed && pending.length > 0) {
+        await syncPendingOfflineSessions(userId);
+      }
+    };
+    const onOnline = () => {
+      void flushIfPendingOnline();
+    };
+    window.addEventListener("online", onOnline);
+    const unsub = subscribeOfflinePackChanges(() => {
+      // Only auto-flush when online and local outbox has queued items
+      void flushIfPendingOnline();
+    });
+    void flushIfPendingOnline();
+    return () => {
+      disposed = true;
+      window.removeEventListener("online", onOnline);
+      unsub();
+    };
+  }, [userId]);
 
   useEffect(() => {
     return installOfflineOutboxReconnectAutoDrain(() => ({
@@ -469,6 +509,7 @@ export function AppShell({ children }: AppShellProps) {
       clearGlobalTasksMemoryCache();
       clearChildModeLockForUser(userId);
       void clearAndroidScheduledReminders();
+      void clearAllOfflineReadingPacks();
       clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
       resetTeacherVoiceForActorSwitch();

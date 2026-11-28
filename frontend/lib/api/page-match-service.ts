@@ -15,6 +15,17 @@ export interface PageMatchService {
   ): Promise<ReadingPageDTO>;
 }
 
+export const cameraSpotlightPointSchema = z.tuple([z.number(), z.number()]);
+
+export const cameraSpotlightLineSchema = z.object({
+  line_index: z.number().int().nonnegative(),
+  text: z.string(),
+  word_count: z.number().int().positive(),
+  points: z.array(cameraSpotlightPointSchema).length(4),
+});
+
+export type CameraSpotlightLineDTO = z.infer<typeof cameraSpotlightLineSchema>;
+
 export const cameraPageMatchSchema = z.object({
   framing_valid: z.boolean(),
   matched: z.boolean(),
@@ -31,6 +42,13 @@ export const cameraPageMatchSchema = z.object({
   message: z.string(),
   confidence: z.number().min(0).max(1),
   matched_page: readingPageDtoSchema.nullable(),
+  homography_matrix: z.array(z.number()).length(9).nullable().optional(),
+  page_quad: z
+    .array(cameraSpotlightPointSchema)
+    .length(4)
+    .nullable()
+    .optional(),
+  spotlight_lines: z.array(cameraSpotlightLineSchema).optional(),
 });
 
 export type CameraPageMatchDTO = z.infer<typeof cameraPageMatchSchema>;

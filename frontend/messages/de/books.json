@@ -576,5 +576,35 @@
     "tooEasy": "Leicht zum Aufwärmen (Klasse {min}–{max})",
     "estimatedGrade": "Geschätzt Klasse {min}–{max}",
     "phonicsScore": "Lautlese-Bereitschaft {score}%"
+  },
+  "offlinePack": {
+    "heading": "Offline-Lesepaket & Druckbare QR-Karte",
+    "description": "Speichern Sie gepruefte Seiten fuer das Offline-Lesen auf diesem Geraet oder drucken Sie eine QR-Karte fuer das gedruckte Buch.",
+    "readyBadge": "Gespeichert ({count} Seiten)",
+    "downloadButton": "Offline-Paket laden",
+    "openOfflineReader": "Jetzt offline lesen",
+    "removeButton": "Offline-Paket entfernen",
+    "syncPendingButton": "Synchronisieren ({count})",
+    "stageDownloadingPages": "Gepruefte Seiten und Beispielaudio werden geladen…",
+    "stageSavingDevice": "Paket wird sicher auf dem Geraet gespeichert…",
+    "savedNotice": "Offline-Lesepaket ({count} Seiten) auf diesem Geraet gespeichert.",
+    "removedNotice": "Offline-Lesepaket fuer dieses Buch entfernt.",
+    "downloadError": "Offline-Lesepaket konnte nicht geladen werden. Bitte bei stabiler Verbindung erneut versuchen.",
+    "syncedNotice": "{count} Offline-Lesesitzung(en) synchronisiert.",
+    "syncDeferredNotice": "Verbindung instabil — Sitzungen bleiben sicher zur spaeteren Synchronisierung gespeichert.",
+    "queuedOfflineNotice": "Sitzung lokal gespeichert — automatische Synchronisierung sobald online.",
+    "readerHeaderBadge": "Offline-Modus · Seite {page}/{total}",
+    "listenCachedAudio": "Beispiel hoeren",
+    "tapWordsHint": "Tippen Sie auf geuebte Woerter, um den Offline-Lernfortschritt festzuhalten:",
+    "prevPage": "Vorherige Seite",
+    "nextPage": "Naechste Seite",
+    "finishAndQueueSync": "Fertig & Synchronisieren"
+  },
+  "qrCard": {
+    "openButton": "QR-Karte drucken",
+    "modalTitle": "Druckbare ViRead QR-Lesekarte",
+    "eyebrow": "QR-Lesezeichen fuer Papierbuecher",
+    "scanInstruction": "Scannen Sie diesen QR-Code mit der Handykamera, um dieses Buch direkt in ViRead zu oeffnen.",
+    "printButton": "QR-Karte drucken"
   }
 }

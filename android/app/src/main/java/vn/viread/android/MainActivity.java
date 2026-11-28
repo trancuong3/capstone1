@@ -159,6 +159,7 @@ public final class MainActivity extends Activity {
     private TrustedNavigation navigation;
     private ViReadNativeSpeechBridge nativeSpeechBridge;
     private ViReadNativeReminderBridge nativeReminderBridge;
+    private ViReadNativeOfflineBridge nativeOfflineBridge;
 
     private WebView webView;
     private ProgressBar progress;
@@ -398,6 +399,7 @@ public final class MainActivity extends Activity {
         installWebViewClients();
         installNativeSpeechBridge();
         installNativeReminderBridge();
+        installNativeOfflineBridge();
         registerModernBackCallback();
         cleanupStaleCameraCaptures(true);
 
@@ -488,6 +490,13 @@ public final class MainActivity extends Activity {
                     }
                 });
         nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
+    }
+
+    private void installNativeOfflineBridge() {
+        nativeOfflineBridge = ViReadNativeOfflineBridge.createDefault(
+                this,
+                () -> navigation);
+        nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
     }
 
     String resolveInitialStartupUrl() {
@@ -1125,6 +1134,9 @@ public final class MainActivity extends Activity {
                         if (nativeReminderBridge != null) {
                             nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
                         }
+                        if (nativeOfflineBridge != null) {
+                            nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
+                        }
                         lastFailedUrl = null;
                         hasLoadedCleanPage = false;
                         loadTrustedUrl(navigation.getOrigin());
@@ -1137,6 +1149,12 @@ public final class MainActivity extends Activity {
                     navigation = endpointStore.clearCustomLanOrigin();
                     if (nativeSpeechBridge != null) {
                         nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+                    }
+                    if (nativeReminderBridge != null) {
+                        nativeReminderBridge.attachToWebView(webView, navigation.getOrigin());
+                    }
+                    if (nativeOfflineBridge != null) {
+                        nativeOfflineBridge.attachToWebView(webView, navigation.getOrigin());
                     }
                     lastFailedUrl = null;
                     hasLoadedCleanPage = false;
@@ -1784,9 +1802,11 @@ public final class MainActivity extends Activity {
             nativeReminderBridge.onHostDestroy();
             nativeReminderBridge = null;
         }
+        nativeOfflineBridge = null;
         if (webView != null) {
             ViReadNativeSpeechBridge.detachFromWebView(webView);
             ViReadNativeReminderBridge.detachFromWebView(webView);
+            ViReadNativeOfflineBridge.detachFromWebView(webView);
             webView.stopLoading();
             webView.loadUrl("about:blank");
             webView.destroy();

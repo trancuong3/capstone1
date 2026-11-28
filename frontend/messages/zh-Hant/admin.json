@@ -1293,7 +1293,24 @@
       "rejected": "此頁面版本已遭拒絕。",
       "suspendedWithTitle": "已暫停私人書籍「{title}」。擁有者家庭將無法立即閱讀。"
     },
-    "kpiAria": "使用者圖書審核佇列概覽"
+    "kpiAria": "使用者圖書審核佇列概覽",
+    "subtabHardRadar": "OCR 難例雷達",
+    "hardRadar": {
+      "heading": "OCR 難例雷達（朗讀卡頓關聯 → Flow 2）",
+      "privacyNotice": "僅彙整公共書庫與已開啟 Flow 2 授權的私享書（嚴格過濾個資並完全匿名化）。",
+      "loading": "正在關聯分析 OCR 信心度與朗讀重試訊號…",
+      "loadError": "無法載入 OCR 難例雷達，請重試。",
+      "totalCandidates": "優先核查詞條總數",
+      "catalogCount": "公共書庫詞條",
+      "consentedPrivateCount": "Flow 2 已授權詞條",
+      "empty": "目前沒有低信心度 OCR 與朗讀卡頓重疊的樣本。",
+      "scopeCatalog": "公共書庫",
+      "scopeConsentedPrivate": "Flow 2 已授權",
+      "scoreLabel": "優先級 {score}/100",
+      "pageLineMeta": "第 {page} 頁 · 第 {line} 行",
+      "signalSummary": "OCR 信心度：{conf}% · 重試未通過：{retries} · 對齊偏差：{mismatches} · 匿名工作階段：{sessions}",
+      "inspectOcrAction": "檢視 OCR 頁面"
+    }
   },
   "flow2": {
     "filters": {
