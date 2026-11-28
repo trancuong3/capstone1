@@ -183,16 +183,35 @@ export async function fetchOcrWorkerHealth(
     const mode =
       typeof rec.mode === "string" && rec.mode.trim() ? rec.mode.trim() : null;
     const ready = rec.ready === true;
+    const hasExplicitReady = typeof rec.ready === "boolean";
     const probeDegraded = rec.probe_degraded === true;
     const workers = Array.isArray(rec.workers) ? rec.workers : [];
-    const anyWorkerOnline = workers.some(
-      (item) =>
-        item &&
-        typeof item === "object" &&
-        Boolean((item as Record<string, unknown>).online),
-    );
-    const workerOnline =
-      mode === "remote_worker" ? anyWorkerOnline || ready : ready;
+    const anyReadyWorkerOnline = workers.some((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return false;
+      }
+      const worker = item as Record<string, unknown>;
+      if (!worker.online || worker.ready === false) {
+        return false;
+      }
+      const workerStatus =
+        typeof worker.status === "string"
+          ? worker.status.trim().toUpperCase()
+          : "";
+      if (
+        workerStatus === "DEGRADED" ||
+        workerStatus === "STARTING" ||
+        workerStatus === "OFFLINE"
+      ) {
+        return false;
+      }
+      return true;
+    });
+    const workerOnline = hasExplicitReady
+      ? ready
+      : mode === "remote_worker"
+        ? anyReadyWorkerOnline
+        : false;
     const queueObj =
       rec.queue && typeof rec.queue === "object"
         ? (rec.queue as Record<string, unknown>)
