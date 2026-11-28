@@ -167,7 +167,7 @@ class BookQualityFinding(Base):
     __tablename__ = "bookqualityfindings"
     __table_args__ = (
         CheckConstraint(
-            "detectionsource IN ('RULE', 'OLLAMA_TEXT')",
+            "detectionsource IN ('RULE', 'OLLAMA_TEXT', 'CLOUD_AI')",
             name="ck_bookqualityfindings_source",
         ),
         CheckConstraint(

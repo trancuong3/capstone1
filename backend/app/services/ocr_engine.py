@@ -53,7 +53,32 @@ import cv2
 import numpy as np
 import requests
 from PIL import Image
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
+try:
+    from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
+except ModuleNotFoundError:
+    SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or None
+    _supabase_secret_key = (os.getenv("SUPABASE_SECRET_KEY") or "").strip() or None
+    _supabase_service_role_key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip() or None
+    SUPABASE_ADMIN_KEY = _supabase_secret_key or _supabase_service_role_key
+
+    def _is_supabase_jwt_key(api_key: str | None) -> bool:
+        """Return True only when the key looks like a legacy 3-part JWT rather than sb_secret_*."""
+        clean = (api_key or "").strip()
+        return clean.count(".") == 2 and not clean.startswith("sb_")
+
+    def supabase_admin_headers(
+        api_key: str | None = None,
+        *,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Build Supabase Storage/PostgREST headers without requiring app.database in Zero-DB workers."""
+        key = ((api_key if api_key is not None else SUPABASE_ADMIN_KEY) or "").strip()
+        headers: dict[str, str] = {"apikey": key}
+        if _is_supabase_jwt_key(key):
+            headers["Authorization"] = f"Bearer {key}"
+        if extra:
+            headers.update(extra)
+        return headers
 
 # Optional/worker-only OCR dependencies are imported lazily so light web deploys
 # (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
@@ -161,7 +186,23 @@ from app.services.ocr_text_utils import (
 
 from unittest.mock import NonCallableMock
 
-from app.services.ocr_executor import get_ocr_executor
+try:
+    from app.services.ocr_executor import get_ocr_executor
+except ModuleNotFoundError:
+    from concurrent.futures import ThreadPoolExecutor
+
+    _fallback_executor_lock = threading.Lock()
+    _fallback_ocr_executor: ThreadPoolExecutor | None = None
+
+    def get_ocr_executor() -> ThreadPoolExecutor:
+        global _fallback_ocr_executor
+        with _fallback_executor_lock:
+            if _fallback_ocr_executor is None:
+                _fallback_ocr_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="viread-ocr",
+                )
+            return _fallback_ocr_executor
 
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None

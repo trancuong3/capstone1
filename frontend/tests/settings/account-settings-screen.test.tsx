@@ -127,7 +127,9 @@ describe("AccountSettingsScreen", () => {
     expect(
       screen.getByRole("heading", { name: "Ngôn ngữ hiển thị" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Sách tiếng Việt, OCR/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sách tiếng Việt, nhận diện trang sách/),
+    ).toBeInTheDocument();
 
     const trigger = screen.getByRole("button", {
       name: /Chọn ngôn ngữ giao diện/i,

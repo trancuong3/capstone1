@@ -25,6 +25,7 @@ def _service(db: AsyncSession) -> ChildProgressService:
 async def get_progress_assessment(
     child_id: UUID,
     days: int = Query(default=30, ge=7, le=90),
+    teacher_gender: str | None = Query(default=None, pattern="^(female|male)$"),
     actor_id: UUID = Depends(get_current_parent_id),
     _rate_limited: None = Depends(
         rate_limit("child_progress_read", default_max=60, default_window=60.0)
@@ -32,7 +33,18 @@ async def get_progress_assessment(
     db: AsyncSession = Depends(get_db),
 ):
     """Scores and metrics now; comments are the cached AI text or offline comments."""
-    return await _service(db).assess(child_id, actor_id, days=days, use_ai=False)
+    safe_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
+    resolved_days = days if isinstance(days, int) and not isinstance(days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
+    return await _service(db).assess(
+        child_id,
+        actor_id,
+        days=resolved_days,
+        use_ai=False,
+        **extra_kwargs,
+    )
 
 
 @router.post(
@@ -50,5 +62,10 @@ async def create_progress_assessment(
 ):
     """Ask the AI to write the assessment (cached while the data is unchanged)."""
     return await _service(db).assess(
-        child_id, actor_id, days=payload.days, use_ai=True, refresh=payload.refresh
+        child_id,
+        actor_id,
+        days=payload.days,
+        use_ai=True,
+        refresh=payload.refresh,
+        teacher_gender=payload.teacher_gender,
     )

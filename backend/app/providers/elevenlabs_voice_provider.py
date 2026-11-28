@@ -42,6 +42,41 @@ VIETNAMESE_TTS_MODELS = {
 }
 SHORT_TTS_CACHE_MAX_ENTRIES = 32
 SHORT_TTS_CACHE_MAX_BYTES = 8 * 1024 * 1024
+CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES = 16
+CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def is_constrained_web_runtime() -> bool:
+    """Detect 512 MiB Render / remote-worker web deployments where memory headroom is tight."""
+    render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+    return render or disable_heavy or remote_ocr
+
+
+def _resolve_short_tts_cache_limits() -> tuple[int, int]:
+    constrained = is_constrained_web_runtime()
+    default_bytes = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_BYTES if constrained else SHORT_TTS_CACHE_MAX_BYTES
+    )
+    max_entries = (
+        CONSTRAINED_SHORT_TTS_CACHE_MAX_ENTRIES
+        if constrained
+        else SHORT_TTS_CACHE_MAX_ENTRIES
+    )
+    raw = (os.getenv("VIREAD_ELEVENLABS_SHORT_CACHE_MAX_BYTES") or "").strip()
+    if raw:
+        try:
+            max_bytes = max(0, min(32 * 1024 * 1024, int(raw)))
+            return max_bytes, max_entries
+        except ValueError:
+            pass
+    return default_bytes, max_entries
 
 
 class VoiceProviderError(Exception):
@@ -365,9 +400,18 @@ class ElevenLabsVoiceProvider:
             words=words,
         )
 
-    def _resolve_effective_voice(self, requested_voice_id: str | None) -> tuple[str, bool]:
+    def _resolve_effective_voice(
+        self,
+        requested_voice_id: str | None,
+        *,
+        expected_gender: str | None = None,
+    ) -> tuple[str, bool]:
         requested = self._voice_id(requested_voice_id)
         fp = self._key_fingerprint or ""
+        if (expected_gender or "").strip().lower() == "male":
+            if (fp, requested) in _unavailable_voices:
+                raise VoiceProviderUnavailable()
+            return requested, False
         if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
             return DEFAULT_VOICE_ID, True
         return requested, False
@@ -379,8 +423,9 @@ class ElevenLabsVoiceProvider:
     @staticmethod
     def _short_cache_put(cache_key: str, item: SynthesizedAudio) -> None:
         global _short_tts_cache_bytes
+        max_bytes, max_entries = _resolve_short_tts_cache_limits()
         size = len(item.content)
-        if size > SHORT_TTS_CACHE_MAX_BYTES // 2:
+        if max_bytes <= 0 or max_entries <= 0 or size > max_bytes // 2:
             return
         previous = _short_tts_cache.pop(cache_key, None)
         if previous is not None:
@@ -388,8 +433,8 @@ class ElevenLabsVoiceProvider:
         _short_tts_cache[cache_key] = item
         _short_tts_cache_bytes += size
         while _short_tts_cache and (
-            len(_short_tts_cache) > SHORT_TTS_CACHE_MAX_ENTRIES
-            or _short_tts_cache_bytes > SHORT_TTS_CACHE_MAX_BYTES
+            len(_short_tts_cache) > max_entries
+            or _short_tts_cache_bytes > max_bytes
         ):
             _, evicted = _short_tts_cache.popitem(last=False)
             _short_tts_cache_bytes -= len(evicted.content)
@@ -430,6 +475,7 @@ class ElevenLabsVoiceProvider:
         text: str,
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
     ) -> SynthesizedAudio:
         headers = self._headers()
         configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
@@ -441,11 +487,15 @@ class ElevenLabsVoiceProvider:
         settings = self._tts_voice_settings(model_id, speed)
         normalized_speed = settings["speed"]
         fp = self._key_fingerprint or ""
+        is_male_persona = (expected_gender or "").strip().lower() == "male"
 
-        voice_id, used_fallback = self._resolve_effective_voice(requested_voice_id)
+        voice_id, used_fallback = self._resolve_effective_voice(
+            requested_voice_id,
+            expected_gender=expected_gender,
+        )
         candidates = (
             [(voice_id, used_fallback)]
-            if voice_id == DEFAULT_VOICE_ID
+            if (voice_id == DEFAULT_VOICE_ID or is_male_persona)
             else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
         )
 
@@ -485,14 +535,19 @@ class ElevenLabsVoiceProvider:
                     if (
                         response.status_code in {402, 404}
                         and candidate_voice != DEFAULT_VOICE_ID
-                        and idx + 1 < len(candidates)
                     ):
+                        self._mark_voice_unavailable(candidate_voice)
+                        if idx + 1 < len(candidates):
+                            logger.warning(
+                                "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                                response.status_code,
+                            )
+                            continue
                         logger.warning(
-                            "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                            "ElevenLabs male voice unavailable (status=%s); refusing female default fallback",
                             response.status_code,
                         )
-                        self._mark_voice_unavailable(candidate_voice)
-                        continue
+                        raise VoiceProviderUnavailable()
                     if response.is_error:
                         raise self._tts_error_from_response(response)
 
@@ -539,6 +594,8 @@ class ElevenLabsVoiceProvider:
         words: list[str],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
+        region: str = "north",
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalTimedSpeech,
@@ -555,6 +612,7 @@ class ElevenLabsVoiceProvider:
             text=normalized_passage,
             requested_voice_id=requested_voice_id,
             speed=speed,
+            expected_gender=expected_gender,
         )
         duration = self._estimate_mp3_duration_seconds(audio.content)
         projected = project_chunk_spans_to_surface_words(
@@ -576,7 +634,7 @@ class ElevenLabsVoiceProvider:
             duration_seconds=duration,
             words=timed_words,
             resolved_voice_id=audio.resolved_voice_id or self.get_configured_voice_id(),
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,
@@ -588,6 +646,8 @@ class ElevenLabsVoiceProvider:
         steps: list[dict[str, Any]],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
+        region: str = "north",
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalPhonicsSpeech,
@@ -608,6 +668,7 @@ class ElevenLabsVoiceProvider:
                 text=spoken,
                 requested_voice_id=requested_voice_id,
                 speed=speed,
+                expected_gender=expected_gender,
             )
 
         synthesized_steps = await asyncio.gather(*(_synth_step(step) for step in steps))
@@ -642,7 +703,7 @@ class ElevenLabsVoiceProvider:
             duration_seconds=total_duration,
             step_timings=timings,
             resolved_voice_id=resolved_voice,
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,

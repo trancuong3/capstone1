@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import time
 from collections import OrderedDict
 from datetime import date, datetime, time as day_time, timedelta
-from typing import Callable
+from typing import Callable, get_args
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
 from app.repositories.child_progress_repository import ChildProgressRepository
 from app.schemas.child_progress import (
+    AiFallbackReason,
     AssessmentTextRead,
     ChildProgressAssessmentRead,
     ComprehensionTypeRead,
@@ -124,6 +126,37 @@ class ChildProgressService:
         self.ai = ai or ChildProgressAI(self.config)
         self._now = now or (lambda: datetime.now(VIETNAM_TZ))
 
+    @staticmethod
+    def _extract_child_teacher_gender(
+        child: object,
+        explicit_gender: str | None = None,
+    ) -> str | None:
+        if explicit_gender in ("female", "male"):
+            return explicit_gender
+        settings = getattr(child, "Settings", None)
+        if isinstance(settings, dict):
+            vp = settings.get("voice_preferences")
+            if isinstance(vp, dict):
+                gender = vp.get("gender")
+                if gender in ("female", "male"):
+                    return str(gender)
+                voice_id = str(vp.get("voice_id") or "").strip().lower()
+                if any(
+                    token in voice_id
+                    for token in (
+                        "quang_son",
+                        "thien_minh",
+                        "thai_son",
+                        "neural2_d",
+                        "wavenet_b",
+                        "_male",
+                    )
+                ):
+                    return "male"
+                if voice_id:
+                    return "female"
+        return None
+
     async def assess(
         self,
         child_id: UUID,
@@ -132,12 +165,17 @@ class ChildProgressService:
         days: int = 30,
         use_ai: bool = False,
         refresh: bool = False,
+        teacher_gender: str | None = None,
     ) -> ChildProgressAssessmentRead:
         if not 7 <= days <= 90:
             raise HTTPException(422, "Invalid period")
-        if await self.repository.owned_child(child_id, actor_id) is None:
+        child = await self.repository.owned_child(child_id, actor_id)
+        if child is None:
             # Same answer for a missing child and another parent's child.
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Child profile not found")
+        resolved_teacher_gender = self._extract_child_teacher_gender(
+            child, teacher_gender
+        )
 
         end: date = self._now().astimezone(VIETNAM_TZ).date()
         start = end - timedelta(days=days - 1)
@@ -170,8 +208,12 @@ class ChildProgressService:
             difficult_words=top_difficult_words(current),
         )
 
-        text, cached = await self._comments(
-            child_id, facts, use_ai=use_ai, refresh=refresh
+        text, cached, fallback_reason = await self._comments(
+            child_id,
+            facts,
+            use_ai=use_ai,
+            refresh=refresh,
+            teacher_gender=resolved_teacher_gender,
         )
         grade = grade_for(overall)
         previous_by_key = {c.key: c.score for c in previous_components}
@@ -204,36 +246,70 @@ class ChildProgressService:
             difficult_words=[DifficultWordStatRead(**word) for word in facts.difficult_words],
             assessment=text,
             ai_cached=cached,
+            ai_fallback_reason=fallback_reason,
         )
 
     async def _comments(
-        self, child_id: UUID, facts: AssessmentFacts, *, use_ai: bool, refresh: bool
-    ) -> tuple[AssessmentTextRead, bool]:
+        self,
+        child_id: UUID,
+        facts: AssessmentFacts,
+        *,
+        use_ai: bool,
+        refresh: bool,
+        teacher_gender: str | None = None,
+    ) -> tuple[AssessmentTextRead, bool, AiFallbackReason | None]:
         fallback = rule_based_assessment(facts)
         if facts.overall is None:
-            return fallback, False  # nothing meaningful to ask an AI about
+            return fallback, False, None  # nothing meaningful to ask an AI about
 
         payload = facts_payload(facts)
         fingerprint = hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
-        key = (str(child_id), facts.days, fingerprint)
+        key = (
+            (str(child_id), facts.days, fingerprint, "male")
+            if teacher_gender == "male"
+            else (str(child_id), facts.days, fingerprint)
+        )
         ttl = self.config.cache_ttl_seconds
 
         cached = assessment_cache.get(key, ttl)
         if cached is not None:
             age = time.monotonic() - cached[0]
             if not (use_ai and refresh and age >= self.config.refresh_cooldown_seconds):
-                return cached[1], True
-        if not (use_ai and self.ai.available):
-            return fallback, False
+                return cached[1], True, None
+        if not use_ai:
+            return fallback, False, None
+        if not self.config.enabled:
+            return fallback, False, "AI_DISABLED"
+        if not self.ai.available:
+            return fallback, False, "AI_NOT_CONFIGURED"
+
+        ai_kwargs: dict[str, object] = {
+            "allowed_words": [w["word"] for w in facts.difficult_words],
+        }
+        try:
+            params = inspect.signature(self.ai.assess).parameters
+            if "teacher_gender" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                ai_kwargs["teacher_gender"] = teacher_gender
+        except (TypeError, ValueError):
+            pass
 
         try:
-            text = await self.ai.assess(
-                payload, allowed_words=[w["word"] for w in facts.difficult_words]
-            )
+            text = await self.ai.assess(payload, **ai_kwargs)
         except AssessmentAIError as error:
-            logger.warning("Progress AI unavailable, using rule-based comments: %s", error.attempts)
-            return fallback, False
+            raw_reason = getattr(error, "primary_reason", "UNKNOWN")
+            valid_reasons = set(get_args(AiFallbackReason))
+            reason: AiFallbackReason = (
+                raw_reason if raw_reason in valid_reasons else "UNKNOWN"  # type: ignore[assignment]
+            )
+            logger.warning(
+                "Progress AI unavailable, using rule-based comments: reason=%s attempts=%s",
+                reason,
+                error.attempts,
+            )
+            return fallback, False, reason
         assessment_cache.put(key, text)
-        return text, False
+        return text, False, None

@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "阅读旅程导航"
+  },
   "overview": {
     "title": "进步报告",
     "subtitle": "追踪孩子的阅读时长、准确率和阅读打卡天数。",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "当前报告仍显示。您可以尝试重新加载周期列表。",
     "noPeriodReportTitle": "所选周期暂无报告",
     "noSavedReportTitle": "暂无已保存的报告",
-    "noReportDescription": "此选项无报告。请选择其他孩子或周期；系统不使用占位数据。",
+    "noReportDescription": "此选择暂无报告。您可以切换其他孩子档案或报告周期。",
     "pendingReportTitle": "数据待补充",
-    "pendingReportDesc": "报告数据尚未就绪。系统不显示估算数据。",
+    "pendingReportDesc": "报告数据暂未就绪，请稍后再试。",
     "periodBannerRange": "周期：{start} → {end}",
     "periodGeneratedAt": "更新于 {dateTime}（越南时间），不会在每次阅读后自动重新计算。",
     "unsupportedFormatTitle": "不支持的报告格式",
@@ -61,10 +64,10 @@
     "viewAllWords": "查看全部 ({count})",
     "noDifficultWordsInPeriod": "本周期报告暂无难词记录。",
     "difficultWordsWindowNote": "注意：难词部分默认汇总最近 90 天，不会随上述报告周期自动更改。",
-    "legacyMetricsTitle": "旧版指标",
-    "legacyMetricsSubtitle": "保留已保存的字段名称；未转换为阅读会话次数或精确百分比。",
-    "legacyTotalBooks": "已保存书籍总数 (total_books)",
-    "legacyAvgFluency": "已保存的 avg_fluency 值（单位未定义）",
+    "legacyMetricsTitle": "历史保存指标",
+    "legacyMetricsSubtitle": "来自早期记录格式的汇总指标。",
+    "legacyTotalBooks": "已保存书籍总数",
+    "legacyAvgFluency": "平均流畅度评分",
     "periodSelectLabel": "已保存的报告周期",
     "periodLatestOption": "最新",
     "periodSelectedRange": "{start} → {end} (已选)",
@@ -135,6 +138,9 @@
       "aiWriting": "AI 正在撰写点评…",
       "aiRefresh": "请求 AI 重新点评",
       "aiFallbackHint": "AI 未连接，当前显示基于数据的自动点评。家长稍后可点击“请求 AI 重新点评”。",
+      "aiFallbackQuota": "AI 暂时繁忙或已达请求上限，当前显示基于数据的自动点评。请稍候几分钟后再点击“请求 AI 重新点评”。",
+      "aiFallbackTimeout": "AI 响应时间超出预期，当前显示基于数据的自动点评。您可以几秒后再次点击“请求 AI 重新点评”。",
+      "aiFallbackConfig": "服务器当前未完成 AI 服务配置，因此显示基于数据的自动点评。请稍后重试或联系管理员。",
       "strengthsTitle": "孩子表现良好",
       "improvementsTitle": "孩子需要改进",
       "actionsTitle": "后续辅导建议",
@@ -162,7 +168,11 @@
       "uncertainLabel": "没听清",
       "uncertainNote": "单独记录，不计入已确认的发音错误。"
     },
-    "entertainmentSummaryHeading": "寓教于乐学习与语言技能概况 (V4.0)"
+    "entertainmentSummaryHeading": "寓教于乐学习与语言技能概况 (V4.0)",
+    "focusAria": "筛选报告板块",
+    "focusAssessment": "AI 评估",
+    "focusSignals": "图表与指标",
+    "focusEntertainment": "边玩边学"
   },
   "sessions": {
     "title": "阅读历史",
@@ -174,7 +184,7 @@
     "noChildDesc": "创建档案以开始保存孩子的阅读练习。",
     "createChildAction": "创建孩子资料",
     "pendingDataTitle": "数据待补充",
-    "pendingHistoryDesc": "阅读历史数据暂不可用。系统不显示示例数据。",
+    "pendingHistoryDesc": "阅读历史数据暂未就绪，请稍后再试。",
     "retry": "重试",
     "manageChildren": "管理孩子档案",
     "notFoundTitle": "未找到历史记录",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes} 分 {seconds} 秒",
     "detail": {
       "loadingAria": "正在加载阅读详情",
-      "pendingDesc": "此项数据格式暂不支持。无可用样本数据。",
+      "pendingDesc": "此项数据暂未就绪，请稍后再试。",
       "notFoundTitle": "未找到阅读会话",
       "notFoundDesc": "阅读会话不存在或不属于当前账户。",
       "backToHistory": "返回历史记录",
@@ -283,7 +293,7 @@
       "originalOmission": "漏读",
       "originalMispronunciation": "发音不正确",
       "recognizedPrefix": "ViRead 识别为：“{text}”",
-      "pageRevisionMeta": "页面 {pageId} · 版本 ",
+      "pageRevisionMeta": "书页",
       "firstPassSectionAria": "首次阅读事件",
       "firstPassSectionTitle": "首次阅读事件",
       "timestampAt": "在 ",
@@ -346,7 +356,7 @@
       "prevShort": "上一页",
       "nextShort": "下一步",
       "loadingPageAria": "正在加载图书页面内容",
-      "verifiedPageTitle": "已验证页面内容",
+      "verifiedPageTitle": "书页内容",
       "selfCorrectedCount": "纠错正确：{count} 个词",
       "pageMissingContentNote": "无法加载孩子阅读时的确切图书页面版本。已保存的朗读记录和统计数据保持不变。",
       "legendAria": "颜色对照图例",
@@ -388,7 +398,20 @@
         "repeated": "重复",
         "hesitation": "犹豫"
       }
-    }
+    },
+    "summarySessions": "阅读次数",
+    "summaryDuration": "累计时长",
+    "summaryCompleted": "已完成",
+    "summaryDurationZero": "0 分钟",
+    "filterAria": "按状态筛选阅读记录",
+    "filterAll": "全部",
+    "filterCompleted": "已完成",
+    "filterIncomplete": "未完成",
+    "searchPlaceholder": "按当前页书名筛选…",
+    "searchAria": "按书名搜索阅读记录",
+    "filterEmptyTitle": "没有符合条件的记录",
+    "filterEmptyDesc": "请切换状态或清空搜索关键词。",
+    "clearFilterAction": "查看全部记录"
   },
   "readingManagement": {
     "title": "阅读管理与提醒",
@@ -406,7 +429,7 @@
     "errorTitle": "出现问题",
     "savedTitle": "已保存",
     "loadChildFailed": "无法加载孩子资料。请重试。",
-    "loadManagementFailed": "无法加载阅读管理数据。请检查后端和阅读管理迁移，然后重试。",
+    "loadManagementFailed": "无法加载阅读管理数据，请稍后再试。",
     "mutationUnconfirmed": "无法完成操作。数据未确认保存；请重试。",
     "overviewAria": "阅读习惯概览",
     "summaryRunningGoals": "进行中的目标",
@@ -514,7 +537,7 @@
     "goalsTimezoneRule": "进度仅统计具有有效开始/结束时间的已完成阅读会话。目标不会因达到100%而自动完成。",
     "remindersSectionAria": "阅读提醒",
     "remindersTitle": "阅读提醒",
-    "remindersSubtitle": "日程按所选时区保存。开启邮件提醒后，系统将向家长已验证的邮箱地址发送提醒。",
+    "remindersSubtitle": "日程按所选时区保存。开启邮件提醒后，系统将向家长已验证邮箱发送提醒。",
     "addReminder": "添加提醒",
     "dueRemindersTitle": "阅读时间 ({count})",
     "reminderAtPrefix": "提醒时间：",
@@ -565,7 +588,7 @@
       "startLabel": "开始",
       "createGoal": "创建目标",
       "localTimeLabel": "当地时间",
-      "ianaTimezoneLabel": "IANA 时区",
+      "ianaTimezoneLabel": "详细时区",
       "repeatDaysLabel": "重复日期",
       "emailReminderLabel": "阅读提醒邮件",
       "sendEmailCheck": "阅读时间到达时发送邮件给家长",
@@ -643,7 +666,11 @@
       "favorited": "已收藏",
       "wantToRead": "想读",
       "savedToRead": "已保存至阅读列表"
-    }
+    },
+    "focusAria": "筛选阅读管理板块",
+    "focusPlans": "计划",
+    "focusGoals": "目标",
+    "focusReminders": "提醒"
   },
   "entertainmentSummary": {
     "loading": "正在汇总 {childName} 的趣味学习进度…",

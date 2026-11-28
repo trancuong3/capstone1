@@ -92,6 +92,7 @@ class SceneSpec(BaseModel):
     guided_questions_vi: list[str] = Field(default_factory=list)
     creative_prompt_vi: str
     matched_focus_words: list[str] = Field(default_factory=list)
+    creative_focus_words: list[str] = Field(default_factory=list)
 
 
 class MemoryThemeRead(BaseModel):
@@ -166,6 +167,7 @@ class MemoryAttemptCreate(BaseModel):
     stage: MemoryAttemptStage = "RECALL"
     input_mode: MemoryInputMode = "TEXT"
     response_text: str = Field(..., min_length=1, max_length=2000)
+    teacher_gender: Literal["female", "male"] | None = None
 
 
 class MatchedFactRead(BaseModel):

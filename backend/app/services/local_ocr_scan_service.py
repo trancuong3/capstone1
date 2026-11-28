@@ -363,7 +363,7 @@ class LocalOcrScanService:
         if not await job_service.has_online_worker():
             raise HTTPException(
                 status_code=503,
-                detail="Remote OCR worker is offline; live page scan is temporarily unavailable.",
+                detail="Dịch vụ nhận diện chữ tạm thời chưa sẵn sàng, vui lòng thử lại sau.",
             )
         await self._release_db_read_txn()
 
@@ -525,7 +525,7 @@ class LocalOcrScanService:
             )
             raise HTTPException(
                 status_code=504,
-                detail="Local OCR processing timed out; please retry",
+                detail="Quá trình nhận diện chữ mất quá nhiều thời gian, vui lòng thử lại.",
             ) from exc
         except HTTPException:
             raise
@@ -544,7 +544,7 @@ class LocalOcrScanService:
                 )
                 raise HTTPException(
                     status_code=422,
-                    detail="No usable text was detected; check the image quality",
+                    detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                 ) from exc
             if _is_ocr_exception(exc, "OcrEngineUnavailable"):
                 log_diagnostic(
@@ -559,7 +559,7 @@ class LocalOcrScanService:
                 )
                 raise HTTPException(
                     status_code=503,
-                    detail="Local OCR engine is unavailable",
+                    detail="Dịch vụ nhận diện chữ tạm thời chưa sẵn sàng, vui lòng thử lại sau.",
                 ) from exc
             log_diagnostic(
                 logger,
@@ -573,7 +573,7 @@ class LocalOcrScanService:
             )
             raise HTTPException(
                 status_code=500,
-                detail="OCR processing failed; check the local OCR configuration",
+                detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
             ) from exc
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -631,7 +631,7 @@ class LocalOcrScanService:
         if not ocr_text:
             raise HTTPException(
                 status_code=422,
-                detail="No usable text was detected; check the image quality",
+                detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
             )
 
         raw_words = ocr_result.get("words") if isinstance(ocr_result.get("words"), list) else []
@@ -682,7 +682,10 @@ class LocalOcrScanService:
 
         # Match extracted Vietnamese text against child-safety-approved catalog pages.
         ocr_tokens = normalize_text_tokens(ocr_text)
-        candidates = await self.repository.eligible_verified_pages(book_id=book_id)
+        candidates = await self.repository.eligible_verified_pages(
+            book_id=book_id,
+            ocr_tokens=ocr_tokens,
+        )
         best_tuple = None
         best_score = 0.0
         best_shared = 0
@@ -726,7 +729,7 @@ class LocalOcrScanService:
                 ],
             )
             message = (
-                f"Đã nhận diện tiếng Việt bằng OCR và khớp Trang {m_page.PageNumber} "
+                f"Đã nhận diện nội dung trang sách và khớp Trang {m_page.PageNumber} "
                 f"của sách “{m_book.Title}”."
             )
         else:
@@ -795,7 +798,7 @@ class LocalOcrScanService:
                 error_code = error_code or "NO_TEXT_DETECTED"
                 error_message = (
                     error_message
-                    or "No usable text was detected; check the image quality"
+                    or "Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn."
                 )
             else:
                 ocr_meta = dict(payload.get("ocr_meta") or {})
@@ -817,6 +820,17 @@ class LocalOcrScanService:
                     elapsed_ms=int(job.DurationMs or 0),
                 )
 
+        from app.services.ai_task_progress import (
+            compute_ocr_job_progress,
+            extract_ocr_worker_phase,
+        )
+
+        worker_phase = extract_ocr_worker_phase(proc_meta)
+        progress_pct, _progress_mode = compute_ocr_job_progress(
+            status=job_status,
+            worker_phase=worker_phase,
+            worker_online=worker_online,
+        )
         return LocalOcrPageScanJobRead(
             job_id=job.Id,
             status=job_status,  # type: ignore[arg-type]
@@ -825,6 +839,8 @@ class LocalOcrScanService:
             updated_at=updated_at,
             file_name=file_name,
             queue_position=queue_position if job_status in ("QUEUED", "FAILED_RETRYABLE") else None,
+            progress_pct=progress_pct,
+            worker_phase=worker_phase,
             error_code=error_code,
             error_message=error_message,
             result=result_dto,
@@ -937,7 +953,7 @@ class LocalOcrScanService:
                         "no_text_detected": not bool(text_val),
                     },
                     ErrorCode=None if text_val else "NO_TEXT_DETECTED",
-                    ErrorMessage=None if text_val else "No usable text was detected; check the image quality",
+                    ErrorMessage=None if text_val else "Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                     DurationMs=duration_ms,
                     CreatedAt=now,
                     UpdatedAt=now,
@@ -975,7 +991,7 @@ class LocalOcrScanService:
                     AttemptCount=1,
                     MaxAttempts=1,
                     ErrorCode=err_code,
-                    ErrorMessage="Local OCR processing failed.",
+                    ErrorMessage="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                     CreatedAt=now,
                     UpdatedAt=now,
                     CompletedAt=now,
@@ -1105,10 +1121,21 @@ class LocalOcrScanService:
             )
         await self._release_db_read_txn()
         worker_online = await job_service.has_online_worker()
+        from app.services.ai_task_progress import compute_ocr_job_progress
+
         return LocalOcrPageScanJobListRead(
             worker_online=worker_online,
             jobs=[
-                item.model_copy(update={"worker_online": worker_online})
+                item.model_copy(
+                    update={
+                        "worker_online": worker_online,
+                        "progress_pct": compute_ocr_job_progress(
+                            status=item.status,
+                            worker_phase=item.worker_phase,
+                            worker_online=worker_online,
+                        )[0],
+                    }
+                )
                 for item in serialized_jobs
             ],
         )
@@ -1173,7 +1200,18 @@ class LocalOcrScanService:
             except Exception:
                 pass
         worker_online = await job_service.has_online_worker()
-        return serialized.model_copy(update={"worker_online": worker_online})
+        from app.services.ai_task_progress import compute_ocr_job_progress
+
+        return serialized.model_copy(
+            update={
+                "worker_online": worker_online,
+                "progress_pct": compute_ocr_job_progress(
+                    status=serialized.status,
+                    worker_phase=serialized.worker_phase,
+                    worker_online=worker_online,
+                )[0],
+            }
+        )
 
     async def cancel_scan_page_job(
         self,
@@ -1210,7 +1248,18 @@ class LocalOcrScanService:
             except Exception:
                 pass
         worker_online = await job_service.has_online_worker()
-        return serialized.model_copy(update={"worker_online": worker_online})
+        from app.services.ai_task_progress import compute_ocr_job_progress
+
+        return serialized.model_copy(
+            update={
+                "worker_online": worker_online,
+                "progress_pct": compute_ocr_job_progress(
+                    status=serialized.status,
+                    worker_phase=serialized.worker_phase,
+                    worker_online=worker_online,
+                )[0],
+            }
+        )
 
 
 async def cleanup_expired_local_scan_objects(

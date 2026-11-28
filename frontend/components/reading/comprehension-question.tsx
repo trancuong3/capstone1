@@ -11,25 +11,48 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import { invalidateApiReadCacheByPrefix } from "@/lib/api/read-cache";
+import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
-import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import {
+  isInjectedTestSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+} from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
-import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
+import {
+  getActiveSessionVoiceLock,
+  getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
+  lockSessionVoice,
+} from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   analyzeComprehensionVoiceInput,
   choiceLetterForSpeech,
 } from "@/lib/reading/comprehension-voice-matcher";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { parseVoiceIntent } from "@/lib/reading/voice-intent";
+import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -91,8 +114,57 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 }
 
+function hasBrowserAudioOrVoiceApi(): boolean {
+  if (typeof window === "undefined") return false;
+  const win = window as unknown as {
+    AudioContext?: unknown;
+    webkitAudioContext?: unknown;
+  };
+  return (
+    Boolean(getSpeechRecognitionCtor()) ||
+    isAndroidNativeSpeechAvailable() ||
+    typeof win.AudioContext === "function" ||
+    typeof win.webkitAudioContext === "function" ||
+    Boolean(window.speechSynthesis?.getVoices?.().length)
+  );
+}
+
 const REMIND_SILENCE_MS = 10_000;
+const SECOND_REMIND_SILENCE_MS = 12_000;
+const MAX_SILENCE_REMINDERS = 2;
 const BARE_LETTER_SETTLE_MS = 850;
+
+function hasQuizVoiceCapabilities(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    Boolean(getSpeechRecognitionCtor()) ||
+    isAndroidNativeSpeechAvailable() ||
+    typeof window.AudioContext === "function" ||
+    Boolean(window.speechSynthesis?.getVoices?.().length)
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+  );
+}
+
+function isSkipQuestionVoiceCommand(transcript: string): boolean {
+  if (parseVoiceIntent(transcript).type === "SKIP") {
+    return true;
+  }
+  const normalized = transcript
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:(?:cô|thầy)\s+)?(?:ơi\s+)?(?:cho\s+(?:con|bé|em)\s+)?bỏ\s+qua(?:\s+câu(?:\s+này)?)?(?:\s+(?:ạ|nhé|nha|đi))?$/u.test(
+    normalized,
+  );
+}
 
 export function ComprehensionQuestion({
   child,
@@ -100,6 +172,7 @@ export function ComprehensionQuestion({
   sessionId,
 }: ComprehensionQuestionProps) {
   const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
   const { comprehensionService } = useReadingServices();
   const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -116,6 +189,23 @@ export function ComprehensionQuestion({
     null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const questionGenProgress = useAiProgress({
+    active: loadState.status === "loading",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 58, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const evalAnswerProgress = useAiProgress({
+    active: isSubmitting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 3_500,
+  });
   const [progress, setProgress] = useState<{
     position?: number;
     total?: number;
@@ -125,6 +215,13 @@ export function ComprehensionQuestion({
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voicePausedByUser, setVoicePausedByUser] = useState(false);
   const [feedbackNote, setFeedbackNote] = useState<string | null>(null);
+  const [wrongCount, setWrongCount] = useState(0);
+  const [eliminatedValues, setEliminatedValues] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [revealedHint, setRevealedHint] = useState<string | null>(null);
+  const [feedbackPreserveVerbatim, setFeedbackPreserveVerbatim] =
+    useState(false);
 
   const mountedRef = useRef(false);
   const flowGenRef = useRef(0);
@@ -134,9 +231,14 @@ export function ComprehensionQuestion({
   const remindTimerRef = useRef<number | null>(null);
   const voiceSettleTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
-  const remindedForQuestionRef = useRef(false);
+  const silenceReminderCountRef = useRef(0);
   const isSubmittingRef = useRef(false);
   const solvedQuestionIdRef = useRef<string | null>(null);
+  const advancingQuestionIdRef = useRef<string | null>(null);
+  const wrongCountRef = useRef(0);
+  const eliminatedValuesRef = useRef<Set<string>>(new Set());
+  const choiceButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const feedbackRef = useRef<HTMLDivElement | null>(null);
   const voicePausedRef = useRef(false);
   const activeQuestionRef = useRef<ComprehensionQuestionViewModelUI | null>(
     null,
@@ -200,6 +302,8 @@ export function ComprehensionQuestion({
 
   useEffect(() => {
     mountedRef.current = true;
+    lockSessionVoice(sessionId);
+    void preloadReadingVoiceEngines();
     const cleanupVoice = () => {
       flowGenRef.current += 1;
       prefetchAbortRef.current?.abort();
@@ -234,7 +338,7 @@ export function ComprehensionQuestion({
       window.removeEventListener("pagehide", handlePageHide);
       cleanupVoice();
     };
-  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer]);
+  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer, sessionId]);
 
   const speakGuarded = useCallback(
     async (
@@ -272,19 +376,41 @@ export function ComprehensionQuestion({
     questionTotal !== undefined &&
     questionPosition < questionTotal;
 
-  const advanceToNextQuestion = useCallback(() => {
-    stopAllVoice();
-    if (!hasNextQuestionRef.current) {
-      onCompleteRef.current();
-      return;
-    }
-    solvedQuestionIdRef.current = null;
-    setSelectedAnswer(null);
-    setResult(null);
-    setFeedbackNote(null);
-    setLoadState({ status: "loading" });
-    setLoadKey((key) => key + 1);
-  }, [stopAllVoice]);
+  const advanceToNextQuestion = useCallback(
+    (expectedQuestionId?: string) => {
+      if (
+        expectedQuestionId &&
+        advancingQuestionIdRef.current === expectedQuestionId
+      ) {
+        return;
+      }
+      if (expectedQuestionId) {
+        advancingQuestionIdRef.current = expectedQuestionId;
+      }
+      stopAllVoice();
+      if (!hasNextQuestionRef.current) {
+        onCompleteRef.current();
+        return;
+      }
+      solvedQuestionIdRef.current = null;
+      wrongCountRef.current = 0;
+      eliminatedValuesRef.current = new Set();
+      silenceReminderCountRef.current = 0;
+      setWrongCount(0);
+      setEliminatedValues(new Set());
+      setRevealedHint(null);
+      setSelectedAnswer(null);
+      setResult(null);
+      setFeedbackNote(null);
+      setFeedbackPreserveVerbatim(false);
+      invalidateApiReadCacheByPrefix(
+        `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
+      );
+      setLoadState({ status: "loading" });
+      setLoadKey((key) => key + 1);
+    },
+    [sessionId, stopAllVoice],
+  );
 
   const startVoiceListenRef = useRef<
     (value: ComprehensionQuestionViewModelUI, gen: number) => void
@@ -316,6 +442,7 @@ export function ComprehensionQuestion({
       setIsSubmitting(true);
       setResult(null);
       setFeedbackNote(null);
+      setFeedbackPreserveVerbatim(false);
 
       let nextResult: ComprehensionAnswerResultDTO | null = null;
       try {
@@ -333,6 +460,22 @@ export function ComprehensionQuestion({
           }
           setResult(nextResult);
         }
+      } catch (error) {
+        if (
+          mountedRef.current &&
+          activeQuestionRef.current?.question.id === submittedQuestionId
+        ) {
+          setSelectedAnswer(null);
+          setResult(null);
+          setFeedbackNote(
+            isServiceError(error)
+              ? error.message
+              : adaptTextToTeacherPersona(
+                  "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+                  getEffectiveTeacherPersona().gender,
+                ),
+          );
+        }
       } finally {
         isSubmittingRef.current = false;
         if (mountedRef.current) setIsSubmitting(false);
@@ -347,21 +490,120 @@ export function ComprehensionQuestion({
       }
 
       const storyHint = nextResult.story_hint?.trim() || null;
+      const canUseVoice =
+        hasQuizVoiceCapabilities() &&
+        gen === flowGenRef.current &&
+        !voicePausedRef.current;
+
+      if (nextResult.is_correct) {
+        setFeedbackPreserveVerbatim(false);
+        if (source === "voice" || canUseVoice) {
+          const praise = prompts.next("quizCorrect");
+          setFeedbackNote(praise);
+          setFeedbackPreserveVerbatim(false);
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(praise, gen);
+          if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
+            advanceToNextQuestion(submittedQuestionId);
+          }
+        }
+        return;
+      }
+
+      // Wrong answer: 3-step anti-stuck ladder
+      const nextWrongCount = wrongCountRef.current + 1;
+      wrongCountRef.current = nextWrongCount;
+      setWrongCount(nextWrongCount);
+      const nextEliminated = new Set(eliminatedValuesRef.current);
+      nextEliminated.add(answer);
+      eliminatedValuesRef.current = nextEliminated;
+      setEliminatedValues(nextEliminated);
+
+      const remainingChoices = activeValue.choices.filter(
+        (c) => !nextEliminated.has(c.value),
+      );
+      const activeTeacherGender = getEffectiveTeacherPersona().gender;
+
+      if (nextWrongCount >= 3) {
+        solvedQuestionIdRef.current = submittedQuestionId;
+        const framingLead = adaptTextToTeacherPersona(
+          "Không sao đâu con!",
+          activeTeacherGender,
+        );
+        const explainText =
+          remainingChoices.length === 1
+            ? `${framingLead} Đáp án đúng là ${remainingChoices[0].id}: “${remainingChoices[0].label}”.${storyHint ? ` ${storyHint}` : ""} Mình sang câu tiếp theo nhé!`
+            : storyHint
+              ? `${framingLead} Gợi ý từ bài đọc: ${storyHint} Mình sang câu tiếp theo nhé!`
+              : `${framingLead} Mình cùng sang câu tiếp theo nhé!`;
+        setFeedbackNote(explainText);
+        setFeedbackPreserveVerbatim(true);
+        setRevealedHint(explainText);
+        if (source === "voice" || canUseVoice) {
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(explainText, gen, {
+            adaptPersona: false,
+          });
+          if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
+            advanceToNextQuestion(submittedQuestionId);
+          }
+        } else {
+          advanceToNextQuestion(submittedQuestionId);
+        }
+        return;
+      }
+
+      if (nextWrongCount === 2) {
+        const adaptedNarrowLead = adaptTextToTeacherPersona(
+          remainingChoices.length === 1
+            ? "Mình loại bớt đáp án chưa đúng nhé. Chỉ còn đáp án __VIREAD_CHOICE_ID__: “__VIREAD_CHOICE_LABEL__” thôi!"
+            : `Mình loại bớt đáp án chưa đúng nhé. Con xem ${remainingChoices.length} lựa chọn còn lại nha!`,
+          activeTeacherGender,
+        );
+        const narrowPrefix =
+          remainingChoices.length === 1
+            ? adaptedNarrowLead
+                .replace("__VIREAD_CHOICE_ID__", remainingChoices[0].id)
+                .replace("__VIREAD_CHOICE_LABEL__", remainingChoices[0].label)
+            : adaptedNarrowLead;
+        const step2Text = storyHint
+          ? `${narrowPrefix} ${storyHint}`
+          : narrowPrefix;
+        setFeedbackNote(step2Text);
+        setFeedbackPreserveVerbatim(true);
+        setRevealedHint(step2Text);
+        if (source === "voice" || canUseVoice) {
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(step2Text, gen, {
+            adaptPersona: false,
+          });
+          if (
+            stillCurrent &&
+            mountedRef.current &&
+            !voicePausedRef.current &&
+            activeQuestionRef.current?.question.id === submittedQuestionId
+          ) {
+            if (source === "voice") {
+              startVoiceListenRef.current(activeValue, gen);
+            } else {
+              setVoicePhase("idle");
+            }
+          }
+        }
+        return;
+      }
+
+      // Wrong #1 -> story_hint
       if (source !== "voice") {
-        if (!nextResult.is_correct && storyHint) {
+        if (storyHint) {
           // Keep story_hint verbatim so book characters ("Cô Tấm", "cô tiên") are never altered.
           setFeedbackNote(storyHint);
+          setRevealedHint(storyHint);
+          setFeedbackPreserveVerbatim(true);
           // Read story_hint aloud even on touch mistakes so Grade-1 readers hear
           // the clue immediately; tapping any other choice barges in via stopAllVoice().
-          if (
-            gen === flowGenRef.current &&
-            !voicePausedRef.current &&
-            typeof window !== "undefined" &&
-            (Boolean(getSpeechRecognitionCtor()) ||
-              isAndroidNativeSpeechAvailable() ||
-              typeof window.AudioContext === "function" ||
-              Boolean(window.speechSynthesis?.getVoices?.().length))
-          ) {
+          if (canUseVoice) {
+            lockSessionVoice(sessionId);
             setVoicePhase("reading");
             const stillCurrent = await speakGuarded(storyHint, gen, {
               adaptPersona: false,
@@ -383,47 +625,57 @@ export function ComprehensionQuestion({
         return;
       }
 
-      if (nextResult.is_correct) {
-        const praise = prompts.next("quizCorrect");
-        setFeedbackNote(praise);
-        setVoicePhase("reading");
-        const stillCurrent = await speakGuarded(praise, gen);
-        if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
-          advanceToNextQuestion();
+      const chosen = activeValue.choices.find((c) => c.value === answer);
+      const activeGender = getEffectiveTeacherPersona().gender;
+      let encourage: string;
+      let preserveVerbatim = false;
+      if (storyHint) {
+        setRevealedHint(storyHint);
+        preserveVerbatim = true;
+        if (chosen) {
+          // Adapt ONLY the framing template BEFORE interpolating story text
+          // so book characters ("Cô Tấm", "cô tiên") in label or storyHint are NEVER rewritten.
+          const adaptedFrame = adaptTextToTeacherPersona(
+            t("comprehension.chosenCorrectFeedback", {
+              label: "__VIREAD_CHOICE_LABEL__",
+              hint: "__VIREAD_STORY_HINT__",
+            }),
+            activeGender,
+          );
+          encourage = adaptedFrame
+            .replace("__VIREAD_CHOICE_LABEL__", chosen.label)
+            .replace("__VIREAD_STORY_HINT__", storyHint);
+        } else {
+          encourage = storyHint;
         }
+      } else if (chosen) {
+        preserveVerbatim = true;
+        const adaptedFrame = adaptTextToTeacherPersona(
+          t("comprehension.chosenWrongFeedback", {
+            label: "__VIREAD_CHOICE_LABEL__",
+          }),
+          activeGender,
+        );
+        encourage = adaptedFrame.replace(
+          "__VIREAD_CHOICE_LABEL__",
+          chosen.label,
+        );
       } else {
-        const chosen = activeValue.choices.find((c) => c.value === answer);
-        const encourage = storyHint
-          ? adaptTextToTeacherPersona(
-              chosen
-                ? t("comprehension.chosenCorrectFeedback", {
-                    label: chosen.label,
-                    hint: storyHint,
-                  })
-                : storyHint,
-              teacherPersona.gender,
-            )
-          : chosen
-            ? adaptTextToTeacherPersona(
-                t("comprehension.chosenWrongFeedback", {
-                  label: chosen.label,
-                }),
-                teacherPersona.gender,
-              )
-            : prompts.next("quizTryAgain");
-        setFeedbackNote(encourage);
-        setVoicePhase("reading");
-        const stillCurrent = await speakGuarded(encourage, gen, {
-          adaptPersona: !storyHint && !chosen,
-        });
-        if (
-          stillCurrent &&
-          mountedRef.current &&
-          !voicePausedRef.current &&
-          activeQuestionRef.current?.question.id === submittedQuestionId
-        ) {
-          startVoiceListenRef.current(activeValue, gen);
-        }
+        encourage = prompts.next("quizTryAgain");
+      }
+      setFeedbackNote(encourage);
+      setFeedbackPreserveVerbatim(preserveVerbatim);
+      setVoicePhase("reading");
+      const stillCurrent = await speakGuarded(encourage, gen, {
+        adaptPersona: !preserveVerbatim,
+      });
+      if (
+        stillCurrent &&
+        mountedRef.current &&
+        !voicePausedRef.current &&
+        activeQuestionRef.current?.question.id === submittedQuestionId
+      ) {
+        startVoiceListenRef.current(activeValue, gen);
       }
     },
     [
@@ -436,7 +688,6 @@ export function ComprehensionQuestion({
       speakGuarded,
       stopAllVoice,
       t,
-      teacherPersona.gender,
     ],
   );
 
@@ -449,217 +700,117 @@ export function ComprehensionQuestion({
       ) {
         return;
       }
-      const boundQuestionId = value.question.id;
-      const boundPageId = `quiz:${boundQuestionId}`;
-      lockSessionVoice(sessionId);
-      const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
-        window as unknown as {
-          SpeechRecognition?: BrowserSpeechRecognitionCtor;
-          webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
-          AudioContext?: typeof AudioContext;
-          webkitAudioContext?: typeof AudioContext;
-        },
-        speechService,
-        () => ({ sessionId, pageId: boundPageId }),
-      ) as BrowserSpeechRecognitionCtor | undefined;
-      if (!Ctor) {
-        setVoicePhase("idle");
-        return;
-      }
-      stopVoiceRecognition();
+      const rawCtor = getSpeechRecognitionCtor();
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttReady = Boolean(
+        freshHealth?.local.available && freshHealth.local.stt_ready,
+      );
+      const needsWasmWarmup =
+        !isAndroidNativeSpeechAvailable() &&
+        !isInjectedTestSpeechRecognition(rawCtor) &&
+        !localSttReady &&
+        detectBrowserWasmSttSupport().supported &&
+        !getBrowserWasmSttClient().isReady();
 
-      let rec: BrowserSpeechRecognition;
-      try {
-        rec = new Ctor();
-      } catch {
-        setVoicePhase("idle");
-        return;
-      }
-
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = "vi-VN";
-      rec.maxAlternatives = 1;
-      recognitionRef.current = rec;
-      setVoicePhase("listening");
-
-      let processedUpTo = -1;
-      let fatalError = false;
-      let consecutiveRestarts = 0;
-      let networkErrorStreak = 0;
-      let maxEpochSeen = -1;
-      const seenFinalTurnIds = new Set<string>();
-      const SETTLE_IGNORED_POLITE = new Set([
-        "ạ",
-        "nhé",
-        "nha",
-        "ơi",
-        "à",
-        "ờ",
-        "ừ",
-        "ừm",
-        "nhỉ",
-        "ha",
-        "dạ",
-        "vâng",
-        "thưa",
-      ]);
-
-      const isItemFencedIn = (
-        item: BrowserSpeechRecognitionResult,
-      ): boolean => {
-        if (item.sessionId != null && item.sessionId !== sessionId)
-          return false;
-        if (item.pageId != null && item.pageId !== boundPageId) return false;
-        if (typeof item.epoch === "number") {
-          if (item.epoch < maxEpochSeen) return false;
-          maxEpochSeen = item.epoch;
-        }
-        return true;
-      };
-
-      const armReminder = () => {
-        clearRemindTimer();
-        if (remindedForQuestionRef.current) return;
-        remindTimerRef.current = window.setTimeout(() => {
-          if (
-            !mountedRef.current ||
-            gen !== flowGenRef.current ||
-            voicePausedRef.current ||
-            isSubmittingRef.current ||
-            solvedQuestionIdRef.current === boundQuestionId ||
-            activeQuestionRef.current?.question.id !== boundQuestionId
-          ) {
-            return;
-          }
-          remindedForQuestionRef.current = true;
-          stopVoiceRecognition();
-          setVoicePhase("reading");
-          void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
-            if (
-              ok &&
-              mountedRef.current &&
-              !voicePausedRef.current &&
-              activeQuestionRef.current?.question.id === boundQuestionId
-            ) {
-              startVoiceListenRef.current(value, gen);
-            }
-          });
-        }, REMIND_SILENCE_MS);
-      };
-
-      armReminder();
-
-      rec.onresult = (event) => {
+      const beginRecognition = () => {
         if (
           !mountedRef.current ||
           gen !== flowGenRef.current ||
-          recognitionRef.current !== rec ||
-          isSubmittingRef.current ||
-          solvedQuestionIdRef.current === boundQuestionId ||
-          activeQuestionRef.current?.question.id !== boundQuestionId
+          voicePausedRef.current
         ) {
           return;
         }
-        // Check interim provisional highlight (only previews, NEVER submits!)
-        for (let idx = event.results.length - 1; idx >= 0; idx -= 1) {
-          const item = event.results[idx];
-          if (!item || item.isFinal) continue;
-          if (!isItemFencedIn(item)) continue;
-          const interimText = item[0]?.transcript?.trim() ?? "";
-          if (interimText) {
-            // Cancel any pending bare-letter settle timer as soon as the child speaks again
-            clearVoiceSettleTimer();
-            armReminder();
-            const interimAnalysis = analyzeComprehensionVoiceInput(
-              interimText,
-              value.choices,
-            );
-            setPreviewChoiceId(
-              interimAnalysis.type === "CHOICE"
-                ? interimAnalysis.choice.id
-                : null,
-            );
-          } else {
-            setPreviewChoiceId(null);
-          }
-          break;
+        const boundQuestionId = value.question.id;
+        const boundPageId = `quiz:${boundQuestionId}`;
+        lockSessionVoice(sessionId);
+        const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
+          window as unknown as {
+            SpeechRecognition?: BrowserSpeechRecognitionCtor;
+            webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+            AudioContext?: typeof AudioContext;
+            webkitAudioContext?: typeof AudioContext;
+          },
+          speechService,
+          () => ({ sessionId, pageId: boundPageId }),
+        ) as BrowserSpeechRecognitionCtor | undefined;
+        if (!Ctor) {
+          setVoicePhase("idle");
+          return;
+        }
+        stopVoiceRecognition();
+
+        let rec: BrowserSpeechRecognition;
+        try {
+          rec = new Ctor();
+        } catch {
+          setVoicePhase("idle");
+          return;
         }
 
-        const start = Math.max(event.resultIndex ?? 0, processedUpTo + 1);
-        for (let idx = start; idx < event.results.length; idx += 1) {
-          const item = event.results[idx];
-          if (!item?.isFinal) continue;
-          processedUpTo = idx;
-          if (!isItemFencedIn(item)) continue;
-          const turnKey = item.turnId ?? item.segmentId;
-          if (turnKey) {
-            if (seenFinalTurnIds.has(turnKey)) continue;
-            seenFinalTurnIds.add(turnKey);
-          }
-          clearVoiceSettleTimer();
-          const transcript = (item[0]?.transcript ?? "")
-            .normalize("NFC")
-            .trim();
-          if (!transcript) continue;
-          armReminder();
-          const confidence = item[0]?.confidence;
-          if (
-            typeof confidence === "number" &&
-            confidence > 0 &&
-            confidence < 0.35
-          ) {
-            continue;
-          }
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = "vi-VN";
+        rec.maxAlternatives = 1;
+        recognitionRef.current = rec;
+        setVoicePhase("listening");
 
-          // Block echo from our own question / option TTS using real VAD onsetAt!
-          const onsetAt =
-            typeof item.onsetAt === "number" && Number.isFinite(item.onsetAt)
-              ? item.onsetAt
-              : null;
-          if (
-            !echoGuard.evaluate({
-              text: transcript,
-              receivedAt: performance.now(),
-              onsetAt,
-            }).accept
-          ) {
-            continue;
-          }
-          consecutiveRestarts = 0;
-          networkErrorStreak = 0;
+        let processedUpTo = -1;
+        let fatalError = false;
+        let consecutiveRestarts = 0;
+        let networkErrorStreak = 0;
+        let maxEpochSeen = -1;
+        const seenFinalTurnIds = new Set<string>();
+        const SETTLE_IGNORED_POLITE = new Set([
+          "ạ",
+          "nhé",
+          "nha",
+          "ơi",
+          "à",
+          "ờ",
+          "ừ",
+          "ừm",
+          "nhỉ",
+          "ha",
+          "dạ",
+          "vâng",
+          "thưa",
+        ]);
 
-          const analysis = analyzeComprehensionVoiceInput(
-            transcript,
-            value.choices,
-          );
-          if (analysis.type === "STOP") {
-            setPreviewChoiceId(null);
-            voicePausedRef.current = true;
-            setVoicePausedByUser(true);
-            setVoicePhase("paused");
-            stopAllVoice();
-            return;
+        const isItemFencedIn = (
+          item: BrowserSpeechRecognitionResult,
+        ): boolean => {
+          if (item.sessionId != null && item.sessionId !== sessionId)
+            return false;
+          if (item.pageId != null && item.pageId !== boundPageId) return false;
+          if (typeof item.epoch === "number") {
+            if (item.epoch < maxEpochSeen) return false;
+            maxEpochSeen = item.epoch;
           }
-          if (analysis.type === "REPLAY") {
-            setPreviewChoiceId(null);
-            void readQuestionAloudRef.current(value);
-            return;
-          }
-          if (
-            analysis.type === "CONFLICT" ||
-            analysis.type === "AMBIGUOUS" ||
-            analysis.type === "NEGATED"
-          ) {
-            setPreviewChoiceId(null);
-            const promptMsg = adaptTextToTeacherPersona(
-              analysis.clarificationPrompt,
-              getEffectiveTeacherPersona().gender,
-            );
-            setFeedbackNote(promptMsg);
+          return true;
+        };
+
+        const armReminder = () => {
+          clearRemindTimer();
+          if (silenceReminderCountRef.current >= MAX_SILENCE_REMINDERS) return;
+          const delayMs =
+            silenceReminderCountRef.current === 0
+              ? REMIND_SILENCE_MS
+              : SECOND_REMIND_SILENCE_MS;
+          remindTimerRef.current = window.setTimeout(() => {
+            if (
+              !mountedRef.current ||
+              gen !== flowGenRef.current ||
+              voicePausedRef.current ||
+              isSubmittingRef.current ||
+              solvedQuestionIdRef.current === boundQuestionId ||
+              activeQuestionRef.current?.question.id !== boundQuestionId
+            ) {
+              return;
+            }
+            silenceReminderCountRef.current += 1;
             stopVoiceRecognition();
             setVoicePhase("reading");
-            void speakGuarded(promptMsg, gen).then((ok) => {
+            void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
               if (
                 ok &&
                 mountedRef.current &&
@@ -669,131 +820,288 @@ export function ComprehensionQuestion({
                 startVoiceListenRef.current(value, gen);
               }
             });
-            return;
-          }
-          if (analysis.type === "CHOICE") {
-            setPreviewChoiceId(analysis.choice.id);
-            const meaningfulWords = transcript
-              .toLowerCase()
-              .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
-              .split(/\s+/u)
-              .filter((w) => w && !SETTLE_IGNORED_POLITE.has(w));
-            // Bare single-letter utterance ("A", "A ạ") waits 850ms so cross-segment
-            // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
-            const settleMs =
-              analysis.matchedBy === "letter" && meaningfulWords.length <= 1
-                ? BARE_LETTER_SETTLE_MS
-                : 0;
-            if (settleMs > 0) {
-              const targetVal = analysis.choice.value;
-              voiceSettleTimerRef.current = window.setTimeout(() => {
-                voiceSettleTimerRef.current = null;
-                if (
-                  !mountedRef.current ||
-                  gen !== flowGenRef.current ||
-                  isSubmittingRef.current ||
-                  solvedQuestionIdRef.current === boundQuestionId ||
-                  activeQuestionRef.current?.question.id !== boundQuestionId
-                ) {
-                  return;
-                }
-                void submitAnswer(targetVal, "voice");
-              }, settleMs);
-            } else {
-              void submitAnswer(analysis.choice.value, "voice");
-            }
-            return;
-          }
-          setPreviewChoiceId(null);
-        }
-      };
+          }, delayMs);
+        };
 
-      rec.onerror = (event) => {
-        if (recognitionRef.current !== rec) return;
-        if (
-          event.error === "not-allowed" ||
-          event.error === "service-not-allowed" ||
-          event.error === "stt-unavailable" ||
-          event.error === "local-stt-unavailable" ||
-          event.error === "audio-capture" ||
-          event.error === "language-not-supported"
-        ) {
-          fatalError = true;
-          stopVoiceRecognition();
-          setVoicePhase("idle");
-        } else if (event.error === "network") {
-          networkErrorStreak += 1;
-          if (networkErrorStreak >= 3) {
+        armReminder();
+
+        rec.onresult = (event) => {
+          if (
+            !mountedRef.current ||
+            gen !== flowGenRef.current ||
+            recognitionRef.current !== rec ||
+            isSubmittingRef.current ||
+            solvedQuestionIdRef.current === boundQuestionId ||
+            activeQuestionRef.current?.question.id !== boundQuestionId
+          ) {
+            return;
+          }
+          // Check interim provisional highlight (only previews, NEVER submits!)
+          for (let idx = event.results.length - 1; idx >= 0; idx -= 1) {
+            const item = event.results[idx];
+            if (!item || item.isFinal) continue;
+            if (!isItemFencedIn(item)) continue;
+            const interimText = item[0]?.transcript?.trim() ?? "";
+            if (interimText) {
+              // Cancel any pending bare-letter settle timer as soon as the child speaks again
+              clearVoiceSettleTimer();
+              armReminder();
+              const interimAnalysis = analyzeComprehensionVoiceInput(
+                interimText,
+                value.choices,
+              );
+              setPreviewChoiceId(
+                interimAnalysis.type === "CHOICE"
+                  ? interimAnalysis.choice.id
+                  : null,
+              );
+            } else {
+              setPreviewChoiceId(null);
+            }
+            break;
+          }
+
+          const start = Math.max(event.resultIndex ?? 0, processedUpTo + 1);
+          for (let idx = start; idx < event.results.length; idx += 1) {
+            const item = event.results[idx];
+            if (!item?.isFinal) continue;
+            processedUpTo = idx;
+            if (!isItemFencedIn(item)) continue;
+            const turnKey = item.turnId ?? item.segmentId;
+            if (turnKey) {
+              if (seenFinalTurnIds.has(turnKey)) continue;
+              seenFinalTurnIds.add(turnKey);
+            }
+            clearVoiceSettleTimer();
+            const transcript = (item[0]?.transcript ?? "")
+              .normalize("NFC")
+              .trim();
+            if (!transcript) continue;
+            armReminder();
+            const confidence = item[0]?.confidence;
+            if (
+              typeof confidence === "number" &&
+              confidence > 0 &&
+              confidence < 0.35
+            ) {
+              continue;
+            }
+
+            // Block echo from our own question / option TTS using real VAD onsetAt!
+            const onsetAt =
+              typeof item.onsetAt === "number" && Number.isFinite(item.onsetAt)
+                ? item.onsetAt
+                : null;
+            if (
+              !echoGuard.evaluate({
+                text: transcript,
+                receivedAt: performance.now(),
+                onsetAt,
+              }).accept
+            ) {
+              continue;
+            }
+            consecutiveRestarts = 0;
+            networkErrorStreak = 0;
+
+            if (isSkipQuestionVoiceCommand(transcript)) {
+              setPreviewChoiceId(null);
+              stopVoiceRecognition();
+              solvedQuestionIdRef.current = boundQuestionId;
+              const remainingChoices = value.choices.filter(
+                (c) => !eliminatedValuesRef.current.has(c.value),
+              );
+              const skipExplain =
+                remainingChoices.length === 1
+                  ? `Được rồi con nhé! Đáp án là ${remainingChoices[0].id}: “${remainingChoices[0].label}”. Mình sang câu tiếp theo nhé!`
+                  : "Được rồi con nhé! Mình cùng sang câu tiếp theo nhé!";
+              setFeedbackNote(skipExplain);
+              setFeedbackPreserveVerbatim(false);
+              setVoicePhase("reading");
+              void speakGuarded(skipExplain, gen).then((ok) => {
+                if (ok && mountedRef.current && !voicePausedRef.current) {
+                  advanceToNextQuestion(boundQuestionId);
+                }
+              });
+              return;
+            }
+
+            const analysis = analyzeComprehensionVoiceInput(
+              transcript,
+              value.choices,
+            );
+            if (analysis.type === "STOP") {
+              setPreviewChoiceId(null);
+              voicePausedRef.current = true;
+              setVoicePausedByUser(true);
+              setVoicePhase("paused");
+              stopAllVoice();
+              return;
+            }
+            if (analysis.type === "REPLAY") {
+              setPreviewChoiceId(null);
+              void readQuestionAloudRef.current(value);
+              return;
+            }
+            if (
+              analysis.type === "CONFLICT" ||
+              analysis.type === "AMBIGUOUS" ||
+              analysis.type === "NEGATED"
+            ) {
+              setPreviewChoiceId(null);
+              const promptMsg = adaptTextToTeacherPersona(
+                analysis.clarificationPrompt,
+                getEffectiveTeacherPersona().gender,
+              );
+              setFeedbackNote(promptMsg);
+              setFeedbackPreserveVerbatim(false);
+              stopVoiceRecognition();
+              setVoicePhase("reading");
+              void speakGuarded(promptMsg, gen).then((ok) => {
+                if (
+                  ok &&
+                  mountedRef.current &&
+                  !voicePausedRef.current &&
+                  activeQuestionRef.current?.question.id === boundQuestionId
+                ) {
+                  startVoiceListenRef.current(value, gen);
+                }
+              });
+              return;
+            }
+            if (analysis.type === "CHOICE") {
+              setPreviewChoiceId(analysis.choice.id);
+              const meaningfulWords = transcript
+                .toLowerCase()
+                .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+                .split(/\s+/u)
+                .filter((w) => w && !SETTLE_IGNORED_POLITE.has(w));
+              // Bare single-letter utterance ("A", "A ạ") waits 850ms so cross-segment
+              // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
+              const settleMs =
+                analysis.matchedBy === "letter" && meaningfulWords.length <= 1
+                  ? BARE_LETTER_SETTLE_MS
+                  : 0;
+              if (settleMs > 0) {
+                const targetVal = analysis.choice.value;
+                voiceSettleTimerRef.current = window.setTimeout(() => {
+                  voiceSettleTimerRef.current = null;
+                  if (
+                    !mountedRef.current ||
+                    gen !== flowGenRef.current ||
+                    isSubmittingRef.current ||
+                    solvedQuestionIdRef.current === boundQuestionId ||
+                    activeQuestionRef.current?.question.id !== boundQuestionId
+                  ) {
+                    return;
+                  }
+                  void submitAnswer(targetVal, "voice");
+                }, settleMs);
+              } else {
+                void submitAnswer(analysis.choice.value, "voice");
+              }
+              return;
+            }
+            setPreviewChoiceId(null);
+          }
+        };
+
+        rec.onerror = (event) => {
+          if (recognitionRef.current !== rec) return;
+          if (
+            event.error === "not-allowed" ||
+            event.error === "service-not-allowed" ||
+            event.error === "stt-unavailable" ||
+            event.error === "local-stt-unavailable" ||
+            event.error === "audio-capture" ||
+            event.error === "language-not-supported"
+          ) {
             fatalError = true;
             stopVoiceRecognition();
             setVoicePhase("idle");
+          } else if (event.error === "network") {
+            networkErrorStreak += 1;
+            if (networkErrorStreak >= 3) {
+              fatalError = true;
+              stopVoiceRecognition();
+              setVoicePhase("idle");
+            }
           }
-        }
-      };
+        };
 
-      rec.onend = () => {
-        if (recognitionRef.current !== rec) return;
-        if (fatalError) {
-          stopVoiceRecognition();
-          setVoicePhase("idle");
-          return;
-        }
-        if (
-          mountedRef.current &&
-          gen === flowGenRef.current &&
-          !voicePausedRef.current &&
-          !isSubmittingRef.current
-        ) {
-          if (consecutiveRestarts >= 5) {
+        rec.onend = () => {
+          if (recognitionRef.current !== rec) return;
+          if (fatalError) {
             stopVoiceRecognition();
             setVoicePhase("idle");
             return;
           }
-          consecutiveRestarts += 1;
-          // Reset index cursor for the new recognition cycle so results starting
-          // at resultIndex=0 after restart are never skipped.
-          processedUpTo = -1;
-          const backoffMs =
-            networkErrorStreak > 0
-              ? Math.min(4_000, 500 * 2 ** (networkErrorStreak - 1))
-              : 0;
-          const restartNow = () => {
-            if (
-              recognitionRef.current !== rec ||
-              !mountedRef.current ||
-              gen !== flowGenRef.current ||
-              voicePausedRef.current ||
-              isSubmittingRef.current
-            ) {
-              return;
-            }
-            try {
-              rec.start();
-            } catch {
+          if (
+            mountedRef.current &&
+            gen === flowGenRef.current &&
+            !voicePausedRef.current &&
+            !isSubmittingRef.current
+          ) {
+            if (consecutiveRestarts >= 5) {
               stopVoiceRecognition();
               setVoicePhase("idle");
+              return;
             }
-          };
-          if (backoffMs > 0) {
-            clearRestartTimer();
-            restartTimerRef.current = window.setTimeout(() => {
-              restartTimerRef.current = null;
+            consecutiveRestarts += 1;
+            // Reset index cursor for the new recognition cycle so results starting
+            // at resultIndex=0 after restart are never skipped.
+            processedUpTo = -1;
+            const backoffMs =
+              networkErrorStreak > 0
+                ? Math.min(4_000, 500 * 2 ** (networkErrorStreak - 1))
+                : 0;
+            const restartNow = () => {
+              if (
+                recognitionRef.current !== rec ||
+                !mountedRef.current ||
+                gen !== flowGenRef.current ||
+                voicePausedRef.current ||
+                isSubmittingRef.current
+              ) {
+                return;
+              }
+              try {
+                rec.start();
+              } catch {
+                stopVoiceRecognition();
+                setVoicePhase("idle");
+              }
+            };
+            if (backoffMs > 0) {
+              clearRestartTimer();
+              restartTimerRef.current = window.setTimeout(() => {
+                restartTimerRef.current = null;
+                restartNow();
+              }, backoffMs);
+            } else {
               restartNow();
-            }, backoffMs);
-          } else {
-            restartNow();
+            }
           }
+        };
+
+        try {
+          rec.start();
+        } catch {
+          recognitionRef.current = null;
+          setVoicePhase("idle");
         }
       };
 
-      try {
-        rec.start();
-      } catch {
-        recognitionRef.current = null;
-        setVoicePhase("idle");
+      if (needsWasmWarmup) {
+        void awaitSttReadyBeforeListening(4_000)
+          .catch(() => false)
+          .then(() => beginRecognition());
+        return;
       }
+      beginRecognition();
     },
     [
+      advanceToNextQuestion,
       clearRemindTimer,
       clearRestartTimer,
       clearVoiceSettleTimer,
@@ -813,18 +1121,12 @@ export function ComprehensionQuestion({
       if (!mountedRef.current || voicePausedRef.current) return;
       // Only auto-start voice walkthrough when the browser supports voice
       // recognition or speech synthesis (keeps non-audio unit environments calm).
-      const hasVoiceApi =
-        Boolean(getSpeechRecognitionCtor()) ||
-        isAndroidNativeSpeechAvailable() ||
-        (typeof window !== "undefined" &&
-          (typeof window.AudioContext === "function" ||
-            Boolean(window.speechSynthesis?.getVoices?.().length)));
-      if (!hasVoiceApi) return;
+      if (!hasBrowserAudioOrVoiceApi()) return;
       lockSessionVoice(sessionId);
 
       stopAllVoice();
       const gen = flowGenRef.current;
-      remindedForQuestionRef.current = false;
+      silenceReminderCountRef.current = 0;
       setVoicePhase("reading");
 
       // Start the question prompt first so it gets first priority on the local voice
@@ -890,8 +1192,11 @@ export function ComprehensionQuestion({
                 break;
               }
               try {
+                const locked = getActiveSessionVoiceLock();
                 await speechService.synthesize(phrase, {
                   sessionId,
+                  voiceId: locked?.voiceId ?? getEffectiveVoiceId(),
+                  speed: locked?.speed ?? getSpeechPreferences().speed,
                   signal: prefetchController.signal,
                 });
               } catch {
@@ -942,11 +1247,18 @@ export function ComprehensionQuestion({
   useEffect(() => {
     let active = true;
     solvedQuestionIdRef.current = null;
+    advancingQuestionIdRef.current = null;
+    wrongCountRef.current = 0;
+    eliminatedValuesRef.current = new Set();
+    silenceReminderCountRef.current = 0;
     void comprehensionService
       .getQuestion(sessionId)
       .then((value) => {
         if (!active) return;
         activeQuestionRef.current = value;
+        setWrongCount(0);
+        setEliminatedValues(new Set());
+        setRevealedHint(null);
         setProgress({ position: value.position, total: value.total });
         setLoadState({ status: "ready", value });
         if (!voicePausedRef.current) {
@@ -987,6 +1299,28 @@ export function ComprehensionQuestion({
       );
     };
   }, [stopAllVoice]);
+
+  useEffect(() => {
+    if (!readingChoiceId) return;
+    const node = choiceButtonRefs.current.get(readingChoiceId);
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({
+        block: "nearest",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    }
+  }, [readingChoiceId]);
+
+  useEffect(() => {
+    if (!result || result.is_correct) return;
+    const node = feedbackRef.current;
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({
+        block: "nearest",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    }
+  }, [result, feedbackNote, revealedHint]);
 
   const handleToggleVoicePause = () => {
     if (voicePausedByUser) {
@@ -1037,6 +1371,16 @@ export function ComprehensionQuestion({
             aria-label={t("comprehension.loadingAria")}
             className="space-y-4"
           >
+            <AiProgressBar
+              active
+              label={
+                questionGenProgress.stageLabel ??
+                tCommon("aiProgress.generatingQuestion")
+              }
+              percent={questionGenProgress.percent}
+              size="sm"
+              testId="comprehension-question-loading-progress"
+            />
             <Skeleton className="h-40 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
@@ -1053,6 +1397,9 @@ export function ComprehensionQuestion({
               <Button
                 className="sm:w-auto"
                 onClick={() => {
+                  invalidateApiReadCacheByPrefix(
+                    `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
+                  );
                   setLoadState({ status: "loading" });
                   setLoadKey((key) => key + 1);
                 }}
@@ -1081,7 +1428,23 @@ export function ComprehensionQuestion({
                 <p className="text-label font-semibold text-purple-ink">
                   {loadState.value.progress_label}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ReadingVoiceSettings
+                    disabled={voicePhase === "listening"}
+                    fallbackNotice={speechPlayer.fallbackNotice}
+                    isPreviewing={speechPlayer.isPlaying}
+                    onPreview={(sample) => {
+                      stopAllVoice();
+                      return speechPlayer.play(sample, {
+                        coaching: true,
+                        cacheScope: "COACHING",
+                        isPrivateBook: false,
+                        bypassSessionLock: true,
+                        utteranceKind: "voice_preview",
+                      });
+                    }}
+                    onStopPreview={stopAllVoice}
+                  />
                   <button
                     type="button"
                     onClick={() => {
@@ -1130,11 +1493,18 @@ export function ComprehensionQuestion({
                   !selected && previewChoiceId === choice.id && !result;
                 const correct = selected && result?.is_correct === true;
                 const beingRead = readingChoiceId === choice.id;
+                const isEliminated =
+                  wrongCount >= 2 && eliminatedValues.has(choice.value);
                 return (
                   <button
+                    ref={(node) => {
+                      if (node) choiceButtonRefs.current.set(choice.id, node);
+                      else choiceButtonRefs.current.delete(choice.id);
+                    }}
                     aria-pressed={selected}
                     data-reading-choice={beingRead ? "true" : undefined}
                     data-preview-choice={previewing ? "true" : undefined}
+                    data-eliminated-choice={isEliminated ? "true" : undefined}
                     className={cn(
                       "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-start text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                       // Hover only applies to answers that can still be chosen.
@@ -1143,19 +1513,27 @@ export function ComprehensionQuestion({
                         !(selected && result) &&
                         !beingRead &&
                         !previewing &&
+                        !isEliminated &&
                         "bg-white",
+                      isEliminated &&
+                        "border-border bg-slate-100 text-muted line-through opacity-55",
                       beingRead &&
                         "border-primary bg-sky/50 ring-2 ring-primary/40",
                       previewing &&
                         "border-dashed border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400/50",
-                      selected && "border-primary",
+                      selected && !isEliminated && "border-primary",
                       selected &&
+                        !isEliminated &&
                         result?.is_correct === false &&
                         "border-warning bg-warning-surface",
                       correct &&
                         "border-success-ink bg-success-surface font-semibold text-success-ink",
                     )}
-                    disabled={isSubmitting || result?.is_correct === true}
+                    disabled={
+                      isSubmitting ||
+                      result?.is_correct === true ||
+                      isEliminated
+                    }
                     key={choice.id}
                     onClick={() => void submitAnswer(choice.value, "click")}
                     type="button"
@@ -1186,16 +1564,37 @@ export function ComprehensionQuestion({
               })}
             </div>
 
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  evalAnswerProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={evalAnswerProgress.percent}
+                size="compact"
+                testId="comprehension-answer-evaluating-progress"
+              />
+            ) : null}
+
             {result ? (
-              <StatusMessage tone={result.is_correct ? "success" : "warning"}>
-                {adaptTextToTeacherPersona(
-                  feedbackNote ??
-                    (result.is_correct
-                      ? t("comprehension.correctPraise")
-                      : t("comprehension.tryAgainHint")),
-                  teacherPersona.gender,
-                )}
-              </StatusMessage>
+              <div ref={feedbackRef}>
+                <StatusMessage tone={result.is_correct ? "success" : "warning"}>
+                  {feedbackNote !== null
+                    ? feedbackPreserveVerbatim
+                      ? feedbackNote
+                      : adaptTextToTeacherPersona(
+                          feedbackNote,
+                          teacherPersona.gender,
+                        )
+                    : adaptTextToTeacherPersona(
+                        result.is_correct
+                          ? t("comprehension.correctPraise")
+                          : t("comprehension.tryAgainHint"),
+                        teacherPersona.gender,
+                      )}
+                </StatusMessage>
+              </div>
             ) : (
               <p
                 role="status"
@@ -1223,7 +1622,9 @@ export function ComprehensionQuestion({
             {result?.is_correct ? (
               <Button
                 className="mx-auto max-w-[360px]"
-                onClick={advanceToNextQuestion}
+                onClick={() =>
+                  advanceToNextQuestion(loadState.value.question.id)
+                }
               >
                 {questionTotal !== undefined && !hasNextQuestion
                   ? t("comprehension.finish")

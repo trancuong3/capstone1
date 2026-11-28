@@ -108,9 +108,11 @@ async def get_sessions(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     sessions = await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
-    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
-    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    safe_offset = offset if offset > 0 else 0
+    safe_limit = limit if limit is not None and limit > 0 else None
     if safe_offset == 0 and safe_limit is None:
         return sessions
     return sessions[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
@@ -207,6 +209,7 @@ async def get_reading_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    revision_id = revision_id if isinstance(revision_id, (UUID, str)) else None
     response.headers["Cache-Control"] = "private, no-store, max-age=0"
     response.headers["Vary"] = "Authorization"
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
@@ -323,6 +326,25 @@ class HistoryRepository:
             .where(ReadingSession.Id == session_id, ChildProfile.ParentId == actor_id)
         )
 
+    async def books_by_ids(self, book_ids: list[UUID], actor_id: UUID) -> dict[UUID, Book]:
+        """Batch-load accessible historical books for a page of sessions (eliminates N+1)."""
+        unique_ids = list(dict.fromkeys(book_ids))
+        if not unique_ids:
+            return {}
+        result = await self.db.execute(
+            select(Book).where(
+                Book.Id.in_(unique_ids),
+                or_(
+                    Book.VisibilityScope == "CATALOG",
+                    and_(
+                        Book.VisibilityScope == "PARENT_PRIVATE",
+                        Book.OwnerParentId == actor_id,
+                    ),
+                ),
+            )
+        )
+        return {row.Id: row for row in result.scalars().all()}
+
     async def session_book(self, session_id: UUID, actor_id: UUID):
         # Historical metadata must not depend on current catalog eligibility,
         # but private books must always belong to the authenticated parent.
@@ -397,7 +419,7 @@ class HistoryService:
             raise HTTPException(status_code=404, detail="Resource not found")
 
     @staticmethod
-    def summary(row):
+    def summary(row, book: CatalogBookResponse | None = None):
         duration = None
         try:
             if row.EndedAt is not None:
@@ -406,6 +428,7 @@ class HistoryService:
                 id=row.Id, child_id=row.ChildId, book_id=row.BookId,
                 state="FINISHED" if row.State == "COMPLETED" else row.State,
                 started_at=row.StartedAt, ended_at=row.EndedAt, duration_ms=duration,
+                book=book,
             )
         except (ValidationError, TypeError, ValueError):
             # Unknown states and invalid timelines must never be guessed.
@@ -463,8 +486,19 @@ class HistoryService:
             if not 1 <= page <= 100000:
                 raise HTTPException(status_code=422, detail="Invalid cursor")
         rows = await self.repository.sessions(child_id, actor_id, (page - 1) * limit, limit)
+        page_rows = rows[:limit]
+        books_map: dict[UUID, CatalogBookResponse] = {}
+        batch_loader = getattr(self.repository, "books_by_ids", None)
+        if inspect.iscoroutinefunction(batch_loader) and page_rows:
+            raw_books = await batch_loader([row.BookId for row in page_rows], actor_id)
+            if isinstance(raw_books, dict):
+                for bid, book_row in raw_books.items():
+                    try:
+                        books_map[bid] = CatalogBookResponse.model_validate(book_row)
+                    except ValidationError:
+                        continue
         return SessionHistoryRead(
-            sessions=[self.summary(row) for row in rows[:limit]],
+            sessions=[self.summary(row, book=books_map.get(row.BookId)) for row in page_rows],
             next_cursor=f"page-{page + 1}" if len(rows) > limit and page < 100000 else None,
         )
 
@@ -609,6 +643,8 @@ async def get_owned_history(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    cursor = cursor if isinstance(cursor, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
     return await HistoryService(HistoryRepository(db)).list(child_id, actor_id, cursor, limit)
 
 
@@ -672,10 +708,13 @@ async def delete_reading_report(
 
 #Kadepham
 from fastapi import UploadFile, File
+from sqlalchemy.orm import load_only
 from app.models.book import PageRevisionWord
 from app.schemas.reading import CameraPageMatchRead, ReadingPageRead, ReadingPageWordRead
-from app.services.storage_service import download_object
+from app.services.storage_service import download_object, download_object_async
 from app.services.vision_page_matcher import vision_page_matcher
+
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
 
 MAX_CAMERA_FRAME_BYTES = 8 * 1024 * 1024
 MAX_CAMERA_FRAME_PIXELS = 40_000_000
@@ -749,10 +788,13 @@ async def _fetch_stored_page_bytes(
     """Read stored page image strictly from Supabase Storage using validated object keys."""
     if not _is_safe_storage_object_path(image_path):
         return None
+    cleaned_path = image_path.strip()
     try:
-        return await asyncio.to_thread(
-            download_object, image_path.strip(), bucket_name=bucket_name
-        )
+        if download_object is not _ORIGINAL_DOWNLOAD_OBJECT:
+            return await asyncio.to_thread(
+                download_object, cleaned_path, bucket_name=bucket_name
+            )
+        return await download_object_async(cleaned_path, bucket_name=bucket_name)
     except Exception:
         return None
 
@@ -868,7 +910,7 @@ async def _build_match_candidates(
         missing.append((p, bucket, cache_key))
 
     if missing:
-        sem = asyncio.Semaphore(6)
+        sem = asyncio.Semaphore(4)
 
         async def _load_one(
             page_orm: BookPage, bucket_name: str | None, key: tuple[str, str]
@@ -877,20 +919,17 @@ async def _build_match_candidates(
                 img_bytes = await _fetch_stored_page_bytes(
                     page_orm.ImagePath, bucket_name=bucket_name
                 )
-            if not img_bytes:
+                if not img_bytes:
+                    return None
+                features = await asyncio.to_thread(
+                    vision_page_matcher.compute_and_cache_features, key, img_bytes
+                )
+                del img_bytes
+            if features is None:
                 return None
-            features = await asyncio.to_thread(
-                vision_page_matcher.compute_and_cache_features, key, img_bytes
-            )
-            if features is not None:
-                return {
-                    "page_orm": page_orm,
-                    "features": features,
-                    "cache_key": key,
-                }
             return {
                 "page_orm": page_orm,
-                "image_bytes": img_bytes,
+                "features": features,
                 "cache_key": key,
             }
 
@@ -945,6 +984,18 @@ async def match_book_page_from_camera(
     max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_BOOK_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
+        .options(
+            load_only(
+                BookPage.Id,
+                BookPage.BookId,
+                BookPage.PageNumber,
+                BookPage.ImagePath,
+                BookPage.CurrentVerifiedRevisionId,
+                BookPage.Width,
+                BookPage.Height,
+            ),
+            load_only(Book.Id, Book.VisibilityScope),
+        )
         .join(Book, Book.Id == BookPage.BookId)
         .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(
@@ -1073,6 +1124,18 @@ async def match_page_global_from_camera(
     max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_GLOBAL_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
+        .options(
+            load_only(
+                BookPage.Id,
+                BookPage.BookId,
+                BookPage.PageNumber,
+                BookPage.ImagePath,
+                BookPage.CurrentVerifiedRevisionId,
+                BookPage.Width,
+                BookPage.Height,
+            ),
+            load_only(Book.Id, Book.VisibilityScope),
+        )
         .join(Book, Book.Id == BookPage.BookId)
         .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(
@@ -1185,6 +1248,11 @@ async def scan_page_with_local_ocr(
     db: AsyncSession = Depends(get_db),
 ):
     """Run local Vietnamese OCR on an uploaded/photographed book page and match verified catalog pages."""
+    book_id = book_id if isinstance(book_id, (UUID, str)) else None
+    child_id = child_id if isinstance(child_id, (UUID, str)) else None
+    idempotency_key = (
+        idempotency_key if isinstance(idempotency_key, (UUID, str)) else None
+    )
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).scan_page(
         actor_id,
@@ -1215,6 +1283,14 @@ async def enqueue_scan_page_ocr_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Enqueue an asynchronous Vietnamese OCR page scan job (safe even while remote worker is offline)."""
+    book_id = book_id if isinstance(book_id, (UUID, str)) else None
+    child_id = child_id if isinstance(child_id, (UUID, str)) else None
+    idempotency_key = (
+        idempotency_key if isinstance(idempotency_key, (UUID, str)) else None
+    )
+    idempotency_key_header = (
+        idempotency_key_header if isinstance(idempotency_key_header, str) else None
+    )
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).enqueue_scan_page_job(
         actor_id,
@@ -1239,6 +1315,8 @@ async def list_scan_page_ocr_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """List authenticated parent's own queued/recent async page scan OCR jobs."""
+    active_only = active_only if isinstance(active_only, bool) else True
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).list_scan_page_jobs(
         actor_id,

@@ -7,6 +7,7 @@ import {
   Brain,
   Coffee,
   HelpCircle,
+  Mic,
   Music2,
   Sparkles,
   Volume2,
@@ -18,19 +19,26 @@ import {
   useContext,
   useEffect,
   useId,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   CrossGameRecommendationDTO,
@@ -192,12 +200,52 @@ function HubSelectedChildSync({
 export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
-  const t = useTranslations("entertainment");
+  const tRaw = useTranslations("entertainment");
+  const teacherPersona = useTeacherPersona();
+  const t = useCallback(
+    (
+      key: string,
+      params?: Record<string, string | number>,
+      defaultValue?: string,
+    ) =>
+      adaptTextToTeacherPersona(
+        tRaw(key, params, defaultValue),
+        teacherPersona.gender,
+      ),
+    [tRaw, teacherPersona.gender],
+  );
+  const tCommon = useTranslations("common");
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
-  const { reducedMotion, calmSound, toggleReducedMotion, toggleCalmSound } =
-    useEntertainmentPreferences();
+  const speechPlayer = useSpeechPlayer();
+  const speechPlayerRef = useRef(speechPlayer);
+  const {
+    reducedMotion,
+    calmSound,
+    autopilotEnabled,
+    toggleReducedMotion,
+    toggleCalmSound,
+    toggleAutopilot,
+  } = useEntertainmentPreferences();
+
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
+    return () => {
+      speechPlayerRef.current.stop();
+    };
+  }, []);
+
+  function handleSpeakFocusWord(word: string) {
+    const cleaned = word.trim();
+    if (!cleaned || !calmSound) return;
+    void speechPlayer
+      .play(cleaned, { wordSample: true, speedScale: 0.92 })
+      .catch(() => undefined);
+  }
 
   const [childrenList, setChildrenList] = useState<readonly ChildProfileDTO[]>(
     [],
@@ -208,6 +256,9 @@ export function EntertainmentScreen({
   const [fallbackChildId, setFallbackChildId] = useState<string | null>(null);
   const [fetchedRecommendations, setFetchedRecommendations] =
     useState<EntertainmentRecommendationsDTO | null>(null);
+  const [loadingRecsForChildId, setLoadingRecsForChildId] = useState<
+    string | null
+  >(null);
 
   const storedShowOnboarding = useSyncExternalStore(
     emptySubscribe,
@@ -249,13 +300,21 @@ export function EntertainmentScreen({
         if (!children.length) return;
         const currentSelected = appStore?.selectedChildId ?? null;
         if (currentSelected) {
+          const matchedSelected =
+            children.find((item) => item.id === currentSelected) ?? null;
+          if (matchedSelected) {
+            appStore?.setValidatedSelectedChild(matchedSelected);
+            hydrateTeacherVoiceFromChildProfile(matchedSelected);
+          }
           return;
         }
         if (appStore) {
           appStore.selectChild(children[0].id);
           appStore.setValidatedSelectedChild(children[0]);
+          hydrateTeacherVoiceFromChildProfile(children[0]);
         } else if (!initialRecommendations) {
           setFallbackChildId(children[0].id);
+          hydrateTeacherVoiceFromChildProfile(children[0]);
         }
       } catch {
         // Gracefully remain in calm static child-first hub when unauthenticated or offline.
@@ -280,14 +339,23 @@ export function EntertainmentScreen({
 
     let active = true;
     async function loadAdaptiveRecommendations(childId: string) {
+      setLoadingRecsForChildId(childId);
       try {
-        const recs =
-          await createAdaptiveLearningService().getRecommendations(childId);
+        const recs = await createAdaptiveLearningService().getRecommendations(
+          childId,
+          teacherPersona.gender,
+        );
         if (active) {
           setFetchedRecommendations(recs);
         }
       } catch {
         // Gracefully keep static child-first hub if adaptive recommendations are unavailable.
+      } finally {
+        if (active) {
+          setLoadingRecsForChildId((current) =>
+            current === childId ? null : current,
+          );
+        }
       }
     }
 
@@ -295,7 +363,12 @@ export function EntertainmentScreen({
     return () => {
       active = false;
     };
-  }, [appStore?.selectedChildId, fallbackChildId, initialRecommendations]);
+  }, [
+    appStore?.selectedChildId,
+    fallbackChildId,
+    initialRecommendations,
+    teacherPersona.gender,
+  ]);
 
   const recommendations =
     fetchedRecommendations &&
@@ -305,6 +378,19 @@ export function EntertainmentScreen({
           (!activeChildId || initialRecommendations.child_id === activeChildId)
         ? initialRecommendations
         : null;
+  const isLoadingRecommendations =
+    Boolean(activeChildId) &&
+    loadingRecsForChildId === activeChildId &&
+    !recommendations;
+  const recommendationsProgress = useAiProgress({
+    active: isLoadingRecommendations,
+    expectedDurationMs: 5_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.analyzing") },
+      { atPct: 45, label: tCommon("aiProgress.loadingRecommendations") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   function handleSelectChild(nextChildId: string) {
     if (!nextChildId) return;
@@ -320,6 +406,7 @@ export function EntertainmentScreen({
     }
     if (matched) {
       setValidatedChild(matched);
+      hydrateTeacherVoiceFromChildProfile(matched, { force: true });
     }
   }
 
@@ -340,6 +427,21 @@ export function EntertainmentScreen({
     ]),
   );
   const primaryRec = recommendations?.primary_recommendation ?? null;
+  const focusWordsForLaunch = primaryRec?.target_words.length
+    ? primaryRec.target_words
+    : (recommendations?.focus_difficult_words ?? []);
+  const autopilotHref = (() => {
+    if (!primaryRec) return null;
+    const baseHref = primaryRec.href;
+    const sep = baseHref.includes("?") ? "&" : "?";
+    const params: string[] = ["autopilot=1"];
+    if (focusWordsForLaunch.length && !baseHref.includes("focus=")) {
+      params.push(
+        `focus=${encodeURIComponent(focusWordsForLaunch.slice(0, 4).join(","))}`,
+      );
+    }
+    return `${baseHref}${sep}${params.join("&")}`;
+  })();
   const activeStep = ONBOARDING_STEP_KEYS[onboardingStep];
   const displayChild =
     childrenList.find((item) => item.id === activeChildId) ??
@@ -355,6 +457,7 @@ export function EntertainmentScreen({
         "activity-library mx-auto flex w-full max-w-[1140px] flex-col gap-5 pb-8",
         reducedMotion && "motion-reduce",
       )}
+      data-autopilot={autopilotEnabled ? "true" : "false"}
       data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
       data-sound-muted={calmSound ? "false" : "true"}
@@ -398,6 +501,21 @@ export function EntertainmentScreen({
             </div>
           ) : null}
 
+          <Button
+            aria-pressed={autopilotEnabled}
+            className="min-h-12 px-4"
+            data-testid="hub-autopilot-toggle"
+            fullWidth={false}
+            onClick={toggleAutopilot}
+            size="compact"
+            type="button"
+            variant={autopilotEnabled ? "secondary" : "quiet"}
+          >
+            <Mic aria-hidden="true" className="size-4" />
+            {autopilotEnabled
+              ? t("hub.autopilotActive", undefined, "Tự động rảnh tay: Bật")
+              : t("hub.autopilotOff", undefined, "Tự động rảnh tay: Tắt")}
+          </Button>
           <Button
             aria-pressed={!calmSound}
             className="min-h-12 px-4"
@@ -469,7 +587,10 @@ export function EntertainmentScreen({
           <p className="text-lg font-extrabold text-ink">
             {recommendations?.mascot_greeting_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recommendations.mascot_greeting_vi}
+                {adaptTextToTeacherPersona(
+                  recommendations.mascot_greeting_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultGreeting")
@@ -478,39 +599,88 @@ export function EntertainmentScreen({
           <p className="text-sm leading-6 text-muted">
             {primaryRec?.reason_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {primaryRec.reason_vi}
+                {adaptTextToTeacherPersona(
+                  primaryRec.reason_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultRecommendationReason")
             )}
           </p>
+          {isLoadingRecommendations ? (
+            <div className="pt-1">
+              <AiProgressBar
+                active
+                label={
+                  recommendationsProgress.stageLabel ??
+                  tCommon("aiProgress.loadingRecommendations")
+                }
+                percent={recommendationsProgress.percent}
+                size="compact"
+                testId="entertainment-recommendations-progress"
+              />
+            </div>
+          ) : null}
           {recommendations?.focus_difficult_words.length ? (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="text-xs font-bold text-ink">
-                {t("hub.focusDifficultWordsLabel")}
+                {t(
+                  "hub.todayChallengeWordsLabel",
+                  undefined,
+                  t("hub.focusDifficultWordsLabel"),
+                )}
               </span>
               {recommendations.focus_difficult_words.map((word) => (
-                <span
-                  className="viread-learning-content rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900"
-                  dir="ltr"
+                <button
+                  aria-label={`Nghe mẫu từ ${word}`}
+                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 transition hover:border-amber-500 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  data-testid={`hub-focus-word-${word}`}
                   key={word}
-                  lang="vi"
+                  onClick={() => handleSpeakFocusWord(word)}
+                  type="button"
                 >
-                  {word}
-                </span>
+                  <Volume2
+                    aria-hidden="true"
+                    className="size-3.5 text-amber-700"
+                  />
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {word}
+                  </span>
+                </button>
               ))}
             </div>
           ) : null}
         </div>
         {primaryRec ? (
-          <ButtonLink
-            className="min-h-12 w-full shrink-0 sm:w-auto"
-            href={primaryRec.href}
-            size="compact"
-          >
-            {t("hub.playSuggestedCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto">
+            {autopilotEnabled && autopilotHref ? (
+              <ButtonLink
+                className="min-h-12 w-full sm:w-auto"
+                data-testid="hub-autopilot-cta"
+                href={autopilotHref}
+                size="compact"
+              >
+                {t("hub.autopilotLaunchCta", undefined, "Vào học vui ngay")}{" "}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+              </ButtonLink>
+            ) : null}
+            <ButtonLink
+              className="min-h-12 w-full sm:w-auto"
+              href={primaryRec.href}
+              size="compact"
+              variant={autopilotEnabled ? "secondary" : "primary"}
+            >
+              {t("hub.playSuggestedCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         ) : null}
       </div>
 
@@ -532,7 +702,10 @@ export function EntertainmentScreen({
                 {t(activeStep.titleKey)}
               </h2>
               <p className="mt-1 text-body text-muted">
-                {t(activeStep.bodyKey)}
+                {adaptTextToTeacherPersona(
+                  t(activeStep.bodyKey),
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">

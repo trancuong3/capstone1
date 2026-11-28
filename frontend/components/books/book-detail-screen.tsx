@@ -25,6 +25,7 @@ import { useBookService } from "@/hooks/use-book-service";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -77,7 +78,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     pageNumber: number | null;
   } | null>(null);
   const [thumbnailPage, setThumbnailPage] = useState(1);
-  const THUMBNAILS_PER_PAGE = 24;
+  const THUMBNAILS_PER_PAGE = 12;
 
   useEffect(() => {
     let isActive = true;
@@ -183,6 +184,17 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   ]);
 
   useEffect(() => {
+    if (state.status !== "ready") return;
+    const initialPage = selectedPage ?? state.pages[0] ?? null;
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: initialPage?.page_id ?? null,
+      pageRevisionId: initialPage?.current_verified_revision_id ?? null,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
+  }, [selectedPage, state]);
+
+  useEffect(() => {
     if (
       state.status !== "ready" ||
       !targetPageId ||
@@ -217,6 +229,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     }
 
     setStartState("starting");
+    // Immediately start preloading STT (WASM/Android) & TTS voices on click so
+    // engines are warm BEFORE the child even enters the reading page!
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: selectedPage.page_id,
+      pageRevisionId: selectedPage.current_verified_revision_id,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
     const params = new URLSearchParams({
       bookId: state.book.id,
       pageId: selectedPage.page_id,
@@ -636,48 +656,63 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 </Button>
               </div>
             ) : null}
-            <div
-              aria-label={t("detail.previewGridAria")}
-              className="flex gap-4 overflow-x-auto pb-1"
-            >
-              {pages
-                .slice(
-                  (thumbnailPage - 1) * THUMBNAILS_PER_PAGE,
-                  thumbnailPage * THUMBNAILS_PER_PAGE,
-                )
-                .map((page) => (
-                  <BookPageThumbnail
-                    isSelected={selectedPage?.page_id === page.page_id}
-                    key={page.page_id}
-                    onSelect={(nextPage) => {
-                      setSelectedPage(nextPage);
-                      setSelectedEndPageId((currentEndId) => {
-                        const currentEnd = pages.find(
-                          (candidate) => candidate.page_id === currentEndId,
-                        );
-                        return !currentEnd ||
-                          currentEnd.page_number < nextPage.page_number
-                          ? nextPage.page_id
-                          : currentEnd.page_id;
-                      });
-                      setStartState("idle");
-                    }}
-                    page={page}
-                  />
-                ))}
-            </div>
-            {pages.length > THUMBNAILS_PER_PAGE ? (
-              <PaginationBar
-                ariaLabel={t("detail.previewPaginationAria")}
-                className="mt-3"
-                compact
-                itemLabel={t("detail.previewPaginationItemLabel")}
-                onPageChange={setThumbnailPage}
-                page={thumbnailPage}
-                pageSize={THUMBNAILS_PER_PAGE}
-                total={pages.length}
-              />
-            ) : null}
+            {(() => {
+              const totalThumbnailPages = Math.max(
+                1,
+                Math.ceil(pages.length / THUMBNAILS_PER_PAGE),
+              );
+              const safeThumbnailPage = Math.min(
+                Math.max(1, thumbnailPage),
+                totalThumbnailPages,
+              );
+              return (
+                <>
+                  <div
+                    aria-label={t("detail.previewGridAria")}
+                    className="flex gap-4 overflow-x-auto pb-1"
+                  >
+                    {pages
+                      .slice(
+                        (safeThumbnailPage - 1) * THUMBNAILS_PER_PAGE,
+                        safeThumbnailPage * THUMBNAILS_PER_PAGE,
+                      )
+                      .map((page) => (
+                        <BookPageThumbnail
+                          isSelected={selectedPage?.page_id === page.page_id}
+                          key={page.page_id}
+                          onSelect={(nextPage) => {
+                            setSelectedPage(nextPage);
+                            setSelectedEndPageId((currentEndId) => {
+                              const currentEnd = pages.find(
+                                (candidate) =>
+                                  candidate.page_id === currentEndId,
+                              );
+                              return !currentEnd ||
+                                currentEnd.page_number < nextPage.page_number
+                                ? nextPage.page_id
+                                : currentEnd.page_id;
+                            });
+                            setStartState("idle");
+                          }}
+                          page={page}
+                        />
+                      ))}
+                  </div>
+                  {pages.length > THUMBNAILS_PER_PAGE ? (
+                    <PaginationBar
+                      ariaLabel={t("detail.previewPaginationAria")}
+                      className="mt-3"
+                      compact
+                      itemLabel={t("detail.previewPaginationItemLabel")}
+                      onPageChange={setThumbnailPage}
+                      page={safeThumbnailPage}
+                      pageSize={THUMBNAILS_PER_PAGE}
+                      total={pages.length}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

@@ -11,12 +11,15 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   scanCameraFrameForBook,
@@ -54,6 +57,7 @@ export function CameraPreview({
 }: CameraPreviewProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("ocr");
+  const tCommon = useTranslations("common");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(false);
@@ -356,10 +360,10 @@ export function CameraPreview({
             if (serviceUnavailable || consecutiveErrorCountRef.current >= 3) {
               const reason =
                 isServiceError(error) && error.status === 504
-                  ? "Máy chủ OCR phản hồi chậm hơn dự kiến. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng."
+                  ? "Hệ thống nhận diện trang đang xử lý chậm hơn dự kiến. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng."
                   : isServiceError(error) && error.message
                     ? error.message
-                    : "Máy chủ OCR đang tạm tắt hoặc tạm bận. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng.";
+                    : "Hệ thống nhận diện trang đang tạm nghỉ hoặc tạm bận. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng.";
               setAutoScan(false);
               setOcrUnavailableBanner(reason);
               setScanResult({
@@ -433,6 +437,20 @@ export function CameraPreview({
     scanResult?.matched,
   ]);
 
+  const cameraScanStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.uploading") },
+      { atPct: 35, label: tCommon("aiProgress.analyzing") },
+      { atPct: 70, label: tCommon("aiProgress.ocrExtracting") },
+    ],
+    [tCommon],
+  );
+  const cameraScanProgress = useAiProgress({
+    active: isScanning,
+    stages: cameraScanStages,
+    expectedDurationMs: 4_500,
+  });
+
   if (!enableScanner) {
     return (
       <section
@@ -489,6 +507,18 @@ export function CameraPreview({
           </span>
         ) : null}
       </div>
+
+      {isScanning && !cameraSuspended ? (
+        <div className="rounded-control border border-primary/20 bg-white px-3.5 py-2">
+          <AiProgressBar
+            active
+            label={cameraScanProgress.stageLabel ?? t("camera.scanningBadge")}
+            percent={cameraScanProgress.percent}
+            size="compact"
+            testId="camera-scan-progress"
+          />
+        </div>
+      ) : null}
 
       {ocrUnavailableBanner && !cameraSuspended ? (
         <div

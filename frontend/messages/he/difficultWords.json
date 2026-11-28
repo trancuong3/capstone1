@@ -13,7 +13,7 @@
     "noChildDescription": "צור פרופיל והתחל לקרוא כדי שלמערכת יהיו נתונים.",
     "createChildAction": "יצירת פרופיל ילד",
     "unsupportedTitle": "הנתונים ממתינים להשלמה",
-    "unsupportedDescription": "הנתונים עבור פריט זה אינם זמינים בפורמט הנוכחי. אין נתוני דוגמה חלופיים.",
+    "unsupportedDescription": "הנתונים של חלק זה עדיין אינם זמינים. אנא נסו שוב מאוחר יותר.",
     "retry": "נסה שוב",
     "manageChildren": "ניהול פרופילי ילדים",
     "notFoundTitle": "הנתונים לא נמצאו",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "אין מילים התואמות למצב התרגול הנבחר.",
     "viewAllWords": "הצג את כל המילים ({count})",
     "paginationAria": "עימוד קבוצות ספרי תרגול מילים",
-    "paginationItemLabel": "ספרים"
+    "paginationItemLabel": "ספרים",
+    "statTotal": "סה״כ מילים",
+    "statCompleted": "נקראו נכון",
+    "statRemaining": "לחזרה",
+    "quickMastered": "נשלטות",
+    "quickNeedsMoreFull": "דורש חיזוק"
   },
   "bookCard": {
     "gradeSingle": "כיתה {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "לא נקרא שוב",
     "badgeNeedsMore": "דורש תרגול נוסף",
     "badgeInProgress": "בתהליך תרגול",
-    "badgeCompleted": "נקרא נכון"
+    "badgeCompleted": "נקרא נכון",
+    "showMoreWords": "+{count} מילים נוספות",
+    "showFewerWords": "צמצום",
+    "tagMispronounced": "שגוי {count}",
+    "tagOmitted": "דולג {count}",
+    "tagRepeated": "חזר {count}"
   },
   "item": {
     "notPracticed": "לא תורגל",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "לא ניתן להשמיע אודיו לדוגמה בווייטנאמית במכשיר זה. הילד עדיין יכול לקרוא יחד עם ההורים.",
     "phonicsLockedBusy": "אודיו פוניטי עסוק זמנית. אנא עקוב אחר השלבים במסך והקש על נסה שוב.",
     "evaluationTimeoutError": "בדיקת המערכת נמשכת זמן רב מהצפוי. באפשרותך לשלוח מחדש את ההקלטה האחרונה.",
-    "evaluationSaveError": "שמירת התוצאות בשרת נכשלה. הקול של הילד נשמר — הקש על שמור תוצאות.",
+    "evaluationSaveError": "לא ניתן לשמור את התוצאה כעת. ההקלטה של הילד נשמרה — לחצו על שמירת תוצאה כדי לנסות שוב.",
     "micPermissionError": "הרשאת המיקרופון בדפדפן נדחתה. הורים, אנא אפשרו גישה למיקרופון בהגדרות הדפדפן ונסו שוב.",
     "micNotFoundError": "המיקרופון לא נמצא. אנא בדוק את חיבור המיקרופון.",
     "micUnsupportedError": "הדפדפן הנוכחי אינו תומך בהקלטה ישירה.",

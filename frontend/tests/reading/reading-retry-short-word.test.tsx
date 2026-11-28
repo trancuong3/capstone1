@@ -415,4 +415,189 @@ describe("ReadingScreen short-word 'có' retry state synchronization", () => {
     expect(coBtnConfirmed.className).toContain("bg-green-200");
     expect(coBtnConfirmed).toHaveAccessibleDescription("Bé đã tự sửa đúng");
   });
+
+  it("shows crisp ready cue, triggers context phrase after 1 failure, and keeps phrase open after 1 UNCERTAIN", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      await screen.findByText("Bíp! Bé đọc từ trên màn hình nhé."),
+    ).toBeInTheDocument();
+
+    // Attempt 1 fails with an unrelated word -> saves FAILED and enables phrase for attempt 2.
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "bò",
+      language_code: "vi",
+      language_probability: 0.99,
+      words: [],
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+    await waitFor(() => {
+      expect(services.readingService.createRetryEvent).toHaveBeenCalledTimes(1);
+    });
+    expect(services.readingService.createRetryEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "FAILED",
+        metadata: expect.objectContaining({
+          retry_attempt: 1,
+          resolution_status: "RETRYING",
+        }),
+      }),
+    );
+
+    // Wait for attempt 2 phrase prompt + reopened mic.
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+    });
+    expect(speechPlayerMock.play).toHaveBeenCalledWith(
+      expect.stringContaining("Con hãy đọc cả cụm:"),
+      expect.objectContaining({ coaching: true }),
+    );
+
+    // Attempt 2 receives UNCERTAIN (low logprob) -> must NOT auto-terminate into UNRESOLVED.
+    speechServiceMock.transcribe
+      .mockResolvedValueOnce({
+        text: "bò",
+        language_code: "vi",
+        words: [{ text: "bò", start: 0, end: 0.2, logprob: -5 }],
+      })
+      .mockResolvedValueOnce({
+        text: "bò",
+        language_code: "vi",
+        words: [{ text: "bò", start: 0, end: 0.2, logprob: -5 }],
+      });
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(3);
+    });
+    expect(services.readingService.createRetryEvent).toHaveBeenCalledTimes(1);
+    expect(services.readingService.finish).not.toHaveBeenCalled();
+  });
+
+  it("runs Pass 2 with contrastive keyterms on uncertain Pass 1 and confirms in 1 read", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+    });
+
+    speechServiceMock.transcribe
+      .mockResolvedValueOnce({
+        text: "",
+        language_code: "vi",
+        words: [{ text: "có", start: 0, end: 0.2, logprob: -5 }],
+      })
+      .mockResolvedValueOnce({
+        text: "có",
+        language_code: "vi",
+        words: [{ text: "có", start: 0, end: 0.2, logprob: -0.2 }],
+      });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    await waitFor(() => {
+      expect(services.readingService.createRetryEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          wordId: coWord.word_id,
+          status: "CONFIRMED",
+          metadata: expect.objectContaining({
+            resolution_status: "SELF_CORRECTED",
+          }),
+        }),
+      );
+    });
+    expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(2);
+    expect(speechServiceMock.transcribe.mock.calls[1]?.[1]?.keyterms).toEqual(
+      expect.arrayContaining(["có"]),
+    );
+  });
+
+  it("handles replay and skip voice intents during retry mode", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+    });
+
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "nghe lại mẫu",
+      language_code: "vi",
+      words: [],
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    await waitFor(() => {
+      expect(speechPlayerMock.play).toHaveBeenCalledWith("có", {
+        wordSample: true,
+      });
+    });
+    expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+    });
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "bỏ qua từ này",
+      language_code: "vi",
+      words: [],
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    await waitFor(() => {
+      expect(services.readingService.createRetryEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          wordId: coWord.word_id,
+          status: "UNCERTAIN",
+          metadata: expect.objectContaining({
+            resolution_status: "UNRESOLVED",
+          }),
+        }),
+      );
+    });
+  });
 });

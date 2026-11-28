@@ -2,37 +2,39 @@
 
 import {
   ArrowLeft,
-  BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
   Volume2,
 } from "lucide-react";
-import dynamic from "next/dynamic";
+import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
 import {
   Component,
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
-import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
-import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  getWasmModelCacheStatus,
+  type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -53,15 +55,23 @@ import {
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
   getSessionVoiceAudit,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
+  hydrateTeacherVoiceFromChildProfile,
   lockSessionVoice,
   setActiveVoiceSession,
   subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
 import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
+import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
@@ -77,9 +87,10 @@ import {
   resolveVoiceGender,
 } from "@/lib/reading/voice-persona";
 import {
+  buildContrastiveKeyterms,
   classifyRetryTranscript,
   classifyYesNoVoiceIntent,
-  hasConfusableNasalEnding,
+  hasConfusableShortCoda,
   isAssistantPromptBleed,
   normalizeShortWordTranscript,
   shortWordContext,
@@ -100,9 +111,11 @@ import {
   hasUnusableAudio,
 } from "@/lib/reading/audio-quality";
 import {
-  SHORT_WORD_CAPTURE_CONFIG,
   PHRASE_CAPTURE_CONFIG,
+  SHORT_WORD_CAPTURE_CONFIG,
+  SHORT_WORD_CONTEXT_RETRY_THRESHOLD,
   hasShortWordSpeechActivity,
+  shouldAttemptShortWordKeytermPass2,
   shouldAutoStopShortWordCapture,
 } from "@/lib/reading/word-practice-engine";
 import {
@@ -199,16 +212,240 @@ import {
   type ComparisonResult,
 } from "@/lib/api/comparison-service";
 
-function DynamicPanelSkeleton() {
+type ReadingDynamicPanelKey = "question" | "complete" | "phonics" | "picker";
+
+interface ReadingDynamicFallbackContextValue {
+  readonly booksHref: string;
+  readonly onSkipQuestion: () => void;
+  readonly onClosePhonics: () => void;
+  readonly onClosePicker: () => void;
+  readonly consumeRetryOnRemount: (panel: ReadingDynamicPanelKey) => boolean;
+  readonly markRetryOnRemount: (panel: ReadingDynamicPanelKey) => void;
+}
+
+const ReadingDynamicFallbackContext =
+  createContext<ReadingDynamicFallbackContextValue | null>(null);
+
+interface ReadingSubpanelErrorBoundaryProps {
+  readonly children: ReactNode;
+  readonly fallback: (error: Error, reset: () => void) => ReactNode;
+}
+
+interface ReadingSubpanelErrorBoundaryState {
+  readonly error: Error | null;
+}
+
+class ReadingSubpanelErrorBoundary extends Component<
+  ReadingSubpanelErrorBoundaryProps,
+  ReadingSubpanelErrorBoundaryState
+> {
+  state: ReadingSubpanelErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(
+    error: Error,
+  ): ReadingSubpanelErrorBoundaryState {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return this.props.fallback(this.state.error, () =>
+        this.setState({ error: null }),
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ReadingSubpanelSkeleton() {
+  const t = useTranslations("reading");
   return (
     <section
       aria-busy="true"
+      aria-label={t("session.loadingAria")}
       className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 p-4"
     >
       <Skeleton className="h-12 w-full rounded-control" />
       <Skeleton className="min-h-[420px] w-full rounded-card" />
-      <Skeleton className="h-20 w-full rounded-card" />
     </section>
+  );
+}
+
+function ReadingSubpanelFallback({
+  error,
+  onResetBoundary,
+  panel,
+  retry,
+}: DynamicOptionsLoadingProps & {
+  readonly panel: "question" | "complete";
+  readonly onResetBoundary?: () => void;
+}) {
+  const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
+  const ctx = useContext(ReadingDynamicFallbackContext);
+  const hasError = Boolean(error);
+
+  useEffect(() => {
+    if (hasError && retry && ctx?.consumeRetryOnRemount(panel)) {
+      retry();
+    }
+  }, [ctx, hasError, panel, retry]);
+
+  if (!hasError) {
+    return <ReadingSubpanelSkeleton />;
+  }
+
+  return (
+    <section
+      className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4"
+      data-testid={
+        panel === "question"
+          ? "reading-question-load-error"
+          : "reading-complete-load-error"
+      }
+    >
+      <h1 className="text-heading font-extrabold text-ink">
+        {panel === "question"
+          ? t("comprehension.loadErrorTitle")
+          : tCommon("states.unavailable")}
+      </h1>
+      <StatusMessage tone="error">
+        {panel === "question"
+          ? t("comprehension.loadErrorDesc")
+          : t("session.openFailedDescription")}
+      </StatusMessage>
+      {typeof retry === "function" || onResetBoundary ? (
+        <Button
+          onClick={() => {
+            onResetBoundary?.();
+            retry?.();
+          }}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          {t("session.retry")}
+        </Button>
+      ) : null}
+      {panel === "question" && ctx ? (
+        <Button
+          onClick={() => {
+            ctx.markRetryOnRemount("question");
+            ctx.onSkipQuestion();
+          }}
+          variant="primary"
+        >
+          {t("comprehension.skipToReport")}
+        </Button>
+      ) : null}
+      <ButtonLink href={ctx?.booksHref ?? "/books"} variant="quiet">
+        <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />
+        {t("session.backToLibrary")}
+      </ButtonLink>
+    </section>
+  );
+}
+
+function ReadingPhonicsFallback({
+  error,
+  onResetBoundary,
+  retry,
+}: DynamicOptionsLoadingProps & { readonly onResetBoundary?: () => void }) {
+  const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
+  const ctx = useContext(ReadingDynamicFallbackContext);
+  const hasError = Boolean(error);
+
+  useEffect(() => {
+    if (hasError && retry && ctx?.consumeRetryOnRemount("phonics")) {
+      retry();
+    }
+  }, [ctx, hasError, retry]);
+
+  if (!hasError) {
+    return <Skeleton className="h-32 w-full rounded-2xl" />;
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-white p-3 text-sm text-ink"
+      data-testid="reading-phonics-load-error"
+      role="status"
+    >
+      <span>{tCommon("states.unavailable")}</span>
+      <div className="flex items-center gap-2">
+        {typeof retry === "function" || onResetBoundary ? (
+          <Button
+            className="h-9! min-h-9! w-auto! px-3! py-1! text-xs!"
+            onClick={() => {
+              onResetBoundary?.();
+              retry?.();
+            }}
+            variant="secondary"
+          >
+            {t("session.retry")}
+          </Button>
+        ) : null}
+        {ctx ? (
+          <Button
+            className="h-9! min-h-9! w-auto! px-3! py-1! text-xs!"
+            onClick={() => {
+              ctx.markRetryOnRemount("phonics");
+              ctx.onClosePhonics();
+            }}
+            variant="quiet"
+          >
+            {t("phonics.closeSr")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ReadingPagePickerFallback({
+  error,
+  onResetBoundary,
+  retry,
+}: DynamicOptionsLoadingProps & { readonly onResetBoundary?: () => void }) {
+  const t = useTranslations("reading");
+  const ctx = useContext(ReadingDynamicFallbackContext);
+  const hasError = Boolean(error);
+
+  useEffect(() => {
+    if (hasError && retry && ctx?.consumeRetryOnRemount("picker")) {
+      retry();
+    }
+  }, [ctx, hasError, retry]);
+
+  if (!hasError) {
+    return null;
+  }
+
+  const handleClose = () => {
+    if (ctx) {
+      ctx.markRetryOnRemount("picker");
+      ctx.onClosePicker();
+    }
+  };
+
+  return (
+    <ReadingStatusDialog
+      body={t("session.pageLoadFailed")}
+      closeOnEscape
+      onClose={handleClose}
+      primaryAction={{
+        label: t("session.retry"),
+        onClick: () => {
+          onResetBoundary?.();
+          retry?.();
+        },
+      }}
+      secondaryAction={{
+        label: t("session.cancel"),
+        onClick: handleClose,
+      }}
+      title={t("session.pagePickerTitle")}
+    />
   );
 }
 
@@ -219,7 +456,22 @@ const ComprehensionQuestion = dynamic(
     ),
   {
     ssr: false,
-    loading: () => <DynamicPanelSkeleton />,
+    loading: (loadingProps) => (
+      <ReadingSubpanelFallback {...loadingProps} panel="question" />
+    ),
+  },
+);
+
+const SessionComplete = dynamic(
+  () =>
+    import("@/components/reading/session-complete").then(
+      (mod) => mod.SessionComplete,
+    ),
+  {
+    ssr: false,
+    loading: (loadingProps) => (
+      <ReadingSubpanelFallback {...loadingProps} panel="complete" />
+    ),
   },
 );
 
@@ -230,7 +482,18 @@ const PhonicsLessonCard = dynamic(
     ),
   {
     ssr: false,
-    loading: () => null,
+    loading: (loadingProps) => <ReadingPhonicsFallback {...loadingProps} />,
+  },
+);
+
+const ReadingPagePickerModal = dynamic(
+  () =>
+    import("@/components/reading/reading-page-picker-modal").then(
+      (mod) => mod.ReadingPagePickerModal,
+    ),
+  {
+    ssr: false,
+    loading: (loadingProps) => <ReadingPagePickerFallback {...loadingProps} />,
   },
 );
 
@@ -247,17 +510,6 @@ const ReadingVoiceSettings = dynamic(
         className="min-h-11 rounded-control bg-cream/80 lg:min-h-14"
       />
     ),
-  },
-);
-
-const SessionComplete = dynamic(
-  () =>
-    import("@/components/reading/session-complete").then(
-      (mod) => mod.SessionComplete,
-    ),
-  {
-    ssr: false,
-    loading: () => <DynamicPanelSkeleton />,
   },
 );
 
@@ -563,6 +815,33 @@ function getRetryCaptureTimeMs(): number {
   return performance.now();
 }
 
+function playRetryReadyCue(): void {
+  if (typeof window === "undefined") return;
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (typeof AudioCtx !== "function") return;
+  try {
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.085);
+    window.setTimeout(() => {
+      void ctx.close().catch(() => undefined);
+    }, 150);
+  } catch {
+    // Visual cue remains active even if WebAudio chime is blocked.
+  }
+}
+
 function resolveWordArrayIndex(
   words: readonly { readonly word_id: string }[],
   snapshot: { readonly currentWordId: string | null } | null | undefined,
@@ -617,6 +896,56 @@ function ReadingSessionScreen({
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  const retryOnRemountRef = useRef({
+    question: false,
+    complete: false,
+    phonics: false,
+    picker: false,
+  });
+  const fallbackActionsRef = useRef({
+    onSkipQuestion: () => {},
+    onClosePhonics: () => {},
+    onClosePicker: () => {},
+  });
+
+  useEffect(() => {
+    fallbackActionsRef.current = {
+      onSkipQuestion: () => {
+        automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
+        setUiState("complete");
+      },
+      onClosePhonics: () => {
+        stopAssistantAudio();
+        setActivePhonicsLesson(null);
+        setActivePhonicsStepIndex(null);
+        setPhonicsStatusHint(null);
+      },
+      onClosePicker: closePagePicker,
+    };
+  });
+
+  const consumeRetryOnRemount = useCallback((panel: ReadingDynamicPanelKey) => {
+    if (!retryOnRemountRef.current[panel]) return false;
+    retryOnRemountRef.current[panel] = false;
+    return true;
+  }, []);
+
+  const markRetryOnRemount = useCallback((panel: ReadingDynamicPanelKey) => {
+    retryOnRemountRef.current[panel] = true;
+  }, []);
+
+  const dynamicFallbackContextValue =
+    useMemo<ReadingDynamicFallbackContextValue>(
+      () => ({
+        booksHref: "/books",
+        onSkipQuestion: () => fallbackActionsRef.current.onSkipQuestion(),
+        onClosePhonics: () => fallbackActionsRef.current.onClosePhonics(),
+        onClosePicker: () => fallbackActionsRef.current.onClosePicker(),
+        consumeRetryOnRemount,
+        markRetryOnRemount,
+      }),
+      [consumeRetryOnRemount, markRetryOnRemount],
+    );
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const tutorResumeListeningRef = useRef(false);
@@ -628,6 +957,108 @@ function ReadingSessionScreen({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
+  const [wasmDownloadState, setWasmDownloadState] = useState<{
+    percent: number | null;
+    file?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const wasmClient = getBrowserWasmSttClient();
+    const unsubscribe = wasmClient.subscribeProgress(
+      (event: WasmSttProgressEvent) => {
+        const normalizedStage = event.stage.toLowerCase();
+        if (
+          normalizedStage === "ready" ||
+          normalizedStage === "completed" ||
+          normalizedStage === "done" ||
+          wasmClient.isReady()
+        ) {
+          setWasmDownloadState(null);
+          return;
+        }
+        const computedPercent =
+          typeof event.index === "number" &&
+          typeof event.total === "number" &&
+          event.total > 0
+            ? Math.max(
+                5,
+                Math.min(
+                  95,
+                  Math.round(((event.index + 1) / event.total) * 85),
+                ),
+              )
+            : null;
+        setWasmDownloadState({
+          percent: computedPercent,
+          file: event.file,
+        });
+      },
+    );
+    return unsubscribe;
+  }, []);
+
+  const isWasmDownloading = wasmDownloadState !== null;
+  useEffect(() => {
+    if (!isWasmDownloading) return;
+    const wasmClient = getBrowserWasmSttClient();
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (wasmClient.isReady() || Date.now() - startedAt > 95_000) {
+        setWasmDownloadState(null);
+      }
+    }, 350);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isWasmDownloading]);
+
+  const isTtsSynthesizing = speechPlayer.state === "loading";
+  const isReadingAiWait =
+    (isBusy && !speechPlayer.isPlaying) ||
+    isRetryingReports ||
+    isTtsSynthesizing;
+  const sessionLoadProgress = useAiProgress({
+    active: loadState.status === "loading" || !page,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 55, label: tCommon("aiProgress.connecting") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 5_000,
+  });
+  const wasmModelProgress = useAiProgress({
+    active: isWasmDownloading,
+    realPercent: wasmDownloadState?.percent ?? null,
+    progressMode:
+      wasmDownloadState?.percent !== null &&
+      wasmDownloadState?.percent !== undefined
+        ? "measured"
+        : "staged",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.downloadingSpeechModel") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 25_000,
+  });
+  const readingAiProgress = useAiProgress({
+    active: isReadingAiWait,
+    stages: isTtsSynthesizing
+      ? [
+          { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+          { atPct: 74, label: tCommon("aiProgress.finalizing") },
+        ]
+      : isRetryingReports
+        ? [
+            { atPct: 0, label: tCommon("aiProgress.analyzing") },
+            { atPct: 74, label: tCommon("aiProgress.finalizing") },
+          ]
+        : [
+            { atPct: 0, label: tCommon("aiProgress.transcribing") },
+            { atPct: 48, label: tCommon("aiProgress.analyzing") },
+            { atPct: 84, label: tCommon("aiProgress.finalizing") },
+          ],
+    expectedDurationMs: 4_500,
+  });
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
@@ -687,6 +1118,7 @@ function ReadingSessionScreen({
     Set<string>
   >(() => new Set());
   const retryPausedRef = useRef(false);
+  const transitioningToRetryRef = useRef(false);
   const retrySaveInFlightRef = useRef<Promise<boolean> | null>(null);
   const retryResolvedKeysRef = useRef(new Set<string>());
   const retryModeRef = useRef(false);
@@ -724,6 +1156,7 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
+  useTeacherPersona();
   const { preferences: automationPreferences, coachingStyle } =
     useAutomationPreferences();
   const automationRef = useRef(automationPreferences);
@@ -818,6 +1251,7 @@ function ReadingSessionScreen({
     readonly wordId: string | null;
     readonly plan: PhonicsLessonPlan;
   } | null>(null);
+  const [isAnalyzingPhonicsAi, setIsAnalyzingPhonicsAi] = useState(false);
   const [activePhonicsStepIndex, setActivePhonicsStepIndex] = useState<
     number | null
   >(null);
@@ -850,11 +1284,26 @@ function ReadingSessionScreen({
   const assistantTurnSpokenRef = useRef<string[]>([]);
   const assistantAudioResumeRequestedRef = useRef(false);
   const pageCompletionStartedRef = useRef<string | null>(null);
+  const lastPageAutoCompleteStartedRef = useRef(false);
+  const savedPageProgressKeysRef = useRef<Set<string>>(new Set());
+  const failedPageProgressKeyRef = useRef<string | null>(null);
+  const inFlightPageSaveRef = useRef<{
+    readonly key: string;
+    readonly promise: Promise<ReadingSessionPageProgressDTO>;
+  } | null>(null);
+  const pageCompletionPromiseRef = useRef<{
+    readonly key: string;
+    readonly promise: Promise<boolean>;
+  } | null>(null);
   const resumeCaptureAfterPageTurnRef = useRef(false);
   const pageRef = useRef<ReadingPageDTO | null>(page);
+  const pageProgressRef = useRef<ReadingSessionPageProgressDTO | null>(
+    pageProgress,
+  );
   useEffect(() => {
     pageRef.current = page;
-  }, [page]);
+    pageProgressRef.current = pageProgress;
+  }, [page, pageProgress]);
   const uiStateRef = useRef<ReadingUiState>(uiState);
   useEffect(() => {
     uiStateRef.current = uiState;
@@ -977,7 +1426,12 @@ function ReadingSessionScreen({
         true,
       );
     } catch (err) {
-      if (!(err instanceof Error && err.name === "AbortError")) {
+      const isAbortError =
+        typeof err === "object" &&
+        err !== null &&
+        "name" in err &&
+        (err as { name?: unknown }).name === "AbortError";
+      if (!isAbortError) {
         console.warn("Lỗi phát âm 1 từ:", err);
       }
     } finally {
@@ -1019,6 +1473,15 @@ function ReadingSessionScreen({
       pageRevisionId: activeCachePageRevisionId,
       isPrivateBook: activeCacheIsPrivate,
     });
+    if (activeCachePageId && page?.words?.length) {
+      void preloadReadingVoiceEngines({
+        bookId: activeCacheBookId,
+        pageId: activeCachePageId,
+        pageRevisionId: activeCachePageRevisionId,
+        isPrivateBook: activeCacheIsPrivate,
+        previewWords: page.words.slice(0, 3).map((w) => w.text),
+      });
+    }
     return () => {
       setSpeechCacheContext?.(null);
     };
@@ -1028,7 +1491,10 @@ function ReadingSessionScreen({
     activeCacheIsPrivate,
     activeCachePageId,
     activeCachePageRevisionId,
+    page?.words,
   ]);
+
+  const retryPendingRetryEventRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1046,7 +1512,10 @@ function ReadingSessionScreen({
         cachedHealth.google.tts_configured && !cachedHealth.google.tts_cooldown;
       if (ttsAllowsFallback && localTtsDown && useGoogleTts) {
         lockSessionVoice(sessionId, {
-          voiceId: mapLocalVoiceToGoogleBackup(null, policy.region),
+          voiceId: mapLocalVoiceToGoogleBackup(
+            getEffectiveVoiceId(),
+            policy.region,
+          ),
         });
       } else {
         lockSessionVoice(sessionId);
@@ -1055,6 +1524,9 @@ function ReadingSessionScreen({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
+    // Warm STT (WASM/Android) & TTS immediately upon entering ReadingScreen
+    // (covers direct URL navigation, refresh, or resume without prep screen).
+    void preloadReadingVoiceEngines();
     const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
@@ -1091,10 +1563,30 @@ function ReadingSessionScreen({
     };
     window.addEventListener("pagehide", handlePageHide);
     document.addEventListener("viread:android-background", handlePageHide);
+    const handleOnline = () => {
+      automationRuntimeRef.current?.dispatch({ type: "NETWORK", online: true });
+      if (
+        pendingRetryEventRef.current &&
+        !retryProcessingRef.current &&
+        retryModeRef.current
+      ) {
+        void retryPendingRetryEventRef.current();
+      }
+    };
+    const handleOffline = () => {
+      automationRuntimeRef.current?.dispatch({
+        type: "NETWORK",
+        online: false,
+      });
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     return () => {
       mountedRef.current = false;
       window.removeEventListener("pagehide", handlePageHide);
       document.removeEventListener("viread:android-background", handlePageHide);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       setActiveVoiceSession(null);
       automationRuntimeRef.current?.dispatch({ type: "SESSION_END" });
       automationRuntimeRef.current?.dispose();
@@ -1137,10 +1629,27 @@ function ReadingSessionScreen({
         const wasmSupported = detectBrowserWasmSttSupport().supported;
         if (localSttDown) {
           if (currentSttTier === "browser_wasm" && wasmSupported) {
-            // Preserve active Tier-1 on-device Browser WASM STT; never clobber it back to local/browser.
+            // Preserve active Tier-2 on-device Browser WASM STT; never clobber it back to local/browser.
+          } else if (wasmSupported && !isAndroidNativeSpeechAvailable()) {
+            // Strict Offline-First STT priority: prefer On-Device WASM BEFORE
+            // Cloud Google / Browser Web Speech. Under `local_only` before reading
+            // begins, keep the mount badge honestly at `"idle"` while Browser WASM
+            // pre-initializes silently in the background and switches to
+            // `browser_wasm` as soon as the child actually begins reading.
+            if (sttAllowsFallback) {
+              recordSttEngineUsage({
+                provider: "wasm",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_STT_UNAVAILABLE",
+              });
+            }
           } else if (sttAllowsFallback) {
             const useGoogleStt =
               health.google.stt_configured && !health.google.stt_cooldown;
+            const useElevenLabsStt = Boolean(
+              health.elevenlabs?.stt_configured &&
+              !health.elevenlabs?.stt_cooldown,
+            );
             const hasNativeWebSpeech =
               typeof window !== "undefined" &&
               Boolean(
@@ -1150,33 +1659,28 @@ function ReadingSessionScreen({
                   .webkitSpeechRecognition,
               );
             recordSttEngineUsage({
-              provider: useGoogleStt
-                ? "google"
-                : hasNativeWebSpeech
-                  ? "browser"
-                  : wasmSupported
-                    ? "wasm"
-                    : "browser",
+              provider: isAndroidNativeSpeechAvailable()
+                ? "android_native"
+                : useGoogleStt
+                  ? "google"
+                  : useElevenLabsStt
+                    ? "elevenlabs"
+                    : hasNativeWebSpeech
+                      ? "browser"
+                      : wasmSupported
+                        ? "wasm"
+                        : "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
           }
-          // When hosted deployment has no local voice worker configured, quietly
-          // pre-warm Browser WASM ONLY if model files are already cached in IndexedDB.
-          if (hostedLocalUnconfigured && wasmSupported && !sttAllowsFallback) {
-            void getWasmModelCacheStatus()
-              .then((cacheStatus) => {
-                if (!cancelled && cacheStatus.ready) {
-                  void getBrowserWasmSttClient()
-                    .init()
-                    .catch(() => undefined);
-                }
-              })
+          // Eagerly initialize Browser WASM STT whenever local STT is down so
+          // the model is already warm before the child speaks the first word!
+          if (wasmSupported && !isAndroidNativeSpeechAvailable()) {
+            void getBrowserWasmSttClient()
+              .init()
               .catch(() => undefined);
           }
-          // Under `local_only` when STT has not started yet, keep the idle mount
-          // badge honestly at `"idle"`; Tier-1 `browser_wasm` activates lazily
-          // when the child actually begins reading.
         } else {
           recordSttEngineUsage({
             provider: "local",
@@ -1192,10 +1696,14 @@ function ReadingSessionScreen({
         if (ttsAllowsFallback && localTtsDown) {
           const useGoogleTts =
             health.google.tts_configured && !health.google.tts_cooldown;
+          const useElevenLabsTts = Boolean(
+            health.elevenlabs?.tts_configured &&
+            !health.elevenlabs?.tts_cooldown,
+          );
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
-              activeLock?.voiceId ?? null,
+              activeLock?.voiceId ?? getEffectiveVoiceId(),
               activeLock?.region ?? policy.region,
             );
             // Lock directly to the configured Google voice (or resync server-side
@@ -1207,7 +1715,8 @@ function ReadingSessionScreen({
               });
             } else if (
               activeLock.provider === "local" &&
-              getSessionVoiceAudit(sessionId).length === 0
+              (getSessionVoiceAudit(sessionId).length === 0 ||
+                hasPendingSessionVoiceSwitch(sessionId))
             ) {
               lockSessionVoice(sessionId, {
                 voiceId: googleVoiceId,
@@ -1231,18 +1740,33 @@ function ReadingSessionScreen({
                 voiceGender: resolveVoiceGender(googleVoiceId),
               });
             }
+          } else if (useElevenLabsTts) {
+            if (!activeLock || activeLock.sessionId !== sessionId) {
+              lockSessionVoice(sessionId);
+            }
+            const resolvedLock = getActiveSessionVoiceLock();
+            if (!ttsUsingCachedAudio) {
+              recordTtsEngineUsage({
+                provider: "elevenlabs",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+                voiceId: resolvedLock?.voiceId ?? null,
+                voiceGender: resolveVoiceGender(resolvedLock?.voiceId),
+              });
+            }
           } else {
             if (!activeLock || activeLock.sessionId !== sessionId) {
               lockSessionVoice(sessionId);
             }
             if (!getActiveSessionVoiceLock() && !ttsUsingCachedAudio) {
               // Only advertise browser TTS fallback when no SessionVoiceLock forbids it.
+              const effectiveVoiceId = getEffectiveVoiceId();
               recordTtsEngineUsage({
                 provider: "browser",
                 fallbackUsed: true,
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-                voiceId: null,
-                voiceGender: resolveVoiceGender(null),
+                voiceId: effectiveVoiceId,
+                voiceGender: resolveVoiceGender(effectiveVoiceId),
               });
             }
           }
@@ -1256,12 +1780,14 @@ function ReadingSessionScreen({
               (!ttsAllowsFallback && currentTtsSnap.fallbackUsed))
           ) {
             const activeLock = getActiveSessionVoiceLock();
+            const resolvedVoiceId =
+              activeLock?.voiceId ?? getEffectiveVoiceId();
             recordTtsEngineUsage({
               provider: "local",
               fallbackUsed: false,
               fallbackReason: null,
-              voiceId: activeLock?.voiceId ?? null,
-              voiceGender: resolveVoiceGender(activeLock?.voiceId),
+              voiceId: resolvedVoiceId,
+              voiceGender: resolveVoiceGender(resolvedVoiceId),
             });
           }
         }
@@ -1390,21 +1916,20 @@ function ReadingSessionScreen({
     async function load() {
       try {
         const session = await services.readingService.get(sessionId);
-        const [
-          book,
-          child,
-          currentPage,
-          completion,
-          initialProgress,
-          practice,
-        ] = await Promise.all([
+        // Batch startup reads in two smaller waves (3 + 3) instead of blasting
+        // 6 concurrent DB queries on mobile cold start.
+        const [book, child, currentPage] = await Promise.all([
           services.bookService.get(session.book_id),
           services.childService.get(session.child_id),
           services.readingService.getCurrentPage(sessionId),
+        ]);
+        const [completion, initialProgress, practice] = await Promise.all([
           services.readingService.getCompletionSummary(sessionId),
           services.readingService.getPageProgress(sessionId),
-          services.readingService.getPracticeState?.(sessionId) ??
-            Promise.resolve(null),
+          (
+            services.readingService.getPracticeState?.(sessionId) ??
+            Promise.resolve(null)
+          ).catch(() => null),
         ]);
 
         // Server-side progress is authoritative on reload. A stale pageId query
@@ -1414,6 +1939,13 @@ function ReadingSessionScreen({
           !initialProgress.pages.some((item) => item.page_id === initialPageId);
 
         if (!active) return;
+
+        hydrateTeacherVoiceFromChildProfile(child, {
+          syncActiveServerSessionLock:
+            typeof voiceStudio.updateSessionVoiceLock === "function"
+              ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+              : undefined,
+        });
 
         if (
           practice &&
@@ -1550,7 +2082,7 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId, t]);
+  }, [initialPageId, loadKey, services, sessionId, t, voiceStudio]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -2030,9 +2562,71 @@ function ReadingSessionScreen({
           preventAssistantAudioResume();
           speechPlayer.stop();
         },
-        savePage: async () => true,
-        turnPage: () => undefined,
-        finishSession: () => undefined,
+        savePage: async (key, attempt) => {
+          if (!automationRef.current.autoAdvance) return true;
+          if (savedPageProgressKeysRef.current.has(key)) return true;
+          const parts = key.split(":");
+          const targetPageId = parts[1];
+          const targetRevisionId = parts[2];
+          if (!targetPageId || !targetRevisionId) return true;
+          if (
+            attempt === 1 &&
+            !pageCompletionPromiseRef.current &&
+            !inFlightPageSaveRef.current &&
+            failedPageProgressKeyRef.current !== key
+          ) {
+            await Promise.resolve();
+          }
+          if (savedPageProgressKeysRef.current.has(key)) return true;
+          if (inFlightPageSaveRef.current?.key === key) {
+            try {
+              await inFlightPageSaveRef.current.promise;
+              return true;
+            } catch {
+              return false;
+            }
+          }
+          if (pageCompletionPromiseRef.current?.key === key) {
+            return await pageCompletionPromiseRef.current.promise;
+          }
+          const progress = pageProgressRef.current;
+          if (!progress?.persisted) return true;
+          const activePage = pageRef.current;
+          if (activePage && activePage.page_id === targetPageId) {
+            freezeCompletedPageAssessment(activePage);
+          }
+          try {
+            await persistPageProgress(targetPageId, targetRevisionId);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        turnPage: () => {
+          if (
+            !mountedRef.current ||
+            retryModeRef.current ||
+            uiStateRef.current !== "reading"
+          ) {
+            return;
+          }
+          const progress = pageProgressRef.current;
+          if (progress && progress.current_index + 1 < progress.total_pages) {
+            resumeCaptureAfterPageTurnRef.current = true;
+            setUiState("page-turn");
+          }
+        },
+        finishSession: () => {
+          if (!mountedRef.current || retryModeRef.current) return;
+          const progress = pageProgressRef.current;
+          if (
+            automationRef.current.autoAdvance &&
+            progress &&
+            progress.current_index + 1 >= progress.total_pages
+          ) {
+            void handleLastPageAutoComplete();
+          }
+        },
         giveUpWord: (wordId) => {
           gaveUpWordIdsRef.current.add(wordId);
           helpedWordIdsRef.current.add(wordId);
@@ -2197,7 +2791,7 @@ function ReadingSessionScreen({
               message: promptText,
             });
             setLatestTranscript(promptText);
-            await speakGuarded(promptText);
+            await speakGuarded(promptText, { preserveBookText: true });
           }
         },
         true,
@@ -2266,10 +2860,10 @@ function ReadingSessionScreen({
                 message: comfortText,
               });
               setLatestTranscript(comfortText);
-              await speakGuarded(comfortText);
+              await speakGuarded(comfortText, { preserveBookText: true });
             } else {
               setLatestTranscript(
-                adaptPersona(`Con nghe cô đọc từ “${word.text}” nhé.`),
+                `${adaptPersona("Con nghe cô đọc từ")} “${word.text}” nhé.`,
               );
               await speakGuarded("Cô đọc mẫu cho con nhé.", { coaching: true });
               if (!isCurrent()) return;
@@ -2294,7 +2888,7 @@ function ReadingSessionScreen({
                 message: step3Text,
               });
               setLatestTranscript(`${step3Text} “${phrase}”`);
-              await speakGuarded(step3Text);
+              await speakGuarded(step3Text, { preserveBookText: true });
               if (!isCurrent()) return;
               await speakGuarded(phrase, { preserveBookText: true });
             } else {
@@ -2320,14 +2914,16 @@ function ReadingSessionScreen({
               });
               setLatestTranscript(`${phonicsGuide} · “${phrase}”`);
               if (style === "gentle") {
-                await speakGuarded(intro, { coaching: true });
+                await speakGuarded(intro, {
+                  coaching: true,
+                  preserveBookText: true,
+                });
                 if (!isCurrent()) return;
               }
-              await speakGuarded(phonicsGuide);
+              await speakGuarded(phonicsGuide, { preserveBookText: true });
               if (!isCurrent()) return;
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.75,
               });
               if (!isCurrent()) return;
               await speakGuarded(phrase, { preserveBookText: true });
@@ -2337,7 +2933,6 @@ function ReadingSessionScreen({
               );
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.8,
               });
               if (!isCurrent()) return;
               if (phraseWords.length > 1) {
@@ -2572,7 +3167,7 @@ function ReadingSessionScreen({
     }
   }
 
-  /** Speak one assistant utterance and register it with the echo guard. */
+  /** Speak one assistant utterance and register it individually with the echo guard. */
   async function speakGuarded(
     text: string,
     options?: SpeechPlayOptions & { readonly preserveBookText?: boolean },
@@ -2587,9 +3182,11 @@ function ReadingSessionScreen({
     if (spokenText.trim()) {
       assistantTurnSpokenRef.current.push(spokenText.trim());
     }
-    const guardText = assistantTurnSpokenRef.current.join(" ");
+    // Register ONLY this utterance's text with EchoGuard (never concatenate earlier
+    // modeled book words into "Đến lượt con đọc nhé.", which would falsely reject
+    // the child's immediate first spoken word as `tail-overlap`).
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(id, guardText || spokenText, performance.now());
+    echoGuard.playbackStarted(id, spokenText, performance.now());
     try {
       if (Object.keys(playOptions).length === 0) {
         await speechPlayer.play(spokenText);
@@ -2641,7 +3238,7 @@ function ReadingSessionScreen({
         async () => {
           if (!isCurrent()) return;
           setLatestTranscript(promptText);
-          await speakGuarded(promptText);
+          await speakGuarded(promptText, { preserveBookText: true });
         },
         true,
         false,
@@ -2749,10 +3346,11 @@ function ReadingSessionScreen({
           })());
     if (!target) return;
 
-    const plan = buildPhonicsLesson(target.text);
+    let plan = buildPhonicsLesson(target.text);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
+    setIsAnalyzingPhonicsAi(false);
 
     if (target.word_id && !retryModeRef.current) {
       helpedWordIdsRef.current.add(target.word_id);
@@ -2772,6 +3370,33 @@ function ReadingSessionScreen({
       await playAssistantAudio(
         async () => {
           if (!isCurrent()) return;
+          if (
+            !plan.supported &&
+            plan.canPlayWholeWord &&
+            typeof speechService.analyzePhonics === "function"
+          ) {
+            setIsAnalyzingPhonicsAi(true);
+            try {
+              const aiPlan = await speechService.analyzePhonics(target.text, {
+                contextPhrase: capturePage?.words
+                  ? capturePage.words
+                      .slice(0, 12)
+                      .map((w) => w.text)
+                      .join(" ")
+                  : null,
+              });
+              if (!isCurrent()) return;
+              if (aiPlan && aiPlan.supported) {
+                plan = aiPlan;
+                setActivePhonicsLesson({ wordId: target.word_id, plan });
+                setActivePhonicsStepIndex(0);
+              }
+            } finally {
+              if (mountedRef.current) {
+                setIsAnalyzingPhonicsAi(false);
+              }
+            }
+          }
           if (!plan.supported) {
             setPhonicsStatusHint(plan.message);
             if (plan.canPlayWholeWord) {
@@ -2779,9 +3404,6 @@ function ReadingSessionScreen({
             }
             return;
           }
-          setLatestTranscript(
-            `Đánh vần tiếng “${plan.focusSyllable}”: ${plan.steps.map((s) => s.displayText).join(" · ")}`,
-          );
           await speakPhonicsLessonGuarded(plan, (stepIdx) => {
             if (isCurrent()) setActivePhonicsStepIndex(stepIdx);
           });
@@ -2873,6 +3495,22 @@ function ReadingSessionScreen({
     }
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    if (
+      !preferAndroidNativeStt &&
+      detectBrowserWasmSttSupport().supported &&
+      !getBrowserWasmSttClient().isReady()
+    ) {
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttReady = Boolean(
+        freshHealth?.local.available && freshHealth.local.stt_ready,
+      );
+      if (!localSttReady) {
+        setLatestTranscript("Đang khởi động nhận diện giọng nói...");
+        await awaitSttReadyBeforeListening(4_000);
+        if (!isCurrent()) return false;
+        setLatestTranscript(null);
+      }
+    }
     let recorderStarted = false;
     if (preferAndroidNativeStt) {
       // Skip parallel WebView getUserMedia/MediaRecorder when Android native
@@ -3096,8 +3734,29 @@ function ReadingSessionScreen({
                 if (!isFencedResult(meta)) {
                   return false;
                 }
+                const immediateWindowWords = (() => {
+                  const activePage = pageRef.current ?? capturePage;
+                  if (!activePage) return [] as string[];
+                  const curId = engine.getSnapshot().currentWordId;
+                  const curIdx = activePage.words.findIndex(
+                    (w) => w.word_id === curId,
+                  );
+                  const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                  return activePage.words
+                    .slice(startIdx, startIdx + 6)
+                    .map((w) => w.text);
+                })();
+                const isLowVolumeMatchingWindow =
+                  meta?.audioQuality?.status === "LOW_VOLUME" &&
+                  Boolean(part.trim()) &&
+                  hasUsableChildWindowBrowserConfidence(
+                    part,
+                    immediateWindowWords,
+                    0.9,
+                  );
                 if (
                   meta?.audioQuality &&
+                  !isLowVolumeMatchingWindow &&
                   (meta.audioQuality.status === "LOW_VOLUME" ||
                     meta.audioQuality.status === "CLIPPING" ||
                     meta.audioQuality.status === "AUDIO_TOO_SHORT")
@@ -3122,21 +3781,7 @@ function ReadingSessionScreen({
                   !isPhonicsCueUsable(part, confidence) &&
                   !hasUsableChildWindowBrowserConfidence(
                     part,
-                    (() => {
-                      const activePage = pageRef.current ?? capturePage;
-                      if (!activePage) return [];
-                      const curId = engine.getSnapshot().currentWordId;
-                      const curIdx = activePage.words.findIndex(
-                        (w) => w.word_id === curId,
-                      );
-                      const startIdx = Math.max(
-                        0,
-                        curIdx >= 0 ? curIdx - 1 : 0,
-                      );
-                      return activePage.words
-                        .slice(startIdx, startIdx + 6)
-                        .map((w) => w.text);
-                    })(),
+                    immediateWindowWords,
                     confidence,
                   )
                 ) {
@@ -3272,6 +3917,12 @@ function ReadingSessionScreen({
                     void finishSentenceReinforcement(engine, false);
                   }
                   rt.dispatch({ type: "RESUME" });
+                  return false;
+                }
+                if (command.type === "NEXT_PAGE") {
+                  if (!automationRef.current.autoAdvance) {
+                    void confirmCurrentPageCompleted();
+                  }
                   return false;
                 }
                 // Sentence-level fluency reinforcement (G20): speech read back
@@ -3700,10 +4351,10 @@ function ReadingSessionScreen({
               setIsMicRecording(false);
               setUiState("stt-error");
               setComparisonError(
-                "Bộ nhận diện giọng nói trên máy chưa bật hoặc đang khởi động. Ba mẹ bật Local Voice Worker hoặc bật Dự phòng Online trong Cài đặt giọng rồi thử lại nhé.",
+                "Hệ thống nghe giọng đọc đang khởi động hoặc tạm chưa sẵn sàng. Ba mẹ vui lòng đợi ít giây rồi thử lại nhé.",
               );
               setLatestTranscript(
-                "Bộ nhận diện giọng nói trên máy chưa bật. Ba mẹ kiểm tra lại dịch vụ giọng nói cục bộ nhé.",
+                "Hệ thống nghe giọng đọc tạm thời chưa sẵn sàng. Bé chờ một lát rồi đọc lại nhé.",
               );
               return;
             }
@@ -3714,7 +4365,7 @@ function ReadingSessionScreen({
               if (sttNetworkErrorStreakRef.current >= 3) {
                 recognitionRef.current = null;
                 setComparisonError(
-                  "Mất kết nối tới bộ nhận diện giọng nói trực tuyến. Bé kiểm tra mạng hoặc bật Local Voice Worker rồi bấm Thử lại nhé.",
+                  "Mất kết nối tới hệ thống nghe giọng đọc. Bé kiểm tra lại mạng rồi bấm Thử lại nhé.",
                 );
                 isListeningActiveRef.current = false;
                 isUsingRecorderRef.current = false;
@@ -3813,6 +4464,20 @@ function ReadingSessionScreen({
             rec.start();
             recognitionRef.current = rec;
             browserRecognitionStarted = true;
+            if (isLocalSegmentRec) {
+              await rec.whenAudioGraphReady(800);
+              if (!isCurrent()) {
+                if (recognitionRef.current === rec) {
+                  recognitionRef.current = null;
+                }
+                try {
+                  rec.abort();
+                } catch {
+                  // Ignore cleanup error
+                }
+                return false;
+              }
+            }
           } catch {
             // MediaRecorder remains the primary source when available.
           }
@@ -4041,10 +4706,15 @@ function ReadingSessionScreen({
     const handoff = options.preserveAlignment || options.forPassageHelp;
 
     const sttStatus = getVoiceEngineStatus().stt;
-    const freshSttHealth = getFreshVoiceEngineHealth();
+    const freshSttHealth = getVoiceEngineHealthForRouting();
+    const elevenLabsSttUsable = Boolean(
+      freshSttHealth?.elevenlabs?.stt_configured &&
+      !freshSttHealth?.elevenlabs?.stt_cooldown,
+    );
     const backendSttUnavailable =
       freshSttHealth !== null &&
       (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
+      !elevenLabsSttUsable &&
       (!freshSttHealth.google.stt_configured ||
         freshSttHealth.google.stt_cooldown);
     const alreadyUsingEmergencyBrowserStt =
@@ -4413,6 +5083,7 @@ function ReadingSessionScreen({
           isPrivateBook: false,
           cacheScope: "COACHING",
           bypassSessionLock: true,
+          utteranceKind: "voice_preview",
           onPlay: () => {
             audioPlayed = true;
           },
@@ -4566,7 +5237,13 @@ function ReadingSessionScreen({
         true,
       );
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (error instanceof Error && error.name === "AbortError") {
+        if (mountedRef.current) {
+          setIsPlayingPageSample(false);
+          setIsBusy(false);
+        }
+        return;
+      }
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
@@ -4575,16 +5252,19 @@ function ReadingSessionScreen({
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
+        setIsPlayingPageSample(false);
         setIsBusy(false);
       }
     } finally {
+      if (mountedRef.current) {
+        setIsPlayingPageSample(false);
+        setIsBusy(false);
+      }
       if (isCurrentSample()) {
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
-        setIsPlayingPageSample(false);
-        setIsBusy(false);
       }
     }
   }
@@ -4720,6 +5400,13 @@ function ReadingSessionScreen({
       setLatestTranscript("");
       setComparisonResult(null);
       setComparisonError(null);
+
+      // Pre-warm the microphone stream during the 3s countdown on Web (never on
+      // Android APK where native SpeechRecognizer owns HAL mic) so the first
+      // letter/word is captured immediately when countdown hits 0.
+      if (!shouldPreferAndroidNativeStt()) {
+        void speechRecorder.prepare().catch(() => undefined);
+      }
 
       setCountdown(3);
     } catch (error) {
@@ -5038,6 +5725,71 @@ function ReadingSessionScreen({
     }
   }
 
+  function persistPageProgress(
+    targetPageId: string,
+    targetRevisionId: string,
+  ): Promise<ReadingSessionPageProgressDTO> {
+    const key = `${sessionId}:${targetPageId}:${targetRevisionId}`;
+    if (inFlightPageSaveRef.current?.key === key) {
+      return inFlightPageSaveRef.current.promise;
+    }
+    const promise = services.readingService
+      .completeCurrentPage(sessionId, targetPageId)
+      .then((nextProgress) => {
+        savedPageProgressKeysRef.current.add(key);
+        if (failedPageProgressKeyRef.current === key) {
+          failedPageProgressKeyRef.current = null;
+        }
+        if (mountedRef.current) {
+          pageProgressRef.current = nextProgress;
+          setPageProgress(nextProgress);
+          setPageNavigationError(null);
+        }
+        return nextProgress;
+      })
+      .catch((error) => {
+        failedPageProgressKeyRef.current = key;
+        throw error;
+      })
+      .finally(() => {
+        if (inFlightPageSaveRef.current?.key === key) {
+          inFlightPageSaveRef.current = null;
+        }
+      });
+    inFlightPageSaveRef.current = { key, promise };
+    return promise;
+  }
+
+  async function handleLastPageAutoComplete(): Promise<void> {
+    if (
+      lastPageAutoCompleteStartedRef.current ||
+      initialAssessmentPreparedRef.current ||
+      prepareFinishStartedRef.current ||
+      finishStartedRef.current ||
+      !mountedRef.current
+    ) {
+      return;
+    }
+    lastPageAutoCompleteStartedRef.current = true;
+    try {
+      if (automationRef.current.assist) {
+        const praise = promptSelectorRef.current.next("pageFluentPraise");
+        setLatestTranscript(praise);
+        try {
+          await speakGuarded(praise, { coaching: true });
+        } catch {
+          // Proceed even if TTS fails
+        }
+      }
+      if (!mountedRef.current) return;
+      await prepareInitialReading();
+    } finally {
+      if (!initialAssessmentPreparedRef.current) {
+        lastPageAutoCompleteStartedRef.current = false;
+      }
+    }
+  }
+
   async function autoCompletePageAfterFinalWord(
     snapshot: RealtimeAlignmentSnapshot,
   ): Promise<void> {
@@ -5076,7 +5828,18 @@ function ReadingSessionScreen({
     }
 
     const completedPageId = completedPage.page_id;
+    const completedRevisionId = completedPage.page_revision_id;
     const completedEngine = alignmentEngineRef.current;
+    const completionKey = `${sessionId}:${completedPageId}:${completedRevisionId}`;
+    let resolveCompletion!: (ok: boolean) => void;
+    const completionPromise = new Promise<boolean>((resolve) => {
+      resolveCompletion = resolve;
+    });
+    pageCompletionPromiseRef.current = {
+      key: completionKey,
+      promise: completionPromise,
+    };
+    let completionSucceeded = false;
     resumeCaptureAfterPageTurnRef.current = true;
     pageCompletionStartedRef.current = completedPageId;
     setIsBusy(true);
@@ -5097,16 +5860,21 @@ function ReadingSessionScreen({
       if (engine) applyRealtimeSnapshot(finishPassageAlignment(engine));
 
       freezeCompletedPageAssessment(completedPage);
-      const nextProgress = await services.readingService.completeCurrentPage(
-        sessionId,
+      const nextProgress = await persistPageProgress(
         completedPageId,
+        completedRevisionId,
       );
+      completionSucceeded = true;
+      resolveCompletion(true);
       if (!mountedRef.current) return;
 
       setIsMicRecording(false);
-      setPageProgress(nextProgress);
       if (nextProgress.current_index + 1 < nextProgress.total_pages) {
         setUiState("page-turn");
+      } else {
+        resumeCaptureAfterPageTurnRef.current = false;
+        setIsBusy(false);
+        await handleLastPageAutoComplete();
       }
     } catch {
       resumeCaptureAfterPageTurnRef.current = false;
@@ -5115,6 +5883,12 @@ function ReadingSessionScreen({
         setPageNavigationError(t("session.savePageRetryHint"));
       }
     } finally {
+      if (!completionSucceeded) {
+        resolveCompletion(false);
+      }
+      if (pageCompletionPromiseRef.current?.promise === completionPromise) {
+        pageCompletionPromiseRef.current = null;
+      }
       if (pageCompletionStartedRef.current === completedPageId) {
         pageCompletionStartedRef.current = null;
       }
@@ -5222,7 +5996,11 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          const tutorText = action?.tts_text ?? word;
+          const isVerbatimTutorWord =
+            !action || !action.tts_text || action.tts_text === word;
+          const tutorText = isVerbatimTutorWord
+            ? word
+            : adaptPersona(action?.tts_text ?? word);
           const tutorPlaybackId = `tutor-read-${(assistantPlaybackSeqRef.current += 1)}`;
           echoGuard.playbackStarted(
             tutorPlaybackId,
@@ -5232,7 +6010,7 @@ function ReadingSessionScreen({
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(tutorText, {
-              wordSample: !action || action.tts_text === word,
+              wordSample: isVerbatimTutorWord,
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -5295,7 +6073,11 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          const retryTutorText = nextAction?.tts_text ?? word;
+          const isVerbatimRetryTutorWord =
+            !nextAction || !nextAction.tts_text || nextAction.tts_text === word;
+          const retryTutorText = isVerbatimRetryTutorWord
+            ? word
+            : adaptPersona(nextAction?.tts_text ?? word);
           const retryTutorPlaybackId = `tutor-retry-${(assistantPlaybackSeqRef.current += 1)}`;
           echoGuard.playbackStarted(
             retryTutorPlaybackId,
@@ -5305,7 +6087,7 @@ function ReadingSessionScreen({
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(retryTutorText, {
-              wordSample: !nextAction || nextAction.tts_text === word,
+              wordSample: isVerbatimRetryTutorWord,
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -5666,14 +6448,55 @@ function ReadingSessionScreen({
     return persistRetryOutcome(pending);
   }
 
+  function handleRetryVoiceCommand(
+    text: string,
+    candidate: RetryWordCandidate,
+    isLiveMic: boolean,
+  ): boolean {
+    const intent = parseVoiceIntent(text, { upcomingText: candidate.text });
+    if (
+      intent.type === "SPELL" ||
+      isSpellingHelpRequest(text, candidate.text)
+    ) {
+      void offerExplicitPhonicsHelp(
+        null,
+        page,
+        { word_id: candidate.wordId, text: candidate.text },
+        isLiveMic,
+      );
+      return true;
+    }
+    if (intent.type === "REPLAY") {
+      void handleReadSample();
+      return true;
+    }
+    if (intent.type === "SKIP") {
+      skipRetryWord(!isLiveMic);
+      return true;
+    }
+    if (intent.type === "STOP") {
+      void pauseReading();
+      return true;
+    }
+    if (intent.type === "HELP" || isWordHelpRequest(text, candidate.text)) {
+      void offerRetryHelp(candidate);
+      return true;
+    }
+    return false;
+  }
+
   function selectRetryPhrase(candidate: RetryWordCandidate): string | null {
+    const hadPhrase = Boolean(retryPhraseRef.current);
     const phrase =
-      retryHeardFailuresRef.current >= 2
+      retryHeardFailuresRef.current >= SHORT_WORD_CONTEXT_RETRY_THRESHOLD
         ? shortWordContext(
             candidate.text,
             resolveRetrySentenceContext(candidate),
           )
         : null;
+    if (!hadPhrase && phrase) {
+      retryUnclearStreakRef.current = 0;
+    }
     retryPhraseRef.current = phrase;
     setRetryPhrase(phrase);
     return phrase;
@@ -5696,18 +6519,7 @@ function ReadingSessionScreen({
     isListeningActiveRef.current = false;
     retryProcessingRef.current = false;
 
-    if (meaningfulSpeech && retryPhraseRef.current) {
-      retryProcessingRef.current = true;
-      void persistRetryOutcome({
-        candidate,
-        status: "UNCERTAIN",
-        transcript,
-        attempt: nextRetryAttempt(candidate),
-      });
-      return;
-    }
-
-    if (meaningfulSpeech) {
+    if (meaningfulSpeech && !retryPhraseRef.current) {
       retryHeardFailuresRef.current += 1;
       if (selectRetryPhrase(candidate)) {
         void playRetryInstructionAndListen(candidate);
@@ -5732,6 +6544,17 @@ function ReadingSessionScreen({
           void startRetryRecognition(candidate);
         }
       }, 500);
+      return;
+    }
+
+    if (meaningfulSpeech && retryPhraseRef.current) {
+      retryProcessingRef.current = true;
+      void persistRetryOutcome({
+        candidate,
+        status: "UNCERTAIN",
+        transcript,
+        attempt: nextRetryAttempt(candidate),
+      });
       return;
     }
 
@@ -5768,7 +6591,7 @@ function ReadingSessionScreen({
     const incorrectCount =
       (retryIncorrectCountsRef.current.get(candidateKey) ?? 0) +
       (pending.status === "FAILED" ? 1 : 0);
-    const terminal = incorrectCount >= 3 || retryPhraseRef.current !== null;
+    const terminal = incorrectCount >= 3;
     pendingRetryEventRef.current = pending;
     setRetryFeedback("processing");
     setLatestTranscript(t("session.retrySavingResult"));
@@ -5896,6 +6719,10 @@ function ReadingSessionScreen({
     await persistRetryOutcome(pending);
   }
 
+  useEffect(() => {
+    retryPendingRetryEventRef.current = retryPendingRetryEvent;
+  });
+
   async function stopRetryListeningAndTranscribe(
     candidate: RetryWordCandidate,
     browserTranscript?: string,
@@ -6000,9 +6827,8 @@ function ReadingSessionScreen({
       browserTranscript ??= retryBrowserFinalRef.current;
       if (
         browserTranscript &&
-        isWordHelpRequest(browserTranscript, candidate.text)
+        handleRetryVoiceCommand(browserTranscript, candidate, false)
       ) {
-        await offerRetryHelp(candidate);
         return;
       }
       const captureQuality = hadRecorder
@@ -6166,19 +6992,8 @@ function ReadingSessionScreen({
 
       if (
         hasUsableTranscript(transcription) &&
-        isSpellingHelpRequest(transcript, candidate.text)
+        handleRetryVoiceCommand(transcript, candidate, false)
       ) {
-        await offerExplicitPhonicsHelp(null, page, {
-          word_id: candidate.wordId,
-          text: candidate.text,
-        });
-        return;
-      }
-      if (
-        hasUsableTranscript(transcription) &&
-        isWordHelpRequest(transcript, candidate.text)
-      ) {
-        await offerRetryHelp(candidate);
         return;
       }
       let status = hasUsableTranscript(transcription)
@@ -6192,22 +7007,21 @@ function ReadingSessionScreen({
       const browserDisagrees =
         browserStatus === "INCORRECT" &&
         (retryBrowserConfidenceRef.current ?? 0) >= 0.75;
-      if (
-        (status === "CORRECT" && browserDisagrees) ||
-        (status === "INCORRECT" && browserStatus === "CORRECT")
-      ) {
+      if (status === "CORRECT" && browserDisagrees) {
         retryUnclearCapture(candidate, transcript);
         return;
       }
 
-      // Lần 2: chỉ chạy khi kết quả lần đầu không rõ.
+      // Lần 2: chỉ chạy khi kết quả lần đầu không rõ hoặc mâu thuẫn với trình duyệt.
       // Quan trọng: sử dụng lại chính recording cũ.
+      const nonViLanguage =
+        Boolean(transcription.language_code) &&
+        !["vi", "vie", "vi-VN"].includes(transcription.language_code!);
       const unpromptedExact =
         Boolean(normalizeShortWordTranscript(transcript)) &&
         normalizeShortWordTranscript(transcript) ===
           normalizeShortWordTranscript(candidate.text) &&
-        (!transcription.language_code ||
-          ["vi", "vie", "vi-VN"].includes(transcription.language_code)) &&
+        !nonViLanguage &&
         (!transcription.words?.length ||
           transcription.words.some(
             (word) => !word.type || word.type === "word",
@@ -6222,14 +7036,21 @@ function ReadingSessionScreen({
         status = "CORRECT";
       }
       if (
-        (status === "UNCERTAIN" || status === "NOT_RECOGNIZED") &&
-        (!transcript || stripNonSpeechAnnotations(transcript)) &&
-        (unpromptedExact || browserStatus === "CORRECT")
+        (!nonViLanguage || browserStatus === "CORRECT") &&
+        shouldAttemptShortWordKeytermPass2({
+          status,
+          audioQuality: captureQuality,
+          transcript,
+          browserStatus,
+        })
       ) {
         try {
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
-            keyterms: [candidate.text],
+            keyterms: buildContrastiveKeyterms(
+              candidate.text,
+              retryContextPhrase,
+            ),
             signal: controller.signal,
             timeoutMs: 5_000,
           });
@@ -6247,7 +7068,11 @@ function ReadingSessionScreen({
           status =
             hasUsableTranscript(transcription) &&
             (browserStatus === "CORRECT" ||
-              hasHighConfidenceKeytermResult(transcription)) &&
+              hasHighConfidenceKeytermResult(
+                transcription,
+                candidate.text,
+                browserStatus,
+              )) &&
             classifyRetryTranscript(
               candidate.text,
               transcript,
@@ -6304,9 +7129,13 @@ function ReadingSessionScreen({
       }
 
       if (status === "INCORRECT") {
+        const evaluatedCount =
+          retryEvaluatedCountsRef.current.get(retryCandidateKey(candidate)) ??
+          0;
         if (
-          hasConfusableNasalEnding(candidate.text, transcript) &&
-          (!browserDisagrees ||
+          hasConfusableShortCoda(candidate.text, transcript) &&
+          (evaluatedCount === 0 ||
+            !browserDisagrees ||
             normalizeVietnameseText(browserTranscript ?? "") !==
               normalizeVietnameseText(transcript))
         ) {
@@ -6418,10 +7247,12 @@ function ReadingSessionScreen({
     // Bắt đầu ghi âm dự phòng nếu chưa có bản ghi đang chạy
     // (bỏ qua MediaRecorder khi Android Native STT đang hoạt động để tránh tranh chấp micro HAL).
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    let startedRecorderNow = false;
     if (!preferAndroidNativeStt && !retryRecorderActiveRef.current) {
       try {
         await speechRecorder.start({ retainStream: false, mode: "short-word" });
         retryRecorderActiveRef.current = true;
+        startedRecorderNow = true;
       } catch (error) {
         console.warn("[RETRY RECORDER ERROR]", error);
 
@@ -6443,6 +7274,14 @@ function ReadingSessionScreen({
         retryRecorderActiveRef.current = false;
       }
       return false;
+    }
+
+    if (startedRecorderNow) {
+      playRetryReadyCue();
+      if (!continuingCapture) {
+        setRetryFeedback("listening");
+        setLatestTranscript(prompt ?? "Bíp! Bé đọc từ trên màn hình nhé.");
+      }
     }
 
     const win = window as unknown as WindowWithSpeech & {
@@ -6479,7 +7318,12 @@ function ReadingSessionScreen({
         isListeningActiveRef.current = true;
 
         setIsMicRecording(true);
-        setLatestTranscript(prompt ?? t("session.listeningProgressNote"));
+        setLatestTranscript(
+          prompt ??
+            (startedRecorderNow
+              ? "Bíp! Bé đọc từ trên màn hình nhé."
+              : t("session.listeningProgressNote")),
+        );
 
         scheduleRetryCaptureStop(candidate);
 
@@ -6581,6 +7425,8 @@ function ReadingSessionScreen({
           const allowCoachedRetryTarget =
             echoVerdict.reason === "tail-overlap" &&
             (isWordHelpRequest(text, candidate.text) ||
+              parseVoiceIntent(text, { upcomingText: candidate.text }).type !==
+                "NONE" ||
               classifyRetryTranscript(candidate.text, text, {
                 contextPhrase: resolveRetrySentenceContext(candidate),
               }) === "CORRECT");
@@ -6629,8 +7475,7 @@ function ReadingSessionScreen({
 
       setLatestTranscript(finalText);
 
-      if (isWordHelpRequest(finalText, candidate.text)) {
-        void offerRetryHelp(candidate);
+      if (handleRetryVoiceCommand(finalText, candidate, true)) {
         return;
       }
       // Keep the recorded tail even when speech recognition finalizes early.
@@ -6925,6 +7770,7 @@ function ReadingSessionScreen({
     }
 
     cancelRetryRecognition();
+    setPreviewSnapshot(null);
     retryPositionRef.current = position;
     const generation = retryAttemptIdRef.current;
     const isCurrent = () =>
@@ -6977,7 +7823,7 @@ function ReadingSessionScreen({
         }
         return;
       } finally {
-        if (isCurrent()) setIsBusy(false);
+        if (mountedRef.current) setIsBusy(false);
       }
     }
 
@@ -6986,10 +7832,10 @@ function ReadingSessionScreen({
     await playRetryInstructionAndListen(candidate, permissionRequest);
   }
 
-  function skipRetryWord(): void {
+  function skipRetryWord(bypassProcessingGuard = false): void {
     if (
       !retryModeRef.current ||
-      retryProcessingRef.current ||
+      (!bypassProcessingGuard && retryProcessingRef.current) ||
       pendingRetryEventRef.current
     ) {
       return;
@@ -7029,6 +7875,8 @@ function ReadingSessionScreen({
     void permissionRequest.catch(() => undefined);
 
     // The consent transition invalidates any remaining initial-reading countdown.
+    transitioningToRetryRef.current = true;
+    setPreviewSnapshot(null);
     setCountdown(null);
     retryCandidatesRef.current = [...activeCandidates];
     setRetryCandidates(activeCandidates);
@@ -7355,11 +8203,19 @@ function ReadingSessionScreen({
     if (!hasRealAudioApi) return;
     let cancelled = false;
     let activeRec: BrowserSpeechRecognition | null = null;
+    let restartTimer: number | null = null;
+    let noSpeechRetries = 0;
+    let shouldRestartAfterNoSpeech = false;
     const promptText = promptSelectorRef.current.next(
       "postReadingWrongWordsAsk",
     );
 
     const stopRec = () => {
+      if (restartTimer !== null && typeof window !== "undefined") {
+        window.clearTimeout(restartTimer);
+        restartTimer = null;
+      }
+      shouldRestartAfterNoSpeech = false;
       if (!activeRec) return;
       const target = activeRec;
       activeRec = null;
@@ -7376,7 +8232,10 @@ function ReadingSessionScreen({
 
     const runVoiceWrapUp = async () => {
       try {
-        await speakGuarded(promptText, { coaching: true });
+        await speakGuarded(promptText, {
+          coaching: true,
+          preserveBookText: true,
+        });
       } catch {
         // Fallback silently to visual buttons if TTS is unavailable
       }
@@ -7422,6 +8281,7 @@ function ReadingSessionScreen({
         rec.maxAlternatives = 1;
         rec.onresult = (event: BrowserSpeechEvent) => {
           if (cancelled || !mountedRef.current) return;
+          noSpeechRetries = 0;
           for (let i = event.resultIndex; i < event.results.length; i += 1) {
             const item = event.results[i];
             if (!item?.isFinal) continue;
@@ -7440,8 +8300,11 @@ function ReadingSessionScreen({
             const intent = classifyYesNoVoiceIntent(spoken);
             if (intent === "yes") {
               stopRec();
+              transitioningToRetryRef.current = true;
               if (startRetrySession(retryCandidatesRef.current)) {
                 setRetryPrompt(false);
+              } else {
+                transitioningToRetryRef.current = false;
               }
               return;
             }
@@ -7454,7 +8317,39 @@ function ReadingSessionScreen({
             }
           }
         };
-        rec.onerror = () => stopRec();
+        rec.onerror = (event: BrowserSpeechErrorEvent) => {
+          if (cancelled || !mountedRef.current || activeRec !== rec) return;
+          if (event.error === "aborted") return;
+          if (event.error === "no-speech" && noSpeechRetries < 2) {
+            noSpeechRetries += 1;
+            shouldRestartAfterNoSpeech = true;
+            return;
+          }
+          stopRec();
+        };
+        rec.onend = () => {
+          if (
+            cancelled ||
+            !mountedRef.current ||
+            activeRec !== rec ||
+            !shouldRestartAfterNoSpeech
+          ) {
+            return;
+          }
+          shouldRestartAfterNoSpeech = false;
+          if (restartTimer !== null && typeof window !== "undefined") {
+            window.clearTimeout(restartTimer);
+          }
+          restartTimer = window.setTimeout(() => {
+            restartTimer = null;
+            if (cancelled || !mountedRef.current || activeRec !== rec) return;
+            try {
+              rec.start();
+            } catch {
+              stopRec();
+            }
+          }, 200);
+        };
         rec.start();
       } catch {
         // Keep manual buttons usable if mic cannot open
@@ -7465,7 +8360,11 @@ function ReadingSessionScreen({
     return () => {
       cancelled = true;
       stopRec();
-      speechPlayer.stop();
+      if (transitioningToRetryRef.current) {
+        transitioningToRetryRef.current = false;
+      } else {
+        speechPlayer.stop();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryPrompt]);
@@ -7542,6 +8441,15 @@ function ReadingSessionScreen({
         <span className="sr-only" role="status">
           {t("session.loadingText")}
         </span>
+        <AiProgressBar
+          active
+          label={
+            sessionLoadProgress.stageLabel ?? tCommon("aiProgress.preparing")
+          }
+          percent={sessionLoadProgress.percent}
+          size="sm"
+          testId="reading-session-loading-progress"
+        />
         <Skeleton className="h-12 w-full rounded-control" />
         <Skeleton className="min-h-[680px] w-full rounded-card" />
         <Skeleton className="h-20 w-full rounded-card" />
@@ -7569,63 +8477,72 @@ function ReadingSessionScreen({
 
   if (uiState === "question") {
     return (
-      <DynamicPanelErrorBoundary
-        backHref={booksHref}
-        backLabel={t("session.backToLibrary")}
-        closeLabel={tCommon("actions.continue")}
-        description={t("session.openFailedDescription")}
-        onClose={() => setUiState("complete")}
-        resetKey={`${sessionId}:question`}
-        retryLabel={tCommon("actions.retry")}
-        title={tCommon("states.unavailable")}
-        variant="fullscreen"
+      <ReadingDynamicFallbackContext.Provider
+        value={dynamicFallbackContextValue}
       >
-        <ComprehensionQuestion
-          child={child}
-          onComplete={() => {
-            automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
-            setUiState("complete");
-          }}
-          sessionId={sessionId}
-        />
-      </DynamicPanelErrorBoundary>
+        <ReadingSubpanelErrorBoundary
+          fallback={(err, reset) => (
+            <ReadingSubpanelFallback
+              error={err}
+              onResetBoundary={reset}
+              panel="question"
+            />
+          )}
+        >
+          <ComprehensionQuestion
+            child={child}
+            onComplete={() => {
+              automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
+              setUiState("complete");
+            }}
+            sessionId={sessionId}
+          />
+        </ReadingSubpanelErrorBoundary>
+      </ReadingDynamicFallbackContext.Provider>
     );
   }
 
   if (uiState === "complete") {
     return (
-      <DynamicPanelErrorBoundary
-        backHref={booksHref}
-        backLabel={t("session.backToLibrary")}
-        closeLabel={tCommon("actions.close")}
-        description={t("session.openFailedDescription")}
-        resetKey={`${sessionId}:complete`}
-        retryLabel={tCommon("actions.retry")}
-        title={tCommon("states.unavailable")}
-        variant="fullscreen"
+      <ReadingDynamicFallbackContext.Provider
+        value={dynamicFallbackContextValue}
       >
-        <SessionComplete
-          booksHref={booksHref}
-          bookId={book.id}
-          startPageId={pageProgress?.start_page_id}
-          endPageId={pageProgress?.end_page_id}
-          child={child}
-          sessionId={sessionId}
-          summary={sessionSummary ?? completion}
-          reportError={comparisonError}
-          onRetryReports={
-            hasPageTranscripts ? () => void retrySavingPageReports() : undefined
-          }
-          isRetryingReports={isRetryingReports}
-        />
-      </DynamicPanelErrorBoundary>
+        <ReadingSubpanelErrorBoundary
+          fallback={(err, reset) => (
+            <ReadingSubpanelFallback
+              error={err}
+              onResetBoundary={reset}
+              panel="complete"
+            />
+          )}
+        >
+          <SessionComplete
+            booksHref={booksHref}
+            bookId={book.id}
+            startPageId={pageProgress?.start_page_id}
+            endPageId={pageProgress?.end_page_id}
+            child={child}
+            sessionId={sessionId}
+            summary={sessionSummary ?? completion}
+            reportError={comparisonError}
+            onRetryReports={
+              hasPageTranscripts
+                ? () => void retrySavingPageReports()
+                : undefined
+            }
+            isRetryingReports={isRetryingReports}
+          />
+        </ReadingSubpanelErrorBoundary>
+      </ReadingDynamicFallbackContext.Provider>
     );
   }
 
   const hasTopBarContent = Boolean(
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice,
+    speechPlayer.fallbackNotice ||
+    isWasmDownloading ||
+    isReadingAiWait,
   );
 
   const readingTopBar = hasTopBarContent ? (
@@ -7735,7 +8652,6 @@ function ReadingSessionScreen({
                 completed: formatNumber(pageProgress.completed_pages),
               })}
             </p>
-            <VoiceEngineBadge compact />
           </div>
         </div>
       ) : null}
@@ -7757,6 +8673,33 @@ function ReadingSessionScreen({
           ) : null}
         </div>
       ) : null}
+      {isWasmDownloading ? (
+        <AiProgressBar
+          active
+          detail={wasmDownloadState?.file}
+          label={
+            wasmModelProgress.stageLabel ??
+            tCommon("aiProgress.downloadingSpeechModel")
+          }
+          percent={wasmModelProgress.percent}
+          size="compact"
+          testId="reading-wasm-model-progress"
+        />
+      ) : null}
+      {isReadingAiWait ? (
+        <AiProgressBar
+          active
+          label={
+            readingAiProgress.stageLabel ??
+            (isTtsSynthesizing
+              ? tCommon("aiProgress.synthesizingVoice")
+              : tCommon("aiProgress.transcribing"))
+          }
+          percent={readingAiProgress.percent}
+          size="compact"
+          testId="reading-ai-busy-progress"
+        />
+      ) : null}
       {pageProgress &&
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
         <p
@@ -7771,502 +8714,484 @@ function ReadingSessionScreen({
   ) : null;
 
   return (
-    <div
-      className="reading-shell"
-      data-reading-shell="true"
-      data-canonical-state={canonicalState}
-      data-child-error-count={safety.child_error_events.length}
-      data-evidence-valid={safety.evidence_valid}
-      data-scoring-active={safety.scoring_active}
-    >
-      <ReadingLayout
-        topBar={readingTopBar}
-        audioLevel={speechRecorder.audioLevel}
-        book={book}
-        child={child}
-        onChoosePage={() => void openPagePicker()}
-        bookTitle={book.title}
-        previewSnapshot={previewSnapshot}
-        controlsDisabled={
-          (uiState !== "reading" && uiState !== "tts-error") ||
-          (isBusy && !speechPlayer.isPlaying) ||
-          (retryMode && pageNavigationError !== null) ||
-          (retryMode &&
-            [
-              "preparing-microphone",
-              "playing-instruction",
-              "playing-sample",
-            ].includes(retryFeedback))
-        }
-        selfCorrectedWordIds={retryConfirmedWordIds}
-        unresolvedWordIds={unresolvedRetryWordIds}
-        uncertainWordIds={uncertainWordIds}
-        progressLabel={
-          pageProgress
-            ? t("session.rangeCompletedSummary", {
-                completed: formatNumber(pageProgress.completed_pages),
-                total: formatNumber(pageProgress.total_pages),
-              })
-            : undefined
-        }
-        correctWordIds={
-          retryConfirmedWordIds.size > 0
-            ? new Set([...correctWordIds, ...retryConfirmedWordIds])
-            : correctWordIds
-        }
-        countdown={countdown}
-        currentWordId={previewSnapshot?.currentWordId ?? currentWordId}
-        currentWordText={
-          retryMode
-            ? (retryCandidates[retryWordPosition]?.text ?? null)
-            : (page.words.find(
-                (w) =>
-                  w.word_id ===
-                  (previewSnapshot?.currentWordId ?? currentWordId),
-              )?.text ?? null)
-        }
-        exitHref={detailHref}
-        onExit={() => setConfirmFinish(true)}
-        voiceSettings={
-          <DynamicPanelErrorBoundary
-            closeLabel={tCommon("actions.close")}
-            description={t("session.openFailedDescription")}
-            resetKey={sessionId}
-            retryLabel={tCommon("actions.retry")}
-            title={tCommon("states.unavailable")}
-            variant="compact"
-          >
-            <ReadingVoiceSettings
-              disabled={isMicRecording}
-              fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying}
-              onPreview={handleVoicePreview}
-              onStopPreview={stopAssistantAudio}
-            />
-          </DynamicPanelErrorBoundary>
-        }
-        isCurrentWordMispronounced={Boolean(
-          currentWordId && mispronouncedWordIds.has(currentWordId),
-        )}
-        isListening={isMicRecording}
-        isMicRecording={isMicRecording}
-        retryContextPhrase={retryMode ? retryPhrase : null}
-        retryMode={retryMode}
-        retryWordPosition={retryWordPosition + 1}
-        retryWordCount={retryCandidates.length}
-        retryFeedback={retryFeedback}
-        isPageTransitioning={uiState === "page-turn"}
-        isPlayingSample={
-          speechPlayer.isPlaying &&
-          (retryMode
-            ? !isReadingWord && !isPlayingPhonicsLesson && !isPlayingTutorAudio
-            : isPlayingPageSample)
-        }
-        isSamplePaused={speechPlayer.isPaused}
-        readingMode={readingMode}
-        onReadingModeChange={setReadingMode}
-        onToggleSamplePause={() => {
-          if (speechPlayer.isPaused)
-            void speechPlayer.resume().catch(() => setUiState("tts-error"));
-          else speechPlayer.pause();
-        }}
-        isReadingWord={isReadingWord}
-        isSpeaking={speechRecorder.isSpeaking}
-        latestTranscript={latestTranscript}
-        mispronouncedWordIds={
-          retryConfirmedWordIds.size > 0
-            ? new Set(
-                [...mispronouncedWordIds].filter(
-                  (wordId) => !retryConfirmedWordIds.has(wordId),
-                ),
-              )
-            : mispronouncedWordIds
-        }
-        onFinish={() => setConfirmFinish(true)}
-        onHelp={() => void requestTutor()}
-        onPause={() => void pauseReading()}
-        onRetryMicrophonePermission={retryRetryMicrophonePermission}
-        onRetryRead={retryCurrentWord}
-        onRetrySave={() => void retryPendingRetryEvent()}
-        retryRecording={
-          retryMode &&
-          retryRecording &&
-          !isMicRecording &&
-          !isBusy &&
-          !speechPlayer.isPlaying ? (
-            <>
-              <Button
-                onClick={() => void retryPlayback.toggle(retryRecording)}
-                variant="quiet"
-              >
-                <Volume2 aria-hidden="true" className="size-4" />
-                {retryPlayback.playing
-                  ? t("session.stopSelfRecording")
-                  : t("session.playSelfRecording")}
-              </Button>
-              {retryPlayback.error ? (
-                <StatusMessage tone="warning">
-                  {retryPlayback.error}
-                </StatusMessage>
-              ) : null}
-            </>
-          ) : undefined
-        }
-        onReadSample={() => void handleReadSample()}
-        onReadWord={
-          retryMode ? () => void handleReadSample() : handleReadCurrentWord
-        }
-        onSpellWord={handleSpellCurrentWord}
-        phonicsPanel={
-          activePhonicsLesson ? (
+    <ReadingDynamicFallbackContext.Provider value={dynamicFallbackContextValue}>
+      <div
+        className="reading-shell"
+        data-reading-shell="true"
+        data-canonical-state={canonicalState}
+        data-child-error-count={safety.child_error_events.length}
+        data-evidence-valid={safety.evidence_valid}
+        data-scoring-active={safety.scoring_active}
+      >
+        <ReadingLayout
+          topBar={readingTopBar}
+          audioLevel={speechRecorder.audioLevel}
+          book={book}
+          child={child}
+          onChoosePage={() => void openPagePicker()}
+          bookTitle={book.title}
+          previewSnapshot={previewSnapshot}
+          controlsDisabled={
+            (uiState !== "reading" && uiState !== "tts-error") ||
+            (isBusy && !speechPlayer.isPlaying) ||
+            (retryMode && pageNavigationError !== null) ||
+            (retryMode &&
+              [
+                "preparing-microphone",
+                "playing-instruction",
+                "playing-sample",
+              ].includes(retryFeedback))
+          }
+          selfCorrectedWordIds={retryConfirmedWordIds}
+          unresolvedWordIds={unresolvedRetryWordIds}
+          uncertainWordIds={uncertainWordIds}
+          progressLabel={
+            pageProgress
+              ? t("session.rangeCompletedSummary", {
+                  completed: formatNumber(pageProgress.completed_pages),
+                  total: formatNumber(pageProgress.total_pages),
+                })
+              : undefined
+          }
+          correctWordIds={
+            retryConfirmedWordIds.size > 0
+              ? new Set([...correctWordIds, ...retryConfirmedWordIds])
+              : correctWordIds
+          }
+          countdown={countdown}
+          currentWordId={previewSnapshot?.currentWordId ?? currentWordId}
+          currentWordText={
+            retryMode
+              ? (retryCandidates[retryWordPosition]?.text ?? null)
+              : (page.words.find(
+                  (w) =>
+                    w.word_id ===
+                    (previewSnapshot?.currentWordId ?? currentWordId),
+                )?.text ?? null)
+          }
+          exitHref={detailHref}
+          onExit={() => setConfirmFinish(true)}
+          voiceSettings={
             <DynamicPanelErrorBoundary
               closeLabel={tCommon("actions.close")}
               description={t("session.openFailedDescription")}
-              onClose={() => {
-                stopAssistantAudio();
-                setActivePhonicsLesson(null);
-                setActivePhonicsStepIndex(null);
-                setPhonicsStatusHint(null);
-              }}
-              resetKey={activePhonicsLesson.wordId}
+              resetKey={sessionId}
               retryLabel={tCommon("actions.retry")}
               title={tCommon("states.unavailable")}
-              variant="inline"
+              variant="compact"
             >
-              <PhonicsLessonCard
-                activeStepIndex={activePhonicsStepIndex}
-                compact
-                isListeningRetry={isMicRecording}
-                isPlayingPhonics={isPlayingPhonicsLesson}
-                isPlayingWord={isReadingWord}
-                lesson={activePhonicsLesson.plan}
-                onPlayPhonics={handleSpellCurrentWord}
-                onPlayWord={
-                  retryMode
-                    ? () => void handleReadSample()
-                    : handleReadCurrentWord
+              <ReadingVoiceSettings
+                childId={
+                  loadState.status === "ready" ? loadState.data.child.id : null
                 }
-                onStopAudio={stopAssistantAudio}
+                disabled={isMicRecording}
+                fallbackNotice={speechPlayer.fallbackNotice}
+                isPreviewing={speechPlayer.isPlaying}
+                onPreview={handleVoicePreview}
+                onStopPreview={stopAssistantAudio}
+              />
+            </DynamicPanelErrorBoundary>
+          }
+          isCurrentWordMispronounced={Boolean(
+            currentWordId && mispronouncedWordIds.has(currentWordId),
+          )}
+          isListening={isMicRecording}
+          isMicRecording={isMicRecording}
+          retryContextPhrase={retryMode ? retryPhrase : null}
+          retryMode={retryMode}
+          retryFocusKey={
+            retryMode
+              ? `${retryWordPosition}:${currentWordId ?? ""}:${Boolean(retryPhrase)}:${Boolean(activePhonicsLesson)}:${Boolean(retryRecording)}`
+              : null
+          }
+          retryWordPosition={retryWordPosition + 1}
+          retryWordCount={retryCandidates.length}
+          retryFeedback={retryFeedback}
+          isPageTransitioning={uiState === "page-turn"}
+          isPlayingSample={
+            speechPlayer.isPlaying &&
+            (retryMode
+              ? !isReadingWord &&
+                !isPlayingPhonicsLesson &&
+                !isPlayingTutorAudio
+              : isPlayingPageSample)
+          }
+          isSamplePaused={speechPlayer.isPaused}
+          readingMode={readingMode}
+          onReadingModeChange={setReadingMode}
+          onToggleSamplePause={() => {
+            if (speechPlayer.isPaused)
+              void speechPlayer.resume().catch(() => setUiState("tts-error"));
+            else speechPlayer.pause();
+          }}
+          isReadingWord={isReadingWord}
+          isSpeaking={speechRecorder.isSpeaking}
+          latestTranscript={latestTranscript}
+          mispronouncedWordIds={
+            retryConfirmedWordIds.size > 0
+              ? new Set(
+                  [...mispronouncedWordIds].filter(
+                    (wordId) => !retryConfirmedWordIds.has(wordId),
+                  ),
+                )
+              : mispronouncedWordIds
+          }
+          onFinish={() => setConfirmFinish(true)}
+          onHelp={() => void requestTutor()}
+          onPause={() => void pauseReading()}
+          onRetryMicrophonePermission={retryRetryMicrophonePermission}
+          onRetryRead={retryCurrentWord}
+          onRetrySave={() => void retryPendingRetryEvent()}
+          retryRecording={
+            retryMode &&
+            retryRecording &&
+            !isMicRecording &&
+            !isBusy &&
+            !speechPlayer.isPlaying ? (
+              <>
+                <Button
+                  onClick={() => void retryPlayback.toggle(retryRecording)}
+                  variant="quiet"
+                >
+                  <Volume2 aria-hidden="true" className="size-4" />
+                  {retryPlayback.playing
+                    ? t("session.stopSelfRecording")
+                    : t("session.playSelfRecording")}
+                </Button>
+                {retryPlayback.error ? (
+                  <StatusMessage tone="warning">
+                    {retryPlayback.error}
+                  </StatusMessage>
+                ) : null}
+              </>
+            ) : undefined
+          }
+          onReadSample={() => void handleReadSample()}
+          onReadWord={
+            retryMode ? () => void handleReadSample() : handleReadCurrentWord
+          }
+          onSpellWord={handleSpellCurrentWord}
+          phonicsPanel={
+            activePhonicsLesson ? (
+              <DynamicPanelErrorBoundary
+                closeLabel={tCommon("actions.close")}
+                description={t("session.openFailedDescription")}
                 onClose={() => {
                   stopAssistantAudio();
                   setActivePhonicsLesson(null);
                   setActivePhonicsStepIndex(null);
                   setPhonicsStatusHint(null);
                 }}
-                statusHint={phonicsStatusHint}
-              />
-            </DynamicPanelErrorBoundary>
-          ) : null
-        }
-        onSkipRetryWord={skipRetryWord}
-        onToggleListening={() => void handleToggleListening()}
-        onWordClick={handleWordClick}
-        page={page}
-        spokenWords={spokenWords}
-        skippedWordIds={
-          retryConfirmedWordIds.size > 0
-            ? new Set(
-                [...skippedWordIds].filter(
-                  (wordId) => !retryConfirmedWordIds.has(wordId),
-                ),
-              )
-            : skippedWordIds
-        }
-        repeatedWordIds={repeatedWordIds}
-        hesitationWordIds={hesitationWordIds}
-        assistedWordIds={assistedWordIds}
-        companionBubble={companionBubble}
-        isCompanionSpeaking={
-          speechPlayer.isPlaying &&
-          !isPlayingPageSample &&
-          !isPlayingPhonicsLesson &&
-          !isReadingWord &&
-          !isPlayingTutorAudio
-        }
-        comparisonResult={comparisonResult}
-        sentenceReinforcementPanel={
-          activeSentenceReinforcement ? (
-            <div
-              role="status"
-              aria-live="polite"
-              data-testid="sentence-reinforcement-banner"
-              className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-xs"
-            >
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                  {t("session.reinforceSentence")}
-                </p>
-                <span className="sr-only">
-                  {t("session.reinforceSentencePrompt", {
-                    sentence: activeSentenceReinforcement.span.text,
-                  })}
-                </span>
-                <p
-                  aria-hidden="true"
-                  className="viread-learning-content flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
-                  dir="ltr"
-                  lang="vi"
+                resetKey={activePhonicsLesson.wordId}
+                retryLabel={tCommon("actions.retry")}
+                title={tCommon("states.unavailable")}
+                variant="inline"
+              >
+                <PhonicsLessonCard
+                  activeStepIndex={activePhonicsStepIndex}
+                  compact
+                  isAnalyzingAi={isAnalyzingPhonicsAi}
+                  isListeningRetry={isMicRecording}
+                  isPlayingPhonics={isPlayingPhonicsLesson}
+                  isPlayingWord={isReadingWord}
+                  lesson={activePhonicsLesson.plan}
+                  onPlayPhonics={handleSpellCurrentWord}
+                  onPlayWord={
+                    retryMode
+                      ? () => void handleReadSample()
+                      : handleReadCurrentWord
+                  }
+                  onStopAudio={stopAssistantAudio}
+                  onClose={() => {
+                    stopAssistantAudio();
+                    setActivePhonicsLesson(null);
+                    setActivePhonicsStepIndex(null);
+                    setPhonicsStatusHint(null);
+                  }}
+                  statusHint={phonicsStatusHint}
+                />
+              </DynamicPanelErrorBoundary>
+            ) : null
+          }
+          onSkipRetryWord={skipRetryWord}
+          onToggleListening={() => void handleToggleListening()}
+          onWordClick={handleWordClick}
+          page={page}
+          spokenWords={spokenWords}
+          skippedWordIds={
+            retryConfirmedWordIds.size > 0
+              ? new Set(
+                  [...skippedWordIds].filter(
+                    (wordId) => !retryConfirmedWordIds.has(wordId),
+                  ),
+                )
+              : skippedWordIds
+          }
+          repeatedWordIds={repeatedWordIds}
+          hesitationWordIds={hesitationWordIds}
+          assistedWordIds={assistedWordIds}
+          companionBubble={companionBubble}
+          isCompanionSpeaking={
+            speechPlayer.isPlaying &&
+            !isPlayingPageSample &&
+            !isPlayingPhonicsLesson &&
+            !isReadingWord &&
+            !isPlayingTutorAudio
+          }
+          comparisonResult={comparisonResult}
+          sentenceReinforcementPanel={
+            activeSentenceReinforcement ? (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="sentence-reinforcement-banner"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-xs"
+              >
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                    {t("session.reinforceSentence")}
+                  </p>
+                  <span className="sr-only">
+                    {t("session.reinforceSentencePrompt", {
+                      sentence: activeSentenceReinforcement.span.text,
+                    })}
+                  </span>
+                  <p
+                    aria-hidden="true"
+                    className="viread-learning-content flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {activeSentenceReinforcement.span.words.map((w, idx) => {
+                      const matched =
+                        activeSentenceReinforcement.matchedIndices.has(idx);
+                      return (
+                        <span
+                          key={`${w.word_id}-${idx}`}
+                          data-reinforce-matched={matched ? "true" : "false"}
+                          className={
+                            matched
+                              ? "rounded-control bg-emerald-100 px-1.5 py-0.5 text-emerald-900 transition-colors duration-200"
+                              : "rounded-control px-1.5 py-0.5 text-ink transition-colors duration-200"
+                          }
+                        >
+                          {w.text}
+                        </span>
+                      );
+                    })}
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="h-10! min-h-10! w-auto! shrink-0 px-3! py-1! text-sm!"
+                  onClick={() =>
+                    void finishSentenceReinforcement(
+                      alignmentEngineRef.current,
+                      false,
+                    )
+                  }
                 >
-                  {activeSentenceReinforcement.span.words.map((w, idx) => {
-                    const matched =
-                      activeSentenceReinforcement.matchedIndices.has(idx);
-                    return (
-                      <span
-                        key={`${w.word_id}-${idx}`}
-                        data-reinforce-matched={matched ? "true" : "false"}
-                        className={
-                          matched
-                            ? "rounded-control bg-emerald-100 px-1.5 py-0.5 text-emerald-900 transition-colors duration-200"
-                            : "rounded-control px-1.5 py-0.5 text-ink transition-colors duration-200"
-                        }
-                      >
-                        {w.text}
-                      </span>
-                    );
-                  })}
-                </p>
+                  {t("session.skipSentenceReinforce")}
+                </Button>
               </div>
-              <Button
-                variant="secondary"
-                className="h-10! min-h-10! w-auto! shrink-0 px-3! py-1! text-sm!"
-                onClick={() =>
-                  void finishSentenceReinforcement(
-                    alignmentEngineRef.current,
-                    false,
-                  )
+            ) : null
+          }
+        >
+          {uiState === "page-turn" ? (
+            <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
+              {t("session.navigatingAndAligning")}
+            </StatusBanner>
+          ) : null}
+        </ReadingLayout>
+        {pickerIndex !== null && pageProgress ? (
+          <ReadingSubpanelErrorBoundary
+            fallback={(err, reset) => (
+              <ReadingPagePickerFallback error={err} onResetBoundary={reset} />
+            )}
+          >
+            <ReadingPagePickerModal
+              isBusy={isBusy}
+              onClose={closePagePicker}
+              onConfirm={(index) => void navigateWithinRange(index, true)}
+              onSelectIndex={setPickerIndex}
+              pageNavigationError={pageNavigationError}
+              pages={pageProgress.pages}
+              pickerIndex={pickerIndex}
+            />
+          </ReadingSubpanelErrorBoundary>
+        ) : retryPrompt ? (
+          <ReadingStatusDialog
+            body={adaptTextToTeacherPersona(
+              t("session.retryPromptQuestion", {
+                count: formatNumber(retryCandidates.length),
+              }),
+              getEffectiveTeacherPersona().gender,
+            )}
+            onClose={() => undefined}
+            primaryAction={{
+              isLoading: isBusy,
+              label: t("session.retryAcceptAction"),
+              onClick: () => {
+                if (startRetrySession(retryCandidatesRef.current)) {
+                  setRetryPrompt(false);
                 }
-              >
-                {t("session.skipSentenceReinforce")}
-              </Button>
-            </div>
-          ) : null
-        }
-      >
-        {uiState === "page-turn" ? (
-          <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
-            {t("session.navigatingAndAligning")}
-          </StatusBanner>
-        ) : null}
-      </ReadingLayout>
-      {pickerIndex !== null && pageProgress ? (
-        <Modal
-          isOpen
-          title={t("session.pagePickerTitle")}
-          tone="paper"
-          showCloseButton={false}
-          closeOnEscape={!isBusy}
-          onClose={closePagePicker}
-        >
-          <div className="grid max-h-[45vh] grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3">
-            {pageProgress.pages.map((item, index) => (
-              <button
-                key={item.page_id}
-                type="button"
-                aria-pressed={pickerIndex === index}
-                disabled={isBusy}
-                onClick={() => setPickerIndex(index)}
-                className="flex min-h-24 flex-col items-start justify-center gap-3 rounded-control border border-border bg-cream p-4 text-sm font-bold text-ink aria-pressed:border-primary aria-pressed:bg-sky"
-              >
-                <BookOpen aria-hidden="true" className="size-6 text-primary" />
-                {t("progress.pageLabel", {
-                  page: formatNumber(item.page_number),
-                })}
-              </button>
-            ))}
-          </div>
-          {pageNavigationError && (
-            <StatusMessage className="mt-4" tone="error">
-              {pageNavigationError}
-            </StatusMessage>
-          )}
-          <Button
-            className="mt-6"
-            isLoading={isBusy}
-            onClick={() => void navigateWithinRange(pickerIndex, true)}
-          >
-            {t("session.confirmThisPage")}
-          </Button>
-          <Button
-            className="mt-2"
-            variant="quiet"
-            disabled={isBusy}
-            onClick={closePagePicker}
-          >
-            {t("session.cancel")}
-          </Button>
-        </Modal>
-      ) : retryPrompt ? (
-        <ReadingStatusDialog
-          body={adaptTextToTeacherPersona(
-            t("session.retryPromptQuestion", {
-              count: formatNumber(retryCandidates.length),
-            }),
-            getEffectiveTeacherPersona().gender,
-          )}
-          onClose={() => undefined}
-          primaryAction={{
-            isLoading: isBusy,
-            label: t("session.retryAcceptAction"),
-            onClick: () => {
-              if (startRetrySession(retryCandidatesRef.current)) {
+              },
+            }}
+            secondaryAction={{
+              label: t("session.retrySkipAction"),
+              onClick: () => {
+                retryModeRef.current = false;
                 setRetryPrompt(false);
-              }
-            },
-          }}
-          secondaryAction={{
-            label: t("session.retrySkipAction"),
-            onClick: () => {
-              retryModeRef.current = false;
-              setRetryPrompt(false);
-              void completeReadingSession();
-            },
-          }}
-          title={t("session.retryModalTitle")}
-        />
-      ) : confirmFinish ? (
-        <ReadingStatusDialog
-          body={comparisonError ?? t("session.pauseModalBody")}
-          closeOnEscape
-          onClose={() => setConfirmFinish(false)}
-          primaryAction={{
-            isLoading: isBusy,
-            label: t("session.saveAndStopAction"),
-            onClick: () => void finishReading(),
-          }}
-          secondaryAction={{
-            label: t("session.continueReadingAction"),
-            onClick: () => setConfirmFinish(false),
-          }}
-          title={t("session.exitConfirmTitle")}
-        />
-      ) : uiState === "paused" ? (
-        <ReadingStatusDialog
-          body={t("session.exitConfirmBody")}
-          closeOnEscape
-          onClose={() => void resumeReading()}
-          primaryAction={{
-            isLoading: isBusy,
-            label: t("session.continueReadingAction"),
-            onClick: () => void resumeReading(),
-          }}
-          secondaryAction={{
-            label: t("session.stopSessionAction"),
-            onClick: () => setConfirmFinish(true),
-          }}
-          title={t("session.micPermissionTitle")}
-        />
-      ) : uiState === "microphone-denied" ? (
-        <ReadingStatusDialog
-          body={t("session.micPermissionBody")}
-          onClose={() => undefined}
-          primaryAction={{
-            isLoading: isBusy,
-            label: t("session.retry"),
-            onClick: () => void retryMicrophonePermission(),
-          }}
-          secondaryAction={{
-            label: t("session.safeFinishAction"),
-            onClick: () => setConfirmFinish(true),
-          }}
-          title={t("session.noSpeechTitle")}
-        />
-      ) : uiState === "page-confidence-low" ? (
-        <ReadingStatusDialog
-          body={
-            <div className="space-y-2">
-              <p>{t("session.alignBookBody")}</p>
-              <p>{t("session.pausedNoPageErrorBody")}</p>
-            </div>
-          }
-          onClose={() => undefined}
-          primaryAction={{
-            isLoading: isBusy,
-            label: t("session.retry"),
-            onClick: () => void retryPageMatch(),
-          }}
-          secondaryAction={{
-            label: t("session.choosePageAction"),
-            disabled: !pageProgress || isBusy,
-            onClick: () => void openPagePicker(),
-          }}
-          tertiaryAction={{
-            label: t("session.safeFinishAction"),
-            variant: "quiet",
-            onClick: () => setConfirmFinish(true),
-          }}
-          title={t("session.cameraUnclearTitle")}
-        />
-      ) : uiState === "reconnecting" || uiState === "stt-error" ? (
-        <ReadingStatusDialog
-          body={
-            <div className="space-y-2">
-              <p>
-                {uiState === "stt-error"
-                  ? t("session.sttErrorTitle")
-                  : t("session.reconnectingTitle")}
-              </p>
-              <p>{t("session.disconnectedNote")}</p>
-              {connectionState === "timed-out" ? (
-                <StatusMessage
-                  title={t("session.reconnectFailedTitle")}
-                  tone="error"
-                >
-                  {t("session.reconnectFailedBody")}
-                </StatusMessage>
-              ) : null}
-            </div>
-          }
-          onClose={() => undefined}
-          primaryAction={{
-            isLoading: isBusy,
-            label:
-              uiState === "stt-error"
-                ? t("session.retryListenAction")
-                : t("session.reconnectAction"),
-            onClick: () =>
-              void reconnect(
-                uiState === "stt-error" ? "recover" : reconnectMode,
-              ),
-          }}
-          secondaryAction={{
-            label: t("session.safeFinishAction"),
-            onClick: () => setConfirmFinish(true),
-          }}
-          title={
-            uiState === "stt-error"
-              ? t("session.sttBannerFallback")
-              : t("session.reconnectingBannerFallback")
-          }
-        />
-      ) : uiState === "tts-error" || tutorOpen ? (
-        <DynamicPanelErrorBoundary
-          closeLabel={tCommon("actions.close")}
-          description={t("session.openFailedDescription")}
-          onClose={closeTutor}
-          resetKey={`${uiState}:${tutorOpen}:${tutorAction?.action_id ?? ""}`}
-          retryLabel={tCommon("actions.retry")}
-          title={tCommon("states.unavailable")}
-          variant="floating"
-        >
-          <TutorMessage
-            action={tutorAction}
-            isPlaying={speechPlayer.isPlaying}
-            isRetrying={isBusy}
-            nonBlocking={uiState === "tts-error" && !tutorOpen}
-            onClose={closeTutor}
-            onRetry={() => void retryTutor()}
-            ttsFailed={uiState === "tts-error"}
-            word={currentWord}
+                void completeReadingSession();
+              },
+            }}
+            title={t("session.retryModalTitle")}
           />
-        </DynamicPanelErrorBoundary>
-      ) : null}
+        ) : confirmFinish ? (
+          <ReadingStatusDialog
+            body={comparisonError ?? t("session.pauseModalBody")}
+            closeOnEscape
+            onClose={() => setConfirmFinish(false)}
+            primaryAction={{
+              isLoading: isBusy,
+              label: t("session.saveAndStopAction"),
+              onClick: () => void finishReading(),
+            }}
+            secondaryAction={{
+              label: t("session.continueReadingAction"),
+              onClick: () => setConfirmFinish(false),
+            }}
+            title={t("session.exitConfirmTitle")}
+          />
+        ) : uiState === "paused" ? (
+          <ReadingStatusDialog
+            body={t("session.exitConfirmBody")}
+            closeOnEscape
+            onClose={() => void resumeReading()}
+            primaryAction={{
+              isLoading: isBusy,
+              label: t("session.continueReadingAction"),
+              onClick: () => void resumeReading(),
+            }}
+            secondaryAction={{
+              label: t("session.stopSessionAction"),
+              onClick: () => setConfirmFinish(true),
+            }}
+            title={t("session.micPermissionTitle")}
+          />
+        ) : uiState === "microphone-denied" ? (
+          <ReadingStatusDialog
+            body={t("session.micPermissionBody")}
+            onClose={() => undefined}
+            primaryAction={{
+              isLoading: isBusy,
+              label: t("session.retry"),
+              onClick: () => void retryMicrophonePermission(),
+            }}
+            secondaryAction={{
+              label: t("session.safeFinishAction"),
+              onClick: () => setConfirmFinish(true),
+            }}
+            title={t("session.noSpeechTitle")}
+          />
+        ) : uiState === "page-confidence-low" ? (
+          <ReadingStatusDialog
+            body={
+              <div className="space-y-2">
+                <p>{t("session.alignBookBody")}</p>
+                <p>{t("session.pausedNoPageErrorBody")}</p>
+              </div>
+            }
+            onClose={() => undefined}
+            primaryAction={{
+              isLoading: isBusy,
+              label: t("session.retry"),
+              onClick: () => void retryPageMatch(),
+            }}
+            secondaryAction={{
+              label: t("session.choosePageAction"),
+              disabled: !pageProgress || isBusy,
+              onClick: () => void openPagePicker(),
+            }}
+            tertiaryAction={{
+              label: t("session.safeFinishAction"),
+              variant: "quiet",
+              onClick: () => setConfirmFinish(true),
+            }}
+            title={t("session.cameraUnclearTitle")}
+          />
+        ) : uiState === "reconnecting" || uiState === "stt-error" ? (
+          <ReadingStatusDialog
+            body={
+              <div className="space-y-2">
+                <p>
+                  {uiState === "stt-error"
+                    ? t("session.sttErrorTitle")
+                    : t("session.reconnectingTitle")}
+                </p>
+                <p>{t("session.disconnectedNote")}</p>
+                {connectionState === "timed-out" ? (
+                  <StatusMessage
+                    title={t("session.reconnectFailedTitle")}
+                    tone="error"
+                  >
+                    {t("session.reconnectFailedBody")}
+                  </StatusMessage>
+                ) : null}
+              </div>
+            }
+            onClose={() => undefined}
+            primaryAction={{
+              isLoading: isBusy,
+              label:
+                uiState === "stt-error"
+                  ? t("session.retryListenAction")
+                  : t("session.reconnectAction"),
+              onClick: () =>
+                void reconnect(
+                  uiState === "stt-error" ? "recover" : reconnectMode,
+                ),
+            }}
+            secondaryAction={{
+              label: t("session.safeFinishAction"),
+              onClick: () => setConfirmFinish(true),
+            }}
+            title={
+              uiState === "stt-error"
+                ? t("session.sttBannerFallback")
+                : t("session.reconnectingBannerFallback")
+            }
+          />
+        ) : uiState === "tts-error" || tutorOpen ? (
+          <DynamicPanelErrorBoundary
+            closeLabel={tCommon("actions.close")}
+            description={t("session.openFailedDescription")}
+            onClose={closeTutor}
+            resetKey={`${uiState}:${tutorOpen}:${tutorAction?.action_id ?? ""}`}
+            retryLabel={tCommon("actions.retry")}
+            title={tCommon("states.unavailable")}
+            variant="floating"
+          >
+            <TutorMessage
+              action={tutorAction}
+              isPlaying={speechPlayer.isPlaying}
+              isRetrying={isBusy}
+              nonBlocking={uiState === "tts-error" && !tutorOpen}
+              onClose={closeTutor}
+              onRetry={() => void retryTutor()}
+              ttsFailed={uiState === "tts-error"}
+              word={currentWord}
+            />
+          </DynamicPanelErrorBoundary>
+        ) : null}
 
-      <span className="sr-only" aria-live="polite">
-        {t("session.connectionStatusSummary", {
-          state: t(`session.connectionStates.${connectionState}`),
-        })}
-      </span>
-    </div>
+        <span className="sr-only" aria-live="polite">
+          {t("session.connectionStatusSummary", {
+            state: t(`session.connectionStates.${connectionState}`),
+          })}
+        </span>
+      </div>
+    </ReadingDynamicFallbackContext.Provider>
   );
 }
 

@@ -39,19 +39,20 @@ Hệ thống hỗ trợ nhiều lớp kích hoạt đồng bộ và **an toàn k
 Các lớp tự động hoạt động cùng nhau như sau:
 
 1. **Lớp 1 — Worker nền trong FastAPI trên Render (`parent_email_dispatcher_worker`)**:
-   - Chạy tự động trong `backend/app/sever.py` lifespan khi `PARENT_EMAIL_WORKER_ENABLED=true` (được giữ ấm 24/7 bởi `.github/workflows/render-keepalive.yml`).
+   - Chạy tự động trong `backend/app/sever.py` lifespan khi `PARENT_EMAIL_WORKER_ENABLED=true` (chỉ hoạt động khi bật worker nền trong tiến trình web).
    - Xử lý real-time: cảnh báo rời khung hình mỗi **10s**, nhắc lịch đọc mỗi **30s**, và báo cáo/nghỉ đọc/cột mốc mỗi **15 phút**.
    - Nếu chưa cấu hình Resend/SMTP (hoặc chưa chạy migration bảng mới), worker tự ở trạng thái ngủ an toàn (không làm sập server, hiển thị rõ trong `/system/admin/health`).
-   - **Lưu ý về `render.yaml` trên `origin/main`**: Blueprint `render.yaml` đặt `VIREAD_ENABLE_LIGHTWEIGHT_WORKERS=false` để tối ưu RAM 512 MiB của Render Free và ưu tiên kích hoạt theo lịch từ bên ngoài. Khi chạy trên cấu hình tắt worker nền, các lớp Cron bên dưới (Vercel Cron / GitHub Actions / Cloudflare Cron) vẫn đảm bảo email được gửi tự động đầy đủ.
+   - **Lưu ý về `render.yaml` trên `origin/main`**: Blueprint `render.yaml` đặt `VIREAD_ENABLE_LIGHTWEIGHT_WORKERS=false` để tối ưu RAM 512 MiB của Render Free, cho phép Render tự ngủ sau 15 phút nhàn rỗi (nằm trong hạn mức 750 giờ/tháng) và ưu tiên kích hoạt theo lịch từ bên ngoài. Khi chạy trên cấu hình tắt worker nền, các lớp Cron bên dưới (Cloudflare Cron / Vercel Cron) vẫn đảm bảo email được gửi tự động đầy đủ.
 2. **Lớp 2 — Vercel Cron Jobs (`frontend/vercel.json` + `/api/cron/parent-emails`)**:
    - Production frontend tại `https://viread-frontend.vercel.app` (giữ nguyên `"regions": ["sin1"]` trong `frontend/vercel.json` để đồng vị trí APAC với Render/Supabase).
    - Chạy mỗi ngày lúc **02:00 UTC (09:00 sáng giờ Việt Nam)** — tương thích **100% gói Vercel Hobby (Free)** lẫn Pro.
    - Bảo vệ bằng `Authorization: Bearer $CRON_SECRET` và chuyển tiếp an toàn tới `POST /parent-notifications/cron/dispatch` trên Render bằng `X-Cron-Secret`.
-3. **Lớp 3 — GitHub Actions Backup Dispatch (`.github/workflows/render-keepalive.yml`)**:
-   - Mỗi 10 phút khi ping giữ ấm Render `/health`, nếu GitHub Repository Secret `PARENT_EMAIL_CRON_SECRET` đã được thêm, workflow sẽ tự gọi thêm `POST /parent-notifications/cron/dispatch` (miễn phí).
+3. **Lớp 3 — GitHub Actions Manual Dispatch (`.github/workflows/render-keepalive.yml`)**:
+   - Chỉ kích hoạt thủ công qua `workflow_dispatch` (đã gỡ lịch `*/10 * * * *` để tránh giữ ấm Render 24/7 làm vượt hạn mức 750 giờ/tháng và không còn gọi trùng `/parent-notifications/cron/dispatch`).
+   - Ping `GET /health` và (nếu có GitHub Secret `VIREAD_CRON_DISPATCH_TOKEN`) kích hoạt `POST /internal/cron/dispatch` để kiểm tra thủ công khi cần.
 4. **Lớp 4 — Cloudflare Workers Cron trên `origin/main` (`infra/cloudflare-cron`)**:
    - Worker miễn phí gọi `POST /internal/cron/dispatch` mỗi **30 phút** (`*/30 * * * *`) với header `X-ViRead-Cron-Token` — đã tích hợp luôn `process_engagement_emails_once` cùng với nhắc lịch đọc & cảnh báo rời khung hình.
-   - Có thể chạy song song với Vercel Cron (`/api/cron/parent-emails`), GitHub Actions và Render worker mà không lo gửi trùng vì cả hai đường gọi đều đi qua cùng cơ chế claim & dedupe nguyên tử trong PostgreSQL.
+   - Có thể chạy song song với Vercel Cron (`/api/cron/parent-emails`) và Render worker mà không lo gửi trùng vì cả hai đường gọi đều đi qua cùng cơ chế claim & dedupe nguyên tử trong PostgreSQL.
 
 ---
 
@@ -91,7 +92,7 @@ Chọn **1 trong 2** nhà cung cấp gửi email (khuyên dùng **Resend** vì c
 - `NEXT_PUBLIC_API_URL=https://capstone1-ssd8.onrender.com` (đã có sẵn)
 
 ### D. (Tuỳ chọn) Trên GitHub Repository Secrets
-- `PARENT_EMAIL_CRON_SECRET=<giống-hệt-trên-Render>` — để workflow `render-keepalive.yml` kiêm luôn backup trigger mỗi 10 phút miễn phí.
+- `VIREAD_CRON_DISPATCH_TOKEN=<giống-hệt-trên-Render>` — chỉ cần nếu muốn chạy thủ công `workflow_dispatch` trong `render-keepalive.yml` để kích hoạt `/internal/cron/dispatch` (lịch định kỳ chính chạy qua Cloudflare Cron `infra/cloudflare-cron`).
 
 ### E. Kiểm tra sau khi deploy
 1. Đăng nhập tài khoản Admin → kiểm tra Health Dashboard có mục **"Gửi email phụ huynh"** = `HEALTHY` và **"Parent email dispatcher worker"** = `HEALTHY`.

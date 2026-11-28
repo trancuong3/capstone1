@@ -4,6 +4,8 @@ import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { ServiceError } from "@/lib/api/service-error";
 import { translateRuntime } from "@/lib/i18n/runtime";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import type {
   PictureCatalogDTO,
   PictureEvaluateResponseDTO,
@@ -162,6 +164,7 @@ export interface CreatePictureSessionInput {
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
   readonly refresh_ai_guide?: boolean;
+  readonly teacher_gender?: "female" | "male";
 }
 
 export interface EvaluatePictureInput {
@@ -169,6 +172,7 @@ export interface EvaluatePictureInput {
   readonly input_mode: PictureInputMode;
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
+  readonly teacher_gender?: "female" | "male";
 }
 
 export interface PictureDescriptionService {
@@ -210,8 +214,9 @@ async function withPictureDeadline<T>(
     ) {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: translateRuntime(
-          "entertainment.pictureDescription.aiTimeoutError",
+        message: adaptTextToTeacherPersona(
+          translateRuntime("entertainment.pictureDescription.aiTimeoutError"),
+          getEffectiveTeacherPersona().gender,
         ),
         status: 504,
         request_id: "",
@@ -282,6 +287,9 @@ export function createPictureDescriptionService(): PictureDescriptionService {
       if (input.refresh_ai_guide) {
         form.append("refresh_ai_guide", "true");
       }
+      if (input.teacher_gender) {
+        form.append("teacher_gender", input.teacher_gender);
+      }
       if (input.image_file) {
         form.append(
           "image",
@@ -298,6 +306,7 @@ export function createPictureDescriptionService(): PictureDescriptionService {
             {
               method: "POST",
               body: form,
+              timeoutMs: AI_DEADLINE_MS,
             },
           ),
         signal,
@@ -315,6 +324,7 @@ export function createPictureDescriptionService(): PictureDescriptionService {
             {
               method: "POST",
               body: input,
+              timeoutMs: AI_DEADLINE_MS,
             },
           ),
         signal,

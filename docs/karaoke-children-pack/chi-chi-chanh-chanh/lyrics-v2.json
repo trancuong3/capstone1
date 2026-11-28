@@ -1,0 +1,261 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "2d62db8c-c98f-5187-ab6f-95c748841e38",
+      "text": "Chi chi chành chành",
+      "start_ms": 2353,
+      "end_ms": 4881,
+      "syllables": [
+        {
+          "id": "e2242f40-b1ea-540a-bde9-23ce0fe49b44",
+          "text": "Chi",
+          "start_ms": 2353,
+          "end_ms": 2882
+        },
+        {
+          "id": "37bb26f6-364e-5491-92e3-519674e245af",
+          "text": "chi",
+          "start_ms": 2882,
+          "end_ms": 3411
+        },
+        {
+          "id": "14e5d7a0-5b6c-5eaf-b8a6-6058ade51c43",
+          "text": "chành",
+          "start_ms": 3411,
+          "end_ms": 3940
+        },
+        {
+          "id": "2ecde366-634a-585c-8c82-7f653520ce1c",
+          "text": "chành",
+          "start_ms": 3940,
+          "end_ms": 4881
+        }
+      ]
+    },
+    {
+      "id": "a05a5ba6-2ce6-5a1f-bd61-1bfa4ad6f3fe",
+      "text": "Cái đanh thổi lửa",
+      "start_ms": 5469,
+      "end_ms": 7997,
+      "syllables": [
+        {
+          "id": "786270a5-8475-5f6e-bfcf-10281622d052",
+          "text": "Cái",
+          "start_ms": 5469,
+          "end_ms": 5998
+        },
+        {
+          "id": "93e88792-7d8c-5ced-b739-db4e1902699b",
+          "text": "đanh",
+          "start_ms": 5998,
+          "end_ms": 6527
+        },
+        {
+          "id": "d9ae81e7-2b89-55b3-953f-b34aef49b7af",
+          "text": "thổi",
+          "start_ms": 6527,
+          "end_ms": 7056
+        },
+        {
+          "id": "e6910428-09e5-5a62-a8fb-9fe7f07e60cb",
+          "text": "lửa",
+          "start_ms": 7056,
+          "end_ms": 7997
+        }
+      ]
+    },
+    {
+      "id": "69cdc1b9-8edf-536e-95e6-09c957429543",
+      "text": "Con ngựa đứt cương",
+      "start_ms": 8585,
+      "end_ms": 11113,
+      "syllables": [
+        {
+          "id": "04ba820e-5523-5ec4-afe9-9b68a1f1758e",
+          "text": "Con",
+          "start_ms": 8585,
+          "end_ms": 9114
+        },
+        {
+          "id": "bbc9e761-521b-5a6c-a5c7-90191cbb949e",
+          "text": "ngựa",
+          "start_ms": 9114,
+          "end_ms": 9643
+        },
+        {
+          "id": "1555ad63-7563-5daf-b754-825cd821d2ff",
+          "text": "đứt",
+          "start_ms": 9643,
+          "end_ms": 10172
+        },
+        {
+          "id": "ed6c3eed-734c-5469-9abb-377eaeee58dc",
+          "text": "cương",
+          "start_ms": 10172,
+          "end_ms": 11113
+        }
+      ]
+    },
+    {
+      "id": "179c0783-5558-5166-a1d3-bfdb772d1578",
+      "text": "Ba vương ngũ đế",
+      "start_ms": 11701,
+      "end_ms": 14229,
+      "syllables": [
+        {
+          "id": "9a58b79e-7bed-5e33-a3a6-5cb81025144a",
+          "text": "Ba",
+          "start_ms": 11701,
+          "end_ms": 12230
+        },
+        {
+          "id": "565b02c5-6208-5ac3-94ac-f14b6ba5a126",
+          "text": "vương",
+          "start_ms": 12230,
+          "end_ms": 12759
+        },
+        {
+          "id": "b256ce1e-e4be-527d-8c6f-e1293dc0a4f9",
+          "text": "ngũ",
+          "start_ms": 12759,
+          "end_ms": 13288
+        },
+        {
+          "id": "0ec40f6c-78a8-52ae-a7ed-a6273a43f188",
+          "text": "đế",
+          "start_ms": 13288,
+          "end_ms": 14229
+        }
+      ]
+    },
+    {
+      "id": "457cf9be-a452-5efb-876f-4763af53a2f7",
+      "text": "Bắt dế đi tìm",
+      "start_ms": 14817,
+      "end_ms": 17345,
+      "syllables": [
+        {
+          "id": "c1939b14-648b-56ef-b93e-5f3c54ac7f7d",
+          "text": "Bắt",
+          "start_ms": 14817,
+          "end_ms": 15346
+        },
+        {
+          "id": "b8fed315-40f2-5586-8c44-e48c2727cac7",
+          "text": "dế",
+          "start_ms": 15346,
+          "end_ms": 15875
+        },
+        {
+          "id": "d61d5288-390f-5f7f-9079-49d0e5175b50",
+          "text": "đi",
+          "start_ms": 15875,
+          "end_ms": 16404
+        },
+        {
+          "id": "a690d705-b07f-5c80-aa60-ef1021f039da",
+          "text": "tìm",
+          "start_ms": 16404,
+          "end_ms": 17345
+        }
+      ]
+    },
+    {
+      "id": "f017223a-85f9-5254-b845-dfcda6418886",
+      "text": "Ù à ù ập",
+      "start_ms": 17933,
+      "end_ms": 20461,
+      "syllables": [
+        {
+          "id": "5c97ddb6-e61d-5a16-bfb8-c2c70e384fc6",
+          "text": "Ù",
+          "start_ms": 17933,
+          "end_ms": 18462
+        },
+        {
+          "id": "be6f8d67-8b2c-5168-aecc-57778533ed86",
+          "text": "à",
+          "start_ms": 18462,
+          "end_ms": 18991
+        },
+        {
+          "id": "0c014190-1ad1-5dc9-b124-48f0fa55d719",
+          "text": "ù",
+          "start_ms": 18991,
+          "end_ms": 19520
+        },
+        {
+          "id": "d5a3ee53-f8e6-5062-b5a2-d2b8ec8b263a",
+          "text": "ập",
+          "start_ms": 19520,
+          "end_ms": 20461
+        }
+      ]
+    },
+    {
+      "id": "58aec10c-528e-5faf-9557-6ee3305828bd",
+      "text": "Nhắm mắt mở ra",
+      "start_ms": 21049,
+      "end_ms": 23577,
+      "syllables": [
+        {
+          "id": "a49c614d-75cf-562e-b0b0-6e1a0c876cc3",
+          "text": "Nhắm",
+          "start_ms": 21049,
+          "end_ms": 21578
+        },
+        {
+          "id": "c54d2444-b1ea-5a2d-ae9e-ee343bdb88ae",
+          "text": "mắt",
+          "start_ms": 21578,
+          "end_ms": 22107
+        },
+        {
+          "id": "99834764-036d-5a1b-a377-d1f13f1a4de6",
+          "text": "mở",
+          "start_ms": 22107,
+          "end_ms": 22636
+        },
+        {
+          "id": "e0f5b669-55e2-55a8-a0c5-0365a8bbd758",
+          "text": "ra",
+          "start_ms": 22636,
+          "end_ms": 23577
+        }
+      ]
+    },
+    {
+      "id": "af1af22f-825f-5b8b-9014-e98269412e91",
+      "text": "Cùng cười ha ha",
+      "start_ms": 24165,
+      "end_ms": 26693,
+      "syllables": [
+        {
+          "id": "4c71c0a2-2dfd-5c8a-bb24-a47018b1bfba",
+          "text": "Cùng",
+          "start_ms": 24165,
+          "end_ms": 24694
+        },
+        {
+          "id": "2ba90ad8-370d-58f8-973c-913993af0b79",
+          "text": "cười",
+          "start_ms": 24694,
+          "end_ms": 25223
+        },
+        {
+          "id": "cad2cb65-b995-5872-973b-3d31d5b73ef9",
+          "text": "ha",
+          "start_ms": 25223,
+          "end_ms": 25752
+        },
+        {
+          "id": "0e8a44c9-996e-5d83-b4aa-36918bf9367c",
+          "text": "ha",
+          "start_ms": 25752,
+          "end_ms": 26693
+        }
+      ]
+    }
+  ]
+}

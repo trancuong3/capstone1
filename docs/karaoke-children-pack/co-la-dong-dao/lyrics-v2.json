@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "ba5caa5a-8b6d-5622-a71a-828315f4930b",
+      "text": "Con cò bay lả bay la",
+      "start_ms": 2727,
+      "end_ms": 6888,
+      "syllables": [
+        {
+          "id": "25b4d165-a04d-566e-ba11-87e79e8c53b7",
+          "text": "Con",
+          "start_ms": 2727,
+          "end_ms": 3341
+        },
+        {
+          "id": "96860873-3f53-5357-899c-18edc9a3d0e7",
+          "text": "cò",
+          "start_ms": 3341,
+          "end_ms": 3955
+        },
+        {
+          "id": "f764ad89-8abb-5729-ad53-d3bf89ede7b6",
+          "text": "bay",
+          "start_ms": 3955,
+          "end_ms": 4569
+        },
+        {
+          "id": "44497292-68ae-551e-99fe-4df9c17a81d8",
+          "text": "lả",
+          "start_ms": 4569,
+          "end_ms": 5183
+        },
+        {
+          "id": "e9d5a181-953a-5b33-8ea0-81745ca266c9",
+          "text": "bay",
+          "start_ms": 5183,
+          "end_ms": 5797
+        },
+        {
+          "id": "5fee89f2-beaa-5e24-bf7f-825609a42ebc",
+          "text": "la",
+          "start_ms": 5797,
+          "end_ms": 6888
+        }
+      ]
+    },
+    {
+      "id": "e4df4157-6fe5-58e6-a833-e1c6f5dbb084",
+      "text": "Bay từ cửa phủ bay ra cánh đồng",
+      "start_ms": 7570,
+      "end_ms": 12959,
+      "syllables": [
+        {
+          "id": "924c0c50-155f-5d7a-807b-729b3a48491e",
+          "text": "Bay",
+          "start_ms": 7570,
+          "end_ms": 8184
+        },
+        {
+          "id": "ee0358f6-e7ea-580a-9fc2-4a6a926307ad",
+          "text": "từ",
+          "start_ms": 8184,
+          "end_ms": 8798
+        },
+        {
+          "id": "4c78dd10-32f0-5244-b823-5ff77dc3d716",
+          "text": "cửa",
+          "start_ms": 8798,
+          "end_ms": 9412
+        },
+        {
+          "id": "5859c681-8728-5c10-af1e-b6b0fc7e1e66",
+          "text": "phủ",
+          "start_ms": 9412,
+          "end_ms": 10026
+        },
+        {
+          "id": "5bbdb3cf-fcf2-5d84-ba36-9ceb4473a9fb",
+          "text": "bay",
+          "start_ms": 10026,
+          "end_ms": 10640
+        },
+        {
+          "id": "c3dcd4b0-af7e-5fd3-95ad-23d768593812",
+          "text": "ra",
+          "start_ms": 10640,
+          "end_ms": 11254
+        },
+        {
+          "id": "18671768-70fd-5624-850d-56baf817b1f2",
+          "text": "cánh",
+          "start_ms": 11254,
+          "end_ms": 11868
+        },
+        {
+          "id": "4771c9a7-787a-5919-9051-fe4397f1ebed",
+          "text": "đồng",
+          "start_ms": 11868,
+          "end_ms": 12959
+        }
+      ]
+    },
+    {
+      "id": "20bf231b-4280-56f6-ab56-11f52b17bd60",
+      "text": "Tình tính tang tang tính tình",
+      "start_ms": 13641,
+      "end_ms": 17802,
+      "syllables": [
+        {
+          "id": "cb4f9039-a2a3-58c8-bb0b-5bae97cb7d4e",
+          "text": "Tình",
+          "start_ms": 13641,
+          "end_ms": 14255
+        },
+        {
+          "id": "667b14bf-6677-51eb-8bdc-9ff18118b7db",
+          "text": "tính",
+          "start_ms": 14255,
+          "end_ms": 14869
+        },
+        {
+          "id": "ab66cd8a-9ca7-5c06-a0fe-44c10a7ebe32",
+          "text": "tang",
+          "start_ms": 14869,
+          "end_ms": 15483
+        },
+        {
+          "id": "89587f63-b9c9-597e-aa1e-a8901af36f9e",
+          "text": "tang",
+          "start_ms": 15483,
+          "end_ms": 16097
+        },
+        {
+          "id": "f03c693c-5aa7-5380-ad11-3ec19b4719e5",
+          "text": "tính",
+          "start_ms": 16097,
+          "end_ms": 16711
+        },
+        {
+          "id": "66371174-b782-5d9e-aae7-0a654968e61e",
+          "text": "tình",
+          "start_ms": 16711,
+          "end_ms": 17802
+        }
+      ]
+    },
+    {
+      "id": "76112875-1f37-5c0e-b0ba-9e1c32f1d568",
+      "text": "Bạn ơi rằng có biết không",
+      "start_ms": 18484,
+      "end_ms": 22645,
+      "syllables": [
+        {
+          "id": "a4b2f909-4d43-5bb9-8f7a-7c892171308f",
+          "text": "Bạn",
+          "start_ms": 18484,
+          "end_ms": 19098
+        },
+        {
+          "id": "df58937b-5e28-59d2-a649-bf6171621aab",
+          "text": "ơi",
+          "start_ms": 19098,
+          "end_ms": 19712
+        },
+        {
+          "id": "804ecc6d-4f6a-518c-8b4a-2e0d1a15834a",
+          "text": "rằng",
+          "start_ms": 19712,
+          "end_ms": 20326
+        },
+        {
+          "id": "b97bb5c6-a708-526b-aa0f-b6d1f8df4dd4",
+          "text": "có",
+          "start_ms": 20326,
+          "end_ms": 20940
+        },
+        {
+          "id": "23b0ed55-678f-5d7a-a920-1a9a29e15c53",
+          "text": "biết",
+          "start_ms": 20940,
+          "end_ms": 21554
+        },
+        {
+          "id": "e3764e1d-7178-5ccb-b157-ef92781cbd50",
+          "text": "không",
+          "start_ms": 21554,
+          "end_ms": 22645
+        }
+      ]
+    },
+    {
+      "id": "23807bcb-cb42-5c90-a433-d0bf758a86e2",
+      "text": "Rằng có nhớ chăng đồng lúa xanh rờn",
+      "start_ms": 23327,
+      "end_ms": 28716,
+      "syllables": [
+        {
+          "id": "1b7f619c-6415-58a5-8f09-22dc1172e365",
+          "text": "Rằng",
+          "start_ms": 23327,
+          "end_ms": 23941
+        },
+        {
+          "id": "43749eb1-5fff-51e2-811c-a193b559aefe",
+          "text": "có",
+          "start_ms": 23941,
+          "end_ms": 24555
+        },
+        {
+          "id": "17caea78-d879-57f9-aab1-ebd5a0112d58",
+          "text": "nhớ",
+          "start_ms": 24555,
+          "end_ms": 25169
+        },
+        {
+          "id": "1a22a62f-7d5a-5547-8e0b-b0c74c41a154",
+          "text": "chăng",
+          "start_ms": 25169,
+          "end_ms": 25783
+        },
+        {
+          "id": "81490ee2-2292-5248-a46e-0504273273a2",
+          "text": "đồng",
+          "start_ms": 25783,
+          "end_ms": 26397
+        },
+        {
+          "id": "09d96a62-51aa-575d-8acb-f922adfaac4e",
+          "text": "lúa",
+          "start_ms": 26397,
+          "end_ms": 27011
+        },
+        {
+          "id": "464ae120-8b6a-5ba2-88db-9bcedcbfc223",
+          "text": "xanh",
+          "start_ms": 27011,
+          "end_ms": 27625
+        },
+        {
+          "id": "b362d8d2-c194-56e5-9055-9615254dd4db",
+          "text": "rờn",
+          "start_ms": 27625,
+          "end_ms": 28716
+        }
+      ]
+    },
+    {
+      "id": "b7da582c-653b-57c3-ac05-a4567f065436",
+      "text": "Cánh cò trắng muốt nắng vương trên đồng",
+      "start_ms": 29398,
+      "end_ms": 34787,
+      "syllables": [
+        {
+          "id": "840253e4-70f1-5c6d-8670-e4cb8eae09d6",
+          "text": "Cánh",
+          "start_ms": 29398,
+          "end_ms": 30012
+        },
+        {
+          "id": "0a2c56df-de17-571f-b3be-0220f11f177c",
+          "text": "cò",
+          "start_ms": 30012,
+          "end_ms": 30626
+        },
+        {
+          "id": "729afe5f-1420-59c5-a4a5-70363a205bc7",
+          "text": "trắng",
+          "start_ms": 30626,
+          "end_ms": 31240
+        },
+        {
+          "id": "1360297d-a556-5a40-b8fc-11c58f8316a2",
+          "text": "muốt",
+          "start_ms": 31240,
+          "end_ms": 31854
+        },
+        {
+          "id": "201aee98-668b-52e4-b172-fa804b0102b8",
+          "text": "nắng",
+          "start_ms": 31854,
+          "end_ms": 32468
+        },
+        {
+          "id": "ecb08cea-e948-547d-85a4-e193c1ee33ac",
+          "text": "vương",
+          "start_ms": 32468,
+          "end_ms": 33082
+        },
+        {
+          "id": "3bce1928-ee99-58e9-be11-7057e2353ded",
+          "text": "trên",
+          "start_ms": 33082,
+          "end_ms": 33696
+        },
+        {
+          "id": "8393d943-1a6d-5a77-b838-7d0d84d0e4df",
+          "text": "đồng",
+          "start_ms": 33696,
+          "end_ms": 34787
+        }
+      ]
+    }
+  ]
+}

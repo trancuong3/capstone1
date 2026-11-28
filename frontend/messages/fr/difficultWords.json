@@ -13,7 +13,7 @@
     "noChildDescription": "Créez un profil et commencez à lire pour que le système puisse enregistrer des preuves.",
     "createChildAction": "Créer le profil de l'enfant",
     "unsupportedTitle": "Données en attente de complément",
-    "unsupportedDescription": "Les données de cet élément ne sont pas disponibles au format actuel. Aucune donnée d'exemple disponible.",
+    "unsupportedDescription": "Les données de cette section ne sont pas encore prêtes. Réessayez plus tard.",
     "retry": "Réessayer",
     "manageChildren": "Gérer les profils enfants",
     "notFoundTitle": "Données introuvables",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "Aucun mot ne correspond au statut d'entraînement sélectionné.",
     "viewAllWords": "Voir tous les mots ({count})",
     "paginationAria": "Pagination des groupes de livres pour l'entraînement",
-    "paginationItemLabel": "livres"
+    "paginationItemLabel": "livres",
+    "statTotal": "Total",
+    "statCompleted": "Bien lus",
+    "statRemaining": "À revoir",
+    "quickMastered": "Maîtrisés",
+    "quickNeedsMoreFull": "À renforcer"
   },
   "bookCard": {
     "gradeSingle": "Classe {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Non relu",
     "badgeNeedsMore": "À pratiquer davantage",
     "badgeInProgress": "En cours",
-    "badgeCompleted": "Lu correctement"
+    "badgeCompleted": "Lu correctement",
+    "showMoreWords": "+{count} autres",
+    "showFewerWords": "Réduire",
+    "tagMispronounced": "Err. {count}",
+    "tagOmitted": "Oublis {count}",
+    "tagRepeated": "Rép. {count}"
   },
   "item": {
     "notPracticed": "Non pratiqué",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "Impossible de lire l'audio exemple sur cet appareil. L'enfant peut toujours lire avec ses parents.",
     "phonicsLockedBusy": "L'audio de phonétique est temporairement indisponible. Veuillez suivre les étapes à l'écran et appuyer sur Réessayer.",
     "evaluationTimeoutError": "La vérification du système prend plus de temps que prévu. Vous pouvez renvoyer l'enregistrement.",
-    "evaluationSaveError": "Échec de l'enregistrement des résultats sur le serveur. L'enregistrement vocal de l'enfant est conservé — appuyez sur Enregistrer les résultats.",
+    "evaluationSaveError": "Impossible d'enregistrer le résultat. L'enregistrement est conservé — touchez Enregistrer le résultat.",
     "micPermissionError": "Autorisation du microphone refusée par le navigateur. Parents, veuillez activer l'accès au microphone dans les paramètres du navigateur et réessayer.",
     "micNotFoundError": "Microphone introuvable sur cet appareil. Veuillez vérifier votre connexion.",
     "micUnsupportedError": "Votre navigateur ne prend pas en charge l'enregistrement direct.",

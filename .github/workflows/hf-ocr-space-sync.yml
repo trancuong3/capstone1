@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Generate and verify <1 MiB HF Space bundle
         run: python3 -B scripts/build_hf_space_bundle.py --output-dir /tmp/viread-hf-space --json

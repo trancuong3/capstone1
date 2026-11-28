@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Navegación del recorrido de lectura"
+  },
   "overview": {
     "title": "Informe de progreso",
     "subtitle": "Realice un seguimiento del tiempo de lectura, la precisión y las rachas de lectura de su hijo.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "El informe actual sigue mostrándose. Puede intentar recargar la lista de períodos.",
     "noPeriodReportTitle": "No hay informe para el período seleccionado",
     "noSavedReportTitle": "No hay informes guardados",
-    "noReportDescription": "No hay informe para esta selección. Elija otro niño o período; el sistema no utiliza datos de marcador de posición.",
+    "noReportDescription": "No hay informe para esta selección. Puedes elegir otro perfil infantil u otro período.",
     "pendingReportTitle": "Datos pendientes",
-    "pendingReportDesc": "Los datos del informe aún no están listos. El sistema no muestra cifras estimadas.",
+    "pendingReportDesc": "Los datos del informe aún no están disponibles. Inténtalo más tarde.",
     "periodBannerRange": "Período: {start} → {end}",
     "periodGeneratedAt": "Actualizado el {dateTime} (hora de Vietnam); no se recalcula automáticamente tras cada sesión.",
     "unsupportedFormatTitle": "Formato de informe no compatible",
@@ -61,10 +64,10 @@
     "viewAllWords": "Ver todas ({count})",
     "noDifficultWordsInPeriod": "No se han registrado palabras difíciles en este periodo.",
     "difficultWordsWindowNote": "Nota: La sección de Palabras difíciles utiliza por defecto los últimos 90 días y no cambia según el periodo del informe anterior.",
-    "legacyMetricsTitle": "Métricas heredadas",
-    "legacyMetricsSubtitle": "Nombres de campo guardados preservados; no convertidos a recuento de sesiones o porcentajes exactos.",
-    "legacyTotalBooks": "Total de libros guardados (total_books)",
-    "legacyAvgFluency": "Valor avg_fluency guardado (unidad no definida)",
+    "legacyMetricsTitle": "Métricas almacenadas anteriormente",
+    "legacyMetricsSubtitle": "Métricas resumidas de un formato de almacenamiento anterior.",
+    "legacyTotalBooks": "Total de libros guardados",
+    "legacyAvgFluency": "Puntuación media de fluidez",
     "periodSelectLabel": "Periodo del informe guardado",
     "periodLatestOption": "Más reciente",
     "periodSelectedRange": "{start} → {end} (seleccionado)",
@@ -135,6 +138,9 @@
       "aiWriting": "La IA está escribiendo un comentario...",
       "aiRefresh": "Pedir a la IA que reescriba el comentario",
       "aiFallbackHint": "La IA no está conectada, por lo que se muestra un comentario automático basado en datos. Los padres pueden tocar “Pedir a la IA que reescriba el comentario” más tarde.",
+      "aiFallbackQuota": "La IA está temporalmente ocupada o alcanzó su límite de solicitudes, por lo que se muestra un comentario automático basado en datos. Espera unos minutos y toca “Pedir a la IA que reescriba el comentario”.",
+      "aiFallbackTimeout": "La IA tardó más de lo esperado en responder, por lo que se muestra un comentario automático basado en datos. Puedes volver a tocar “Pedir a la IA que reescriba el comentario” en unos segundos.",
+      "aiFallbackConfig": "El servicio de IA no está configurado actualmente en el servidor, por lo que se muestra un comentario automático basado en datos. Inténtalo más tarde o contacta al administrador.",
       "strengthsTitle": "El niño lo está haciendo bien",
       "improvementsTitle": "El niño necesita mejorar",
       "actionsTitle": "Próximos pasos para el apoyo",
@@ -162,7 +168,11 @@
       "uncertainLabel": "No se escuchó claramente",
       "uncertainNote": "Registrado por separado, no cuenta como un error de pronunciación confirmado."
     },
-    "entertainmentSummaryHeading": "Aprendizaje lúdico y habilidades lingüísticas (V4.0)"
+    "entertainmentSummaryHeading": "Aprendizaje lúdico y habilidades lingüísticas (V4.0)",
+    "focusAria": "Filtrar secciones del informe",
+    "focusAssessment": "Evaluación de IA",
+    "focusSignals": "Gráficos y métricas",
+    "focusEntertainment": "Aprender jugando"
   },
   "sessions": {
     "title": "Historial de lectura",
@@ -174,7 +184,7 @@
     "noChildDesc": "Crea un perfil para empezar a guardar las sesiones de lectura del niño.",
     "createChildAction": "Crear perfil de niño",
     "pendingDataTitle": "Datos pendientes",
-    "pendingHistoryDesc": "Los datos del historial de lectura aún no están disponibles. El sistema no muestra datos de muestra.",
+    "pendingHistoryDesc": "Los datos del historial de lectura aún no están disponibles. Inténtalo más tarde.",
     "retry": "Reintentar",
     "manageChildren": "Gestionar perfiles de niño",
     "notFoundTitle": "Historial no encontrado",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes} minutos {seconds} segundos",
     "detail": {
       "loadingAria": "Cargando detalles de la sesión de lectura",
-      "pendingDesc": "Los datos de este elemento no están disponibles en el formato actual. No hay datos de muestra disponibles.",
+      "pendingDesc": "Los datos de este elemento aún no están disponibles. Inténtalo más tarde.",
       "notFoundTitle": "Sesión de lectura no encontrada",
       "notFoundDesc": "La sesión de lectura no existe o no pertenece a la cuenta actual.",
       "backToHistory": "Volver al historial",
@@ -283,7 +293,7 @@
       "originalOmission": "Omisión",
       "originalMispronunciation": "Pronunciación incorrecta",
       "recognizedPrefix": "ViRead reconoció: “{text}”",
-      "pageRevisionMeta": "Página {pageId} · versión ",
+      "pageRevisionMeta": "Página del libro",
       "firstPassSectionAria": "Eventos de la primera pasada",
       "firstPassSectionTitle": "Eventos de la primera pasada",
       "timestampAt": "En ",
@@ -346,7 +356,7 @@
       "prevShort": "Anterior",
       "nextShort": "Siguiente",
       "loadingPageAria": "Cargando contenido de la página del libro",
-      "verifiedPageTitle": "Contenido de página verificado",
+      "verifiedPageTitle": "Contenido de la página del libro",
       "selfCorrectedCount": "Autocorrido: {count} palabras",
       "pageMissingContentNote": "No se pudo cargar la versión exacta de la página del libro leída por su hijo. Las transcripciones y estadísticas guardadas permanecen sin cambios.",
       "legendAria": "Leyenda de colores",
@@ -388,7 +398,20 @@
         "repeated": "Repetición",
         "hesitation": "Vacilante"
       }
-    }
+    },
+    "summarySessions": "Sesiones",
+    "summaryDuration": "Duración total",
+    "summaryCompleted": "Completadas",
+    "summaryDurationZero": "0 min",
+    "filterAria": "Filtrar sesiones por estado",
+    "filterAll": "Todas",
+    "filterCompleted": "Completadas",
+    "filterIncomplete": "En curso",
+    "searchPlaceholder": "Filtrar por título en esta página…",
+    "searchAria": "Buscar sesiones por título de libro",
+    "filterEmptyTitle": "No hay sesiones coincidentes",
+    "filterEmptyDesc": "Prueba otro filtro o borra la búsqueda.",
+    "clearFilterAction": "Ver todas las sesiones"
   },
   "readingManagement": {
     "title": "Gestión de lectura y recordatorios",
@@ -406,7 +429,7 @@
     "errorTitle": "Algo salió mal",
     "savedTitle": "Guardado",
     "loadChildFailed": "No se pudo cargar el perfil de la criatura. Inténtelo de nuevo.",
-    "loadManagementFailed": "No se pudieron cargar los datos de gestión de lectura. Compruebe el backend y las migraciones de gestión de lectura, y vuelva a intentarlo.",
+    "loadManagementFailed": "No se pudieron cargar los datos de gestión de lectura. Inténtalo más tarde.",
     "mutationUnconfirmed": "No se pudo completar la acción. No se confirmó que los datos se hayan guardado; inténtelo de nuevo.",
     "overviewAria": "Resumen de hábitos de lectura",
     "summaryRunningGoals": "Objetivos activos",
@@ -514,7 +537,7 @@
     "goalsTimezoneRule": "El progreso solo cuenta las sesiones completadas con horas de inicio y fin válidas. Los objetivos no se completan automáticamente solo por alcanzar el 100%.",
     "remindersSectionAria": "Recordatorios de lectura",
     "remindersTitle": "Recordatorios de lectura",
-    "remindersSubtitle": "Los horarios se guardan en tu zona horaria seleccionada. Cuando las alertas por correo electrónico estén activadas, los recordatorios se enviarán a la dirección verificada del progenitor.",
+    "remindersSubtitle": "Los horarios se guardan en la zona horaria elegida. Si el correo está activado, el sistema enviará recordatorios a la dirección verificada.",
     "addReminder": "Añadir recordatorio",
     "dueRemindersTitle": "Es hora de leer ({count})",
     "reminderAtPrefix": "Recordatorio a las ",
@@ -565,7 +588,7 @@
       "startLabel": "Inicio",
       "createGoal": "Crear objetivo",
       "localTimeLabel": "Hora local",
-      "ianaTimezoneLabel": "Zona horaria IANA",
+      "ianaTimezoneLabel": "Zona horaria detallada",
       "repeatDaysLabel": "Repetir el",
       "emailReminderLabel": "Correo de recordatorio de lectura",
       "sendEmailCheck": "Enviar correo al padre o madre cuando sea la hora de leer",
@@ -643,7 +666,11 @@
       "favorited": "Añadido a favoritos",
       "wantToRead": "Quiero leer",
       "savedToRead": "Guardado en la lista de lectura"
-    }
+    },
+    "focusAria": "Filtrar secciones de gestión de lectura",
+    "focusPlans": "Planes",
+    "focusGoals": "Objetivos",
+    "focusReminders": "Recordatorios"
   },
   "entertainmentSummary": {
     "loading": "Resumiendo el progreso lúdico de {childName}…",

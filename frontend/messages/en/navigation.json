@@ -26,7 +26,11 @@
       "sessions": "Review completed reading sessions",
       "entertainment": "Language games, storytelling, and karaoke",
       "difficultWords": "Practice words your child often misreads"
-    }
+    },
+    "devicePermissions": "Mic & Camera Check",
+    "aiTasksNotifications": "AI Tasks & Notifications",
+    "userGuide": "Step-by-step User Guide",
+    "helpFeedback": "Help & Send Feedback"
   },
   "admin": {
     "navLabel": "Admin navigation",
@@ -37,15 +41,15 @@
     "books": "Book Library",
     "metadataQuality": "Book Quality",
     "auditLogs": "Audit Logs",
-    "training": "OCR Training",
+    "training": "Text recognition models",
     "health": "Operations",
     "moreTitle": "More Admin",
     "mobileQualityShort": "Quality",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Text AI",
     "mobileMoreDescriptions": {
       "auditLogs": "Track admin audit logs",
-      "training": "Train and operate VietOCR V2 model",
-      "health": "System status, OCR worker, and voice"
+      "training": "Train and manage text recognition models",
+      "health": "System health, text recognition, and voice"
     }
   },
   "accountMenu": {
@@ -58,7 +62,19 @@
     "accountSection": "Account",
     "helpSection": "Help",
     "sessionSection": "Session",
-    "defaultAccountLabel": "ViRead Account"
+    "defaultAccountLabel": "ViRead Account",
+    "activitiesSection": "Activity & Utilities",
+    "accountDeviceSection": "Account & Devices",
+    "guideSupportSection": "Guide & Support",
+    "quickChildTitle": "Active Child Profile",
+    "languageLabel": "Interface Language",
+    "taskStatusRunning": "{count} background task(s) running",
+    "taskStatusReview": "{count} task(s) awaiting review",
+    "taskStatusFailed": "{count} task(s) need attention",
+    "taskStatusNewDone": "{count} newly completed task(s)",
+    "taskStatusIdle": "No new tasks",
+    "unreadBadgeAria": "Unread AI task notifications",
+    "runningBadgeAria": "Background AI tasks running"
   },
   "childSwitcher": {
     "selectedAria": "Selected child: {alias}, tap to switch",
@@ -73,5 +89,38 @@
     "ariaLabel": "ViRead information",
     "logoDashboardAria": "ViRead - Go to dashboard",
     "logoHomeAria": "ViRead - Go to home"
+  },
+  "guide": {
+    "title": "How to Use ViRead",
+    "subtitle": "5 simple steps to read together with your child every day.",
+    "closeAction": "Got it",
+    "openHelpCenter": "Open Help Center",
+    "steps": {
+      "1": {
+        "title": "1. Create a child profile",
+        "body": "Open Child Profiles to add your child's name and grade (Grades 1–5) for tailored book suggestions.",
+        "action": "Child Profiles"
+      },
+      "2": {
+        "title": "2. Choose or upload family books",
+        "body": "Pick a story from the library or upload images, PDF, or DOCX in My Books for private family reading.",
+        "action": "My Books"
+      },
+      "3": {
+        "title": "3. Check microphone & read together",
+        "body": "Test your microphone beforehand so ViRead hears your child clearly and offers gentle phonics help.",
+        "action": "Device Check"
+      },
+      "4": {
+        "title": "4. Practice Difficult Words & view Progress",
+        "body": "Review tricky words grouped by book and track weekly reading progress.",
+        "action": "Difficult Words"
+      },
+      "5": {
+        "title": "5. Schedule reading & track AI Tasks",
+        "body": "Set goals and reminders in Reading Management and monitor OCR or cover jobs in AI Tasks.",
+        "action": "Reading Management"
+      }
+    }
   }
 }

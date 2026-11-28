@@ -65,14 +65,11 @@ export function normalizeVoiceGender(
   return null;
 }
 
-export function resolveVoiceGender(
+export function inferIntrinsicVoiceGender(
   voiceId?: string | null,
-  explicitGender?: string | null,
-): VoiceGender {
-  const fromExplicit = normalizeVoiceGender(explicitGender);
-  if (fromExplicit) return fromExplicit;
-
+): VoiceGender | null {
   const trimmed = (voiceId ?? "").trim();
+  if (!trimmed) return null;
   if (KNOWN_MALE_VOICE_IDS.has(trimmed)) return "male";
   if (KNOWN_FEMALE_VOICE_IDS.has(trimmed)) return "female";
 
@@ -87,7 +84,29 @@ export function resolveVoiceGender(
   ) {
     return "male";
   }
-  return "female";
+  if (
+    lower.includes("truc_ly") ||
+    lower.includes("ngoc_linh") ||
+    lower.includes("ngoc_tran") ||
+    lower.includes("thuc_doan") ||
+    lower.includes("my_duyen") ||
+    lower.includes("neural2_a") ||
+    lower.includes("wavenet_c") ||
+    lower.includes("_female")
+  ) {
+    return "female";
+  }
+  return null;
+}
+
+export function resolveVoiceGender(
+  voiceId?: string | null,
+  explicitGender?: string | null,
+): VoiceGender {
+  const fromExplicit = normalizeVoiceGender(explicitGender);
+  if (fromExplicit) return fromExplicit;
+
+  return inferIntrinsicVoiceGender(voiceId) ?? "female";
 }
 
 export function getTeacherPersona(gender: VoiceGender): TeacherPersona {
@@ -101,19 +120,43 @@ export function getTeacherPersonaForVoice(
   return getTeacherPersona(resolveVoiceGender(voiceId, explicitGender));
 }
 
+const QUOTED_SPAN_RE = /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
+
+const NON_TEACHER_CO_FOLLOWERS =
+  "(?!\\s+(?:bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
+
+const CO_GIAO_CAP_RE = new RegExp(`(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`, "gu");
+const CO_GIAO_LOW_RE = new RegExp(`(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`, "gu");
+const CO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  "gu",
+);
+const CO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  "gu",
+);
+
 /**
  * Safely converts Vietnamese teacher self-reference ("cô" / "Cô" / "Cô giáo")
  * to ("thầy" / "Thầy" / "Thầy giáo") when a male voice is active, without
- * altering unrelated words like "con", "công", "cố", "cổ", "cơ".
+ * altering quoted book/story text or unrelated words like "con", "cô bé",
+ * "cô gái", "cô tiên", "cô tấm", "công", "cố", "cổ", "cơ".
  */
 export function adaptTextToTeacherPersona(
   text: string,
   gender: VoiceGender,
 ): string {
   if (gender !== "male" || !text) return text;
-  return text
-    .replace(/(^|[^\p{L}])Cô giáo(?=$|[^\p{L}])/gu, "$1Thầy giáo")
-    .replace(/(^|[^\p{L}])cô giáo(?=$|[^\p{L}])/gu, "$1thầy giáo")
-    .replace(/(^|[^\p{L}])Cô(?=$|[^\p{L}])/gu, "$1Thầy")
-    .replace(/(^|[^\p{L}])cô(?=$|[^\p{L}])/gu, "$1thầy");
+  const parts = text.split(QUOTED_SPAN_RE);
+  return parts
+    .map((segment, index) => {
+      // Odd indices are captured quoted spans (e.g. “cô”, "cô giáo") -> NEVER alter book/story quotes.
+      if (index % 2 === 1) return segment;
+      return segment
+        .replace(CO_GIAO_CAP_RE, "$1Thầy giáo")
+        .replace(CO_GIAO_LOW_RE, "$1thầy giáo")
+        .replace(CO_CAP_RE, "$1Thầy")
+        .replace(CO_LOW_RE, "$1thầy");
+    })
+    .join("");
 }

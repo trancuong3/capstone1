@@ -509,7 +509,7 @@ class TestHfZeroCostOcrAndConcurrency(unittest.TestCase):
                 ocr_contribution=None,
             )
             self.assertIn("dịch vụ AI đám mây bảo mật", summary_cloud.privacy_notice)
-            self.assertIn("không được dùng để huấn luyện", summary_cloud.privacy_notice.lower())
+            self.assertIn("không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ", summary_cloud.privacy_notice.lower())
 
         with patch.dict(
             os.environ,

@@ -1,0 +1,405 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "50892e66-c988-5b9b-815d-ec8cc6baa95e",
+      "text": "Bắc kim thang cà lang bí rợ",
+      "start_ms": 2400,
+      "end_ms": 6600,
+      "syllables": [
+        {
+          "id": "4f2e6106-d819-53c1-b413-37c8957ca577",
+          "text": "Bắc",
+          "start_ms": 2400,
+          "end_ms": 2940
+        },
+        {
+          "id": "b4de3e8d-7745-5c97-ba49-b0a3d31f02d0",
+          "text": "kim",
+          "start_ms": 2940,
+          "end_ms": 3480
+        },
+        {
+          "id": "50673556-f6da-50ec-bdf4-2aa182c338e4",
+          "text": "thang",
+          "start_ms": 3480,
+          "end_ms": 4020
+        },
+        {
+          "id": "1b8e47dd-d706-506d-926c-2ef9f8dd9286",
+          "text": "cà",
+          "start_ms": 4020,
+          "end_ms": 4560
+        },
+        {
+          "id": "591793b2-2e0c-5bef-9f4a-623c6e3e4895",
+          "text": "lang",
+          "start_ms": 4560,
+          "end_ms": 5100
+        },
+        {
+          "id": "3d8a1eff-862e-5113-9364-c7360d3fd90e",
+          "text": "bí",
+          "start_ms": 5100,
+          "end_ms": 5640
+        },
+        {
+          "id": "a9f246d6-c65f-5f47-959e-5af3df559129",
+          "text": "rợ",
+          "start_ms": 5640,
+          "end_ms": 6600
+        }
+      ]
+    },
+    {
+      "id": "53c500eb-43d1-5869-b852-dc27a7d44b4b",
+      "text": "Cột qua kèo là kèo qua cột",
+      "start_ms": 7200,
+      "end_ms": 11400,
+      "syllables": [
+        {
+          "id": "c76cb6a1-bf5f-543c-89b2-f59158948a67",
+          "text": "Cột",
+          "start_ms": 7200,
+          "end_ms": 7740
+        },
+        {
+          "id": "a294bab5-b4d6-5ca6-b59d-fde137cdfd77",
+          "text": "qua",
+          "start_ms": 7740,
+          "end_ms": 8280
+        },
+        {
+          "id": "9f7d4d82-54ee-5c89-ae9b-b9ac825206ba",
+          "text": "kèo",
+          "start_ms": 8280,
+          "end_ms": 8820
+        },
+        {
+          "id": "970977df-a611-5210-853b-00bd549bae0c",
+          "text": "là",
+          "start_ms": 8820,
+          "end_ms": 9360
+        },
+        {
+          "id": "11daa495-57fe-53bb-9189-d2dbee9f8e3c",
+          "text": "kèo",
+          "start_ms": 9360,
+          "end_ms": 9900
+        },
+        {
+          "id": "03e148bb-9e0f-5ff1-a0da-c0920baeae8d",
+          "text": "qua",
+          "start_ms": 9900,
+          "end_ms": 10440
+        },
+        {
+          "id": "8cd5dddd-8630-56af-8afa-7baf2c7667a8",
+          "text": "cột",
+          "start_ms": 10440,
+          "end_ms": 11400
+        }
+      ]
+    },
+    {
+      "id": "4b058669-889c-5f79-aaaa-1e343364823f",
+      "text": "Chú bán dầu qua cầu mà té",
+      "start_ms": 12000,
+      "end_ms": 16200,
+      "syllables": [
+        {
+          "id": "6efc77e9-3f56-5f25-8049-08e1f112d7aa",
+          "text": "Chú",
+          "start_ms": 12000,
+          "end_ms": 12540
+        },
+        {
+          "id": "895fa76c-4492-5c8d-8b9d-03302f03fa69",
+          "text": "bán",
+          "start_ms": 12540,
+          "end_ms": 13080
+        },
+        {
+          "id": "2cb37261-25cc-5187-9302-7a6f30288a9b",
+          "text": "dầu",
+          "start_ms": 13080,
+          "end_ms": 13620
+        },
+        {
+          "id": "3a60f521-c51a-5454-83cb-416e27a302a7",
+          "text": "qua",
+          "start_ms": 13620,
+          "end_ms": 14160
+        },
+        {
+          "id": "d89dd441-373f-54fc-9cda-43c876bc7fac",
+          "text": "cầu",
+          "start_ms": 14160,
+          "end_ms": 14700
+        },
+        {
+          "id": "56f37857-86c0-5559-a80e-ef7067372fca",
+          "text": "mà",
+          "start_ms": 14700,
+          "end_ms": 15240
+        },
+        {
+          "id": "612d38f2-7b63-5198-9ab7-5e810a88d880",
+          "text": "té",
+          "start_ms": 15240,
+          "end_ms": 16200
+        }
+      ]
+    },
+    {
+      "id": "c692d6c7-4dd1-577b-8140-9eb93887d956",
+      "text": "Chú bán ếch ở lại làm chi",
+      "start_ms": 16800,
+      "end_ms": 21000,
+      "syllables": [
+        {
+          "id": "6fbba3f4-2887-520d-bf48-886fcc468d62",
+          "text": "Chú",
+          "start_ms": 16800,
+          "end_ms": 17340
+        },
+        {
+          "id": "ccb42322-f456-5965-b23a-019fb49ac126",
+          "text": "bán",
+          "start_ms": 17340,
+          "end_ms": 17880
+        },
+        {
+          "id": "039d7f88-8112-5378-aad5-0149f8ec0909",
+          "text": "ếch",
+          "start_ms": 17880,
+          "end_ms": 18420
+        },
+        {
+          "id": "1b633c66-0901-5524-8b3c-038a18e1d161",
+          "text": "ở",
+          "start_ms": 18420,
+          "end_ms": 18960
+        },
+        {
+          "id": "e8a0c5d2-b395-51d6-80d6-92644449dde9",
+          "text": "lại",
+          "start_ms": 18960,
+          "end_ms": 19500
+        },
+        {
+          "id": "379ed9e1-14d4-52d4-bb71-c35dc36a95ed",
+          "text": "làm",
+          "start_ms": 19500,
+          "end_ms": 20040
+        },
+        {
+          "id": "b5928803-e478-5f95-9551-bf4e4f7823b7",
+          "text": "chi",
+          "start_ms": 20040,
+          "end_ms": 21000
+        }
+      ]
+    },
+    {
+      "id": "18fc74c9-c591-5099-aec5-888a33114341",
+      "text": "Con le le đánh trống thổi kèn",
+      "start_ms": 21600,
+      "end_ms": 25800,
+      "syllables": [
+        {
+          "id": "a23af980-56fa-5f5c-a58e-1ea4ec3a2d73",
+          "text": "Con",
+          "start_ms": 21600,
+          "end_ms": 22140
+        },
+        {
+          "id": "bb14991e-492f-5310-bdf0-3c54a6b482d4",
+          "text": "le",
+          "start_ms": 22140,
+          "end_ms": 22680
+        },
+        {
+          "id": "76b391dc-2385-5d55-9041-71a1f4989791",
+          "text": "le",
+          "start_ms": 22680,
+          "end_ms": 23220
+        },
+        {
+          "id": "2f1145a2-e68c-5296-8fd2-d27cf56323bf",
+          "text": "đánh",
+          "start_ms": 23220,
+          "end_ms": 23760
+        },
+        {
+          "id": "ea12de82-0968-5686-b991-454eff1e5169",
+          "text": "trống",
+          "start_ms": 23760,
+          "end_ms": 24300
+        },
+        {
+          "id": "31f7df0b-933a-516a-97d5-8428af5cad8b",
+          "text": "thổi",
+          "start_ms": 24300,
+          "end_ms": 24840
+        },
+        {
+          "id": "d720045a-87d1-56a3-9254-7d33eebd618d",
+          "text": "kèn",
+          "start_ms": 24840,
+          "end_ms": 25800
+        }
+      ]
+    },
+    {
+      "id": "bc8930a7-4d50-539b-bfba-c9420536a2aa",
+      "text": "Con bìm bịp thổi tò tí te",
+      "start_ms": 26400,
+      "end_ms": 30600,
+      "syllables": [
+        {
+          "id": "c071d659-217d-5b4f-99d8-fecc2b3242c9",
+          "text": "Con",
+          "start_ms": 26400,
+          "end_ms": 26940
+        },
+        {
+          "id": "47591409-4080-51f0-afe9-e24dd4ed0324",
+          "text": "bìm",
+          "start_ms": 26940,
+          "end_ms": 27480
+        },
+        {
+          "id": "2d0d7b05-353b-5f67-80ba-3e63cc079b1d",
+          "text": "bịp",
+          "start_ms": 27480,
+          "end_ms": 28020
+        },
+        {
+          "id": "fa20fe90-739c-5efe-8900-b4b45c0dc002",
+          "text": "thổi",
+          "start_ms": 28020,
+          "end_ms": 28560
+        },
+        {
+          "id": "d8328b62-4b41-5a8d-ba8b-7f04625f8a9c",
+          "text": "tò",
+          "start_ms": 28560,
+          "end_ms": 29100
+        },
+        {
+          "id": "71f2bfcb-59e2-5915-8dab-421c91cf12e2",
+          "text": "tí",
+          "start_ms": 29100,
+          "end_ms": 29640
+        },
+        {
+          "id": "187c272b-3220-5af6-81af-d5d63a6e5de0",
+          "text": "te",
+          "start_ms": 29640,
+          "end_ms": 30600
+        }
+      ]
+    },
+    {
+      "id": "77a66f8b-811e-5a19-932f-1de93a90cfeb",
+      "text": "Tò tí te cùng nghe vui ghê",
+      "start_ms": 31200,
+      "end_ms": 35400,
+      "syllables": [
+        {
+          "id": "9738db13-7559-5318-9fc3-a6b06b8bc62b",
+          "text": "Tò",
+          "start_ms": 31200,
+          "end_ms": 31740
+        },
+        {
+          "id": "7cf23b28-c011-5e1f-abb5-7c439523f82c",
+          "text": "tí",
+          "start_ms": 31740,
+          "end_ms": 32280
+        },
+        {
+          "id": "9c7818c6-7535-5073-888b-b78795df33ff",
+          "text": "te",
+          "start_ms": 32280,
+          "end_ms": 32820
+        },
+        {
+          "id": "1b1426c8-ee79-54de-abab-529887193899",
+          "text": "cùng",
+          "start_ms": 32820,
+          "end_ms": 33360
+        },
+        {
+          "id": "f7df5871-78b4-5e78-a696-71d9d5868efc",
+          "text": "nghe",
+          "start_ms": 33360,
+          "end_ms": 33900
+        },
+        {
+          "id": "c2045791-787c-51d6-a531-d35560d7814c",
+          "text": "vui",
+          "start_ms": 33900,
+          "end_ms": 34440
+        },
+        {
+          "id": "beba0de9-8e8f-57a9-8b35-7932c2d94340",
+          "text": "ghê",
+          "start_ms": 34440,
+          "end_ms": 35400
+        }
+      ]
+    },
+    {
+      "id": "4fd07e85-c128-546b-bfb7-a4db3e2d4f2b",
+      "text": "Bạn bên nhau hát vang câu vè",
+      "start_ms": 36000,
+      "end_ms": 40200,
+      "syllables": [
+        {
+          "id": "952c32b9-a2c7-5114-8a0f-459320067c83",
+          "text": "Bạn",
+          "start_ms": 36000,
+          "end_ms": 36540
+        },
+        {
+          "id": "c3234554-8d70-5f67-9e64-8ed417809e09",
+          "text": "bên",
+          "start_ms": 36540,
+          "end_ms": 37080
+        },
+        {
+          "id": "b790c6b4-a264-588e-ba67-abde8aa534db",
+          "text": "nhau",
+          "start_ms": 37080,
+          "end_ms": 37620
+        },
+        {
+          "id": "e0a1277a-cf68-5423-8549-835b2c3c9fb6",
+          "text": "hát",
+          "start_ms": 37620,
+          "end_ms": 38160
+        },
+        {
+          "id": "6ea3b975-6c1a-5fc6-aca0-d917760c7196",
+          "text": "vang",
+          "start_ms": 38160,
+          "end_ms": 38700
+        },
+        {
+          "id": "e4e65215-782a-5546-87ff-319945e24046",
+          "text": "câu",
+          "start_ms": 38700,
+          "end_ms": 39240
+        },
+        {
+          "id": "e62f5068-507e-5264-ab52-4d8594eac24e",
+          "text": "vè",
+          "start_ms": 39240,
+          "end_ms": 40200
+        }
+      ]
+    }
+  ]
+}

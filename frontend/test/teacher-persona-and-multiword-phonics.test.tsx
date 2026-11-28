@@ -176,10 +176,10 @@ describe("Live STT & TTS Engine Source Indicator (<VoiceEngineBadge />)", () => 
     const badge = screen.getByTestId("voice-engine-status-badge");
     expect(badge.getAttribute("data-stt-tier")).toBe("local_offline");
     expect(badge.getAttribute("data-tts-tier")).toBe("local_offline");
-    expect(badge.textContent).toContain("Offline (Sherpa-ONNX)");
-    expect(badge.textContent).toContain("Offline (VieNeu-TTS)");
+    expect(badge.textContent).toContain("Nghe: Nhận diện ViRead");
+    expect(badge.textContent).toContain("Đọc: Giọng đọc ViRead");
 
-    // Fallback tier 1: Google Cloud API
+    // Fallback tier 1: Cloud
     recordSttEngineUsage({
       provider: "google",
       fallbackUsed: true,
@@ -195,7 +195,7 @@ describe("Live STT & TTS Engine Source Indicator (<VoiceEngineBadge />)", () => 
     rerender(<VoiceEngineBadge />);
     expect(badge.getAttribute("data-stt-tier")).toBe("google_cloud");
     expect(badge.getAttribute("data-tts-tier")).toBe("google_cloud");
-    expect(badge.textContent).toContain("Google Cloud API");
+    expect(badge.textContent).toContain("Trực tuyến");
 
     // Fallback tier 2: Browser Default
     recordSttEngineUsage({
@@ -213,16 +213,16 @@ describe("Live STT & TTS Engine Source Indicator (<VoiceEngineBadge />)", () => 
     expect(badge.getAttribute("data-tts-tier")).toBe("browser_default");
     expect(badge.textContent).toContain("Trình duyệt mặc định");
 
-    // Compact badge clearly distinguishes Online vs Offline
+    // Compact badge cleanly distinguishes voice status without vendor jargon
     rerender(<VoiceEngineBadge compact />);
-    expect(badge.textContent).toContain("Online (Google/Trình duyệt)");
+    expect(badge.textContent).toContain("Trình duyệt");
 
     recordSttEngineUsage({ provider: "google", fallbackUsed: true });
     rerender(<VoiceEngineBadge compact />);
-    expect(badge.textContent).toContain("Online (Google API)");
+    expect(badge.textContent).toContain("Trực tuyến");
 
     recordSttEngineUsage({ provider: "local", fallbackUsed: false });
     rerender(<VoiceEngineBadge compact />);
-    expect(badge.textContent).toContain("STT: Offline");
+    expect(badge.textContent).toContain("Nghe: ViRead");
   });
 });

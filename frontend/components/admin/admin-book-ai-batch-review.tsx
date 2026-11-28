@@ -2,17 +2,22 @@
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { AdminBadge } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import {
   markAiPageRevisionSkipped,
   useSkippedAiPageIds,
 } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { registerCacheResetListener } from "@/lib/api/read-cache";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
 import {
@@ -70,8 +75,16 @@ const batchSessions = new Map<string, BatchSession>();
 const batchListeners = new Map<string, Set<() => void>>();
 const batchControllers = new Map<string, AbortController>();
 
+function buildBatchSessionKey(bookId: string, actorId?: string | null): string {
+  const normalizedActor =
+    typeof actorId === "string" && actorId.trim().length > 0
+      ? actorId.trim()
+      : "anon";
+  return `${normalizedActor}:${bookId}`;
+}
+
 export function clearAdminBookAiBatchSessions(): void {
-  const affectedBookIds = new Set<string>([
+  const affectedKeys = new Set<string>([
     ...batchSessions.keys(),
     ...batchControllers.keys(),
     ...batchListeners.keys(),
@@ -81,31 +94,33 @@ export function clearAdminBookAiBatchSessions(): void {
   }
   batchControllers.clear();
   batchSessions.clear();
-  for (const bookId of affectedBookIds) {
-    batchListeners.get(bookId)?.forEach((listener) => listener());
+  for (const key of affectedKeys) {
+    batchListeners.get(key)?.forEach((listener) => listener());
   }
 }
 
-function getBatchSession(bookId: string) {
-  return batchSessions.get(bookId) ?? emptyBatchSession;
+registerCacheResetListener(clearAdminBookAiBatchSessions);
+
+function getBatchSession(sessionKey: string) {
+  return batchSessions.get(sessionKey) ?? emptyBatchSession;
 }
 
-function subscribeBatchSession(bookId: string, onChange: () => void) {
-  const listeners = batchListeners.get(bookId) ?? new Set<() => void>();
+function subscribeBatchSession(sessionKey: string, onChange: () => void) {
+  const listeners = batchListeners.get(sessionKey) ?? new Set<() => void>();
   listeners.add(onChange);
-  batchListeners.set(bookId, listeners);
+  batchListeners.set(sessionKey, listeners);
   return () => {
     listeners.delete(onChange);
-    if (listeners.size === 0) batchListeners.delete(bookId);
+    if (listeners.size === 0) batchListeners.delete(sessionKey);
   };
 }
 
 function updateBatchSession(
-  bookId: string,
+  sessionKey: string,
   update: (current: BatchSession) => BatchSession,
 ) {
-  batchSessions.set(bookId, update(getBatchSession(bookId)));
-  batchListeners.get(bookId)?.forEach((listener) => listener());
+  batchSessions.set(sessionKey, update(getBatchSession(sessionKey)));
+  batchListeners.get(sessionKey)?.forEach((listener) => listener());
 }
 
 function pageErrorMessage(cause: unknown, t: TranslateFn): string {
@@ -196,17 +211,23 @@ export function AdminBookAiBatchReview({
   onCompleted: () => void;
 }) {
   const { ocr } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
+  const actorId = taskCenter?.actorId ?? null;
+  const sessionKey = buildBatchSessionKey(bookId, actorId);
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatNumber } = useI18n();
+  const BATCH_RESULTS_PAGE_SIZE = 6;
+  const [resultsPage, setResultsPage] = useState(1);
   const session = useSyncExternalStore(
-    (onChange) => subscribeBatchSession(bookId, onChange),
-    () => getBatchSession(bookId),
+    (onChange) => subscribeBatchSession(sessionKey, onChange),
+    () => getBatchSession(sessionKey),
     () => emptyBatchSession,
   );
   const { results, progress, processing, notice, completedRunId } = session;
   const onCompletedRef = useRef(onCompleted);
   const lastCompletedRunRef = useRef({
-    bookId,
+    sessionKey,
     runId: completedRunId,
   });
 
@@ -215,21 +236,41 @@ export function AdminBookAiBatchReview({
   }, [onCompleted]);
 
   useEffect(() => {
-    if (lastCompletedRunRef.current.bookId !== bookId) {
-      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+    if (lastCompletedRunRef.current.sessionKey !== sessionKey) {
+      lastCompletedRunRef.current = { sessionKey, runId: completedRunId };
       return;
     }
     if (completedRunId < lastCompletedRunRef.current.runId) {
-      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      lastCompletedRunRef.current = { sessionKey, runId: completedRunId };
       return;
     }
     if (!processing && completedRunId > lastCompletedRunRef.current.runId) {
-      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      lastCompletedRunRef.current = { sessionKey, runId: completedRunId };
       onCompletedRef.current();
     }
-  }, [bookId, completedRunId, processing]);
+  }, [completedRunId, processing, sessionKey]);
 
-  const skippedPageIds = useSkippedAiPageIds(bookId);
+  const skippedPageIds = useSkippedAiPageIds(bookId, actorId);
+
+  const currentPageProgress =
+    progress && progress.totalChunks > 0
+      ? progress.completedChunks / progress.totalChunks
+      : 0;
+  const progressPercent = progress
+    ? Math.max(
+        4,
+        Math.round(
+          ((progress.current - 1 + currentPageProgress) / progress.total) * 100,
+        ),
+      )
+    : 0;
+
+  const batchAiProgress = useAiProgress({
+    active: processing && Boolean(progress),
+    realPercent: progress ? progressPercent : null,
+    progressMode: "staged",
+    expectedDurationMs: 12_000,
+  });
 
   if (collapsed && !processing && results.length === 0 && !notice) {
     return null;
@@ -248,32 +289,29 @@ export function AdminBookAiBatchReview({
   const verifiedResults = results.filter((item) => item.status === "verified");
   const savedResults = results.filter((item) => item.status === "saved");
   const failedResults = results.filter((item) => item.status === "failed");
-  const currentPageProgress =
-    progress && progress.totalChunks > 0
-      ? progress.completedChunks / progress.totalChunks
-      : 0;
-  const progressPercent = progress
-    ? Math.max(
-        4,
-        Math.round(
-          ((progress.current - 1 + currentPageProgress) / progress.total) * 100,
-        ),
-      )
-    : 0;
+  const resultsTotalPages = Math.max(
+    1,
+    Math.ceil(results.length / BATCH_RESULTS_PAGE_SIZE),
+  );
+  const safeResultsPage = Math.min(Math.max(1, resultsPage), resultsTotalPages);
+  const visibleResults = results.slice(
+    (safeResultsPage - 1) * BATCH_RESULTS_PAGE_SIZE,
+    safeResultsPage * BATCH_RESULTS_PAGE_SIZE,
+  );
 
   async function reviewAllPages() {
     if (
-      getBatchSession(bookId).processing ||
+      getBatchSession(sessionKey).processing ||
       waitingPages.length === 0 ||
-      batchControllers.has(bookId)
+      batchControllers.has(sessionKey)
     )
       return;
     const controller = new AbortController();
     const isActiveController = () =>
-      batchControllers.get(bookId) === controller;
-    const nextRunId = getBatchSession(bookId).completedRunId + 1;
-    batchControllers.set(bookId, controller);
-    updateBatchSession(bookId, (current) => ({
+      batchControllers.get(sessionKey) === controller;
+    const nextRunId = getBatchSession(sessionKey).completedRunId + 1;
+    batchControllers.set(sessionKey, controller);
+    updateBatchSession(sessionKey, (current) => ({
       ...current,
       processing: true,
       results: [],
@@ -285,7 +323,7 @@ export function AdminBookAiBatchReview({
       if (!isActiveController() || controller.signal.aborted) break;
       const pageId = item.processing.page_id;
       const revisionId = item.processing.page_revision_id;
-      updateBatchSession(bookId, (current) => ({
+      updateBatchSession(sessionKey, (current) => ({
         ...current,
         progress: {
           current: index + 1,
@@ -320,7 +358,7 @@ export function AdminBookAiBatchReview({
           detail.words,
           (workflowProgress) => {
             if (!isActiveController() || controller.signal.aborted) return;
-            updateBatchSession(bookId, (current) => ({
+            updateBatchSession(sessionKey, (current) => ({
               ...current,
               progress: {
                 current: index + 1,
@@ -335,11 +373,7 @@ export function AdminBookAiBatchReview({
         );
         if (!isActiveController() || controller.signal.aborted) break;
         if (workflow.status === "FAILED" || !workflow.proofread_text) {
-          throw new Error(
-            t("books.aiBatch.errors.workflowIncomplete", {
-              errorCode: workflow.error_code ?? "FAILED",
-            }),
-          );
+          throw new Error(t("books.aiBatch.errors.workflowIncomplete"));
         }
 
         const prepared = preparePage(
@@ -355,7 +389,7 @@ export function AdminBookAiBatchReview({
         );
         if (!isActiveController()) break;
         draftSaved = true;
-        markAiPageRevisionSkipped(bookId, revisionId);
+        markAiPageRevisionSkipped(bookId, revisionId, actorId);
         if (
           saved.page_revision_id !== revisionId ||
           saved.verification_status !== "NEEDS_REVIEW"
@@ -379,7 +413,7 @@ export function AdminBookAiBatchReview({
           request: prepared.request,
         };
         completed = [...completed, savedResult];
-        updateBatchSession(bookId, (current) => ({
+        updateBatchSession(sessionKey, (current) => ({
           ...current,
           results: [...completed],
         }));
@@ -413,7 +447,7 @@ export function AdminBookAiBatchReview({
                 detail: detailMessage,
               }),
             };
-        markAiPageRevisionSkipped(bookId, revisionId);
+        markAiPageRevisionSkipped(bookId, revisionId, actorId);
         const existingIndex = completed.findIndex(
           (result) => result.pageId === pageId,
         );
@@ -426,14 +460,14 @@ export function AdminBookAiBatchReview({
         }
       }
       if (!isActiveController()) break;
-      updateBatchSession(bookId, (current) => ({
+      updateBatchSession(sessionKey, (current) => ({
         ...current,
         results: [...completed],
       }));
     }
 
     if (!isActiveController()) return;
-    batchControllers.delete(bookId);
+    batchControllers.delete(sessionKey);
 
     let finalNotice: BatchNotice;
     if (controller.signal.aborted) {
@@ -472,7 +506,7 @@ export function AdminBookAiBatchReview({
         }),
       };
     }
-    updateBatchSession(bookId, (current) => ({
+    updateBatchSession(sessionKey, (current) => ({
       ...current,
       progress: null,
       processing: false,
@@ -482,7 +516,7 @@ export function AdminBookAiBatchReview({
   }
 
   function stopReview() {
-    batchControllers.get(bookId)?.abort();
+    batchControllers.get(sessionKey)?.abort();
   }
 
   return (
@@ -578,15 +612,20 @@ export function AdminBookAiBatchReview({
                   : t("books.aiBatch.progressPreparingLine")}
                 {t("books.aiBatch.progressKeepOpenHint")}
               </p>
-              <div
-                aria-hidden="true"
-                className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white"
-              >
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
+              <AiProgressBar
+                active={processing}
+                className="mt-2.5"
+                detail={
+                  progress.totalChunks > 0
+                    ? `${formatNumber(progress.completedChunks)}/${formatNumber(progress.totalChunks)}`
+                    : `${formatNumber(progress.current)}/${formatNumber(progress.total)}`
+                }
+                elapsedSeconds={batchAiProgress.elapsedSeconds}
+                label={tCommon("aiProgress.proofreading")}
+                percent={batchAiProgress.percent}
+                size="sm"
+                testId="ai-batch-review-progress"
+              />
             </div>
           </div>
         </div>
@@ -601,8 +640,8 @@ export function AdminBookAiBatchReview({
               failed: formatNumber(failedResults.length),
             })}
           </p>
-          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border px-3">
-            {results.map((result) => (
+          <ul className="divide-y divide-border rounded-lg border border-border px-3">
+            {visibleResults.map((result) => (
               <li
                 className="space-y-1.5 py-2.5 text-xs"
                 key={`${result.pageId}:${result.revisionId}`}
@@ -697,6 +736,13 @@ export function AdminBookAiBatchReview({
               </li>
             ))}
           </ul>
+          <PaginationBar
+            compact
+            onPageChange={setResultsPage}
+            page={safeResultsPage}
+            pageSize={BATCH_RESULTS_PAGE_SIZE}
+            total={results.length}
+          />
         </div>
       ) : null}
     </div>

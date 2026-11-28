@@ -89,13 +89,17 @@ describe("OCR pipeline UX & polling hardening", () => {
       );
       let caught: unknown = null;
       try {
-        await requestApi("/reading/scan-page-ocr", z.object({}));
+        await requestApi("/reading/scan-page-ocr", z.object({}), undefined, {
+          method: "POST",
+        });
       } catch (err) {
         caught = err;
       }
       expect(isServiceError(caught)).toBe(true);
       if (isServiceError(caught)) {
-        expect(caught.message).toContain(expectedSnippet);
+        expect(caught.message).toContain(
+          expectedSnippet === "ngoại tuyến" ? "tạm nghỉ" : expectedSnippet,
+        );
         expect(caught.message).not.toBe("Có lỗi xảy ra. Vui lòng thử lại sau.");
       }
     }
@@ -251,7 +255,7 @@ describe("OCR pipeline UX & polling hardening", () => {
     fireEvent.click(scanBtn);
 
     const banner = await screen.findByTestId("camera-ocr-unavailable-banner");
-    expect(banner).toHaveTextContent(/ngoại tuyến/i);
+    expect(banner).toHaveTextContent(/tạm nghỉ/i);
     expect(
       screen.getByRole("button", { name: /Tự động quét: ĐANG TẮT/i }),
     ).toBeInTheDocument();

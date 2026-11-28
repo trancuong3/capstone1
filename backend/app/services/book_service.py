@@ -39,6 +39,7 @@ from app.schemas.book import (
 )
 from app.services import storage_service as _storage_service_module
 from app.services.storage_service import (
+    create_cached_signed_image_urls,
     create_cached_signed_image_urls_async,
     create_signed_image_url,
     create_signed_image_urls,
@@ -48,7 +49,31 @@ from app.services.storage_service import (
 _ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
 _ORIGINAL_CREATE_SIGNED_IMAGE_URLS = create_signed_image_urls
 _ORIGINAL_PRIVATE_PAGE_IMAGE_URL = private_page_image_url
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS = create_cached_signed_image_urls
 _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC = create_cached_signed_image_urls_async
+
+_COVER_PRIORITY = {
+    "USER_UPLOAD": 4,
+    "ENHANCED_CROP": 3,
+    "ORIGINAL_CROP": 3,
+    "AI_GENERATED": 2,
+    "METADATA_RENDER": 1,
+}
+
+
+def _normalize_cover_source_type(raw_source: object) -> str:
+    src = str(raw_source or "")
+    if src in ("USER_UPLOAD", "ORIGINAL_CROP", "ENHANCED_CROP"):
+        return "USER_UPLOAD"
+    return src
+
+
+async def _safe_rollback(db_session: object) -> None:
+    rollback = getattr(db_session, "rollback", None)
+    if callable(rollback):
+        res = rollback()
+        if inspect.isawaitable(res):
+            await res
 
 
 async def _resolve_cover_map(
@@ -58,7 +83,7 @@ async def _resolve_cover_map(
     private_book_ids: set[UUID] | None = None,
     require_begin_nested: bool = True,
 ) -> dict[UUID, tuple[str, str]]:
-    """Batch-resolve book covers; emit cached signed URLs for public CATALOG covers and proxy URLs for PRIVATE/fallback."""
+    """Batch-resolve highest-priority approved covers; sign CATALOG paths cleanly off DB."""
     if not book_ids or db_session is None:
         return {}
     if require_begin_nested and not callable(getattr(db_session, "begin_nested", None)):
@@ -69,7 +94,6 @@ async def _resolve_cover_map(
         from sqlalchemy import desc, select
         from app.models.smart_book_studio import BookPresentationAsset
 
-        priority = {"USER_UPLOAD": 3, "AI_GENERATED": 2, "METADATA_RENDER": 1}
         query = (
             select(BookPresentationAsset)
             .where(
@@ -90,60 +114,78 @@ async def _resolve_cover_map(
         else:
             rows = (await db_session.scalars(query)).all()
 
-        chosen: dict[UUID, tuple[int, UUID, str, str | None, object]] = {}
+        # Snapshot chosen scalar attributes before releasing DB read transaction.
+        chosen: dict[UUID, tuple[int, UUID, str | None, str, object]] = {}
         for asset in rows:
-            rank = priority.get(str(asset.SourceType), 0)
+            raw_source = str(getattr(asset, "SourceType", "") or "")
+            rank = _COVER_PRIORITY.get(raw_source, 0)
             prev = chosen.get(asset.BookId)
             if prev is None or rank > prev[0]:
                 raw_path = getattr(asset, "StoragePath", None)
-                clean_path = (
-                    raw_path.strip()
-                    if isinstance(raw_path, str) and raw_path.strip()
-                    else None
-                )
+                clean_path = raw_path.strip() if isinstance(raw_path, str) and raw_path.strip() else None
                 chosen[asset.BookId] = (
                     rank,
                     asset.Id,
-                    str(asset.SourceType),
                     clean_path,
+                    _normalize_cover_source_type(raw_source),
                     getattr(asset, "OwnerId", None),
                 )
 
-        result: dict[UUID, tuple[str, str]] = {
-            bid: (f"/studio/assets/{asset_id}/media", src)
-            for bid, (_r, asset_id, src, _path, _owner) in chosen.items()
-        }
-        private_ids = private_book_ids or set()
-        public_to_sign = [
-            (bid, path, src)
-            for bid, (_r, _asset_id, src, path, owner_id) in chosen.items()
-            if bid not in private_ids and owner_id is None and path is not None
-        ]
-        if public_to_sign and not is_local_storage_enabled():
+        if not chosen:
+            return {}
+
+        await _safe_rollback(db_session)
+
+        use_direct_catalog_urls = private_book_ids is not None and not is_local_storage_enabled()
+        catalog_to_sign: list[tuple[UUID, UUID, str, str]] = []
+        cover_map: dict[UUID, tuple[str, str]] = {}
+        for bid, (_rank, asset_id, storage_path, source_type, owner_id) in chosen.items():
+            proxy_url = f"/studio/assets/{asset_id}/media"
+            if (
+                use_direct_catalog_urls
+                and bid not in private_book_ids  # type: ignore[operator]
+                and owner_id is None
+                and storage_path is not None
+            ):
+                catalog_to_sign.append((bid, asset_id, storage_path, source_type))
+            else:
+                cover_map[bid] = (proxy_url, source_type)
+
+        if catalog_to_sign:
             skip_unpatched_test_signing = (
                 APP_ENVIRONMENT == "test"
                 and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
                 and not _storage_service_module.SUPABASE_ADMIN_KEY
+                and create_cached_signed_image_urls is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS
                 and create_cached_signed_image_urls_async is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC
                 and _storage_service_module.create_signed_image_urls is _storage_service_module._ORIGINAL_CREATE_SIGNED_IMAGE_URLS
                 and _storage_service_module.get_supabase_admin_client is _storage_service_module._ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
                 and httpx.AsyncClient is _storage_service_module._ORIGINAL_HTTPX_ASYNC_CLIENT
             )
-            if not skip_unpatched_test_signing:
-                rollback_fn = getattr(db_session, "rollback", None)
-                if inspect.iscoroutinefunction(rollback_fn):
-                    await rollback_fn()
+            if skip_unpatched_test_signing:
+                for bid, asset_id, _path, source_type in catalog_to_sign:
+                    cover_map[bid] = (f"/studio/assets/{asset_id}/media", source_type)
+            else:
                 try:
-                    signed_urls = await create_cached_signed_image_urls_async(
-                        [path for _, path, _ in public_to_sign],
-                        bucket_name=SUPABASE_STORAGE_BUCKET,
-                    )
-                    for (bid, _path, src), signed_url in zip(public_to_sign, signed_urls):
-                        if signed_url:
-                            result[bid] = (signed_url, src)
+                    paths_to_sign = [path for _bid, _aid, path, _src in catalog_to_sign]
+                    if create_cached_signed_image_urls is not _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS:
+                        signed_urls = await asyncio.to_thread(
+                            create_cached_signed_image_urls,
+                            paths_to_sign,
+                            bucket_name=SUPABASE_STORAGE_BUCKET,
+                        )
+                    else:
+                        signed_urls = await create_cached_signed_image_urls_async(
+                            paths_to_sign,
+                            bucket_name=SUPABASE_STORAGE_BUCKET,
+                        )
+                    for (bid, asset_id, _path, source_type), signed_url in zip(catalog_to_sign, signed_urls):
+                        cover_map[bid] = (signed_url or f"/studio/assets/{asset_id}/media", source_type)
                 except Exception:
-                    pass
-        return result
+                    for bid, asset_id, _path, source_type in catalog_to_sign:
+                        cover_map[bid] = (f"/studio/assets/{asset_id}/media", source_type)
+
+        return cover_map
     except Exception:
         return {}
 
@@ -202,7 +244,7 @@ class CatalogService:
         *,
         private_book_ids: set[UUID] | None = None,
     ) -> dict[UUID, tuple[str, str]]:
-        """Best-effort batch cover lookup (USER_UPLOAD > AI_GENERATED > METADATA_RENDER)."""
+        """Best-effort batch cover lookup (USER_UPLOAD > ORIGINAL/ENHANCED_CROP > AI_GENERATED > METADATA_RENDER)."""
         return await _resolve_cover_map(
             getattr(self.repository, "db", None),
             book_ids,
@@ -288,13 +330,12 @@ class CatalogService:
     async def get(self, book_id: UUID, *, actor_id: UUID | None = None):
         book = await self._require_readable_book(book_id, actor_id=actor_id)
         dto = CatalogBookResponse.model_validate(book)
-        book_uuid = dto.id
-        private_ids = {book_uuid} if is_book_private(book) else None
+        private_book_ids = {dto.id} if is_book_private(book) else set()
         covers = await self._cover_map_for_books(
-            [book_uuid],
-            private_book_ids=private_ids,
+            [dto.id],
+            private_book_ids=private_book_ids,
         )
-        cover_info = covers.get(book_uuid)
+        cover_info = covers.get(dto.id)
         if cover_info is not None:
             dto = dto.model_copy(
                 update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
@@ -361,6 +402,11 @@ class CatalogService:
                 # Preserve existing unit test patches targeting book_service.create_signed_image_urls.
                 preview_urls = await asyncio.to_thread(
                     create_signed_image_urls,
+                    [page["image_path"] for page in snapshots],
+                )
+            elif create_cached_signed_image_urls is not _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS:
+                preview_urls = await asyncio.to_thread(
+                    create_cached_signed_image_urls,
                     [page["image_path"] for page in snapshots],
                 )
             else:
@@ -437,23 +483,20 @@ class AdminCatalogService:
         *,
         private_book_ids: set[UUID] | None = None,
     ) -> dict[UUID, tuple[str, str]]:
-        """Best-effort batched cover lookup (USER_UPLOAD > AI_GENERATED > METADATA_RENDER)."""
+        """Best-effort batched cover lookup (USER_UPLOAD > ORIGINAL/ENHANCED_CROP > AI_GENERATED > METADATA_RENDER)."""
         return await _resolve_cover_map(
             getattr(self.repository, "db", None),
             book_ids,
-            private_book_ids=private_book_ids,
+            private_book_ids=set() if private_book_ids is None else private_book_ids,
             require_begin_nested=False,
         )
 
     async def list(self, search: str | None, lifecycle_status: str | None, verification_status: str | None):
         if isinstance(self.repository, AdminCatalogRepository):
-            output = []
             rows = await self.repository.catalog_rows(
                 search, lifecycle_status, verification_status
             )
-            snapshotted_rows: list[
-                tuple[AdminBookMetadataResponse, int, int, int, int, bool]
-            ] = []
+            snapshots: list[tuple[AdminBookMetadataResponse, int, int, int, int, bool]] = []
             private_book_ids: set[UUID] = set()
             for row in rows:
                 (
@@ -479,7 +522,7 @@ class AdminCatalogService:
                     raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
                 if is_book_private(book):
                     private_book_ids.add(book_dto.id)
-                snapshotted_rows.append(
+                snapshots.append(
                     (
                         book_dto,
                         page_count,
@@ -491,9 +534,10 @@ class AdminCatalogService:
                 )
 
             covers = await self._cover_map_for_books(
-                [item[0].id for item in snapshotted_rows],
+                [item[0].id for item in snapshots],
                 private_book_ids=private_book_ids,
             )
+            output = []
             for (
                 book_dto,
                 page_count,
@@ -501,13 +545,13 @@ class AdminCatalogService:
                 needs_review_count,
                 verified_count,
                 parent_catalog_eligible,
-            ) in snapshotted_rows:
+            ) in snapshots:
+                cover_info = covers.get(book_dto.id)
+                if cover_info is not None:
+                    book_dto = book_dto.model_copy(
+                        update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                    )
                 try:
-                    cover_info = covers.get(book_dto.id)
-                    if cover_info is not None:
-                        book_dto = book_dto.model_copy(
-                            update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
-                        )
                     output.append(
                         AdminCatalogBookResponse(
                             book=book_dto,
@@ -522,10 +566,7 @@ class AdminCatalogService:
                     raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
             return output
 
-        output = []
-        snapshotted_matched: list[
-            tuple[AdminBookMetadataResponse, int, int, int, int, bool]
-        ] = []
+        matched: list[tuple[AdminBookMetadataResponse, int, int, int, int, bool]] = []
         private_book_ids: set[UUID] = set()
         for book in await self.repository.books(search, lifecycle_status):
             pages = await self.repository.pages(book.Id)
@@ -545,7 +586,7 @@ class AdminCatalogService:
             if is_book_private(book):
                 private_book_ids.add(book_dto.id)
             eligible = await self.repository.is_eligible(book_dto.id)
-            snapshotted_matched.append(
+            matched.append(
                 (
                     book_dto,
                     len(pages),
@@ -557,28 +598,34 @@ class AdminCatalogService:
             )
 
         covers = await self._cover_map_for_books(
-            [item[0].id for item in snapshotted_matched],
+            [item[0].id for item in matched],
             private_book_ids=private_book_ids,
         )
+        output = []
         for (
             book_dto,
             page_count,
             processing_count,
             needs_review_count,
             verified_count,
-            eligible,
-        ) in snapshotted_matched:
+            parent_catalog_eligible,
+        ) in matched:
+            cover_info = covers.get(book_dto.id)
+            if cover_info is not None:
+                book_dto = book_dto.model_copy(
+                    update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                )
             try:
-                cover_info = covers.get(book_dto.id)
-                if cover_info is not None:
-                    book_dto = book_dto.model_copy(
-                        update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                output.append(
+                    AdminCatalogBookResponse(
+                        book=book_dto,
+                        page_count=page_count,
+                        processing_count=processing_count,
+                        needs_review_count=needs_review_count,
+                        verified_count=verified_count,
+                        parent_catalog_eligible=parent_catalog_eligible,
                     )
-                output.append(AdminCatalogBookResponse(
-                    book=book_dto, page_count=page_count,
-                    processing_count=processing_count, needs_review_count=needs_review_count,
-                    verified_count=verified_count, parent_catalog_eligible=eligible,
-                ))
+                )
             except ValidationError:
                 raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
         return output
@@ -734,6 +781,8 @@ class AdminCatalogService:
         await self.repository.db.rollback()
         if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
             preview_url = await asyncio.to_thread(create_signed_image_url, image_path)
+        elif create_cached_signed_image_urls is not _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS:
+            preview_url = (await asyncio.to_thread(create_cached_signed_image_urls, [image_path]))[0]
         else:
             preview_url = (await create_cached_signed_image_urls_async([image_path]))[0]
         try:

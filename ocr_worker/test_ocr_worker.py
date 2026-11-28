@@ -1284,6 +1284,73 @@ sys.exit(2)
             self.assertNotIn(secret_token, proc2.stdout)
             self.assertNotIn(secret_token, proc2.stderr)
 
+    def test_backend_client_retries_transient_502_503_504_on_claim_and_heartbeats(self):
+        import json
+
+        token = "r" * 40
+        counts = {"worker_hb": 0, "job_hb": 0, "claim": 0, "conflict_hb": 0, "timeout_claim": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path == "/internal/ocr-jobs/worker-heartbeat":
+                counts["worker_hb"] += 1
+                if counts["worker_hb"] < 3:
+                    return httpx.Response(503, text="restarting")
+                return httpx.Response(200, json={"ok": True})
+            if path == "/internal/ocr-jobs/job-1/heartbeat":
+                counts["job_hb"] += 1
+                if counts["job_hb"] == 1:
+                    return httpx.Response(502, text="bad gateway")
+                return httpx.Response(200, json={"cancelled": False, "status": "RUNNING"})
+            if path == "/internal/ocr-jobs/job-conflict/heartbeat":
+                counts["conflict_hb"] += 1
+                return httpx.Response(409, json={"detail": "conflict"})
+            if path == "/internal/ocr-jobs/claim":
+                body = json.loads(request.content.decode("utf-8"))
+                if body.get("worker_id") == "w-readtimeout":
+                    counts["timeout_claim"] += 1
+                    raise httpx.ReadTimeout("slow read after commit")
+                counts["claim"] += 1
+                if counts["claim"] == 1:
+                    return httpx.Response(504, text="gateway timeout")
+                if counts["claim"] == 2:
+                    raise httpx.ConnectError("transient connect failure")
+                return httpx.Response(200, json={"job": {"job_id": "job-1"}})
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(handler),
+            completion_retry_attempts=3,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            self.assertEqual(client.send_worker_heartbeat({"worker_id": "w-1"}), {"ok": True})
+            self.assertEqual(counts["worker_hb"], 3)
+
+            self.assertEqual(
+                client.heartbeat_job("job-1", worker_id="w-1", fencing_token=1),
+                {"cancelled": False, "status": "RUNNING"},
+            )
+            self.assertEqual(counts["job_hb"], 2)
+
+            self.assertEqual(
+                client.heartbeat_job("job-conflict", worker_id="w-1", fencing_token=1),
+                {"cancelled": True, "status": "CONFLICT"},
+            )
+            self.assertEqual(counts["conflict_hb"], 1)
+
+            claimed = client.claim_next_job("w-1")
+            self.assertEqual(claimed, {"job_id": "job-1"})
+            self.assertEqual(counts["claim"], 3)
+
+            with self.assertRaises(httpx.ReadTimeout):
+                client.claim_next_job("w-readtimeout")
+            self.assertEqual(counts["timeout_claim"], 1)
+        finally:
+            client.close()
+
 
 if __name__ == "__main__":
     unittest.main()

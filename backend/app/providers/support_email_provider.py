@@ -82,6 +82,7 @@ class SupportEmailProvider:
         body: str,
         reply_to: str,
         locale: str = DEFAULT_LOCALE,
+        html_body: str | None = None,
     ) -> None:
         smtp_settings = self._required_settings()
         message = EmailMessage()
@@ -90,6 +91,8 @@ class SupportEmailProvider:
         message["To"] = str(smtp_settings["recipient"])
         message["Reply-To"] = reply_to
         message.set_content(body)
+        if html_body and html_body.strip():
+            message.add_alternative(html_body, subtype="html")
         message["Content-Language"] = resolve_supported_locale(locale)
 
         try:

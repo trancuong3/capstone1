@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "ניווט במסע הקריאה"
+  },
   "overview": {
     "title": "דוח התקדמות",
     "subtitle": "עקוב אחר זמן הקריאה, הדיוק ورصيف הקריאה של ילדך.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "הדוח הנוכחי עדיין מוצג. באפשרותך לנסות לטעון מחדש את רשימת התקופות.",
     "noPeriodReportTitle": "אין דוח עבור התקופה שנבחרה",
     "noSavedReportTitle": "אין דוחות שמורים",
-    "noReportDescription": "אין דוח עבור בחירה זו. באפשרותך לבחור ילד אחר או תקופה אחרת; המערכת אינה משתמשת בנתוני דמה חלופיים.",
+    "noReportDescription": "לא נמצא דוח עבור בחירה זו. ניתן לבחור פרופיל ילד אחר או תקופה אחרת.",
     "pendingReportTitle": "הנתונים ממתינים להשלמה",
-    "pendingReportDesc": "נתוני הדוח עדיין אינם מוכנים. המערכת אינה מציגה נתונים משוערים חלופיים.",
+    "pendingReportDesc": "נתוני הדוח עדיין אינם זמינים. אנא נסו שוב מאוחר יותר.",
     "periodBannerRange": "תקופה: {start} → {end}",
     "periodGeneratedAt": "עודכן בתאריך {dateTime} (שעון וייטנאם); הנתונים אינם מחושבים מחדש אוטומטית לאחר כל פעילות.",
     "unsupportedFormatTitle": "פורמט הדוח אינו נתמך",
@@ -61,10 +64,10 @@
     "viewAllWords": "הצג הכל ({count})",
     "noDifficultWordsInPeriod": "דוח תקופה זו לא תיעד מילים קשות.",
     "difficultWordsWindowNote": "הערה: מקטע המילים הקשות מציג כברירת מחדל את 90 הימים האחרונים ואינו משתנה בהתאם לתקופת הדוח שלמעלה.",
-    "legacyMetricsTitle": "מדדים בפורמט ישן",
-    "legacyMetricsSubtitle": "שמות השדות השמורים נשמרו; הם לא הומרו למספר מפגשים או לאחוזים מדויקים.",
-    "legacyTotalBooks": "סך כל הספרים שנשמרו (total_books)",
-    "legacyAvgFluency": "ערך avg_fluency שמור (היחידה אינה מוגדרת)",
+    "legacyMetricsTitle": "מדדים שנשמרו בעבר",
+    "legacyMetricsSubtitle": "מדדים מסכמים מפורמט שמירה קודם.",
+    "legacyTotalBooks": "סך הספרים שנשמרו",
+    "legacyAvgFluency": "ציון שטף קריאה ממוצע",
     "periodSelectLabel": "תקופת דוח שמורה",
     "periodLatestOption": "העדכני ביותר",
     "periodSelectedRange": "{start} → {end} (נבחר)",
@@ -135,6 +138,9 @@
       "aiWriting": "ה-AI כותב הערה...",
       "aiRefresh": "בקש מ-AI לכתוב מחדש את ההערה",
       "aiFallbackHint": "אין חיבור ל-AI ולכן מוצגת הערה אוטומטית מהנתונים. ההורים יכולים ללחוץ על \"בקש מ-AI לכתוב מחדש את ההערה\" מאוחר יותר.",
+      "aiFallbackQuota": "ה-AI עמוס זמנית או הגיע למגבלת הבקשות, ולכן מוצגת הערה אוטומטית מהנתונים. אנא המתינו מספר דקות ולחצו על \"בקש מ-AI לכתוב מחדש את ההערה\".",
+      "aiFallbackTimeout": "ל-AI לקח יותר זמן מהצפוי להגיב, ולכן מוצגת הערה אוטומטית מהנתונים. ניתן ללחוץ שוב על \"בקש מ-AI לכתוב מחדש את ההערה\" בעוד מספר שניות.",
+      "aiFallbackConfig": "שירות ה-AI אינו מוגדר כעת בשרת, ולכן מוצגת הערה אוטומטית מהנתונים. אנא נסו שוב מאוחר יותר או פנו למנהל המערכת.",
       "strengthsTitle": "הילד/ה מתפקד/ת היטב",
       "improvementsTitle": "יש מקום לשיפור",
       "actionsTitle": "הצעות להמשך תמיכה",
@@ -162,7 +168,11 @@
       "uncertainLabel": "לא שמעתי היטב",
       "uncertainNote": "מתועד בנפרד, אינו נחשב כשגיאת הגייה מאומתת."
     },
-    "entertainmentSummaryHeading": "למידה במשחק וכישורי שפה (V4.0)"
+    "entertainmentSummaryHeading": "למידה במשחק וכישורי שפה (V4.0)",
+    "focusAria": "סינון חלקי הדוח",
+    "focusAssessment": "הערכת בינה מלאכותית",
+    "focusSignals": "תרשימים ומדדים",
+    "focusEntertainment": "למידה במשחק"
   },
   "sessions": {
     "title": "היסטוריית קריאה",
@@ -174,7 +184,7 @@
     "noChildDesc": "יצירת פרופיל כדי להתחיל לשמור את מפגשי הקריאה של הילד/ה.",
     "createChildAction": "יצירת פרופיל ילד",
     "pendingDataTitle": "הנתונים ממתינים להשלמה",
-    "pendingHistoryDesc": "נתוני היסטוריית הקריאה אינם זמינים כעת. המערכת אינה מציגה נתונים לדוגמה חלופיים.",
+    "pendingHistoryDesc": "נתוני היסטוריית הקריאה עדיין אינם זמינים. אנא נסו שוב מאוחר יותר.",
     "retry": "נסה שוב",
     "manageChildren": "ניהול פרופילי ילדים",
     "notFoundTitle": "ההיסטוריה לא נמצאה",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes} דקות {seconds} שניות",
     "detail": {
       "loadingAria": "טוען פרטי סession קריאה",
-      "pendingDesc": "הנתונים עבור פריט זה אינם זמינים בפורמט הנוכחי. אין נתוני דוגמה חלופיים.",
+      "pendingDesc": "הנתונים של פריט זה עדיין אינם זמינים. אנא נסו שוב מאוחר יותר.",
       "notFoundTitle": "סلسלת הקריאה לא נמצאה",
       "notFoundDesc": "סلسלת הקריאה אינה קיימת או אינה שייכת לחשבון הנוכחי.",
       "backToHistory": "חזרה להיסטוריה",
@@ -283,7 +293,7 @@
       "originalOmission": "דילוג",
       "originalMispronunciation": "הגייה שגויה",
       "recognizedPrefix": "ViRead זיהה: “{text}”",
-      "pageRevisionMeta": "עמוד {pageId} · גרסה ",
+      "pageRevisionMeta": "דף ספר",
       "firstPassSectionAria": "אירועי מעבר ראשון",
       "firstPassSectionTitle": "אירועי מעבר ראשון",
       "timestampAt": "ב-",
@@ -346,7 +356,7 @@
       "prevShort": "קודם",
       "nextShort": "הבא",
       "loadingPageAria": "טוען את תוכן עמוד הספר",
-      "verifiedPageTitle": "תוכן עמוד מאומת",
+      "verifiedPageTitle": "תוכן דף הספר",
       "selfCorrectedCount": "תוקן עצמית: {count} מילים",
       "pageMissingContentNote": "לא ניתן לטעון את גרסת עמוד הספר המדויקת שנקראה על ידי ילדכם. התמלילים והסטטיסטיקות השמורות נותרו ללא שינוי.",
       "legendAria": "מקרא צבעים",
@@ -388,7 +398,20 @@
         "repeated": "חזרה על מילים",
         "hesitation": "מהסס"
       }
-    }
+    },
+    "summarySessions": "מפגשי קריאה",
+    "summaryDuration": "משך כולל",
+    "summaryCompleted": "הושלמו",
+    "summaryDurationZero": "0 דקות",
+    "filterAria": "סינון מפגשים לפי סטטוס",
+    "filterAll": "הכול",
+    "filterCompleted": "הושלמו",
+    "filterIncomplete": "בתהליך",
+    "searchPlaceholder": "סינון לפי שם ספר בעמוד זה…",
+    "searchAria": "חיפוש מפגשים לפי שם ספר",
+    "filterEmptyTitle": "אין מפגשים תואמים",
+    "filterEmptyDesc": "נסו לשנות סינון או לנקות חיפוש.",
+    "clearFilterAction": "הצגת כל המפגשים"
   },
   "readingManagement": {
     "title": "ניהול קריאה ותזכורות",
@@ -406,7 +429,7 @@
     "errorTitle": "משהו השתבש",
     "savedTitle": "נשמר",
     "loadChildFailed": "לא ניתן לטעון את פרופיל הילד. אנא נסה שוב.",
-    "loadManagementFailed": "לא ניתן לטעון את נתוני ניהול הקריאה. בדק את השרת ואת עדכוני ניהול הקריאה, ואז נסה שוב.",
+    "loadManagementFailed": "לא ניתן לטעון את נתוני ניהול הקריאה. אנא נסו שוב מאוחר יותר.",
     "mutationUnconfirmed": "לא ניתן להשלים את הפעולה. הנתונים לא אושרו כשמורים; אנא נסה שוב.",
     "overviewAria": "סקירת הרגלי קריאה",
     "summaryRunningGoals": "יעדים פעילים",
@@ -514,7 +537,7 @@
     "goalsTimezoneRule": "ההתקדמות סופרת רק מפגשים שהושלמו עם זמני התחלה וסיום תקפים. יעדים אינם מושלמים אוטומטית רק הגעה ל-100%.",
     "remindersSectionAria": "תזכורות קריאה",
     "remindersTitle": "תזכורות קריאה",
-    "remindersSubtitle": "התזכורות נשמרות באזור הזמן שבחרת. כאשר התראות האימייל מופעלות, תזכורות נשלחות לכתובת המאומתת של ההורה.",
+    "remindersSubtitle": "הלוחות נשמרים לפי אזור הזמן שנבחר. כאשר אימייל מופעל, המערכת תשלח תזכורות לכתובת המאומתת של ההורה.",
     "addReminder": "הוספת תזכורת",
     "dueRemindersTitle": "הגיע הזמן לקרוא ({count})",
     "reminderAtPrefix": "תזכורת בשעה ",
@@ -565,7 +588,7 @@
       "startLabel": "התחל",
       "createGoal": "יצירת יעד",
       "localTimeLabel": "שעה מקומית",
-      "ianaTimezoneLabel": "אזור זמן IANA",
+      "ianaTimezoneLabel": "אזור זמן מפורט",
       "repeatDaysLabel": "חזור ביום",
       "emailReminderLabel": "אימייל תזכורת לקריאה",
       "sendEmailCheck": "שלח אימייל להורה כשהגיע הזמן לקרוא",
@@ -643,7 +666,11 @@
       "favorited": "הוספת למועדפים",
       "wantToRead": "רוצה לקרוא",
       "savedToRead": "נשמר לרשימת הקריאה"
-    }
+    },
+    "focusAria": "סינון חלקי ניהול הקריאה",
+    "focusPlans": "תוכניות",
+    "focusGoals": "יעדים",
+    "focusReminders": "תזכורות"
   },
   "entertainmentSummary": {
     "loading": "מסכם את התקדמות הלמידה במשחק של {childName}…",

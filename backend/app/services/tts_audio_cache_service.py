@@ -43,6 +43,8 @@ _DAILY_USAGE_CACHE_TTL_SECONDS = 15.0
 _SUMMARY_CACHE_TTL_SECONDS = 15.0
 _AUDIO_RAM_LRU_MAX_BYTES = 32 * 1024 * 1024  # 32 MiB bounded server RAM LRU
 _AUDIO_RAM_LRU_MAX_ITEM_BYTES = 4 * 1024 * 1024  # Never pin >4 MiB single clip
+_CONSTRAINED_AUDIO_RAM_LRU_MAX_BYTES = 16 * 1024 * 1024  # 16 MiB on 512 MiB Render Free
+_CONSTRAINED_AUDIO_RAM_LRU_MAX_ITEM_BYTES = 2 * 1024 * 1024  # 2 MiB max single clip
 
 _CACHE_STATE_LOCK = threading.Lock()
 _SCOPE_TARGET_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, Any]]" = OrderedDict()
@@ -51,9 +53,46 @@ _SUMMARY_CACHE: dict[tuple[int, int, int, date], tuple[float, dict[str, Any]]] =
 _AUDIO_RAM_LRU: "OrderedDict[tuple[str, str], tuple[bytes, str]]" = OrderedDict()
 _AUDIO_RAM_LRU_BYTES = 0
 
-DEFAULT_TTS_CACHE_MAX_BYTES = 150 * 1024 * 1024  # 150 MiB
+DEFAULT_TTS_CACHE_MAX_BYTES = 150 * 1024 * 1024  # 150 MiB (CATALOG + COACHING partition)
+DEFAULT_TTS_PRIVATE_OWNER_MAX_BYTES = 12 * 1024 * 1024  # 12 MiB per-parent PRIVATE cap
+DEFAULT_TTS_PRIVATE_GLOBAL_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB global PRIVATE cap
+DEFAULT_TTS_GLOBAL_ACTIVE_MAX_BYTES = 200 * 1024 * 1024  # 200 MiB cross-scope ceiling
 DEFAULT_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES = 300 * 1024 * 1024  # 300 MiB/day
 DEFAULT_TTS_CACHE_BUCKET = "viread-tts-cache"
+
+
+def _is_constrained_web_runtime() -> bool:
+    render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+    return render or disable_heavy or remote_ocr
+
+
+def _get_audio_ram_lru_max_bytes() -> int:
+    raw = (os.getenv("VIREAD_TTS_RAM_CACHE_MAX_BYTES") or "").strip()
+    if raw:
+        try:
+            return max(0, min(64 * 1024 * 1024, int(raw)))
+        except ValueError:
+            pass
+    return (
+        _CONSTRAINED_AUDIO_RAM_LRU_MAX_BYTES
+        if _is_constrained_web_runtime()
+        else _AUDIO_RAM_LRU_MAX_BYTES
+    )
+
+
+def _get_audio_ram_lru_max_item_bytes() -> int:
+    return (
+        _CONSTRAINED_AUDIO_RAM_LRU_MAX_ITEM_BYTES
+        if _is_constrained_web_runtime()
+        else _AUDIO_RAM_LRU_MAX_ITEM_BYTES
+    )
 
 _EXTENSION_BY_MIME = {
     "audio/mpeg": "mp3",
@@ -69,6 +108,34 @@ _RUNTIME_METRICS: dict[str, Any] = {
     "bytes_served": 0,
     "quota_exhausted": False,
 }
+
+
+_MALE_VOICE_MARKERS = (
+    "thien_minh",
+    "quang_son",
+    "thai_son",
+    "neural2_d",
+    "wavenet_b",
+    "_male",
+)
+
+
+def _infer_voice_gender(voice_id: str | None) -> str:
+    lower = (voice_id or "").strip().lower()
+    if any(marker in lower for marker in _MALE_VOICE_MARKERS):
+        return "male"
+    return "female"
+
+
+def _entry_matches_requested_voice(entry: Any, requested_voice_id: str) -> bool:
+    entry_voice_id = getattr(entry, "VoiceId", None)
+    if not isinstance(entry_voice_id, str) or not entry_voice_id.strip():
+        return False
+    clean_entry = entry_voice_id.strip()
+    clean_req = (requested_voice_id or "").strip()
+    if not clean_req or clean_entry != clean_req:
+        return False
+    return _infer_voice_gender(clean_entry) == _infer_voice_gender(clean_req)
 
 
 def _reset_day_if_needed_locked(today: date) -> None:
@@ -180,15 +247,17 @@ def _audio_ram_lru_get(bucket: str, path: str) -> tuple[bytes, str] | None:
 
 def _audio_ram_lru_put(bucket: str, path: str, data: bytes, content_type: str) -> None:
     global _AUDIO_RAM_LRU_BYTES
+    max_bytes = _get_audio_ram_lru_max_bytes()
+    max_item_bytes = _get_audio_ram_lru_max_item_bytes()
     size = len(data)
-    if size <= 0 or size > _AUDIO_RAM_LRU_MAX_ITEM_BYTES or size > _AUDIO_RAM_LRU_MAX_BYTES:
+    if max_bytes <= 0 or size <= 0 or size > max_item_bytes or size > max_bytes:
         return
     key = (bucket, path)
     with _CACHE_STATE_LOCK:
         existing = _AUDIO_RAM_LRU.pop(key, None)
         if existing is not None:
             _AUDIO_RAM_LRU_BYTES = max(0, _AUDIO_RAM_LRU_BYTES - len(existing[0]))
-        while _AUDIO_RAM_LRU and (_AUDIO_RAM_LRU_BYTES + size) > _AUDIO_RAM_LRU_MAX_BYTES:
+        while _AUDIO_RAM_LRU and (_AUDIO_RAM_LRU_BYTES + size) > max_bytes:
             _, evicted = _AUDIO_RAM_LRU.popitem(last=False)
             _AUDIO_RAM_LRU_BYTES = max(0, _AUDIO_RAM_LRU_BYTES - len(evicted[0]))
         _AUDIO_RAM_LRU[key] = (data, content_type)
@@ -328,6 +397,36 @@ def get_tts_cache_max_bytes() -> int:
         return DEFAULT_TTS_CACHE_MAX_BYTES
 
 
+def get_tts_private_owner_max_bytes() -> int:
+    raw = (os.getenv("VIREAD_TTS_CACHE_PRIVATE_OWNER_MAX_BYTES") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_PRIVATE_OWNER_MAX_BYTES
+    try:
+        return max(1024, int(raw))
+    except ValueError:
+        return DEFAULT_TTS_PRIVATE_OWNER_MAX_BYTES
+
+
+def get_tts_private_global_max_bytes() -> int:
+    raw = (os.getenv("VIREAD_TTS_CACHE_PRIVATE_GLOBAL_MAX_BYTES") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_PRIVATE_GLOBAL_MAX_BYTES
+    try:
+        return max(1024, int(raw))
+    except ValueError:
+        return DEFAULT_TTS_PRIVATE_GLOBAL_MAX_BYTES
+
+
+def get_tts_cache_global_max_bytes() -> int:
+    raw = (os.getenv("VIREAD_TTS_CACHE_GLOBAL_MAX_BYTES") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_GLOBAL_ACTIVE_MAX_BYTES
+    try:
+        return max(1024, int(raw))
+    except ValueError:
+        return DEFAULT_TTS_GLOBAL_ACTIVE_MAX_BYTES
+
+
 def get_tts_cache_daily_egress_limit_bytes() -> int:
     raw = (os.getenv("VIREAD_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES") or "").strip()
     if not raw:
@@ -445,6 +544,12 @@ ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Máy chưa nghe rõ giọng của con. Con lại gần micro và thử lại nhé!",
     "Phần nhận diện giọng nói đang bận một chút. Con không bị tính sai đâu, mình thử lại sau nhé!",
     "Máy chưa nghe thật chắc chắn. Con không bị tính sai đâu, mình thử đọc lại nhé!",
+    "Buổi đọc xong rồi! Con có muốn luyện lại mấy từ khó vừa rồi cùng cô không? Con bấm nút Luyện ngay các từ khó nhé!",
+    "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại nhé.",
+    "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại rõ hơn một chút nhé.",
+    "Không sao đâu, từ này mình luyện thêm sau. Mình sang từ tiếp theo nhé!",
+    "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+    "Không sao đâu con! Mình cùng sang câu tiếp theo nhé!",
 )
 TIMED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     # Spoken via `/voice/text-to-speech/timed` with `cache_scope="COACHING"` (ReadingVoiceSettings "Nghe thử")
@@ -933,6 +1038,8 @@ class TtsAudioCacheService:
         if not rows:
             return False
 
+        from app.services.games.sentence_extraction import _sentence_spans
+
         punct = _FOLD_PUNCT_CHARS
         allowed: set[str] = set()
         for verified_text, word_pairs in rows:
@@ -940,6 +1047,12 @@ class TtsAudioCacheService:
                 norm_page = canonical_tts_text(verified_text)
                 if norm_page:
                     allowed.add(norm_page)
+                    for span_start, span_end in _sentence_spans(verified_text):
+                        norm_sentence = canonical_tts_text(
+                            verified_text[span_start:span_end]
+                        )
+                        if norm_sentence:
+                            allowed.add(norm_sentence)
                     for piece in norm_page.split():
                         allowed.add(piece)
                         stripped = piece.strip(punct)
@@ -1404,6 +1517,17 @@ class TtsAudioCacheService:
                         if callable(nearest_fn):
                             entry = await nearest_fn(**coaching_phonics_kwargs)
 
+            if entry is not None and not _entry_matches_requested_voice(entry, voice_id):
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="tts_cache_voice_mismatch_rejected",
+                    stage="tts_cache",
+                    requested_voice_id=voice_id,
+                    cached_voice_id=getattr(entry, "VoiceId", None),
+                )
+                entry = None
+
             if entry is None:
                 if use_bg_writes:
                     await self._end_read_tx()
@@ -1642,7 +1766,17 @@ class TtsAudioCacheService:
             source_content_type,
         )
         max_bytes = get_tts_cache_max_bytes()
-        if len(compressed_bytes) > max_bytes:
+        global_cap = get_tts_cache_global_max_bytes()
+        if target.scope == "PRIVATE":
+            effective_item_cap = min(
+                max_bytes,
+                get_tts_private_owner_max_bytes(),
+                get_tts_private_global_max_bytes(),
+                global_cap,
+            )
+        else:
+            effective_item_cap = min(max_bytes, global_cap)
+        if len(compressed_bytes) > effective_item_cap:
             return False
 
         content_sha256 = canonical_tts_sha256(normalized_text)
@@ -1767,23 +1901,13 @@ class TtsAudioCacheService:
             await asyncio.gather(*(_delete_one(b, p) for b, p in to_delete))
         return True
 
-    async def _enforce_lru_quota(
+    async def _get_partition_active_bytes(
         self,
         *,
-        max_bytes: int,
-        keep_entry_id: UUID | None = None,
-        scope: str | None = None,
-        owner_parent_id: UUID | None = None,
-    ) -> list[tuple[str, str]]:
+        partition_scopes: tuple[str, ...] | None,
+        partition_owner: UUID | None,
+    ) -> tuple[int, bool]:
         assert self.repo is not None
-        partition_scopes: tuple[str, ...] | None = None
-        partition_owner: UUID | None = None
-        if scope == "PRIVATE":
-            partition_scopes = ("PRIVATE",)
-            partition_owner = owner_parent_id
-        elif scope in ("CATALOG", "COACHING"):
-            partition_scopes = ("CATALOG", "COACHING")
-
         scoped_repo = True
         try:
             total = await self.repo.total_active_bytes(
@@ -1802,20 +1926,32 @@ class TtsAudioCacheService:
                     for e in entries_map.values()
                     if getattr(e, "Status", None) == "ACTIVE"
                     and getattr(e, "Scope", None) in partition_scopes
-                    and (partition_owner is None or getattr(e, "OwnerParentId", None) == partition_owner)
+                    and (
+                        partition_owner is None
+                        or getattr(e, "OwnerParentId", None) == partition_owner
+                    )
                 )
+        return int(total or 0), scoped_repo
 
-        if total <= max_bytes:
+    async def _evict_excess_from_partition(
+        self,
+        *,
+        excess_bytes: int,
+        partition_scopes: tuple[str, ...] | None,
+        partition_owner: UUID | None,
+        exclude_ids: list[UUID],
+    ) -> list[tuple[str, str]]:
+        assert self.repo is not None
+        if excess_bytes <= 0:
             return []
-
-        exclude_ids: list[UUID] = [keep_entry_id] if keep_entry_id is not None else []
+        remaining_to_shed = int(excess_bytes)
         evict_ids: list[UUID] = []
         evict_objects: list[tuple[str, str]] = []
         batch_size = 200
         for _ in range(10):
-            if total <= max_bytes:
+            if remaining_to_shed <= 0:
                 break
-            batch_scoped = scoped_repo
+            batch_scoped = True
             try:
                 candidates = await self.repo.list_lru_eviction_candidates(
                     exclude_ids=tuple(exclude_ids),
@@ -1836,24 +1972,150 @@ class TtsAudioCacheService:
                     item
                     for item in candidates
                     if getattr(item, "Scope", None) in partition_scopes
-                    and (partition_owner is None or getattr(item, "OwnerParentId", None) == partition_owner)
+                    and (
+                        partition_owner is None
+                        or getattr(item, "OwnerParentId", None) == partition_owner
+                    )
                 ]
             progressed = False
             for item in candidates:
-                if total <= max_bytes:
+                if remaining_to_shed <= 0:
                     break
                 if item.Id in exclude_ids:
                     continue
                 exclude_ids.append(item.Id)
                 evict_ids.append(item.Id)
                 evict_objects.append((str(item.StorageBucket), str(item.StoragePath)))
-                total -= int(item.ByteSize or 0)
+                remaining_to_shed -= int(item.ByteSize or 0)
                 progressed = True
             if not progressed or raw_count < batch_size:
                 break
         if evict_ids:
             await self.repo.mark_entries_status(evict_ids, status="DELETED")
         return evict_objects
+
+    async def _enforce_lru_quota(
+        self,
+        *,
+        max_bytes: int,
+        keep_entry_id: UUID | None = None,
+        scope: str | None = None,
+        owner_parent_id: UUID | None = None,
+    ) -> list[tuple[str, str]]:
+        assert self.repo is not None
+        exclude_ids: list[UUID] = [keep_entry_id] if keep_entry_id is not None else []
+        evicted_objects: list[tuple[str, str]] = []
+        global_cap = get_tts_cache_global_max_bytes()
+
+        if scope == "PRIVATE":
+            # Tier 1: Per-parent PRIVATE cap
+            owner_cap = min(int(max_bytes), get_tts_private_owner_max_bytes())
+            owner_total, _ = await self._get_partition_active_bytes(
+                partition_scopes=("PRIVATE",),
+                partition_owner=owner_parent_id,
+            )
+            if owner_total > owner_cap:
+                evicted_objects.extend(
+                    await self._evict_excess_from_partition(
+                        excess_bytes=owner_total - owner_cap,
+                        partition_scopes=("PRIVATE",),
+                        partition_owner=owner_parent_id,
+                        exclude_ids=exclude_ids,
+                    )
+                )
+
+            # Tier 2: Global PRIVATE cap across all parents
+            private_global_cap = get_tts_private_global_max_bytes()
+            priv_total, _ = await self._get_partition_active_bytes(
+                partition_scopes=("PRIVATE",),
+                partition_owner=None,
+            )
+            if priv_total > private_global_cap:
+                evicted_objects.extend(
+                    await self._evict_excess_from_partition(
+                        excess_bytes=priv_total - private_global_cap,
+                        partition_scopes=("PRIVATE",),
+                        partition_owner=None,
+                        exclude_ids=exclude_ids,
+                    )
+                )
+
+            # Tier 3: Cross-scope global safety ceiling (PRIVATE writes never evict CATALOG/COACHING)
+            global_total, _ = await self._get_partition_active_bytes(
+                partition_scopes=None,
+                partition_owner=None,
+            )
+            if global_total > global_cap:
+                evicted_objects.extend(
+                    await self._evict_excess_from_partition(
+                        excess_bytes=global_total - global_cap,
+                        partition_scopes=("PRIVATE",),
+                        partition_owner=None,
+                        exclude_ids=exclude_ids,
+                    )
+                )
+            return evicted_objects
+
+        if scope in ("CATALOG", "COACHING"):
+            # Tier 1: Public CATALOG + COACHING partition cap
+            pub_total, _ = await self._get_partition_active_bytes(
+                partition_scopes=("CATALOG", "COACHING"),
+                partition_owner=None,
+            )
+            if pub_total > max_bytes:
+                evicted_objects.extend(
+                    await self._evict_excess_from_partition(
+                        excess_bytes=pub_total - max_bytes,
+                        partition_scopes=("CATALOG", "COACHING"),
+                        partition_owner=None,
+                        exclude_ids=exclude_ids,
+                    )
+                )
+
+            # Tier 2: Cross-scope global safety ceiling (evict PRIVATE first, then CATALOG/COACHING)
+            global_total, _ = await self._get_partition_active_bytes(
+                partition_scopes=None,
+                partition_owner=None,
+            )
+            if global_total > global_cap:
+                evicted_objects.extend(
+                    await self._evict_excess_from_partition(
+                        excess_bytes=global_total - global_cap,
+                        partition_scopes=("PRIVATE",),
+                        partition_owner=None,
+                        exclude_ids=exclude_ids,
+                    )
+                )
+                global_total, _ = await self._get_partition_active_bytes(
+                    partition_scopes=None,
+                    partition_owner=None,
+                )
+                if global_total > global_cap:
+                    evicted_objects.extend(
+                        await self._evict_excess_from_partition(
+                            excess_bytes=global_total - global_cap,
+                            partition_scopes=("CATALOG", "COACHING"),
+                            partition_owner=None,
+                            exclude_ids=exclude_ids,
+                        )
+                    )
+            return evicted_objects
+
+        total, _ = await self._get_partition_active_bytes(
+            partition_scopes=None,
+            partition_owner=None,
+        )
+        effective_cap = min(int(max_bytes), global_cap)
+        if total > effective_cap:
+            evicted_objects.extend(
+                await self._evict_excess_from_partition(
+                    excess_bytes=total - effective_cap,
+                    partition_scopes=None,
+                    partition_owner=None,
+                    exclude_ids=exclude_ids,
+                )
+            )
+        return evicted_objects
 
     async def invalidate_target(
         self,

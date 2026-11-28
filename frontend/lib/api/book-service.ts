@@ -65,6 +65,8 @@ export function createBookService(): BookService {
           include_private: query?.include_private ? "true" : undefined,
         })}`,
         z.array(parentBookSchema),
+        undefined,
+        { cacheTtlMs: 60_000 },
       ),
     get: (bookId) =>
       requestApi(

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select, text
+from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import OcrInferenceJob, OcrWorkerHeartbeat
@@ -21,6 +21,44 @@ class OcrInferenceJobRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    def _get_dialect_name(self) -> str:
+        bind = getattr(self.db, "bind", None)
+        if bind is None:
+            try:
+                bind = self.db.get_bind()
+            except Exception:
+                bind = None
+        dialect_name = getattr(getattr(bind, "dialect", None), "name", "") if bind is not None else ""
+        return dialect_name if isinstance(dialect_name, str) else ""
+
+    async def is_storage_ready(self) -> bool:
+        """Check whether OCR job & heartbeat tables exist before running pruning."""
+        try:
+            dialect = self._get_dialect_name()
+            if dialect == "sqlite":
+                rows = (
+                    await self.db.execute(
+                        text(
+                            "SELECT name FROM sqlite_master "
+                            "WHERE type = 'table' "
+                            "AND name IN ('ocr_inference_jobs', 'ocr_worker_heartbeats')"
+                        )
+                    )
+                ).scalars().all()
+                return {str(r) for r in rows} == {
+                    "ocr_inference_jobs",
+                    "ocr_worker_heartbeats",
+                }
+            jobs_tbl = await self.db.scalar(
+                select(text("to_regclass('public.ocr_inference_jobs')"))
+            )
+            hb_tbl = await self.db.scalar(
+                select(text("to_regclass('public.ocr_worker_heartbeats')"))
+            )
+            return jobs_tbl is not None and hb_tbl is not None
+        except Exception:
+            return False
 
     async def get(self, job_id: UUID, *, lock: bool = False) -> OcrInferenceJob | None:
         query = select(OcrInferenceJob).where(OcrInferenceJob.Id == job_id)
@@ -73,8 +111,12 @@ class OcrInferenceJobRepository:
         ]
         if submission_id is not None:
             filters.append(OcrInferenceJob.SubmissionId == submission_id)
+            if owner_user_id is not None:
+                filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         elif page_id is not None:
             filters.append(OcrInferenceJob.PageId == page_id)
+            if owner_user_id is not None:
+                filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         elif owner_user_id is not None:
             filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         else:
@@ -693,3 +735,39 @@ class OcrInferenceJobRepository:
             ):
                 return candidate
         return None
+
+    async def prune_terminal_jobs(
+        self,
+        *,
+        older_than_days: int = 30,
+        limit: int = 200,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete aged terminal OCR job rows without touching Storage objects or active heartbeat refs."""
+        ts = now or datetime.now(timezone.utc)
+        cutoff = ts - timedelta(days=max(7, int(older_than_days)))
+        effective_limit = max(1, min(1000, int(limit)))
+        active_hb_subq = select(OcrWorkerHeartbeat.ActiveJobId).where(
+            OcrWorkerHeartbeat.ActiveJobId.is_not(None)
+        )
+        age_expr = func.coalesce(OcrInferenceJob.CompletedAt, OcrInferenceJob.UpdatedAt)
+        stmt = (
+            select(OcrInferenceJob.Id)
+            .where(
+                OcrInferenceJob.Status.in_(("SUCCEEDED", "CANCELLED", "DEAD_LETTER")),
+                age_expr < cutoff,
+                ~OcrInferenceJob.Id.in_(active_hb_subq),
+            )
+            .order_by(age_expr.asc(), OcrInferenceJob.Id.asc())
+            .limit(effective_limit)
+        )
+        if self._get_dialect_name() == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+
+        ids = list((await self.db.execute(stmt)).scalars().all())
+        if not ids:
+            return 0
+        res = await self.db.execute(
+            delete(OcrInferenceJob).where(OcrInferenceJob.Id.in_(ids))
+        )
+        return int(res.rowcount or len(ids))

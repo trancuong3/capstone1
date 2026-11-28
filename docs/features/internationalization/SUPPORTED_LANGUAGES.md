@@ -10,11 +10,11 @@ The registry is architected to scale beyond 100 locales without changing routing
 
 ## Production Publishing Gate
 
-Per project policy, a language is **only** exposed in production selectors (`published: true`) after reaching 100% UI key parity (`5,136 / 5,136` keys) and passing `i18n:check --strict` with zero placeholder, schema, or untranslated errors. Unfinished languages remain `status: "incomplete"` and `published: false` in `LOCALE_REGISTRY`, hidden from `<LanguageSelector>` by default (`publishedOnly = true`), and safely resolve back to `vi` if requested directly.
+Per project policy, a language is **only** exposed in production selectors (`published: true`) after reaching 100% UI key parity (`6,186 / 6,186` keys) and passing `i18n:check --strict` with zero placeholder, schema, or untranslated errors. Unfinished languages remain `status: "incomplete"` and `published: false` in `LOCALE_REGISTRY`, hidden from `<LanguageSelector>` by default (`publishedOnly = true`), and safely resolve back to `vi` if requested directly.
 
 ## Complete 30-Locale Registry
 
-### Published in Production (11 Locales — 5,136 / 5,136 Keys Verified)
+### Published in Production (11 Locales — 6,186 / 6,186 Keys Verified)
 
 | Code      | Native Name | English Name          | Direction | Region Group     | Popular | Status     | Published |
 | --------- | ----------- | --------------------- | --------- | ---------------- | ------- | ---------- | --------- |

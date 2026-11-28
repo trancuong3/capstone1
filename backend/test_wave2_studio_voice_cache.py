@@ -6,10 +6,11 @@ import base64
 import io
 import json
 import os
+import shutil
 import struct
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -642,7 +643,9 @@ class Wave2TtsCacheAndVoiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(stale, list)
                 self.assertEqual(len(stale), 1)
                 priv_bucket, priv_path = stale[0]
-                priv_file = Path(tmpdir) / priv_bucket / priv_path
+                priv_file = (Path(tmpdir) / priv_bucket / priv_path).resolve()
+                if os.name == "nt" and len(str(priv_file)) >= 248 and not str(priv_file).startswith("\\\\?\\"):
+                    priv_file = Path(f"\\\\?\\{priv_file}")
                 self.assertTrue(priv_file.is_file())
                 await delete_stale_tts_objects(stale)
                 self.assertFalse(priv_file.is_file())
@@ -930,10 +933,283 @@ class Wave2TtsCacheAndVoiceTests(unittest.IsolatedAsyncioTestCase):
                 stop_ev.set()
                 return fake_proc
 
-            with patch.object(bootstrap_mod.subprocess, "Popen", side_effect=_popen_and_signal):
-                ok = await bootstrap_mod.ensure_local_voice_worker_running(stop_event=stop_ev)
+            with patch.dict(os.environ, {}, clear=False):
+                with patch.object(bootstrap_mod.subprocess, "Popen", side_effect=_popen_and_signal):
+                    ok = await bootstrap_mod.ensure_local_voice_worker_running(stop_event=stop_ev)
         self.assertFalse(ok)
         fake_proc.terminate.assert_called_once()
+
+
+class M1CacheBoundsAndMultiLayerQuotaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_f05_constrained_render_audio_ram_caches_bounded_to_28_mib_with_env_overrides(
+        self,
+    ) -> None:
+        from app.providers import elevenlabs_studio_provider as studio_prov
+        from app.providers import elevenlabs_voice_provider as voice_prov
+        from app.services import tts_audio_cache_service as tts_svc
+
+        tts_svc.clear_tts_cache_runtime_metrics()
+        studio_prov.clear_caches()
+        self.addCleanup(tts_svc.clear_tts_cache_runtime_metrics)
+        self.addCleanup(studio_prov.clear_caches)
+
+        with patch.dict(
+            os.environ,
+            {"RENDER": "true"},
+            clear=False,
+        ):
+            os.environ.pop("VIREAD_TTS_RAM_CACHE_MAX_BYTES", None)
+            os.environ.pop("VIREAD_ELEVENLABS_TIMED_CACHE_MAX_BYTES", None)
+            os.environ.pop("VIREAD_ELEVENLABS_SHORT_CACHE_MAX_BYTES", None)
+
+            ram_max = tts_svc._get_audio_ram_lru_max_bytes()
+            ram_item_max = tts_svc._get_audio_ram_lru_max_item_bytes()
+            timed_bytes, timed_entries = studio_prov._resolve_timed_cache_limits()
+            short_bytes, short_entries = voice_prov._resolve_short_tts_cache_limits()
+
+            self.assertEqual(ram_max, 16 * 1024 * 1024)
+            self.assertEqual(ram_item_max, 2 * 1024 * 1024)
+            self.assertEqual((timed_bytes, timed_entries), (8 * 1024 * 1024, 12))
+            self.assertEqual((short_bytes, short_entries), (4 * 1024 * 1024, 16))
+            self.assertEqual(ram_max + timed_bytes + short_bytes, 28 * 1024 * 1024)
+
+            # _audio_ram_lru_put skips >2 MiB item on constrained runtime
+            tts_svc._audio_ram_lru_put("b", "too-big.mp3", b"x" * (2 * 1024 * 1024 + 1), "audio/mpeg")
+            self.assertIsNone(tts_svc._audio_ram_lru_get("b", "too-big.mp3"))
+
+            # _TimedSpeechCache enforces 12-entry cap
+            cache = studio_prov._TimedSpeechCache()
+            for i in range(15):
+                cache.put(
+                    f"k-{i}",
+                    studio_prov.TimedSpeech(
+                        audio=b"a" * 100,
+                        content_type="audio/mpeg",
+                        duration_seconds=1.0,
+                        words=(),
+                    ),
+                )
+            self.assertEqual(len(cache._items), 12)
+            self.assertIsNone(cache.get("k-0"))
+            self.assertIsNotNone(cache.get("k-14"))
+
+            # _short_cache_put enforces 16-entry cap
+            for i in range(20):
+                voice_prov.ElevenLabsVoiceProvider._short_cache_put(
+                    f"s-{i}",
+                    voice_prov.SynthesizedAudio(content=b"s" * 100, content_type="audio/mpeg"),
+                )
+            self.assertEqual(len(voice_prov._short_tts_cache), 16)
+
+        with patch.dict(
+            os.environ,
+            {
+                "RENDER": "true",
+                "VIREAD_TTS_RAM_CACHE_MAX_BYTES": str(10 * 1024 * 1024),
+                "VIREAD_ELEVENLABS_TIMED_CACHE_MAX_BYTES": str(6 * 1024 * 1024),
+                "VIREAD_ELEVENLABS_SHORT_CACHE_MAX_BYTES": str(2 * 1024 * 1024),
+            },
+            clear=False,
+        ):
+            self.assertEqual(tts_svc._get_audio_ram_lru_max_bytes(), 10 * 1024 * 1024)
+            self.assertEqual(studio_prov._resolve_timed_cache_limits()[0], 6 * 1024 * 1024)
+            self.assertEqual(voice_prov._resolve_short_tts_cache_limits()[0], 2 * 1024 * 1024)
+
+    async def test_f06_multi_parent_private_cap_global_private_cap_and_cross_scope_ceiling(
+        self,
+    ) -> None:
+        from test_zero_cost_phase2_backend import _InMemoryTtsRepo
+
+        @contextmanager
+        def _longpath_tempdir():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                try:
+                    yield d
+                finally:
+                    if os.name == "nt":
+                        shutil.rmtree(f"\\\\?\\{Path(d).resolve()}", ignore_errors=True)
+
+        with _longpath_tempdir() as tmpdir:
+            repo = _InMemoryTtsRepo()
+            fake_db = MagicMock(spec=AsyncSession)
+            fake_db.commit = AsyncMock()
+            fake_db.rollback = AsyncMock()
+            svc = TtsAudioCacheService(fake_db)
+            svc.repo = repo  # type: ignore[assignment]
+
+            parent_a = uuid4()
+            parent_b = uuid4()
+            parent_c = uuid4()
+            book_a = uuid4()
+            book_b = uuid4()
+            book_c = uuid4()
+            page_id = uuid4()
+
+            # 1. Per-parent PRIVATE cap evicts parent A's oldest without touching parent B
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_LOCAL_STORAGE_DIR": tmpdir,
+                    "VIREAD_TTS_CACHE_MAX_BYTES": "10000",
+                    "VIREAD_TTS_CACHE_PRIVATE_OWNER_MAX_BYTES": "1024",
+                    "VIREAD_TTS_CACHE_PRIVATE_GLOBAL_MAX_BYTES": "5000",
+                    "VIREAD_TTS_CACHE_GLOBAL_MAX_BYTES": "10000",
+                },
+                clear=False,
+            ):
+                t_a = ResolvedCacheTarget("PRIVATE", parent_a, book_a, page_id, None, True)
+                t_b = ResolvedCacheTarget("PRIVATE", parent_b, book_b, page_id, None, True)
+                self.assertTrue(
+                    await svc.store_cached_audio(
+                        target=t_a,
+                        normalized_text="A1",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        model_version=LOCAL_TTS_MODEL_VERSION,
+                        speed=1.0,
+                        audio_bytes=b"ID3" + b"a" * 697,
+                        source_content_type="audio/mpeg",
+                    )
+                )
+                id_a1 = next(iter(repo.entries.keys()))
+                self.assertTrue(
+                    await svc.store_cached_audio(
+                        target=t_b,
+                        normalized_text="B1",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        model_version=LOCAL_TTS_MODEL_VERSION,
+                        speed=1.0,
+                        audio_bytes=b"ID3" + b"b" * 697,
+                        source_content_type="audio/mpeg",
+                    )
+                )
+                id_b1 = [eid for eid in repo.entries if eid != id_a1][0]
+                self.assertTrue(
+                    await svc.store_cached_audio(
+                        target=t_a,
+                        normalized_text="A2",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        model_version=LOCAL_TTS_MODEL_VERSION,
+                        speed=1.0,
+                        audio_bytes=b"ID3" + b"c" * 697,
+                        source_content_type="audio/mpeg",
+                    )
+                )
+                self.assertEqual(repo.entries[id_a1].Status, "DELETED")
+                self.assertEqual(repo.entries[id_b1].Status, "ACTIVE")
+
+            # 2. Global PRIVATE cap evicts oldest PRIVATE across parents
+            repo.entries.clear()
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_LOCAL_STORAGE_DIR": tmpdir,
+                    "VIREAD_TTS_CACHE_MAX_BYTES": "10000",
+                    "VIREAD_TTS_CACHE_PRIVATE_OWNER_MAX_BYTES": "2048",
+                    "VIREAD_TTS_CACHE_PRIVATE_GLOBAL_MAX_BYTES": "1500",
+                    "VIREAD_TTS_CACHE_GLOBAL_MAX_BYTES": "10000",
+                },
+                clear=False,
+            ):
+                t_a = ResolvedCacheTarget("PRIVATE", parent_a, book_a, page_id, None, True)
+                t_b = ResolvedCacheTarget("PRIVATE", parent_b, book_b, page_id, None, True)
+                t_c = ResolvedCacheTarget("PRIVATE", parent_c, book_c, page_id, None, True)
+                await svc.store_cached_audio(
+                    target=t_a,
+                    normalized_text="GA",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"a" * 697,
+                    source_content_type="audio/mpeg",
+                )
+                id_ga = next(iter(repo.entries.keys()))
+                await svc.store_cached_audio(
+                    target=t_b,
+                    normalized_text="GB",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"b" * 697,
+                    source_content_type="audio/mpeg",
+                )
+                await svc.store_cached_audio(
+                    target=t_c,
+                    normalized_text="GC",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"c" * 697,
+                    source_content_type="audio/mpeg",
+                )
+                self.assertEqual(repo.entries[id_ga].Status, "DELETED")
+                priv_active_bytes = sum(
+                    e.ByteSize for e in repo.entries.values() if e.Status == "ACTIVE"
+                )
+                self.assertLessEqual(priv_active_bytes, 1500)
+
+            # 3. Cross-scope ceiling: PRIVATE never evicts COACHING, COACHING evicts PRIVATE first
+            repo.entries.clear()
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_LOCAL_STORAGE_DIR": tmpdir,
+                    "VIREAD_TTS_CACHE_MAX_BYTES": "2048",
+                    "VIREAD_TTS_CACHE_PRIVATE_OWNER_MAX_BYTES": "2048",
+                    "VIREAD_TTS_CACHE_PRIVATE_GLOBAL_MAX_BYTES": "2048",
+                    "VIREAD_TTS_CACHE_GLOBAL_MAX_BYTES": "1500",
+                },
+                clear=False,
+            ):
+                pub_t = ResolvedCacheTarget("COACHING", None, None, None, None, True)
+                priv_t1 = ResolvedCacheTarget("PRIVATE", parent_a, book_a, page_id, None, True)
+                priv_t2 = ResolvedCacheTarget("PRIVATE", parent_b, book_b, page_id, None, True)
+                await svc.store_cached_audio(
+                    target=pub_t,
+                    normalized_text="C1",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"p" * 697,  # 700 B
+                    source_content_type="audio/mpeg",
+                )
+                id_c1 = next(iter(repo.entries.keys()))
+                await svc.store_cached_audio(
+                    target=priv_t1,
+                    normalized_text="P1",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"x" * 697,  # 700 B (total 1400 <= 1500)
+                    source_content_type="audio/mpeg",
+                )
+                id_p1 = [eid for eid in repo.entries if eid != id_c1][0]
+                await svc.store_cached_audio(
+                    target=priv_t2,
+                    normalized_text="P2",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"y" * 697,  # 700 B -> total 2100 > 1500 -> evicts P1, keeps C1
+                    source_content_type="audio/mpeg",
+                )
+                self.assertEqual(repo.entries[id_c1].Status, "ACTIVE")
+                self.assertEqual(repo.entries[id_p1].Status, "DELETED")
+
+                # Now COACHING writes 600 B (700 + 700 + 600 = 2000 > 1500) -> evicts P2 first, keeps C1!
+                id_p2 = [
+                    eid for eid, e in repo.entries.items() if e.Status == "ACTIVE" and e.Scope == "PRIVATE"
+                ][0]
+                await svc.store_cached_audio(
+                    target=pub_t,
+                    normalized_text="C2",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3" + b"q" * 597,  # 600 B
+                    source_content_type="audio/mpeg",
+                )
+                self.assertEqual(repo.entries[id_p2].Status, "DELETED")
+                self.assertEqual(repo.entries[id_c1].Status, "ACTIVE")
 
 
 if __name__ == "__main__":

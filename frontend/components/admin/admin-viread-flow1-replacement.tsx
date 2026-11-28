@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { ResponsiveTable } from "@/components/common/responsive-table";
@@ -18,11 +19,6 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { TranslateFn } from "@/lib/i18n/types";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
-
-function shortHash(value: string) {
-  if (value.length <= 16) return value;
-  return `${value.slice(0, 10)}…${value.slice(-8)}`;
-}
 
 function formatBytes(
   bytes: number,
@@ -130,9 +126,6 @@ export function AdminVireadReliabilityPanel({
               <CheckCircle2 className="size-3.5" />{" "}
               {t("training.flow1.activeBadge")}
             </span>
-            <span className="rounded-control bg-sky px-2 py-0.5 font-mono text-xs font-bold text-primary-hover">
-              {activeModel.profile}
-            </span>
           </div>
           <h2 className="mt-2 text-2xl font-black">
             {activeModel.version_label ||
@@ -145,10 +138,6 @@ export function AdminVireadReliabilityPanel({
             <span className="font-semibold text-ink">
               {activeModel.weights_filename ||
                 t("training.flow1.manualWeightsFallback")}
-            </span>{" "}
-            · SHA-256:{" "}
-            <span className="font-mono text-xs">
-              {shortHash(activeModel.checkpoint_sha256)}
             </span>
           </p>
         </div>
@@ -1043,9 +1032,7 @@ export function AdminVireadFlow1Replacement({
             </p>
           ) : (
             <p className="mt-1 text-xs text-muted">
-              {t("training.flow1.step2HintPrefix")}
-              <code className="font-mono text-ink">vgg_transformer</code>
-              {t("training.flow1.step2HintSuffix")}
+              {t("training.flow1.defaultYaml")}
             </p>
           )}
         </div>
@@ -1134,16 +1121,13 @@ export function AdminVireadFlow1Replacement({
         {/* 5. Progress bar & Submit button */}
         {uploading ? (
           <div className="rounded-control border border-primary/25 bg-white p-4">
-            <div className="flex justify-between text-xs font-bold text-primary-hover">
-              <span>{progressStatus}</span>
-              <span className="tabular-nums">{progressPercent}%</span>
-            </div>
-            <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-sky">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+            <AiProgressBar
+              active={uploading && progressPercent < 100}
+              label={progressStatus || t("training.flow1.uploadingBtn")}
+              percent={progressPercent}
+              size="md"
+              testId="flow1-model-upload-progress"
+            />
           </div>
         ) : null}
 

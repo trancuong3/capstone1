@@ -30,10 +30,21 @@ def _service(db: AsyncSession) -> AdaptiveLearningService:
 async def get_child_adaptive_profile(
     child_id: UUID,
     window_days: int = Query(default=30, ge=7, le=90),
+    teacher_gender: str | None = Query(default=None, pattern="^(female|male)$"),
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> AdaptiveProfileRead:
-    return await _service(db).get_adaptive_profile(child_id, parent_id, window_days=window_days)
+    safe_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
+    return await _service(db).get_adaptive_profile(
+        child_id,
+        parent_id,
+        window_days=resolved_window,
+        **extra_kwargs,
+    )
 
 
 @router.get(
@@ -42,10 +53,18 @@ async def get_child_adaptive_profile(
 )
 async def get_child_entertainment_recommendations(
     child_id: UUID,
+    teacher_gender: str | None = Query(default=None, pattern="^(female|male)$"),
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> EntertainmentRecommendationsRead:
-    return await _service(db).get_entertainment_recommendations(child_id, parent_id)
+    safe_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
+    return await _service(db).get_entertainment_recommendations(
+        child_id,
+        parent_id,
+        teacher_gender=safe_gender,
+    )
 
 
 @router.get(
@@ -55,10 +74,21 @@ async def get_child_entertainment_recommendations(
 async def get_child_parent_entertainment_analytics(
     child_id: UUID,
     window_days: int = Query(default=30, ge=7, le=90),
+    teacher_gender: str | None = Query(default=None, pattern="^(female|male)$"),
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> ParentEntertainmentAnalyticsRead:
-    return await _service(db).get_parent_analytics(child_id, parent_id, window_days=window_days)
+    safe_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
+    return await _service(db).get_parent_analytics(
+        child_id,
+        parent_id,
+        window_days=resolved_window,
+        **extra_kwargs,
+    )
 
 
 @router.post("/children/{child_id}/evidence", response_model=SkillEvidenceRead)

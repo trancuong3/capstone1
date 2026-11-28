@@ -278,6 +278,7 @@ class ParentPageSubmissionRead(BaseModel):
     optimistic_lock_version: int
     workflow_status: SubmissionWorkflowStatus
     workflow_status_label: str
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
 
     ocr_status: str
     ocr_text: str | None = None
@@ -337,7 +338,7 @@ class ParentPrivateBookSummaryRead(BaseModel):
     ready_to_add_count: int = 0
     readable_for_children: bool = False
     has_held_multipage_batch: bool = False
-    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để huấn luyện OCR."
+    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ."
     ocr_contribution: "ParentOcrContributionStateRead | None" = None
     created_at: datetime
 
@@ -460,6 +461,7 @@ class AdminUserBookSubmissionDetailRead(BaseModel):
 
     workflow_status: SubmissionWorkflowStatus
     workflow_status_label: str
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     request_status: str | None = None
 
     ocr_status: str

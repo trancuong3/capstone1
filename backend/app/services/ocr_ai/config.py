@@ -5,6 +5,13 @@ import re
 from dataclasses import dataclass, field
 
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_MULTIMODAL_MODEL,
+    read_model_env,
+    read_secret_env,
+)
 from app.services.ocr_ai.exceptions import OcrConfigurationError
 
 
@@ -12,8 +19,7 @@ _MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}")
 
 
 def _optional_secret(name: str) -> str | None:
-    value = os.getenv(name, "").strip()
-    return value or None
+    return read_secret_env(name)
 
 
 def _read_bool(name: str, default: bool) -> bool:
@@ -42,10 +48,10 @@ def _read_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 def _read_model(name: str, default: str) -> str:
-    value = os.getenv(name, default).strip()
-    if not _MODEL_PATTERN.fullmatch(value):
-        raise OcrConfigurationError("INVALID_CLOUD_MODEL")
-    return value
+    try:
+        return read_model_env(name, default=default, strict=True)
+    except ValueError as exc:
+        raise OcrConfigurationError("INVALID_CLOUD_MODEL") from exc
 
 
 @dataclass(frozen=True)
@@ -55,9 +61,9 @@ class OcrCorrectionConfig:
     cloud_enabled: bool = False
     gemini_api_key: str | None = field(default=None, repr=False)
     groq_api_key: str | None = field(default=None, repr=False)
-    gemini_primary_model: str = "gemini-3.5-flash-lite"
-    gemini_fallback_model: str = "gemini-3.1-flash-lite"
-    groq_model: str = "qwen/qwen3.8-27b"
+    gemini_primary_model: str = DEFAULT_GEMINI_PRIMARY_MODEL
+    gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
+    groq_model: str = DEFAULT_GROQ_MULTIMODAL_MODEL
     cloud_timeout_seconds: int = 60
     total_timeout_seconds: int = 300
     local_enabled: bool = True
@@ -110,6 +116,17 @@ class OcrCorrectionConfig:
         if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
             return True
         return True
+    @staticmethod
+    def _resolve_cloud_enabled(
+        *,
+        local_enabled: bool,
+        gemini_api_key: str | None,
+        groq_api_key: str | None,
+    ) -> bool:
+        raw_cloud = os.getenv("OCR_CLOUD_CORRECTION_ENABLED")
+        if raw_cloud is not None and raw_cloud.strip() != "":
+            return _read_bool("OCR_CLOUD_CORRECTION_ENABLED", False)
+        return (not local_enabled) and bool(gemini_api_key or groq_api_key)
 
     @staticmethod
     def private_book_allow_cloud_ai() -> bool:
@@ -119,7 +136,11 @@ class OcrCorrectionConfig:
             return _read_bool("PRIVATE_BOOK_ALLOW_CLOUD_AI", False)
         if not OcrCorrectionConfig.local_ollama_enabled():
             try:
-                return _read_bool("OCR_CLOUD_CORRECTION_ENABLED", False)
+                return OcrCorrectionConfig._resolve_cloud_enabled(
+                    local_enabled=False,
+                    gemini_api_key=_optional_secret("GEMINI_API_KEY"),
+                    groq_api_key=_optional_secret("GROQ_API_KEY"),
+                )
             except OcrConfigurationError:
                 return False
         return False
@@ -134,6 +155,8 @@ class OcrCorrectionConfig:
     @classmethod
     def from_environment(cls) -> "OcrCorrectionConfig":
         local_enabled = cls.local_ollama_enabled()
+        gemini_api_key = _optional_secret("GEMINI_API_KEY")
+        groq_api_key = _optional_secret("GROQ_API_KEY")
         try:
             local = LocalOcrConfig.from_environment()
         except LocalCorrectionError as exc:
@@ -142,16 +165,20 @@ class OcrCorrectionConfig:
             else:
                 raise OcrConfigurationError("INVALID_LOCAL_OCR_CONFIGURATION") from exc
         return cls(
-            cloud_enabled=_read_bool("OCR_CLOUD_CORRECTION_ENABLED", False),
-            gemini_api_key=_optional_secret("GEMINI_API_KEY"),
-            groq_api_key=_optional_secret("GROQ_API_KEY"),
+            cloud_enabled=cls._resolve_cloud_enabled(
+                local_enabled=local_enabled,
+                gemini_api_key=gemini_api_key,
+                groq_api_key=groq_api_key,
+            ),
+            gemini_api_key=gemini_api_key,
+            groq_api_key=groq_api_key,
             gemini_primary_model=_read_model(
-                "GEMINI_OCR_PRIMARY_MODEL", "gemini-3.5-flash-lite"
+                "GEMINI_OCR_PRIMARY_MODEL", DEFAULT_GEMINI_PRIMARY_MODEL
             ),
             gemini_fallback_model=_read_model(
-                "GEMINI_OCR_FALLBACK_MODEL", "gemini-3.1-flash-lite"
+                "GEMINI_OCR_FALLBACK_MODEL", DEFAULT_GEMINI_FALLBACK_MODEL
             ),
-            groq_model=_read_model("GROQ_OCR_MODEL", "qwen/qwen3.8-27b"),
+            groq_model=_read_model("GROQ_OCR_MODEL", DEFAULT_GROQ_MULTIMODAL_MODEL),
             cloud_timeout_seconds=_read_int(
                 "OCR_CLOUD_TIMEOUT_SECONDS", 60, 1, 300
             ),

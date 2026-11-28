@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId } from "react";
 import { Button } from "@/components/common/button";
 import { useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import { progressHref } from "@/lib/utils/progress-report-state";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ProgressPeriodOptionDTO } from "@/types/reports";
@@ -19,7 +20,11 @@ interface ProgressReportFiltersProps {
   readonly hasMore: boolean;
   readonly loadingMore: boolean;
   readonly onLoadMore: () => void;
+  readonly className?: string;
 }
+
+const SELECT_CLASSES =
+  "h-10 min-h-10 w-full min-w-0 cursor-pointer rounded-control border border-border bg-white px-2.5 text-xs font-bold text-ink outline-none transition-colors hover:border-primary/50 focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:h-9 sm:min-h-9 sm:text-sm";
 
 export function ProgressReportFilters({
   childrenProfiles,
@@ -29,6 +34,7 @@ export function ProgressReportFilters({
   hasMore,
   loadingMore,
   onLoadMore,
+  className,
 }: ProgressReportFiltersProps) {
   const t = useTranslations("reports");
   const tc = useTranslations("child");
@@ -45,18 +51,18 @@ export function ProgressReportFilters({
 
   return (
     <div
-      className={`grid grid-cols-1 items-end gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`}
+      className={cn(
+        "flex w-full flex-wrap items-center gap-1.5 lg:w-auto lg:flex-nowrap",
+        className,
+      )}
     >
-      <div className="min-w-0">
-        <label
-          className="mb-1.5 block text-xs font-bold text-muted"
-          htmlFor={childSelectId}
-        >
+      <div className="min-w-0 flex-1 basis-[148px] lg:w-44 lg:flex-none lg:basis-auto">
+        <label className="sr-only" htmlFor={childSelectId}>
           {tc("selector.label")}
         </label>
         <select
           aria-label={tc("selector.selectAria")}
-          className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className={SELECT_CLASSES}
           id={childSelectId}
           onChange={(event) => router.push(progressHref(event.target.value))}
           value={childId}
@@ -72,15 +78,12 @@ export function ProgressReportFilters({
         </select>
       </div>
 
-      <div className="min-w-0">
-        <label
-          className="mb-1.5 block text-xs font-bold text-muted"
-          htmlFor={periodSelectId}
-        >
+      <div className="min-w-0 flex-1 basis-[168px] lg:w-52 lg:flex-none lg:basis-auto">
+        <label className="sr-only" htmlFor={periodSelectId}>
           {t("overview.periodSelectLabel")}
         </label>
         <select
-          className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className={cn(SELECT_CLASSES, "tabular-nums")}
           id={periodSelectId}
           onChange={(event) => {
             const value = event.target.value;
@@ -115,9 +118,10 @@ export function ProgressReportFilters({
 
       {hasMore ? (
         <Button
-          className="min-h-12 whitespace-nowrap sm:w-auto"
+          className="h-10 min-h-10! shrink-0 whitespace-nowrap px-2.5! py-0! text-xs! sm:h-9 sm:min-h-9! sm:w-auto"
           disabled={loadingMore}
           onClick={onLoadMore}
+          size="admin"
           variant="secondary"
         >
           {loadingMore

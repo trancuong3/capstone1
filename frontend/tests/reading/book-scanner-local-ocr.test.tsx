@@ -161,9 +161,11 @@ describe("BookScannerScreen local OCR photo upload", () => {
     expect(await screen.findByTestId("local-ocr-text")).toHaveTextContent(
       "Buổi sáng mùa thu trời trong xanh.",
     );
-    expect(screen.getByText("paddleocr_vietocr_dual")).toBeInTheDocument();
-    expect(screen.getByText("CUDA")).toBeInTheDocument();
-    expect(screen.getByText("req-local-ocr-001")).toBeInTheDocument();
+    expect(
+      screen.queryByText("paddleocr_vietocr_dual"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("CUDA")).not.toBeInTheDocument();
+    expect(screen.queryByText("req-local-ocr-001")).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: /Mở Trang 2 để bắt đầu đọc/i }),
@@ -203,7 +205,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
 
     expect(
       await screen.findByText(
-        /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+        /Đang gửi ảnh tới hệ thống nhận diện trang sách tiếng Việt/i,
       ),
     ).toBeInTheDocument();
 
@@ -212,7 +214,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await waitFor(() => {
       expect(
         screen.queryByText(
-          /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+          /Đang gửi ảnh tới hệ thống nhận diện trang sách tiếng Việt/i,
         ),
       ).not.toBeInTheDocument();
     });
@@ -254,7 +256,9 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await user.upload(input, makePageFile());
 
     expect(
-      await screen.findByText(/OCR cục bộ xử lý quá thời gian cho phép/i),
+      await screen.findByText(
+        /Nhận diện trang sách xử lý quá thời gian cho phép/i,
+      ),
     ).toBeInTheDocument();
 
     await user.click(
@@ -299,5 +303,54 @@ describe("BookScannerScreen local OCR photo upload", () => {
     expect(
       screen.getByRole("link", { name: /Đăng nhập lại/i }),
     ).toHaveAttribute("href", "/login");
+  });
+
+  it("paginates queued scan jobs at 5 per page when many pages are queued", async () => {
+    const user = userEvent.setup();
+    const queuedList = Array.from({ length: 8 }, (_, index) => ({
+      job_id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, "0")}`,
+      status: "QUEUED",
+      worker_online: false,
+      file_name: `trang-cho-${index + 1}.jpg`,
+      queue_position: index + 1,
+      created_at: "2026-11-25T10:00:00Z",
+      updated_at: "2026-11-25T10:00:00Z",
+      error_code: null,
+      error_message: null,
+      result: null,
+    }));
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/reading/scan-page-ocr/jobs") {
+        return Response.json({ worker_online: false, jobs: queuedList });
+      }
+      if (path === "/ocr/worker-status") {
+        return Response.json({
+          status: "unavailable",
+          worker_online: false,
+          queue_depth: 8,
+        });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    renderScanner();
+
+    // Job 1 is the active card; Jobs 2..8 (7 jobs) are in listedQueuedJobs -> 5 on page 1, 2 on page 2
+    const listRegion = await screen.findByTestId("queued-scan-jobs-list");
+    expect(listRegion).toHaveTextContent("trang-cho-2.jpg");
+    expect(listRegion).toHaveTextContent("trang-cho-6.jpg");
+    expect(listRegion).not.toHaveTextContent("trang-cho-7.jpg");
+    expect(listRegion).toHaveTextContent("Trang 1 / 2");
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(listRegion).toHaveTextContent("trang-cho-7.jpg");
+    expect(listRegion).toHaveTextContent("trang-cho-8.jpg");
+    expect(listRegion).not.toHaveTextContent("trang-cho-2.jpg");
+    expect(listRegion).toHaveTextContent("Trang 2 / 2");
   });
 });

@@ -15,59 +15,22 @@ import {
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import {
+  SELECTED_CHILD_SIGNAL_KEY,
+  SELECTED_CHILD_SYNC_CHANNEL,
+  broadcastChildSelection,
   clearPersistedSelectedChild,
   getSelectedChildStorageKey,
   normalizeSelectedChildId,
   readSessionSelectedChildId,
+  subscribeLocalSelectedChildChange,
   writeSessionSelectedChildId,
+  type ChildSyncMessage,
 } from "@/lib/cache/selected-child-storage";
+import {
+  hydrateTeacherVoiceFromChildProfile,
+  resetTeacherVoiceForActorSwitch,
+} from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
-
-const SELECTED_CHILD_SYNC_CHANNEL = "viread:selected-child-sync";
-const SELECTED_CHILD_SIGNAL_KEY = "viread:selected-child-signal";
-
-interface ChildSyncMessage {
-  userId: string;
-  childId: string | null;
-  nonce: string;
-}
-
-function broadcastChildSelection(
-  userId: string | null,
-  childId: string | null,
-  channel?: BroadcastChannel | null,
-) {
-  if (!userId || typeof window === "undefined") return;
-  const payload: ChildSyncMessage = {
-    userId,
-    childId,
-    nonce: `${Date.now()}-${Math.random()}`,
-  };
-  if (channel) {
-    try {
-      channel.postMessage(payload);
-    } catch {
-      // Ignore closed/unsupported channel errors; storage signal handles fallback.
-    }
-  } else if (typeof BroadcastChannel !== "undefined") {
-    try {
-      const transient = new BroadcastChannel(SELECTED_CHILD_SYNC_CHANNEL);
-      transient.postMessage(payload);
-      transient.close();
-    } catch {
-      // Ignore unsupported BroadcastChannel environments.
-    }
-  }
-  try {
-    window.localStorage.setItem(
-      SELECTED_CHILD_SIGNAL_KEY,
-      JSON.stringify(payload),
-    );
-    window.localStorage.removeItem(SELECTED_CHILD_SIGNAL_KEY);
-  } catch {
-    // Ignore storage quota or private-mode restrictions; in-memory state stays authoritative.
-  }
-}
 
 export interface AppStore {
   selectedChildId: string | null;
@@ -113,11 +76,13 @@ export function AppStoreProvider({
 
     if (authRuntime.lastEvent === "SIGNED_OUT") {
       clearPersistedSelectedChild();
+      resetTeacherVoiceForActorSwitch();
       if (previousUserId && previousUserId !== activeUserId) {
         broadcastChildSelection(previousUserId, null, syncChannelRef.current);
       }
     } else if (previousUserId && previousUserId !== activeUserId) {
       clearPersistedSelectedChild();
+      resetTeacherVoiceForActorSwitch();
       broadcastChildSelection(previousUserId, null, syncChannelRef.current);
     } else if (activeUserId) {
       clearPersistedSelectedChild(activeUserId);
@@ -219,8 +184,16 @@ export function AppStoreProvider({
       }
     }
 
+    const unsubscribeLocal = subscribeLocalSelectedChildChange((detail) => {
+      if (detail.userId !== activeUserId) {
+        return;
+      }
+      applySyncedChildId(normalizeSelectedChildId(detail.childId));
+    });
+
     window.addEventListener("storage", handleStorage);
     return () => {
+      unsubscribeLocal();
       window.removeEventListener("storage", handleStorage);
       if (channel) {
         channel.onmessage = null;
@@ -272,6 +245,12 @@ export function AppStoreProvider({
     }
   }, [activeUserId, effectiveSelection.childId]);
 
+  useEffect(() => {
+    if (effectiveSelection.child) {
+      hydrateTeacherVoiceFromChildProfile(effectiveSelection.child);
+    }
+  }, [effectiveSelection.child]);
+
   const selectChild = useCallback(
     (childId: string) => {
       const normalized = normalizeSelectedChildId(childId);
@@ -296,10 +275,22 @@ export function AppStoreProvider({
   const setValidatedSelectedChild = useCallback(
     (child: ChildProfileDTO) => {
       setSelection((current) => {
-        if (current.userId !== activeUserId || current.childId !== child.id) {
+        const effectiveUserId =
+          current.userId === null && activeUserId !== null
+            ? activeUserId
+            : current.userId;
+        const effectiveChildId =
+          current.userId === null && activeUserId !== null
+            ? (current.childId ?? readSessionSelectedChildId(activeUserId))
+            : current.childId;
+        if (effectiveUserId !== activeUserId || effectiveChildId !== child.id) {
           return current;
         }
-        return { userId: activeUserId, childId: current.childId, child };
+        return {
+          userId: activeUserId,
+          childId: effectiveChildId,
+          child,
+        };
       });
     },
     [activeUserId],

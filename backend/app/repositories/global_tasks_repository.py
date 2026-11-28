@@ -155,22 +155,16 @@ class GlobalTasksRepository:
         actor_role: str,
         lock: bool = False,
     ) -> SmartStudioJob | None:
-        """Strictly actor-scoped lookup: Parent sees ONLY own jobs; Admin sees Admin jobs."""
+        """Strictly actor + portal scoped lookup: every actor sees ONLY their own portal jobs."""
 
         async def _op() -> SmartStudioJob | None:
-            if actor_role == "parent":
-                pred = and_(
-                    SmartStudioJob.Id == job_id,
-                    SmartStudioJob.ActorId == actor_id,
-                    SmartStudioJob.ActorRole == "parent",
-                )
-            elif actor_role == "admin":
-                pred = and_(
-                    SmartStudioJob.Id == job_id,
-                    SmartStudioJob.ActorRole == "admin",
-                )
-            else:
+            if actor_role not in ("parent", "admin"):
                 return None
+            pred = and_(
+                SmartStudioJob.Id == job_id,
+                SmartStudioJob.ActorId == actor_id,
+                SmartStudioJob.ActorRole == actor_role,
+            )
             query = select(SmartStudioJob).where(pred)
             if lock:
                 query = query.with_for_update()
@@ -402,15 +396,12 @@ class GlobalTasksRepository:
         limit: int = 40,
     ) -> list[SmartStudioJob]:
         async def _op() -> list[SmartStudioJob]:
-            if actor_role == "parent":
-                pred = and_(
-                    SmartStudioJob.ActorId == actor_id,
-                    SmartStudioJob.ActorRole == "parent",
-                )
-            elif actor_role == "admin":
-                pred = SmartStudioJob.ActorRole == "admin"
-            else:
+            if actor_role not in ("parent", "admin"):
                 return []
+            pred = and_(
+                SmartStudioJob.ActorId == actor_id,
+                SmartStudioJob.ActorRole == actor_role,
+            )
             query = (
                 select(SmartStudioJob)
                 .where(pred)
@@ -435,7 +426,10 @@ class GlobalTasksRepository:
                     OcrInferenceJob.JobKind.in_(PARENT_OCR_JOB_KINDS),
                 )
             elif actor_role == "admin":
-                pred = OcrInferenceJob.JobKind.in_(ADMIN_OCR_JOB_KINDS)
+                pred = and_(
+                    OcrInferenceJob.OwnerUserId == actor_id,
+                    OcrInferenceJob.JobKind.in_(ADMIN_OCR_JOB_KINDS),
+                )
             else:
                 return []
             query = (
@@ -448,16 +442,107 @@ class GlobalTasksRepository:
 
         return await self._with_savepoint_fallback(_op, fallback=[], label="list_ocr_inference_jobs_for_actor")
 
-    async def list_admin_workflows(self, *, limit: int = 30) -> list[AdminAiWorkflow]:
+    async def get_ocr_inference_job_for_actor(
+        self,
+        job_id: UUID,
+        *,
+        actor_id: UUID,
+        actor_role: str,
+    ) -> OcrInferenceJob | None:
+        async def _op() -> OcrInferenceJob | None:
+            if actor_role == "parent":
+                allowed_kinds = PARENT_OCR_JOB_KINDS
+            elif actor_role == "admin":
+                allowed_kinds = ADMIN_OCR_JOB_KINDS
+            else:
+                return None
+            query = select(OcrInferenceJob).where(
+                OcrInferenceJob.Id == job_id,
+                OcrInferenceJob.OwnerUserId == actor_id,
+                OcrInferenceJob.JobKind.in_(allowed_kinds),
+            )
+            return await self.db.scalar(query)
+
+        return await self._with_savepoint_fallback(
+            _op, fallback=None, label="get_ocr_inference_job_for_actor"
+        )
+
+    async def list_ocr_inference_jobs_by_ids(
+        self,
+        job_ids: Sequence[UUID],
+        *,
+        actor_id: UUID | None = None,
+    ) -> list[OcrInferenceJob]:
+        if not job_ids:
+            return []
+
+        async def _op() -> list[OcrInferenceJob]:
+            criteria = [OcrInferenceJob.Id.in_(list(job_ids))]
+            if actor_id is not None:
+                criteria.append(OcrInferenceJob.OwnerUserId == actor_id)
+            query = select(OcrInferenceJob).where(*criteria)
+            return list((await self.db.scalars(query)).all())
+
+        return await self._with_savepoint_fallback(
+            _op, fallback=[], label="list_ocr_inference_jobs_by_ids"
+        )
+
+    async def get_latest_ocr_job_for_submission(
+        self,
+        submission_id: UUID,
+        *,
+        actor_id: UUID,
+    ) -> OcrInferenceJob | None:
+        async def _op() -> OcrInferenceJob | None:
+            query = (
+                select(OcrInferenceJob)
+                .where(
+                    OcrInferenceJob.SubmissionId == submission_id,
+                    OcrInferenceJob.OwnerUserId == actor_id,
+                    OcrInferenceJob.JobKind == "PARENT_BOOK_SUBMISSION",
+                )
+                .order_by(OcrInferenceJob.UpdatedAt.desc(), OcrInferenceJob.CreatedAt.desc())
+                .limit(1)
+            )
+            return await self.db.scalar(query)
+
+        return await self._with_savepoint_fallback(
+            _op, fallback=None, label="get_latest_ocr_job_for_submission"
+        )
+
+    async def list_admin_workflows(
+        self,
+        *,
+        actor_id: UUID,
+        limit: int = 30,
+    ) -> list[AdminAiWorkflow]:
         async def _op() -> list[AdminAiWorkflow]:
             query = (
                 select(AdminAiWorkflow)
+                .where(AdminAiWorkflow.ActorId == actor_id)
                 .order_by(AdminAiWorkflow.UpdatedAt.desc(), AdminAiWorkflow.CreatedAt.desc())
                 .limit(max(1, min(limit, 100)))
             )
             return list((await self.db.scalars(query)).all())
 
         return await self._with_savepoint_fallback(_op, fallback=[], label="list_admin_workflows")
+
+    async def get_admin_workflow_for_actor(
+        self,
+        workflow_id: UUID,
+        *,
+        actor_id: UUID,
+    ) -> AdminAiWorkflow | None:
+        async def _op() -> AdminAiWorkflow | None:
+            query = select(AdminAiWorkflow).where(
+                AdminAiWorkflow.Id == workflow_id,
+                AdminAiWorkflow.ActorId == actor_id,
+            )
+            return await self.db.scalar(query)
+
+        return await self._with_savepoint_fallback(
+            _op, fallback=None, label="get_admin_workflow_for_actor"
+        )
 
     async def list_parent_submissions(
         self,
@@ -479,13 +564,33 @@ class GlobalTasksRepository:
 
         return await self._with_savepoint_fallback(_op, fallback=[], label="list_parent_submissions")
 
+    async def get_parent_submission_for_actor(
+        self,
+        submission_id: UUID,
+        *,
+        actor_id: UUID,
+    ) -> ParentBookPageSubmission | None:
+        async def _op() -> ParentBookPageSubmission | None:
+            query = select(ParentBookPageSubmission).where(
+                ParentBookPageSubmission.Id == submission_id,
+                ParentBookPageSubmission.OwnerParentId == actor_id,
+            )
+            return await self.db.scalar(query)
+
+        return await self._with_savepoint_fallback(
+            _op, fallback=None, label="get_parent_submission_for_actor"
+        )
+
     async def is_remote_ocr_worker_online(self, *, ttl_seconds: int = 45) -> bool | None:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(10, ttl_seconds))
 
         async def _op() -> bool:
             row = await self.db.scalar(
                 select(OcrWorkerHeartbeat)
-                .where(OcrWorkerHeartbeat.LastHeartbeatAt >= cutoff)
+                .where(
+                    OcrWorkerHeartbeat.LastHeartbeatAt >= cutoff,
+                    OcrWorkerHeartbeat.Status.in_(("IDLE", "BUSY")),
+                )
                 .order_by(OcrWorkerHeartbeat.LastHeartbeatAt.desc())
                 .limit(1)
             )

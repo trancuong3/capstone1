@@ -27,6 +27,8 @@ class OcrProviderError(RuntimeError):
         upstream_error_code: str | None = None,
         upstream_request_id: str | None = None,
         disables_family: bool = False,
+        retry_after_seconds: float | None = None,
+        limit_zero: bool = False,
     ) -> None:
         super().__init__(code)
         self.provider = provider
@@ -37,6 +39,8 @@ class OcrProviderError(RuntimeError):
         self.upstream_error_code = upstream_error_code
         self.upstream_request_id = upstream_request_id
         self.disables_family = disables_family
+        self.retry_after_seconds = retry_after_seconds
+        self.limit_zero = limit_zero
 
 
 class OcrOrchestrationError(RuntimeError):

@@ -122,7 +122,17 @@ class AdaptiveLearningRepository:
         *,
         window_days: int = 90,
         limit: int = 200,
-    ) -> list[DifficultWordPracticeAttempt]:
+    ) -> list[Any]:
+        from app.services.active_weak_words import load_unified_weak_word_attempts
+
+        unified = await load_unified_weak_word_attempts(
+            self.db,
+            child_id,
+            window_days=window_days,
+        )
+        if unified:
+            return unified[: max(limit, 300)]
+
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
         try:
             async with self.db.begin_nested():

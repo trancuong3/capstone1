@@ -323,21 +323,20 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
       synthesizeTimed: vi.fn(),
     } as unknown as VoiceStudioService;
 
-    // 1. local_only + locked session -> blocked
+    // 1. local_only + locked session + transient local worker error (NOT LOCAL_VOICE_UNCONFIGURED) -> blocked
     setVoicePolicyPreferences({
       providerMode: "local_only",
       allowGoogleTtsFallback: false,
     });
     lockSessionVoice("sess-android-pause", { voiceId: "local_north_truc_ly" });
+    vi.mocked(speech.synthesize).mockRejectedValueOnce(
+      new Error("worker down"),
+    );
     const player = new TtsPlayback(speech, studio);
     await expect(player.play("Chào các bạn nhỏ.")).rejects.toThrow();
     expect(spokenTexts).toHaveLength(0);
 
-    // 2. Opted-in local_with_google_fallback + LOCAL_VOICE_UNCONFIGURED -> speaks & supports pause/resume
-    setVoicePolicyPreferences({
-      providerMode: "local_with_google_fallback",
-      allowGoogleTtsFallback: true,
-    });
+    // 2. Hosted LOCAL_VOICE_UNCONFIGURED on Android WebView -> speaks via on-device Android Native TTS & supports pause/resume
     const playbackPromise = player.play("Chào các bạn nhỏ.");
     await vi.waitFor(() => expect(spokenTexts).toHaveLength(1));
 

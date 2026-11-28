@@ -373,7 +373,7 @@ def build_google_drive_store_from_row(
     if scope_val == DRIVE_DESKTOP_SYNC_SCOPE:
         if len(enc_key) < 32:
             raise TrainingStorageError(
-                "Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY is not configured",
+                "Khóa mã hóa kết nối Google Drive trên máy chủ chưa được cấu hình.",
                 code="DRIVE_ENCRYPTION_KEY_MISSING",
                 http_status=503,
             )
@@ -401,7 +401,7 @@ def build_google_drive_store_from_row(
     elif scope_val == APPS_SCRIPT_BRIDGE_SCOPE:
         if len(enc_key) < 32:
             raise TrainingStorageError(
-                "Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY is not configured",
+                "Khóa mã hóa kết nối Google Drive trên máy chủ chưa được cấu hình.",
                 code="DRIVE_ENCRYPTION_KEY_MISSING",
                 http_status=503,
             )
@@ -432,7 +432,7 @@ def build_google_drive_store_from_row(
         client_secret = (os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_SECRET") or "").strip()
         if not client_id or not client_secret or not enc_key:
             raise TrainingStorageError(
-                "Google Drive server OAuth credentials or encryption key are not configured",
+                "Thông tin xác thực Google Drive hoặc khóa mã hóa trên máy chủ chưa được cấu hình.",
                 code="DRIVE_OAUTH_NOT_CONFIGURED",
                 http_status=503,
             )
@@ -538,11 +538,11 @@ class VireadDriveConnectionService:
         await self._release_read_txn()
         if not migration_applied:
             raise DriveNotConnectedError(
-                "Flow 2 Google Drive database migration has not been applied yet"
+                "Cơ sở dữ liệu kết nối Google Drive chưa được khởi tạo."
             )
         if not row or row.get("status") != "CONNECTED":
             raise DriveNotConnectedError(
-                "Google Drive is not connected for Flow 2 training; connect it in Admin Training"
+                "Google Drive chưa được kết nối. Vui lòng kết nối trong mục Quản trị huấn luyện."
             )
         store = await self._build_store_async(row)
         _set_sync_google_drive_store_cache(store)
@@ -584,7 +584,7 @@ class VireadDriveConnectionService:
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
-                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+                detail="Cơ sở dữ liệu lưu trữ Google Drive chưa sẵn sàng; vui lòng cập nhật cấu trúc dữ liệu trước khi kết nối.",
             )
         try:
             config = load_oauth_config(redirect_uri_override=redirect_uri)
@@ -610,7 +610,7 @@ class VireadDriveConnectionService:
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
-                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+                detail="Cơ sở dữ liệu lưu trữ Google Drive chưa sẵn sàng; vui lòng cập nhật cấu trúc dữ liệu trước khi kết nối.",
             )
         try:
             config = load_oauth_config()
@@ -629,7 +629,7 @@ class VireadDriveConnectionService:
             )
             if not tokens.refresh_token:
                 raise DriveAuthError(
-                    "Google did not issue an offline refresh token; remove previous consent and reconnect",
+                    "Google không cấp mã làm mới phiên kết nối; vui lòng gỡ quyền truy cập cũ và kết nối lại.",
                     code="DRIVE_REFRESH_TOKEN_MISSING",
                     http_status=400,
                 )
@@ -655,8 +655,8 @@ class VireadDriveConnectionService:
                     if actual_email != config.required_account_email:
                         revoke_token(tokens.refresh_token, session=self._session)
                         raise DrivePermissionError(
-                            f"Google Drive must be connected with the required owner account "
-                            f"({config.required_account_email}), not {actual_email or 'unknown'}",
+                            f"Google Drive phải được kết nối bằng tài khoản quản trị quy định "
+                            f"({config.required_account_email}), không phải {actual_email or 'không xác định'}.",
                             code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
                             http_status=403,
                         )
@@ -705,13 +705,13 @@ class VireadDriveConnectionService:
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
-                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+                detail="Cơ sở dữ liệu lưu trữ Google Drive chưa sẵn sàng; vui lòng cập nhật cấu trúc dữ liệu trước khi kết nối.",
             )
         enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
         if len(enc_key) < 32:
             raise HTTPException(
                 status_code=503,
-                detail="DRIVE_ENCRYPTION_KEY_MISSING: Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY must be >= 32 characters",
+                detail="DRIVE_ENCRYPTION_KEY_MISSING: Khóa mã hóa Google Drive trên máy chủ chưa được cấu hình đủ độ dài bảo mật.",
             )
         resolved_secret = (bridge_secret or "").strip() or (
             os.getenv("VIREAD_GDRIVE_APPS_SCRIPT_SECRET") or ""
@@ -741,8 +741,8 @@ class VireadDriveConnectionService:
                 actual_email = (health.account_email or "").strip().lower()
                 if required_email and actual_email != required_email:
                     raise DrivePermissionError(
-                        f"Google Drive bridge must be deployed by the required owner account "
-                        f"({required_email}), not {actual_email or 'unknown'}",
+                        f"Cầu nối Google Drive phải được triển khai bằng tài khoản quản trị quy định "
+                        f"({required_email}), không phải {actual_email or 'không xác định'}.",
                         code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
                         http_status=403,
                     )
@@ -805,8 +805,8 @@ class VireadDriveConnectionService:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER: Cloud server không thể đọc ổ G:\\ "
-                    "Google Drive for Desktop trên máy cá nhân; hãy kết nối qua Apps Script Bridge."
+                    "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER: Máy chủ đám mây không thể đọc thư mục "
+                    "Google Drive trên máy cá nhân; hãy kết nối qua Apps Script Bridge."
                 ),
             )
         raw_input = (sync_root_path or "").strip()
@@ -814,8 +814,8 @@ class VireadDriveConnectionService:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST: Máy chủ Linux không hỗ trợ "
-                    "Google Drive for Desktop local mount; hãy kết nối qua Apps Script Bridge."
+                    "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST: Máy chủ hiện tại không hỗ trợ "
+                    "thư mục đồng bộ Google Drive cục bộ; hãy kết nối qua Apps Script Bridge."
                 ),
             )
         _, migration_applied = await self.repo.get_primary()
@@ -823,13 +823,13 @@ class VireadDriveConnectionService:
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
-                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+                detail="Cơ sở dữ liệu lưu trữ Google Drive chưa sẵn sàng; vui lòng cập nhật cấu trúc dữ liệu trước khi kết nối.",
             )
         enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
         if len(enc_key) < 32:
             raise HTTPException(
                 status_code=503,
-                detail="DRIVE_ENCRYPTION_KEY_MISSING: Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY must be >= 32 characters",
+                detail="DRIVE_ENCRYPTION_KEY_MISSING: Khóa mã hóa Google Drive trên máy chủ chưa được cấu hình đủ độ dài bảo mật.",
             )
         required_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
 
@@ -842,7 +842,7 @@ class VireadDriveConnectionService:
                         raw_path = str(detected[0]["drive_root"])
                     else:
                         raise DriveNotConnectedError(
-                            "Google Drive for Desktop mount was not auto-detected; install/sign into Google Drive for Desktop or configure a valid sync mount path"
+                            "Không tự động phát hiện được thư mục đồng bộ Google Drive; hãy đăng nhập ứng dụng hoặc chọn thư mục đồng bộ hợp lệ."
                         )
                 resolved_root = resolve_flow2_sync_root(raw_path)
                 allowed_root = validate_flow2_sync_root_allowed(resolved_root, detected_mounts=detected)
@@ -856,13 +856,13 @@ class VireadDriveConnectionService:
                 if required_email:
                     if detected_email and detected_email != required_email:
                         raise DrivePermissionError(
-                            f"Google Drive for Desktop is signed in as {detected_email}, not required owner {required_email}",
+                            f"Google Drive trên máy tính đang đăng nhập bằng {detected_email}, không khớp tài khoản quy định {required_email}.",
                             code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
                             http_status=403,
                         )
                     if requested_email and requested_email != required_email:
                         raise DrivePermissionError(
-                            f"Google Drive must be connected with required owner account ({required_email}), not {requested_email}",
+                            f"Google Drive phải được kết nối bằng tài khoản quy định ({required_email}), không phải {requested_email}.",
                             code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
                             http_status=403,
                         )
@@ -873,7 +873,7 @@ class VireadDriveConnectionService:
                 health = desktop_store.health_check()
                 if not health.healthy:
                     raise TrainingStorageError(
-                        health.detail or "Google Drive for Desktop folder is not writable",
+                        health.detail or "Thư mục đồng bộ Google Drive chưa cho phép ghi dữ liệu.",
                         code=health.error_code or "DRIVE_DESKTOP_IO_ERROR",
                         http_status=503,
                     )
@@ -889,7 +889,7 @@ class VireadDriveConnectionService:
             logger.warning("Google Drive Desktop connect I/O failure: %s", exc)
             raise HTTPException(
                 status_code=503,
-                detail="DRIVE_DESKTOP_IO_ERROR: Google Drive for Desktop folder is not accessible",
+                detail="DRIVE_DESKTOP_IO_ERROR: Không thể truy cập thư mục đồng bộ Google Drive.",
             ) from exc
 
         cred_blob = json.dumps(
@@ -980,6 +980,12 @@ class VireadDriveConnectionService:
             desktop_readiness=desktop_readiness,
         )
         payload["health_detail"] = health.detail
+        if health.advanced_drive_enabled is not None:
+            payload["advanced_drive_enabled"] = health.advanced_drive_enabled
+        if health.delete_mode is not None:
+            payload["delete_mode"] = health.delete_mode
+        if health.warnings:
+            payload["warnings"] = list(health.warnings)
         return payload
 
     async def run_self_test(self) -> dict[str, Any]:
@@ -992,7 +998,7 @@ class VireadDriveConnectionService:
             logger.warning("Google Drive self-test I/O failure: %s", exc)
             raise HTTPException(
                 status_code=503,
-                detail="DRIVE_DESKTOP_IO_ERROR: Google Drive storage self-test failed",
+                detail="DRIVE_DESKTOP_IO_ERROR: Tự kiểm tra lưu trữ Google Drive thất bại.",
             ) from exc
 
         if result.quota is not None:
@@ -1018,6 +1024,9 @@ class VireadDriveConnectionService:
             "is_private": result.is_private,
             "quota": _quota_status_to_dict(result.quota),
             "detail": result.detail,
+            "permanent_delete": result.permanent_delete,
+            "delete_mode": result.delete_mode,
+            "warning": result.warning,
         }
 
     async def disconnect(self) -> dict[str, Any]:

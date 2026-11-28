@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "読書ジャーニーのナビゲーション"
+  },
   "overview": {
     "title": "進捗レポート",
     "subtitle": "お子さまの読書時間、正確性、連続読書日数を追跡します。",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "現在のレポートは引き続き表示されます。期間リストの再読み込みをお試しください。",
     "noPeriodReportTitle": "選択した期間のレポートはありません",
     "noSavedReportTitle": "保存されたレポートはありません",
-    "noReportDescription": "この選択に対するレポートはありません。別のお子さまや期間を選択してください。プレースホルダーデータは使用されません。",
+    "noReportDescription": "この選択に該当するレポートはありません。別のお子さまや期間をお選びください。",
     "pendingReportTitle": "データ待機中",
-    "pendingReportDesc": "レポートデータはまだ準備できていません。代替の推定値は表示されません。",
+    "pendingReportDesc": "レポートデータはまだ利用できません。しばらくしてからもう一度お試しください。",
     "periodBannerRange": "期間：{start} → {end}",
     "periodGeneratedAt": "更新日時：{dateTime}（ベトナム時間）。各セッション後に自動再計算はされません。",
     "unsupportedFormatTitle": "サポートされていないレポート形式です",
@@ -61,10 +64,10 @@
     "viewAllWords": "すべて表示 ({count})",
     "noDifficultWordsInPeriod": "この期間の練習が必要な単語は記録されていません。",
     "difficultWordsWindowNote": "注意: 「練習が必要な単語」セクションはデフォルトで過去90日間を対象としており、上記のレポート期間に応じて変更されません。",
-    "legacyMetricsTitle": "旧形式の指標",
-    "legacyMetricsSubtitle": "保存されたフィールド名を保持。セッション数や正確なパーセンテージには変換されていません。",
-    "legacyTotalBooks": "保存された合計書籍数 (total_books)",
-    "legacyAvgFluency": "保存されたavg_fluency値 (単位未定義)",
+    "legacyMetricsTitle": "以前保存された指標",
+    "legacyMetricsSubtitle": "以前の保存形式による集計指標です。",
+    "legacyTotalBooks": "保存された本の合計",
+    "legacyAvgFluency": "平均流暢さスコア",
     "periodSelectLabel": "保存されたレポート期間",
     "periodLatestOption": "最新",
     "periodSelectedRange": "{start} → {end} (選択中)",
@@ -135,6 +138,9 @@
       "aiWriting": "AIがコメントを作成中…",
       "aiRefresh": "AIにコメントの書き直しを依頼",
       "aiFallbackHint": "AIに接続できないため、データに基づく自動コメントを表示しています。後ほど「AIにコメントの書き直しを依頼」をタップしてください。",
+      "aiFallbackQuota": "AIが一時的に混雑しているか利用上限に達したため、データに基づく自動コメントを表示しています。数分待ってから「AIにコメントの書き直しを依頼」をタップしてください。",
+      "aiFallbackTimeout": "AIの応答に通常より時間がかかったため、データに基づく自動コメントを表示しています。数秒後に再度「AIにコメントの書き直しを依頼」をタップしてください。",
+      "aiFallbackConfig": "サーバー側でAIサービスが現在設定されていないため、データに基づく自動コメントを表示しています。しばらくしてから再試行するか、管理者にお問い合わせください。",
       "strengthsTitle": "順調です",
       "improvementsTitle": "改善が必要です",
       "actionsTitle": "次のサポートステップ",
@@ -162,7 +168,11 @@
       "uncertainLabel": "よく聞こえませんでした",
       "uncertainNote": "個別に記録され、確定した発音エラーにはカウントされません。"
     },
-    "entertainmentSummaryHeading": "あそび学習と言語スキルまとめ (V4.0)"
+    "entertainmentSummaryHeading": "あそび学習と言語スキルまとめ (V4.0)",
+    "focusAria": "レポートのセクションを絞り込む",
+    "focusAssessment": "AI評価",
+    "focusSignals": "グラフと指標",
+    "focusEntertainment": "遊びながら学ぶ"
   },
   "sessions": {
     "title": "読書履歴",
@@ -174,7 +184,7 @@
     "noChildDesc": "プロフィールを作成して、お子様の読書セッションの保存を開始しましょう。",
     "createChildAction": "お子様のプロフィールを作成",
     "pendingDataTitle": "データ待機中",
-    "pendingHistoryDesc": "読書履歴データはまだ利用できません。サンプルデータは表示されません。",
+    "pendingHistoryDesc": "読書履歴データはまだ利用できません。しばらくしてからもう一度お試しください。",
     "retry": "再試行",
     "manageChildren": "子プロフィールの管理",
     "notFoundTitle": "履歴が見つかりません",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes}分{seconds}秒",
     "detail": {
       "loadingAria": "読書セッションの詳細を読み込み中",
-      "pendingDesc": "この項目のデータは現在の形式では利用できません。サンプルデータもありません。",
+      "pendingDesc": "この項目のデータはまだ利用できません。しばらくしてからもう一度お試しください。",
       "notFoundTitle": "読書セッションが見つかりません",
       "notFoundDesc": "読書セッションが存在しないか、現在のアカウントに属していません。",
       "backToHistory": "履歴に戻る",
@@ -283,7 +293,7 @@
       "originalOmission": "読み飛ばし",
       "originalMispronunciation": "発音が正しくありません",
       "recognizedPrefix": "ViReadの認識結果: “{text}”",
-      "pageRevisionMeta": "ページID {pageId} · バージョン ",
+      "pageRevisionMeta": "本のページ",
       "firstPassSectionAria": "初回読み上げイベント",
       "firstPassSectionTitle": "初回読み上げイベント",
       "timestampAt": "時点 ",
@@ -346,7 +356,7 @@
       "prevShort": "前へ",
       "nextShort": "次へ",
       "loadingPageAria": "書籍ページの内容を読み込み中",
-      "verifiedPageTitle": "確認済みページコンテンツ",
+      "verifiedPageTitle": "本のページ内容",
       "selfCorrectedCount": "自己修正数: {count} 単語",
       "pageMissingContentNote": "お子様が読んだ時点の正確な書籍ページを読み込めませんでした。保存されたトランスクリプトと統計は変更されません。",
       "legendAria": "色分けの凡例",
@@ -388,7 +398,20 @@
         "repeated": "繰り返し",
         "hesitation": "ためらい"
       }
-    }
+    },
+    "summarySessions": "読書回数",
+    "summaryDuration": "合計時間",
+    "summaryCompleted": "完了",
+    "summaryDurationZero": "0分",
+    "filterAria": "状態で読書履歴を絞り込み",
+    "filterAll": "すべて",
+    "filterCompleted": "完了",
+    "filterIncomplete": "途中",
+    "searchPlaceholder": "このページの書名で絞り込み…",
+    "searchAria": "書名で履歴を検索",
+    "filterEmptyTitle": "一致する履歴がありません",
+    "filterEmptyDesc": "状態フィルターを変更するか検索をクリアしてください。",
+    "clearFilterAction": "すべての履歴を表示"
   },
   "readingManagement": {
     "title": "読書管理とリマインダー",
@@ -406,7 +429,7 @@
     "errorTitle": "問題が発生しました",
     "savedTitle": "保存済み",
     "loadChildFailed": "お子様のプロフィールを読み込めませんでした。もう一度お試しください。",
-    "loadManagementFailed": "読書管理データを読み込めませんでした。バックエンドとReading Managementのマイグレーションを確認してから再試行してください。",
+    "loadManagementFailed": "読書管理データを読み込めませんでした。しばらくしてからもう一度お試しください。",
     "mutationUnconfirmed": "操作を完了できませんでした。データが保存されたか確認できません。もう一度お試しください。",
     "overviewAria": "読書習慣の概要",
     "summaryRunningGoals": "実行中の目標",
@@ -514,7 +537,7 @@
     "goalsTimezoneRule": "進捗は、開始・終了時刻が有効な完了済みセッションのみカウントされます。100%に達しても自動的に完了にはなりません。",
     "remindersSectionAria": "読書リマインダー",
     "remindersTitle": "読書リマインダー",
-    "remindersSubtitle": "スケジュールは選択したタイムゾーンで保存されます。メール通知をオンにすると、保護者の確認済みメールアドレスにリマインダーが送信されます。",
+    "remindersSubtitle": "スケジュールは選択したタイムゾーンで保存されます。メールが有効な場合、確認済みの保護者宛にリマインダーが送信されます。",
     "addReminder": "リマインダーを追加",
     "dueRemindersTitle": "読書の時間 ({count})",
     "reminderAtPrefix": "リマインダー時刻: ",
@@ -565,7 +588,7 @@
       "startLabel": "開始",
       "createGoal": "目標を作成",
       "localTimeLabel": "現地時間",
-      "ianaTimezoneLabel": "IANAタイムゾーン",
+      "ianaTimezoneLabel": "詳細タイムゾーン",
       "repeatDaysLabel": "繰り返し曜日",
       "emailReminderLabel": "読書リマインダーメール",
       "sendEmailCheck": "時間になったら保護者にメールを送信",
@@ -643,7 +666,11 @@
       "favorited": "お気に入り",
       "wantToRead": "読みたい",
       "savedToRead": "読書リストに保存"
-    }
+    },
+    "focusAria": "読書管理のセクションを絞り込む",
+    "focusPlans": "計画",
+    "focusGoals": "目標",
+    "focusReminders": "リマインダー"
   },
   "entertainmentSummary": {
     "loading": "{childName} のあそび学習の記録をまとめています…",

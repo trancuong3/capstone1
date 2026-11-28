@@ -570,6 +570,32 @@ class PictureDescriptionService:
             except Exception:
                 pass
 
+    @staticmethod
+    def _extract_child_teacher_gender(child: Any) -> str | None:
+        settings = getattr(child, "Settings", None)
+        if not isinstance(settings, dict):
+            return None
+        vp = settings.get("voice_preferences")
+        if not isinstance(vp, dict):
+            return None
+        gender = str(vp.get("gender") or "").strip().lower()
+        return gender if gender in ("female", "male") else None
+
+    @staticmethod
+    def _supports_kwarg(fn: Any, name: str) -> bool:
+        import inspect as _inspect
+
+        try:
+            sig = _inspect.signature(fn)
+        except (TypeError, ValueError):
+            return False
+        if name in sig.parameters:
+            return True
+        return any(
+            p.kind == _inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+
     async def create_session(
         self,
         actor_id: UUID,
@@ -582,15 +608,32 @@ class PictureDescriptionService:
         teaching_mode: TeachingMode = "OBSERVE",
         target_words: list[str] | None = None,
         refresh_ai_guide: bool = False,
+        teacher_gender: str | None = None,
     ) -> PictureSessionRead:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
         child_grade = int(child.Grade)
+        resolved_teacher_gender = (
+            teacher_gender
+            if teacher_gender in ("female", "male")
+            else self._extract_child_teacher_gender(child)
+        )
         session_id = uuid4()
         active_mode: TeachingMode = (
             teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
         )
         cleaned_targets = _normalize_target_words(target_words)
+        if not cleaned_targets and target_words is None:
+            from app.services.active_weak_words import list_active_weak_words_for_child
+
+            cleaned_targets = _normalize_target_words(
+                await list_active_weak_words_for_child(
+                    getattr(self.repository, "db", None),
+                    child_id,
+                    parent_id=actor_id,
+                    limit=4,
+                )
+            )
 
         resolved_book_id: UUID | None = None
         resolved_book_page_id: UUID | None = None
@@ -662,10 +705,44 @@ class PictureDescriptionService:
         # Static built-in samples serve curated default_guide directly with ZERO outbound cloud calls
         # unless the caller explicitly requests refresh_ai_guide=True.
         if source_type == "SAMPLE" and sample_spec is not None and not refresh_ai_guide:
+            curated_vocab = list(sample_spec.default_guide.suggested_vocabulary)
+            if cleaned_targets:
+                from app.services.active_weak_words import classify_vietnamese_phonics_category
+
+                scene_corpus = " ".join(
+                    [
+                        sample_spec.title,
+                        sample_spec.theme,
+                        sample_spec.description,
+                        sample_spec.default_guide.scene_summary,
+                        *sample_spec.default_guide.model_sample_sentences,
+                        *(v.word for v in curated_vocab),
+                    ]
+                ).casefold()
+                existing_words = {item.word.casefold() for item in curated_vocab}
+                ranked_targets = sorted(
+                    [w for w in cleaned_targets if w.casefold() not in existing_words],
+                    key=lambda w: (
+                        0 if w.casefold() in scene_corpus else 1,
+                        0
+                        if classify_vietnamese_phonics_category(w)[0]
+                        in ("compound_reduplicative", "hoi_nga")
+                        else 1,
+                    ),
+                )
+                injected = [
+                    PictureVocabItem(
+                        word=word,
+                        hint="⭐ Từ bé đang luyện: hãy thử đưa từ này vào câu kể nhé!",
+                    )
+                    for word in ranked_targets[:2]
+                ]
+                curated_vocab = (injected + curated_vocab)[:8]
             guide = sample_spec.default_guide.model_copy(
                 update={
                     "teaching_mode": active_mode,
                     "target_words": cleaned_targets,
+                    "suggested_vocabulary": curated_vocab,
                 }
             )
             model_used = "curated-sample-v4"
@@ -673,14 +750,19 @@ class PictureDescriptionService:
             assert image_bytes is not None
             # Release any DB lock completely before calling Vision AI!
             try:
-                guide, model_used = await self.ai_client.analyze_picture(
-                    image_bytes=image_bytes,
-                    mime_type=image_mime,
-                    child_grade=child_grade,
-                    context_hint=context_hint,
-                    teaching_mode=active_mode,
-                    target_words=cleaned_targets,
-                )
+                analyze_kwargs: dict[str, Any] = {
+                    "image_bytes": image_bytes,
+                    "mime_type": image_mime,
+                    "child_grade": child_grade,
+                    "context_hint": context_hint,
+                    "teaching_mode": active_mode,
+                    "target_words": cleaned_targets,
+                }
+                if resolved_teacher_gender and self._supports_kwarg(
+                    self.ai_client.analyze_picture, "teacher_gender"
+                ):
+                    analyze_kwargs["teacher_gender"] = resolved_teacher_gender
+                guide, model_used = await self.ai_client.analyze_picture(**analyze_kwargs)
             except PictureSafetyError as exc:
                 # CRITICAL SAFETY INVARIANT: Never bypass UNSAFE_PICTURE!
                 raise HTTPException(
@@ -827,23 +909,43 @@ class PictureDescriptionService:
 
         image_bytes, image_mime = await self._load_bytes_for_session(session)
 
+        resolved_teacher_gender = (
+            payload.teacher_gender
+            if payload.teacher_gender in ("female", "male")
+            else None
+        )
+        if resolved_teacher_gender is None:
+            child_id = getattr(session, "ChildProfileId", None) or getattr(session, "ChildId", None)
+            if child_id is not None and hasattr(self.repository, "child_owned_by"):
+                try:
+                    owned_child = await self.repository.child_owned_by(child_id, actor_id)
+                    resolved_teacher_gender = self._extract_child_teacher_gender(owned_child)
+                    await self.repository.db.rollback()
+                except Exception:
+                    resolved_teacher_gender = None
+
         try:
-            feedback, model_used = await self.ai_client.evaluate_description(
-                image_bytes=image_bytes,
-                mime_type=image_mime,
-                child_grade=session.ChildGrade,
-                scene_title=session.SceneTitle,
-                guiding_questions=guide.guiding_questions,
-                child_transcript=payload.transcript_text,
-                model_sample_sentences=guide.model_sample_sentences,
-                previous_transcript=previous_transcript,
-                previous_score=previous_score,
-                previous_tip=previous_tip,
-                teaching_mode=active_mode,
-                target_words=active_target_words,
-                scene_summary=guide.scene_summary,
-                suggested_vocabulary=guide.suggested_vocabulary,
-            )
+            eval_kwargs: dict[str, Any] = {
+                "image_bytes": image_bytes,
+                "mime_type": image_mime,
+                "child_grade": session.ChildGrade,
+                "scene_title": session.SceneTitle,
+                "guiding_questions": guide.guiding_questions,
+                "child_transcript": payload.transcript_text,
+                "model_sample_sentences": guide.model_sample_sentences,
+                "previous_transcript": previous_transcript,
+                "previous_score": previous_score,
+                "previous_tip": previous_tip,
+                "teaching_mode": active_mode,
+                "target_words": active_target_words,
+                "scene_summary": guide.scene_summary,
+                "suggested_vocabulary": guide.suggested_vocabulary,
+            }
+            if resolved_teacher_gender and self._supports_kwarg(
+                self.ai_client.evaluate_description, "teacher_gender"
+            ):
+                eval_kwargs["teacher_gender"] = resolved_teacher_gender
+            feedback, model_used = await self.ai_client.evaluate_description(**eval_kwargs)
         except PictureSafetyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -872,6 +974,7 @@ class PictureDescriptionService:
                     previous_score=previous_score,
                     teaching_mode=active_mode,
                     target_words=active_target_words,
+                    teacher_gender=resolved_teacher_gender,
                 )
             else:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -961,6 +1064,29 @@ class PictureDescriptionService:
             feedback=feedback,
             model_used=model_used,
         )
+        if input_mode == "VOICE" and feedback.is_relevant and used_target_words:
+            from app.services.active_weak_words import (
+                match_focus_words_in_text,
+                record_entertainment_vocal_word_practice,
+            )
+
+            # Enforce strict NFC tone & diacritic preservation before recording vocal pronunciation mastery.
+            exact_vocal_words = match_focus_words_in_text(
+                payload.transcript_text,
+                active_target_words,
+            )
+            if exact_vocal_words:
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repository, "db", None),
+                    child_id=updated_session.ChildProfileId,
+                    parent_id=actor_id,
+                    words=exact_vocal_words,
+                    source_module="PICTURE_DESCRIPTION",
+                    source_record_id=str(saved_attempt.Id),
+                    transcript_text=payload.transcript_text,
+                    confidence=0.65 if model_used == "guide-fallback" else 0.85,
+                    difficulty_level=updated_session.ChildGrade,
+                )
 
         session_read = await asyncio.to_thread(
             self._to_session_read, updated_session, all_attempts

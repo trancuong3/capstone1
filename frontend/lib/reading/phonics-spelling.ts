@@ -27,10 +27,7 @@ import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
-import {
-  adaptTextToTeacherPersona,
-  type VoiceGender,
-} from "@/lib/reading/voice-persona";
+import { type VoiceGender } from "@/lib/reading/voice-persona";
 
 export type VietnameseTone = "ngang" | "sac" | "huyen" | "hoi" | "nga" | "nang";
 
@@ -742,17 +739,18 @@ export function generateSpokenPhonicsGuide(
   gender?: VoiceGender,
 ): string {
   const effectiveGender = gender ?? getEffectiveTeacherPersona().gender;
-  return adaptTextToTeacherPersona(
-    generateFemaleSpokenPhonicsGuide(word),
-    effectiveGender,
-  );
+  const teacherPronoun = effectiveGender === "male" ? "thầy" : "cô";
+  return generateSpokenPhonicsGuideWithPronoun(word, teacherPronoun);
 }
 
-function generateFemaleSpokenPhonicsGuide(word: string): string {
+function generateSpokenPhonicsGuideWithPronoun(
+  word: string,
+  teacherPronoun: "cô" | "thầy",
+): string {
   const parts = decomposeVietnameseSyllable(word);
   const displayWord = normalizeVietnameseWord(word) || word.trim();
   if (!parts) {
-    return `Con nghe cô đọc chậm chữ “${displayWord}” rồi đọc cùng cô nhé!`;
+    return `Con nghe ${teacherPronoun} đọc chậm chữ “${displayWord}” rồi đọc cùng ${teacherPronoun} nhé!`;
   }
 
   const { normalized, onset, rhyme, untonedSyllable, tone } = parts;
@@ -779,27 +777,27 @@ function generateFemaleSpokenPhonicsGuide(word: string): string {
         tone !== "ngang" && !(isCheckedCoda && tone === "sac")
           ? `... ${toneSpoken}... ${normalized}`
           : "";
-      return `Mình đánh vần chậm cùng cô nhé: ${rhymeStep}${blendTail}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+      return `Mình đánh vần chậm cùng ${teacherPronoun} nhé: ${rhymeStep}${blendTail}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${teacherPronoun} nào!`;
     }
 
     const blendParts = [onsetSpoken, spokenRhyme, preToneSyllable];
     if (tone !== "ngang") {
       blendParts.push(toneSpoken, normalized);
     }
-    return `Mình ghép vần cùng cô nha: ${rhymeStep}, ${blendParts.join("... ")}! Đọc trơn là: ${normalized}. Con thử đọc lại chữ “${normalized}” nhé!`;
+    return `Mình ghép vần cùng ${teacherPronoun} nha: ${rhymeStep}, ${blendParts.join("... ")}! Đọc trơn là: ${normalized}. Con thử đọc lại chữ “${normalized}” nhé!`;
   }
 
   // Case 2: Simple 1-vowel rhyme with onset (e.g. "tê", "cá", "nhỏ", "mẹ")
   if (onset) {
     if (tone === "ngang") {
-      return `Mình đánh vần chậm cùng cô nhé: ${onsetSpoken}... ${spokenRhyme}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+      return `Mình đánh vần chậm cùng ${teacherPronoun} nhé: ${onsetSpoken}... ${spokenRhyme}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${teacherPronoun} nào!`;
     }
-    return `Con nghe cô đánh vần nhé: ${onsetSpoken}... ${spokenRhyme}... ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Đến lượt con giỏi lắm nào!`;
+    return `Con nghe ${teacherPronoun} đánh vần nhé: ${onsetSpoken}... ${spokenRhyme}... ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Đến lượt con giỏi lắm nào!`;
   }
 
   // Case 3: Single-vowel syllable without onset (e.g. "ở", "ý", "ô")
   if (tone !== "ngang") {
-    return `Mình đánh vần chậm cùng cô nhé: ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+    return `Mình đánh vần chậm cùng ${teacherPronoun} nhé: ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${teacherPronoun} nào!`;
   }
-  return `Mình đọc chậm cùng cô nhé: ${normalized}! Giờ con đọc thử cùng cô nào!`;
+  return `Mình đọc chậm cùng ${teacherPronoun} nhé: ${normalized}! Giờ con đọc thử cùng ${teacherPronoun} nào!`;
 }

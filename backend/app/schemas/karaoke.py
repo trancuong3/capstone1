@@ -232,6 +232,46 @@ class SongList(Contract):
     offset: int
 
 
+class MelodyNoteRead(Contract):
+    start_ms: int = Field(ge=0, le=MAX_DURATION_MS)
+    end_ms: int = Field(gt=0, le=MAX_DURATION_MS)
+    midi: float = Field(ge=24.0, le=108.0)
+    hz: float = Field(gt=0.0, le=4000.0)
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    voiced: bool = True
+    syllable_id: str | None = None
+    line_id: str | None = None
+    text: str | None = None
+
+
+class MelodyContourPointRead(Contract):
+    time_ms: int = Field(ge=0, le=MAX_DURATION_MS)
+    hz: float = Field(gt=0.0, le=4000.0)
+    midi: float = Field(ge=24.0, le=108.0)
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class MelodyProfileRead(Contract):
+    melody_version: int = Field(default=1, ge=1)
+    hop_ms: int = Field(default=40, ge=10, le=200)
+    duration_ms: int = Field(ge=0, le=MAX_DURATION_MS)
+    min_midi: float = Field(ge=24.0, le=108.0)
+    max_midi: float = Field(ge=24.0, le=108.0)
+    median_midi: float = Field(ge=24.0, le=108.0)
+    bpm: float | None = Field(default=None, ge=30.0, le=240.0)
+    notes: list[MelodyNoteRead] = Field(default_factory=list, max_length=1500)
+    pitch_contour: list[MelodyContourPointRead] = Field(default_factory=list, max_length=3000)
+
+
+class MelodyExtractResponse(Contract):
+    song_id: UUID
+    version_id: UUID
+    source_audio: Literal["reference_audio", "audio"]
+    melody_profile: MelodyProfileRead | None = None
+    persisted: bool = False
+    storage_ready: bool = True
+
+
 class DraftPreview(Contract):
     song_id: UUID
     version_id: UUID
@@ -243,6 +283,7 @@ class DraftPreview(Contract):
     audio_url_expires_at: datetime
     cover_url: str | None
     lyrics: Lyrics
+    melody_profile: MelodyProfileRead | None = None
 
 
 class TimedLine(SyllableLine):
@@ -264,3 +305,4 @@ class Playback(Contract):
     audio_url_expires_at: datetime
     cover_url: str | None
     lyrics: TimedLyrics
+    melody_profile: MelodyProfileRead | None = None

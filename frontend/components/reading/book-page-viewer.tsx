@@ -12,6 +12,7 @@ import {
 } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
@@ -20,7 +21,6 @@ import {
 import { isStudioAuthenticatedMediaUrl } from "@/lib/api/book-assets-service";
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
   getWordHighlightTier,
@@ -42,6 +42,8 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustrationUrl?: string | null;
   illustrationTextFree?: boolean;
   initialReadingMode?: ReadingDisplayMode;
+  retryMode?: boolean;
+  retryFocusKey?: string | null;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
 }
@@ -194,7 +196,8 @@ function PageSurface(
 ) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
-  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
+  const teacherPersona = useTeacherPersona();
+  const isMalePersona = teacherPersona.gender === "male";
   const {
     page,
     currentWordId,
@@ -513,23 +516,37 @@ function PageSurface(
         ? "text"
         : legacyMode;
 
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const prevRenderModeRef = useRef(renderMode);
+  useEffect(() => {
+    if (prevRenderModeRef.current !== renderMode) {
+      prevRenderModeRef.current = renderMode;
+      setLayoutRevision((rev) => rev + 1);
+    }
+  }, [renderMode]);
+
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
 
   const getActiveNode = useCallback(() => {
     if (!activeId) return null;
-    if (overlay) {
+    if (renderMode === "image-overlay") {
       return overlayNodesRef.current.get(activeId) ?? null;
     }
     return textNodesRef.current.get(activeId) ?? null;
-  }, [activeId, overlay]);
+  }, [activeId, renderMode]);
 
   const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
     containerRef: rootRef,
     getActiveElement: getActiveNode,
     activeWordId: activeId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
+    centerMode: Boolean(props.retryMode),
+    forceFocusKey:
+      props.retryMode && props.retryFocusKey
+        ? `${props.retryFocusKey}:rev=${layoutRevision}`
+        : null,
     isPreview: Boolean(previewSnapshot),
   });
 
@@ -591,7 +608,7 @@ function PageSurface(
               <button
                 aria-selected={effectiveReadingMode === "ILLUSTRATED"}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                  "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
                   effectiveReadingMode === "ILLUSTRATED"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -608,7 +625,7 @@ function PageSurface(
             <button
               aria-selected={effectiveReadingMode === "TEXT"}
               className={cn(
-                "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
                 effectiveReadingMode === "TEXT"
                   ? "border-primary bg-primary text-white shadow-xs"
                   : "border-border bg-white text-ink hover:bg-canvas",
@@ -686,6 +703,7 @@ function PageSurface(
                     page: formatNumber(page.page_number),
                   })}
                   className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                  onLoad={() => setLayoutRevision((rev) => rev + 1)}
                   onError={() => {
                     if (illustrationNeedsAuth && safeIllustrationUrl) {
                       setIllustrationAuthState({
@@ -790,6 +808,7 @@ function PageSurface(
                     height={Math.max(1, page.height)}
                     unoptimized
                     className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
+                    onLoad={() => setLayoutRevision((rev) => rev + 1)}
                     onError={handleImageLoadError}
                   />
                 </div>

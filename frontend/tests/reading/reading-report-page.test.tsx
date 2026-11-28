@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ReadingReportPage from "@/app/sessions/[sessionId]/report/page";
+import ReadingReportPage from "@/app/(app)/sessions/[sessionId]/report/page";
 
 const api = vi.hoisted(() => ({
   getSessionReports: vi.fn(),
@@ -221,5 +221,33 @@ describe("per-session reading report page", () => {
     expect(
       screen.queryByTestId("saved-report-rep-p1-v1"),
     ).not.toBeInTheDocument();
+  });
+
+  it("windows page switcher buttons cleanly when a session has 20+ pages", async () => {
+    const user = userEvent.setup();
+    const twentyPageReports = Array.from({ length: 20 }, (_, idx) => ({
+      ...savedReport(`rep-p-${idx + 1}`, `Nội dung trang ${idx + 1}`),
+      page_id: `11111111-1111-4111-8111-0000000000${String(idx + 1).padStart(2, "0")}`,
+      page_revision_id: `22222222-2222-4222-8222-0000000000${String(idx + 1).padStart(2, "0")}`,
+      created_at: `2026-11-02T10:${String(idx).padStart(2, "0")}:00Z`,
+    }));
+    api.getSessionReports.mockResolvedValue(reportsResponse(twentyPageReports));
+
+    render(<ReadingReportPage />);
+    expect(
+      await screen.findByTestId("saved-report-rep-p-1"),
+    ).toBeInTheDocument();
+
+    const pageNav = screen.getByRole("navigation", {
+      name: "Chọn trang có báo cáo",
+    });
+    // Prev + Next + at most 7 numbered page buttons = <= 9 buttons total
+    expect(pageNav.querySelectorAll("button").length).toBeLessThanOrEqual(9);
+    expect(pageNav).toHaveTextContent("…");
+
+    await user.click(screen.getByRole("button", { name: "Trang 20" }));
+    expect(
+      await screen.findByTestId("saved-report-rep-p-20"),
+    ).toHaveTextContent("Nội dung trang 20");
   });
 });

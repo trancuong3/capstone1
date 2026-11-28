@@ -34,7 +34,7 @@
     "currentInvalid": "Current password is incorrect.",
     "changeError": "Unable to change password. Please check your connection and try again.",
     "noEmailForRecovery": "No email address on file to send a password reset link.",
-    "recoverySent": "Supabase Auth has received the password reset request. Please check your inbox and spam folder.",
+    "recoverySent": "The account system has received your request for a password setup link. Please check your inbox and spam folder.",
     "recoveryError": "Unable to send password reset link. Please try again later.",
     "showFieldAria": "Show {label}",
     "hideFieldAria": "Hide {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "Display Language",
     "description": "Choose the language for navigation and settings. Vietnamese book content remains unchanged.",
-    "learningContentNote": "Changing the language only affects navigation, buttons, and settings. Vietnamese books, OCR, voice recognition (STT), and sample audio (TTS) remain in Vietnamese."
+    "learningContentNote": "Changing the language only updates navigation bars, buttons, and settings. Vietnamese books, page recognition, voice recognition, and sample narration remain in Vietnamese."
   }
 }

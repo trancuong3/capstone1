@@ -289,6 +289,10 @@ def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Pat
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The stored image is not a Storage object path",
         )
+    if os.name == "nt":
+        target_str = str(target)
+        if len(target_str) >= 248 and not target_str.startswith("\\\\?\\"):
+            return Path(f"\\\\?\\{target_str}")
     return target
 
 
@@ -972,13 +976,11 @@ async def create_cached_signed_image_urls_async(
             create_signed_image_urls is not _ORIGINAL_CREATE_SIGNED_IMAGE_URLS
             or get_supabase_admin_client is not _ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
         ):
-            call_kwargs: dict[str, object] = {}
-            if bucket_name is not None:
-                call_kwargs["bucket_name"] = bucket_name
-            if max_workers != 8:
-                call_kwargs["max_workers"] = max_workers
-            if ttl_seconds is not None:
-                call_kwargs["ttl_seconds"] = effective_ttl
+            call_kwargs: dict[str, object] = {
+                "bucket_name": bucket_name,
+                "max_workers": max_workers,
+                "ttl_seconds": effective_ttl,
+            }
             if create_signed_image_urls is not _ORIGINAL_CREATE_SIGNED_IMAGE_URLS:
                 call_kwargs = _filter_signed_urls_call_kwargs(
                     create_signed_image_urls, call_kwargs
@@ -1148,3 +1150,9 @@ async def create_cached_signed_image_url_async(
             cache_ttl_seconds=cache_ttl_seconds,
         )
     )[0]
+
+
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS = create_cached_signed_image_urls
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC = create_cached_signed_image_urls_async
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
+_ORIGINAL_DOWNLOAD_OBJECT_ASYNC = download_object_async

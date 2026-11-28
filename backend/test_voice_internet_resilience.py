@@ -24,7 +24,7 @@ from app.api.routes.voice import (
     _resolve_audio_content_type,
     router as voice_router,
 )
-from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider, VoiceProviderError
 from app.providers.local_voice_provider import (
     LocalTimedSpeech,
     LocalTranscription,
@@ -429,10 +429,13 @@ class LocalVoiceProviderInternetResilienceTests(unittest.IsolatedAsyncioTestCase
 
 class VoiceOrchestratorAndRouteResilienceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
         clear_voice_orchestrator_caches()
 
     def tearDown(self) -> None:
         clear_voice_orchestrator_caches()
+        self._env_patch.stop()
 
     async def test_orchestrator_preserves_session_lock_diacritics_and_strict_google_policy(self) -> None:
         local = MagicMock()
@@ -473,7 +476,11 @@ class VoiceOrchestratorAndRouteResilienceTests(unittest.IsolatedAsyncioTestCase)
 
         session_id = str(uuid.uuid4())
         page_id = str(uuid.uuid4())
-        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+        orch = VoiceOrchestrator(
+            local_provider=local,
+            google_provider=google,
+            elevenlabs_provider=ElevenLabsVoiceProvider(api_key=""),
+        )
 
         # Strict SessionVoiceLock: even if allow_google_tts=True, TTS preserves exact requested voice,
         # speed, and Vietnamese diacritics and NEVER falls back/switches providers mid-session.

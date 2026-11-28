@@ -354,8 +354,8 @@ class TestM2CachedAsyncStorageSigning(unittest.IsolatedAsyncioTestCase):
                 CreatedAt=datetime.now(timezone.utc),
                 AvatarPath=f"children/{child_id}/avatar/a.webp",
             )
-            c1 = ChildProfileService._response(child, use_prebuilt_url=False)
-            c2 = ChildProfileService._response(child, use_prebuilt_url=False)
+            c1 = await ChildProfileService._response(child, use_prebuilt_url=False)
+            c2 = await ChildProfileService._response(child, use_prebuilt_url=False)
             self.assertEqual(c1["avatar_url"], c2["avatar_url"])
             self.assertEqual(sign_mock.call_count, 4)
 
@@ -1067,8 +1067,8 @@ class TestM2DirectCatalogCoverAndIllustrationSigning(unittest.IsolatedAsyncioTes
         client = TestClient(app)
         with patch.object(
             BookCoverService,
-            "get_authorized_asset_media",
-            AsyncMock(return_value=(b"BYTES", "image/webp", True)),
+            "get_authorized_asset_media_response",
+            AsyncMock(return_value=(b"BYTES", "image/webp", True, None)),
         ):
             resp = client.get(f"/studio/assets/{asset_id}/media", follow_redirects=False)
         self.assertEqual(resp.status_code, 200)
@@ -1943,6 +1943,7 @@ class TestM2RollbackOrmExpiryAndPolish(unittest.IsolatedAsyncioTestCase):
             return await real_run_in_threadpool(func, *args, **kwargs)
 
         with (
+            patch("app.services.global_tasks_service.run_in_threadpool", side_effect=_tracking_threadpool),
             patch("starlette.concurrency.run_in_threadpool", side_effect=_tracking_threadpool),
             patch("app.services.storage_service.download_object", return_value=pdf_bytes),
             patch(

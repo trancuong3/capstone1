@@ -13,7 +13,7 @@
     "noChildDescription": "Erstelle ein Profil und beginne zu lesen, damit das System Daten erfassen kann.",
     "createChildAction": "Kinderprofil erstellen",
     "unsupportedTitle": "Daten ausstehend",
-    "unsupportedDescription": "Die Daten für dieses Element sind im aktuellen Format nicht verfügbar. Keine Beispieldaten verfügbar.",
+    "unsupportedDescription": "Die Daten für diesen Bereich sind noch nicht bereit. Bitte versuchen Sie es später erneut.",
     "retry": "Erneut versuchen",
     "manageChildren": "Kindesprofile verwalten",
     "notFoundTitle": "Daten nicht gefunden",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "Keine Wörter entsprechen dem ausgewählten Übungsstatus.",
     "viewAllWords": "Alle Wörter anzeigen ({count})",
     "paginationAria": "Buchgruppen für Wortübungen paginieren",
-    "paginationItemLabel": "Bücher"
+    "paginationItemLabel": "Bücher",
+    "statTotal": "Wörter gesamt",
+    "statCompleted": "Sicher gelesen",
+    "statRemaining": "Noch üben",
+    "quickMastered": "Gekonnt",
+    "quickNeedsMoreFull": "Mehr üben"
   },
   "bookCard": {
     "gradeSingle": "Klasse {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Noch nicht wiederholt",
     "badgeNeedsMore": "Übung erforderlich",
     "badgeInProgress": "In Übung",
-    "badgeCompleted": "Richtig gelesen"
+    "badgeCompleted": "Richtig gelesen",
+    "showMoreWords": "+{count} weitere",
+    "showFewerWords": "Weniger",
+    "tagMispronounced": "Falsch {count}",
+    "tagOmitted": "Ausgel. {count}",
+    "tagRepeated": "Wdh. {count}"
   },
   "item": {
     "notPracticed": "Nicht geübt",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "Beispiel-Aussprache kann auf diesem Gerät nicht abgespielt werden. Das Kind kann trotzdem gemeinsam mit den Eltern lesen.",
     "phonicsLockedBusy": "Die Phonics-Audiofunktion ist vorübergehend belegt. Bitte folgen Sie den Schritten auf dem Bildschirm und tippen Sie auf „Erneut versuchen“.",
     "evaluationTimeoutError": "Die Systemprüfung dauert länger als erwartet. Sie können die Aufnahme erneut senden.",
-    "evaluationSaveError": "Ergebnisse konnten nicht auf dem Server gespeichert werden. Die Sprachaufnahme des Kindes bleibt erhalten – bitte auf „Ergebnisse speichern“ tippen.",
+    "evaluationSaveError": "Ergebnis konnte noch nicht gespeichert werden. Die Aufnahme bleibt erhalten — tippen Sie auf Ergebnis speichern.",
     "micPermissionError": "Keine Mikrofonberechtigung für den Browser. Bitte erlauben Sie den Mikrofonzugriff in den Browsereinstellungen und versuchen Sie es erneut.",
     "micNotFoundError": "Kein Mikrofon auf diesem Gerät gefunden. Bitte überprüfen Sie die Mikrofonverbindung.",
     "micUnsupportedError": "Ihr Browser unterstützt keine direkte Aufnahme.",

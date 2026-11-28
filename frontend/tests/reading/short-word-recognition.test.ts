@@ -7,9 +7,11 @@ import {
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
 import {
   SHORT_WORD_CAPTURE_CONFIG,
+  SHORT_WORD_CONTEXT_RETRY_THRESHOLD,
   classifyShortWordFailureLabel,
   evaluateRecordedShortWord,
   hasShortWordSpeechActivity,
+  shouldAttemptShortWordKeytermPass2,
   shouldAutoStopShortWordCapture,
 } from "@/lib/reading/word-practice-engine";
 import type { SpeechService } from "@/lib/api/speech-service";
@@ -83,12 +85,15 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
     );
   });
 
-  it("stops promptly after a full quiet tail", () => {
+  it("stops promptly after a full quiet tail and guards 1-poll energy spikes", () => {
+    expect(SHORT_WORD_CONTEXT_RETRY_THRESHOLD).toBe(1);
+    expect(SHORT_WORD_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(950);
+
     expect(
       shouldAutoStopShortWordCapture({
         elapsedMs: 500,
         speechObserved: true,
-        silenceElapsedMs: 250,
+        silenceElapsedMs: 800,
       }),
     ).toBe(false);
 
@@ -96,7 +101,7 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
       shouldAutoStopShortWordCapture({
         elapsedMs: 1050,
         speechObserved: true,
-        silenceElapsedMs: 800,
+        silenceElapsedMs: 950,
       }),
     ).toBe(true);
 
@@ -108,6 +113,51 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
       }),
     ).toBe(true);
 
+    // Unguarded 1-poll liveRms >= 0.015 spike must NOT trigger speechObserved
+    expect(
+      hasShortWordSpeechActivity({
+        isSpeakingNow: false,
+        audioLevel: 0.03,
+        quality: {
+          status: "UNKNOWN",
+          durationMs: 120,
+          speechDurationMs: 0,
+          silenceDurationMs: 0,
+          rms: 0.03,
+          peak: 0.05,
+          noiseFloor: 0.002,
+          clipped: false,
+          isSpeaking: false,
+        },
+        hasLiveBrowserSpeech: false,
+        speechObserved: false,
+        previousSpeechDurationMs: 0,
+      }),
+    ).toBe(false);
+
+    // Confirmed across multiple polls above noiseFloor (1.8x) -> true
+    expect(
+      hasShortWordSpeechActivity({
+        isSpeakingNow: false,
+        audioLevel: 0.02,
+        quality: {
+          status: "UNKNOWN",
+          durationMs: 240,
+          speechDurationMs: 0,
+          silenceDurationMs: 0,
+          rms: 0.012,
+          peak: 0.03,
+          noiseFloor: 0.003,
+          clipped: false,
+          isSpeaking: false,
+        },
+        hasLiveBrowserSpeech: false,
+        speechObserved: false,
+        previousSpeechDurationMs: 0,
+        consecutiveEnergyPolls: 2,
+      }),
+    ).toBe(true);
+
     expect(
       hasShortWordSpeechActivity({
         isSpeakingNow: true,
@@ -115,6 +165,84 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
         hasLiveBrowserSpeech: false,
       }),
     ).toBe(true);
+  });
+
+  it("triggers Pass 2 with contrastive keyterms on SPEECH_DETECTED + NOT_RECOGNIZED/UNCERTAIN and accepts logprob >= -0.75", async () => {
+    expect(
+      shouldAttemptShortWordKeytermPass2({
+        status: "NOT_RECOGNIZED",
+        audioQuality: {
+          status: "SPEECH_DETECTED",
+          durationMs: 600,
+          speechDurationMs: 220,
+          silenceDurationMs: 300,
+          rms: 0.03,
+          peak: 0.08,
+          noiseFloor: 0.002,
+          clipped: false,
+          isSpeaking: false,
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAttemptShortWordKeytermPass2({
+        status: "NOT_RECOGNIZED",
+        transcript: "[tiếng đập]",
+        audioQuality: {
+          status: "SPEECH_DETECTED",
+          durationMs: 600,
+          speechDurationMs: 220,
+          silenceDurationMs: 300,
+          rms: 0.03,
+          peak: 0.08,
+          noiseFloor: 0.002,
+          clipped: false,
+          isSpeaking: false,
+        },
+      }),
+    ).toBe(false);
+
+    const calls: Array<readonly string[] | undefined> = [];
+    const speech = {
+      transcribe: vi.fn(async (_blob, opts) => {
+        calls.push(opts?.keyterms);
+        if (!opts?.keyterms) {
+          return {
+            text: "",
+            language_code: "vi",
+            language_probability: 0.5,
+            words: null,
+          };
+        }
+        return {
+          text: "có",
+          language_code: "vi",
+          language_probability: 0.94,
+          words: [{ text: "có", start: 0.05, end: 0.3, logprob: -0.68 }],
+        };
+      }),
+    };
+
+    const res = await evaluateRecordedShortWord({
+      expectedWord: "có",
+      audioBlob: new Blob(["audio"], { type: "audio/webm" }),
+      audioQuality: {
+        status: "SPEECH_DETECTED",
+        durationMs: 600,
+        speechDurationMs: 220,
+        silenceDurationMs: 300,
+        rms: 0.03,
+        peak: 0.08,
+        noiseFloor: 0.002,
+        clipped: false,
+        isSpeaking: false,
+      },
+      speechService: speech,
+    });
+    expect(res.status).toBe("CORRECT");
+    expect(res.source).toBe("SERVER_STT_KEYTERM");
+    expect(calls[1]).toEqual(expect.arrayContaining(["có", "cò", "cỏ", "cọ"]));
   });
 });
 

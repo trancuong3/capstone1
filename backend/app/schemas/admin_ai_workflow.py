@@ -81,6 +81,7 @@ class AdminAiWorkflowRead(BaseModel):
     status: WorkflowStatus
     stage: WorkflowStage
     progress: dict[str, int]
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     attempts: int = Field(ge=0)
     error_code: str | None
     original_ocr_hash: str

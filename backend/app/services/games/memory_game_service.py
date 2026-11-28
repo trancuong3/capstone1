@@ -330,6 +330,22 @@ class MemoryGameService:
                 detail="EMPTY_RESPONSE",
             )
 
+        resolved_teacher_gender = (
+            payload.teacher_gender
+            if payload.teacher_gender in ("female", "male")
+            else None
+        )
+        if resolved_teacher_gender is None and hasattr(self.repo, "child_owned_by"):
+            try:
+                owned_child = await self.repo.child_owned_by(session.ChildId, parent_id)
+                settings = getattr(owned_child, "Settings", None)
+                if isinstance(settings, dict):
+                    vp = settings.get("voice_preferences")
+                    if isinstance(vp, dict) and vp.get("gender") in ("female", "male"):
+                        resolved_teacher_gender = vp["gender"]
+            except Exception:
+                resolved_teacher_gender = None
+
         scene_spec = SceneSpec.model_validate(session.SceneSpec)
         evaluation = await self.evaluator.evaluate(
             scene_spec=scene_spec,
@@ -340,6 +356,7 @@ class MemoryGameService:
             prior_best_factual_score=session.BestFactualScore,
             prior_best_creative_score=session.BestCreativeScore,
             enable_ai_enrichment=enable_ai_enrichment,
+            teacher_gender=resolved_teacher_gender,
         )
 
         saved = await self.repo.record_attempt(
@@ -367,6 +384,31 @@ class MemoryGameService:
             evaluation=evaluation,
             scene_spec=scene_spec,
         )
+        if payload.input_mode == "VOICE" and evaluation.used_focus_words:
+            from app.services.active_weak_words import (
+                match_focus_words_in_text,
+                record_entertainment_vocal_word_practice,
+            )
+
+            exact_vocal_words = match_focus_words_in_text(
+                cleaned_response,
+                [
+                    *scene_spec.matched_focus_words,
+                    *getattr(scene_spec, "creative_focus_words", []),
+                ],
+            )
+            if exact_vocal_words:
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repo, "db", None),
+                    child_id=updated_session.ChildId,
+                    parent_id=parent_id,
+                    words=exact_vocal_words,
+                    source_module="MEMORY_GAME",
+                    source_record_id=str(attempt_proj.Id),
+                    transcript_text=cleaned_response,
+                    confidence=0.84,
+                    difficulty_level=updated_session.DifficultyLevel,
+                )
 
         return MemoryAttemptSubmitRead(
             attempt=_to_attempt_read(attempt_proj),

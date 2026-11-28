@@ -32,6 +32,7 @@ class UnauthorizedLookupError extends Error {
 }
 
 let inflightTokenLookup: InflightTokenLookup | null = null;
+let inflightTokenRefresh: Promise<string | null> | null = null;
 let cachedTokenState: CachedTokenState | null = null;
 let authListenerClient: object | null = null;
 const initializedClients = new WeakSet<object>();
@@ -42,11 +43,12 @@ export function resetBrowserAuthCache(): void {
     inflightTokenLookup.cancelTimeout();
     inflightTokenLookup = null;
   }
+  inflightTokenRefresh = null;
   cachedTokenState = null;
   authListenerClient = null;
 }
 
-registerCacheResetListener(resetBrowserAuthCache);
+registerCacheResetListener(resetBrowserAuthCache, { onActorSwitch: false });
 
 export function invalidateBrowserTokenCache(): void {
   cachedTokenState = null;
@@ -254,4 +256,99 @@ export async function getBrowserAccessToken({
       },
     );
   });
+}
+
+/**
+ * Coalesces concurrent 401-triggered `supabase.auth.refreshSession()` calls so
+ * parallel API failures perform at most one token refresh round-trip.
+ */
+export async function refreshBrowserAccessToken(
+  failedToken?: string,
+): Promise<string | null> {
+  const now = Date.now();
+  if (
+    cachedTokenState &&
+    cachedTokenState.expiresAtMs > now &&
+    (!failedToken || cachedTokenState.accessToken !== failedToken)
+  ) {
+    return cachedTokenState.accessToken;
+  }
+
+  if (inflightTokenRefresh) {
+    return await inflightTokenRefresh;
+  }
+
+  const refreshPromise = (async (): Promise<string | null> => {
+    const supabase = createBrowserSupabaseClient();
+    const auth = supabase.auth as unknown as {
+      refreshSession?: () => Promise<{
+        data: {
+          session: {
+            access_token?: string | null;
+            expires_at?: number | null;
+            user?: { id?: string | null } | null;
+          } | null;
+        };
+        error: unknown | null;
+      }>;
+      onAuthStateChange?: unknown;
+    };
+
+    if (typeof auth.refreshSession !== "function") {
+      cachedTokenState = null;
+      return null;
+    }
+
+    let result: Awaited<ReturnType<NonNullable<typeof auth.refreshSession>>>;
+    try {
+      result = await auth.refreshSession();
+    } catch {
+      cachedTokenState = null;
+      return null;
+    }
+
+    const refreshedToken = result.data?.session?.access_token;
+    if (
+      result.error ||
+      typeof refreshedToken !== "string" ||
+      !refreshedToken ||
+      (failedToken && refreshedToken === failedToken)
+    ) {
+      cachedTokenState = null;
+      return null;
+    }
+
+    const supportsReactiveAuthEvents =
+      typeof auth.onAuthStateChange === "function";
+    if (supportsReactiveAuthEvents) {
+      const userId = result.data.session?.user?.id ?? null;
+      const sessionExpMs =
+        typeof result.data.session?.expires_at === "number"
+          ? result.data.session.expires_at * 1000 -
+            TOKEN_REFRESH_SAFETY_WINDOW_MS
+          : Date.now() + MAX_LOCAL_TOKEN_CACHE_MS;
+      cachedTokenState = {
+        accessToken: refreshedToken,
+        userId,
+        expiresAtMs: Math.min(
+          Date.now() + MAX_LOCAL_TOKEN_CACHE_MS,
+          sessionExpMs,
+        ),
+      };
+      if (userId) {
+        setApiReadCacheActorScope(userId);
+      }
+    }
+
+    return refreshedToken;
+  })();
+
+  inflightTokenRefresh = refreshPromise;
+  try {
+    return await refreshPromise;
+  } finally {
+    if (inflightTokenRefresh === refreshPromise) {
+      inflightTokenRefresh = null;
+    }
+  }
 }

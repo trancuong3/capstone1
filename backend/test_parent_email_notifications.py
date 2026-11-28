@@ -607,6 +607,47 @@ class TransportAndHealthTests(unittest.TestCase):
         html_body = msg.get_body(preferencelist=("html",)).get_content()
         self.assertNotIn("<script>", html_body)
         self.assertIn("&lt;script&gt;", html_body)
+        self.assertNotIn("#2563eb", html_body.lower())
+        self.assertEqual(msg["Content-Language"], "vi")
+
+    def test_weekly_digest_html_includes_delta_fluency_goal_bar_and_size_bounds(self):
+        with patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):
+            msg = transport.build_weekly_digest_message(
+                recipient="parent@example.test",
+                parent_name="Mẹ Lan",
+                week_label="23/11–29/11",
+                items=[
+                    transport.ChildWeeklyDigestItem(
+                        child_alias="Bé An",
+                        sessions_count=5,
+                        total_minutes=64,
+                        prev_sessions_count=3,
+                        avg_fluency_score=91.4,
+                        goal_summary="5/5 buổi/tuần (100%)",
+                        top_difficult_words=("nghiêng", "khúc khuỷu"),
+                    ),
+                    transport.ChildWeeklyDigestItem(
+                        child_alias="Bé Bo",
+                        sessions_count=1,
+                        total_minutes=12,
+                        prev_sessions_count=3,
+                        avg_fluency_score=78.0,
+                        goal_summary="1/5 buổi/tuần (20%)",
+                        top_difficult_words=(),
+                    ),
+                ],
+                delivery_id=uuid4(),
+            )
+        self.assertEqual(msg["Content-Language"], "vi")
+        html_body = msg.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("+2 so với tuần trước", html_body)
+        self.assertIn("-2 so với tuần trước", html_body)
+        self.assertIn("Độ trôi chảy TB: 91%", html_body)
+        self.assertIn("5/5 buổi/tuần (100%)", html_body)
+        self.assertIn("khúc khuỷu", html_body)
+        self.assertIn("#087467", html_body.lower())
+        self.assertNotIn("#2563eb", html_body.lower())
+        self.assertLess(len(msg.as_bytes()), 64 * 1024)
 
     def test_resend_transport_classifies_429_retryable_and_422_permanent(self):
         with patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):
@@ -1803,6 +1844,138 @@ class RobustnessAndRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active_delivered, 4)
         self.assertEqual(len(sent), 4)
         self.assertGreaterEqual(repo.db.rollback_calls, 4)
+
+
+class GlobalDailyCapAndDryRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_max_daily_emails_global_caps_dispatch_and_handles_pre_migration(self):
+        bundles = []
+        snapshots = {}
+        for idx in range(4):
+            pid = uuid4()
+            cid = uuid4()
+            child = SimpleNamespace(
+                Id=cid,
+                ParentId=pid,
+                Alias=f"Bé {idx}",
+                CreatedAt=SUNDAY_MORNING_UTC - timedelta(days=30),
+            )
+            bundles.append(
+                ActiveParentBundle(
+                    parent_id=pid,
+                    display_name=f"Parent {idx}",
+                    children=(child,),  # type: ignore[arg-type]
+                    preferences=None,
+                    created_at=SUNDAY_MORNING_UTC - timedelta(days=30 - idx),
+                )
+            )
+            snapshots[cid] = ChildActivitySnapshot(
+                child=child,  # type: ignore[arg-type]
+                sessions_last_7d=(),
+                sessions_prev_7d_count=0,
+                sessions_last_35d=(),
+                total_completed_sessions=0,
+                last_session_at=None,
+                avg_fluency_last_7d=None,
+                top_difficult_words_last_7d=(),
+                active_goals=(),
+                first_completed_session_at=None,
+            )
+
+        repo = FakeNotificationRepo(bundles=bundles, snapshots=snapshots)
+
+        sent_counter = {"count": 0}
+
+        async def _count_global(_since: datetime) -> int:
+            return sent_counter["count"]
+
+        repo.count_global_sent_since = _count_global  # type: ignore[attr-defined]
+        service = ParentEmailNotificationService(repo)  # type: ignore[arg-type]
+
+        async def verified_parent(pid: UUID) -> str:
+            return f"{pid}@example.test"
+
+        sent: list = []
+        with patch(
+            "app.services.parent_email_notification_service.parent_email_delivery_is_configured",
+            return_value=True,
+        ), patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):
+            # 1. Already at global cap -> 0 emails sent
+            sent_counter["count"] = 3
+            with patch.dict(os.environ, {"MAX_DAILY_EMAILS_GLOBAL": "3"}, clear=False):
+                delivered = await service.dispatch_engagement_emails(
+                    SUNDAY_MORNING_UTC,
+                    recipient_resolver=verified_parent,
+                    message_sender=lambda m: sent.append(m) or "resend",
+                )
+            self.assertEqual(delivered, 0)
+            self.assertEqual(len(sent), 0)
+
+            # 2. Remaining global budget = 1 -> caps total across parents to 1
+            sent_counter["count"] = 2
+            with patch.dict(os.environ, {"MAX_DAILY_EMAILS_GLOBAL": "3"}, clear=False):
+                delivered = await service.dispatch_engagement_emails(
+                    SUNDAY_MORNING_UTC,
+                    recipient_resolver=verified_parent,
+                    message_sender=lambda m: sent.append(m) or "resend",
+                )
+            self.assertEqual(delivered, 1)
+            self.assertEqual(len(sent), 1)
+
+            # 3. Pre-migration is_storage_ready() == False skips before calling count_global_sent_since
+            repo.is_storage_ready = AsyncMock(return_value=False)  # type: ignore[method-assign]
+            repo.count_global_sent_since = AsyncMock(  # type: ignore[attr-defined]
+                side_effect=AssertionError("must not query missing table")
+            )
+            delivered_unmigrated = await service.dispatch_engagement_emails(
+                SUNDAY_MORNING_UTC,
+                recipient_resolver=verified_parent,
+                message_sender=lambda m: sent.append(m) or "resend",
+            )
+            self.assertEqual(delivered_unmigrated, 0)
+
+    def test_cron_dispatch_dry_run_route_is_non_mutating(self):
+        app = FastAPI()
+        app.include_router(route.router, prefix="/parent-notifications")
+        client = TestClient(app)
+        secret = "super-secret-cron-token-123456"
+
+        with (
+            patch.object(route.settings, "PARENT_EMAIL_CRON_SECRET", secret),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker._worker_ready",
+                return_value=(True, "resend"),
+            ),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker.active_email_provider",
+                return_value="resend",
+            ),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker.process_due_alerts_once",
+                new=AsyncMock(side_effect=AssertionError("dry_run must not run presence")),
+            ),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker.process_due_reminders_once",
+                new=AsyncMock(side_effect=AssertionError("dry_run must not run reminders")),
+            ),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker.process_engagement_emails_once",
+                new=AsyncMock(side_effect=AssertionError("dry_run must not run engagement")),
+            ),
+            patch(
+                "app.jobs.parent_email_dispatcher_worker.persist_worker_heartbeats_batch_with_factory",
+                new=AsyncMock(side_effect=AssertionError("dry_run must not write heartbeats")),
+            ),
+        ):
+            resp = client.post(
+                "/parent-notifications/cron/dispatch?scope=all&dry_run=true",
+                headers={"X-Cron-Secret": secret},
+            )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["dry_run"])
+        self.assertEqual(body["presence_sent"], 0)
+        self.assertEqual(body["reminders_sent"], 0)
+        self.assertEqual(body["engagement_sent"], 0)
 
 
 if __name__ == "__main__":

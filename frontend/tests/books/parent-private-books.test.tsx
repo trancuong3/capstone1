@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,11 +8,23 @@ import {
 } from "@/components/auth/auth-service-provider";
 import { ParentMyBooksScreen } from "@/components/books/parent-my-books-screen";
 import { ParentPrivateBookManager } from "@/components/books/parent-private-book-manager";
+import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { ParentAccountDropdown } from "@/components/layout/parent-account-dropdown";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
+import {
+  clearGlobalTasksMemoryCache,
+  type GlobalTasksService,
+} from "@/lib/api/global-tasks-service";
+import { resetTaskAlertAckMemoryCache } from "@/lib/tasks/task-alert-acknowledgment";
 import {
   apiFetchFixture,
   installApiFetchFixture,
 } from "@/test/fixtures/api-test-fixture";
+import type {
+  GlobalTaskItem,
+  GlobalTaskListResponse,
+} from "@/types/global-tasks";
 import type {
   ParentPageSubmissionDTO,
   ParentPrivateBookDetailDTO,
@@ -1178,5 +1190,660 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     expect(await screen.findByText("Sách Ảnh User 2")).toBeInTheDocument();
     expect(screen.queryByAltText(/trang1\.png/)).not.toBeInTheDocument();
     expect(revokeSpy).toHaveBeenCalledWith("blob:live-retention-1");
+  });
+
+  it("suppresses ParentAccountDropdown warnings on direct acceptSpelling, addPage, and requestAdminReview without opening the task drawer and without re-triggering on bumped updated_at", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const SUB_2_ID = "bb000000-0000-4000-8000-000000000002";
+    const makeParentTask = (
+      overrides: Partial<GlobalTaskItem>,
+    ): GlobalTaskItem => ({
+      id: SUB_ID,
+      source: "parent_submission",
+      job_type: "PARENT_PAGE_PIPELINE",
+      title_vi: "Kiểm tra trang sách của tôi",
+      book_id: BOOK_ID,
+      book_page_id: null,
+      book_title: "Truyện Riêng Nhà An",
+      page_number: 1,
+      source_revision_id: null,
+      actor_id: "parent-a",
+      actor_role: "parent",
+      portal: "parent",
+      status: "SUCCEEDED",
+      status_label_vi: "Bản đọc đã sẵn sàng để xem",
+      stage: "COMPLETED",
+      stage_label_vi: "Hoàn tất",
+      priority: 50,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 3,
+      progress_total: 3,
+      progress_unit: "bước",
+      progress_pct: 100,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/my-books?bookId=${BOOK_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: null,
+      error_message_vi: null,
+      created_at: NOW,
+      updated_at: "2026-11-28T10:00:00.000Z",
+      started_at: NOW,
+      completed_at: "2026-11-28T10:00:00.000Z",
+      ...overrides,
+    });
+
+    const makeParentFeed = (
+      tasks: GlobalTaskItem[],
+    ): GlobalTaskListResponse => ({
+      actor_id: "parent-a",
+      actor_role: "parent",
+      portal: "parent",
+      active_count: tasks.filter((item) => item.status === "RUNNING").length,
+      waiting_review_count: tasks.filter(
+        (item) => item.status === "WAITING_FOR_REVIEW",
+      ).length,
+      failed_count: tasks.filter((item) => item.status === "FAILED").length,
+      completed_count: tasks.filter((item) => item.status === "SUCCEEDED")
+        .length,
+      worker_online: true,
+      recommended_poll_ms: null,
+      tasks,
+    });
+
+    let currentTasks: GlobalTaskItem[] = [
+      makeParentTask({
+        id: SUB_ID,
+        status: "SUCCEEDED",
+        updated_at: "2026-11-28T10:00:00.000Z",
+      }),
+      makeParentTask({
+        id: SUB_2_ID,
+        page_number: 2,
+        status: "WAITING_FOR_REVIEW",
+        status_label_vi: "Cần xác minh",
+        stage: "WAITING_FOR_REVIEW",
+        stage_label_vi: "Chờ người dùng xác minh",
+        updated_at: "2026-11-28T10:00:10.000Z",
+      }),
+    ];
+
+    const listTasksMock = vi.fn(async () => makeParentFeed(currentTasks));
+    const taskService: GlobalTasksService = {
+      listTasks: listTasksMock,
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const sub1Ready = makeSubmission({
+      id: SUB_ID,
+      source_page_number: 1,
+      workflow_status: "PASSED_READY_TO_ADD",
+      workflow_status_label: "Đạt — sẵn sàng thêm vào sách",
+      tool_check_status: "PASSED",
+      tool_check_suitability: "SUITABLE",
+      tool_check_findings_count: 0,
+      tool_check_parent_notice: null,
+      proofread_suggestions: [
+        {
+          original: "cây",
+          suggested: "cây xanh",
+          uncertain: false,
+          word_index: 0,
+        },
+      ],
+      spelling_accepted: false,
+      can_add_to_book: false,
+      can_request_admin_review: false,
+      can_retry: false,
+    });
+    const sub2Flagged = makeSubmission({
+      id: SUB_2_ID,
+      source_page_number: 2,
+      workflow_status: "NEEDS_ADMIN_REVIEW",
+      workflow_status_label: "Cần Admin duyệt",
+      can_add_to_book: false,
+      can_request_admin_review: true,
+    });
+
+    let currentDetail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({
+        ready_to_add_count: 1,
+        flagged_submission_count: 1,
+      }),
+      pages: [],
+      submissions: [sub1Ready, sub2Flagged],
+    };
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}` &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json(currentDetail);
+      }
+      if (
+        url.pathname ===
+          `/books/my-books/${BOOK_ID}/submissions/${SUB_ID}/accept-spelling` &&
+        init?.method === "POST"
+      ) {
+        const accepted = {
+          ...sub1Ready,
+          spelling_accepted: true,
+          can_add_to_book: true,
+          updated_at: "2026-11-28T10:01:00.000Z",
+        };
+        currentDetail = {
+          ...currentDetail,
+          submissions: [accepted, currentDetail.submissions[1]],
+        };
+        currentTasks = [
+          makeParentTask({
+            id: SUB_ID,
+            status: "SUCCEEDED",
+            updated_at: "2026-11-28T10:01:00.000Z",
+          }),
+          currentTasks[1],
+        ];
+        return Response.json(accepted);
+      }
+      if (
+        url.pathname ===
+          `/books/my-books/${BOOK_ID}/submissions/${SUB_ID}/add-page` &&
+        init?.method === "POST"
+      ) {
+        const committed = {
+          ...sub1Ready,
+          spelling_accepted: true,
+          workflow_status: "ADDED_TO_BOOK" as const,
+          workflow_status_label: "Đã thêm vào sách",
+          can_add_to_book: false,
+          committed_page_id: PAGE_ID,
+          committed_revision_id: REV_ID,
+          updated_at: "2026-11-28T10:02:00.000Z",
+        };
+        currentDetail = {
+          book: makeBookSummary({
+            committed_page_count: 1,
+            flagged_submission_count: 1,
+            readable_for_children: true,
+          }),
+          pages: [
+            {
+              page_id: PAGE_ID,
+              page_number: 1,
+              current_verified_revision_id: REV_ID,
+              verified_text: "Nội dung đã thêm.",
+              verified_text_preview: "Nội dung đã thêm.",
+              image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_ID}/image`,
+              created_at: NOW,
+            },
+          ],
+          submissions: [committed, currentDetail.submissions[1]],
+        };
+        // Backend keeps status SUCCEEDED for ADDED_TO_BOOK with bumped updated_at!
+        currentTasks = [
+          makeParentTask({
+            id: SUB_ID,
+            book_page_id: PAGE_ID,
+            status: "SUCCEEDED",
+            updated_at: "2026-11-28T10:02:00.000Z",
+          }),
+          currentTasks[1],
+        ];
+        return Response.json(
+          {
+            book_id: BOOK_ID,
+            page_id: PAGE_ID,
+            page_number: 1,
+            revision_id: REV_ID,
+            submission: committed,
+            book_readable_for_children: true,
+          },
+          { status: 201 },
+        );
+      }
+      if (
+        url.pathname ===
+          `/books/my-books/${BOOK_ID}/submissions/${SUB_2_ID}/request-admin-review` &&
+        init?.method === "POST"
+      ) {
+        const pendingAdmin = {
+          ...sub2Flagged,
+          workflow_status: "PENDING_ADMIN" as const,
+          workflow_status_label: "Đang chờ Admin",
+          can_request_admin_review: false,
+          updated_at: "2026-11-28T10:03:00.000Z",
+        };
+        currentDetail = {
+          ...currentDetail,
+          submissions: [currentDetail.submissions[0], pendingAdmin],
+        };
+        // Backend keeps status WAITING_FOR_REVIEW for PENDING_ADMIN with bumped updated_at!
+        currentTasks = [
+          currentTasks[0],
+          makeParentTask({
+            id: SUB_2_ID,
+            page_number: 2,
+            status: "WAITING_FOR_REVIEW",
+            status_label_vi: "Cần xác minh",
+            stage: "WAITING_FOR_REVIEW",
+            stage_label_vi: "Chờ người dùng xác minh",
+            updated_at: "2026-11-28T10:03:00.000Z",
+          }),
+        ];
+        return Response.json(pendingAdmin);
+      }
+      throw new Error(`Unexpected ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLocale="vi">
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+          <AppServicesProvider>
+            <AiTaskCenterProvider
+              actorId="parent-a"
+              actorRole="parent"
+              service={taskService}
+            >
+              <ParentAccountDropdown
+                appStore={null}
+                availableChildren={[]}
+                avatarUrl={null}
+                displayName="Phụ huynh An"
+                email="parent-a@example.test"
+                isSigningOut={false}
+                onSignOut={vi.fn(async () => {})}
+                pathname={`/my-books/${BOOK_ID}`}
+                roleLabel="Phụ huynh"
+                selectedChild={null}
+                userId="parent-a"
+              />
+              <ParentPrivateBookManager bookId={BOOK_ID} />
+            </AiTaskCenterProvider>
+          </AppServicesProvider>
+        </AuthRuntimeContext.Provider>
+      </I18nProvider>,
+    );
+
+    // Initially red alert dot is visible (sub1 SUCCEEDED + sub2 WAITING_FOR_REVIEW).
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    // 1) Accept spelling on sub1 -> acknowledges sub1 (even with bumped updated_at),
+    // while sub2's unread WAITING_FOR_REVIEW alert keeps the red dot active.
+    const acceptSpellingBtn = await screen.findByRole("button", {
+      name: "Chấp nhận đề xuất chính tả",
+    });
+    const sub1Card = document.querySelector<HTMLElement>(
+      `[data-submission-id="${SUB_ID}"]`,
+    );
+    expect(sub1Card).not.toBeNull();
+    await user.click(acceptSpellingBtn);
+    await waitFor(() =>
+      expect(
+        within(sub1Card!).getByRole("button", { name: "Thêm trang vào sách" }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByTestId("avatar-notification-dot")).toBeInTheDocument();
+
+    // 2) Commit sub1 -> ADDED_TO_BOOK bumps updated_at; sub1 stays suppressed, sub2 still alerts.
+    await user.click(
+      within(sub1Card!).getByRole("button", { name: "Thêm trang vào sách" }),
+    );
+    await screen.findByText(/Đã thêm vào sách đọc/);
+    expect(screen.getByTestId("avatar-notification-dot")).toBeInTheDocument();
+
+    // 3) Escalate sub2 to Admin -> PENDING_ADMIN bumps updated_at; BOTH alerts are now handled -> red dot clears WITHOUT opening drawer!
+    await user.click(screen.getByRole("button", { name: "Gửi Admin xem xét" }));
+    await user.click(
+      screen.getByRole("button", { name: "Xác nhận gửi Admin" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+
+    // 4) Later, Admin rejects sub2 (new status FAILED at T4) -> MUST re-alert!
+    currentTasks = [
+      currentTasks[0],
+      makeParentTask({
+        id: SUB_2_ID,
+        page_number: 2,
+        status: "FAILED",
+        status_label_vi: "Xử lý thất bại",
+        stage: "FAILED",
+        stage_label_vi: "Gặp lỗi",
+        updated_at: "2026-11-28T10:10:00.000Z",
+      }),
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+  });
+
+  it("suppresses ParentAccountDropdown stale failure warnings on direct retry, edit, replaceFile, and cancelSubmission", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const makeParentTask = (
+      overrides: Partial<GlobalTaskItem> = {},
+    ): GlobalTaskItem => ({
+      id: SUB_ID,
+      source: "parent_submission",
+      job_type: "PARENT_PAGE_PIPELINE",
+      title_vi: "Kiểm tra trang sách của tôi",
+      book_id: BOOK_ID,
+      book_page_id: null,
+      book_title: "Truyện Riêng Nhà An",
+      page_number: 1,
+      source_revision_id: null,
+      actor_id: "parent-a",
+      actor_role: "parent",
+      portal: "parent",
+      status: "FAILED",
+      status_label_vi: "Xử lý thất bại",
+      stage: "FAILED",
+      stage_label_vi: "Gặp lỗi",
+      priority: 50,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 1,
+      progress_total: 3,
+      progress_unit: "bước",
+      progress_pct: 33,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/my-books?bookId=${BOOK_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: "OLLAMA_TIMEOUT",
+      error_message_vi: "Hết thời gian xử lý.",
+      created_at: NOW,
+      updated_at: "2026-11-28T11:00:00.000Z",
+      started_at: NOW,
+      completed_at: "2026-11-28T11:00:00.000Z",
+      ...overrides,
+    });
+
+    let currentTasks: GlobalTaskItem[] = [makeParentTask()];
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => ({
+        actor_id: "parent-a",
+        actor_role: "parent" as const,
+        portal: "parent" as const,
+        active_count: currentTasks.filter((t) => t.status === "RUNNING").length,
+        waiting_review_count: currentTasks.filter(
+          (t) => t.status === "WAITING_FOR_REVIEW",
+        ).length,
+        failed_count: currentTasks.filter((t) => t.status === "FAILED").length,
+        completed_count: currentTasks.filter((t) => t.status === "SUCCEEDED")
+          .length,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: currentTasks,
+      })),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const failedSub = makeSubmission({
+      id: SUB_ID,
+      workflow_status: "CHECK_FAILED",
+      workflow_status_label: "Kiểm tra lỗi",
+      tool_check_status: "FAILED",
+      tool_check_error_code: "OLLAMA_TIMEOUT",
+      can_add_to_book: false,
+      can_request_admin_review: false,
+      can_retry: true,
+    });
+    let currentDetail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({ failed_submission_count: 1 }),
+      pages: [],
+      submissions: [failedSub],
+    };
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}` &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json(currentDetail);
+      }
+      if (url.pathname.endsWith("/retry") && init?.method === "POST") {
+        const retried = {
+          ...failedSub,
+          workflow_status: "CHECKING" as const,
+          workflow_status_label: "Đang kiểm tra",
+          can_retry: false,
+          updated_at: "2026-11-28T11:01:00.000Z",
+        };
+        currentDetail = { ...currentDetail, submissions: [retried] };
+        currentTasks = [
+          makeParentTask({
+            status: "RUNNING",
+            status_label_vi: "Đang xử lý",
+            attempt_count: 2,
+            updated_at: "2026-11-28T11:01:00.000Z",
+          }),
+        ];
+        return Response.json(retried);
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/submissions/${SUB_ID}` &&
+        init?.method === "PATCH"
+      ) {
+        const edited = {
+          ...failedSub,
+          workflow_status: "NEEDS_RECHECK" as const,
+          workflow_status_label: "Cần kiểm tra lại",
+          candidate_text: "Nội dung đã chỉnh sửa",
+          updated_at: "2026-11-28T11:03:00.000Z",
+        };
+        currentDetail = { ...currentDetail, submissions: [edited] };
+        currentTasks = [
+          makeParentTask({
+            status: "WAITING_FOR_REVIEW",
+            status_label_vi: "Cần xác minh",
+            attempt_count: 2,
+            updated_at: "2026-11-28T11:03:00.000Z",
+          }),
+        ];
+        return Response.json(edited);
+      }
+      if (url.pathname.endsWith("/file") && init?.method === "PUT") {
+        const replaced = {
+          ...failedSub,
+          workflow_status: "CHECKING" as const,
+          workflow_status_label: "Đang kiểm tra",
+          updated_at: "2026-11-28T11:05:00.000Z",
+        };
+        currentDetail = { ...currentDetail, submissions: [replaced] };
+        currentTasks = [
+          makeParentTask({
+            status: "RUNNING",
+            status_label_vi: "Đang xử lý",
+            attempt_count: 3,
+            updated_at: "2026-11-28T11:05:00.000Z",
+          }),
+        ];
+        return Response.json(replaced);
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/submissions/${SUB_ID}` &&
+        init?.method === "DELETE"
+      ) {
+        currentDetail = { ...currentDetail, submissions: [] };
+        currentTasks = [
+          makeParentTask({
+            status: "CANCELLED",
+            status_label_vi: "Đã hủy",
+            attempt_count: 3,
+            updated_at: "2026-11-28T11:07:00.000Z",
+          }),
+        ];
+        return Response.json({ status: "cancelled", submission_id: SUB_ID });
+      }
+      throw new Error(`Unexpected ${init?.method ?? "GET"} ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLocale="vi">
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+          <AppServicesProvider>
+            <AiTaskCenterProvider
+              actorId="parent-a"
+              actorRole="parent"
+              service={taskService}
+            >
+              <ParentAccountDropdown
+                appStore={null}
+                availableChildren={[]}
+                avatarUrl={null}
+                displayName="Phụ huynh An"
+                email="parent-a@example.test"
+                isSigningOut={false}
+                onSignOut={vi.fn(async () => {})}
+                pathname={`/my-books/${BOOK_ID}`}
+                roleLabel="Phụ huynh"
+                selectedChild={null}
+                userId="parent-a"
+              />
+              <ParentPrivateBookManager bookId={BOOK_ID} />
+            </AiTaskCenterProvider>
+          </AppServicesProvider>
+        </AuthRuntimeContext.Provider>
+      </I18nProvider>,
+    );
+
+    // Initial FAILED alert dot is shown.
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    // 1) Retry -> clears red alert dot and shows calm running dot!
+    await user.click(
+      await screen.findByRole("button", { name: "Thử lại kiểm tra" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("avatar-running-dot")).toBeInTheDocument();
+
+    // Attempt 2 fails again -> red alert dot MUST re-appear!
+    currentDetail = { ...currentDetail, submissions: [failedSub] };
+    currentTasks = [
+      makeParentTask({
+        status: "FAILED",
+        attempt_count: 2,
+        updated_at: "2026-11-28T11:02:00.000Z",
+      }),
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    // 2) Edit content directly -> acknowledges both old failure and post-edit NEEDS_RECHECK sync!
+    await user.click(screen.getByRole("button", { name: "Sửa nội dung" }));
+    await user.click(
+      screen.getByRole("button", { name: "Lưu thay đổi & kiểm tra lại" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+
+    // 3) Simulate a new failure, then replace file directly -> red dot clears and running dot appears!
+    currentTasks = [
+      makeParentTask({
+        status: "FAILED",
+        attempt_count: 3,
+        updated_at: "2026-11-28T11:04:00.000Z",
+      }),
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    const replaceInput = screen.getByLabelText("Thay ảnh cho trang nguồn 1");
+    await user.upload(
+      replaceInput,
+      new File(["img"], "replacement.png", { type: "image/png" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("avatar-running-dot")).toBeInTheDocument();
+
+    // 4) Simulate another failure, then cancel submission directly -> red dot clears completely!
+    currentTasks = [
+      makeParentTask({
+        status: "FAILED",
+        attempt_count: 3,
+        updated_at: "2026-11-28T11:06:00.000Z",
+      }),
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Hủy trang nguồn 1" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("avatar-running-dot")).not.toBeInTheDocument();
   });
 });

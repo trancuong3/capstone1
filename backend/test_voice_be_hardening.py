@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_active_profile_id
 from app.api.routes import voice as voice_route
 from app.api.routes import voice_studio as voice_studio_route
-from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider, VoiceProviderError
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
@@ -689,6 +689,15 @@ class TestVoiceWorkerHardeningAndClientVad(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
+        clear_voice_orchestrator_caches()
+
+    def tearDown(self) -> None:
+        clear_voice_orchestrator_caches()
+        self._env_patch.stop()
+
     async def test_session_voice_lock_rejects_mid_session_google_override_and_tracks_central_backup(self) -> None:
         clear_voice_orchestrator_caches()
         local = MagicMock(spec=LocalVoiceProvider)
@@ -715,7 +724,11 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
                 provider="google",
             )
         )
-        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+        orch = VoiceOrchestrator(
+            local_provider=local,
+            google_provider=google,
+            elevenlabs_provider=ElevenLabsVoiceProvider(api_key=""),
+        )
         sid = str(uuid4())
         actor = uuid4()
 

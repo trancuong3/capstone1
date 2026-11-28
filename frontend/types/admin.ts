@@ -229,7 +229,9 @@ export interface AdminPageUploadProgressUI {
   readonly client_id: string;
   readonly file_name?: string;
   readonly progress_percent: number;
-  readonly status: "QUEUED" | "UPLOADING" | "PROCESSING" | "FAILED";
+  readonly status:
+    "QUEUED" | "QUEUED_OFFLINE" | "UPLOADING" | "PROCESSING" | "FAILED";
+  readonly queued_offline?: boolean;
   readonly error_message?: string;
   readonly created_pages_count?: number;
   readonly skipped_empty_count?: number;

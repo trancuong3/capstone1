@@ -95,8 +95,12 @@ async def upload_admin_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_page_number = (
+        page_number if isinstance(page_number, int) and not isinstance(page_number, bool) else None
+    )
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
     detail = await AdminOcrService(db).upload_page(
-        actor_id, book_id, image, upload_id=upload_id, page_number=page_number
+        actor_id, book_id, image, upload_id=resolved_upload_id, page_number=resolved_page_number
     )
     # OCR is complete and persisted at this point. Enqueue this page's durable
     # proofreading workflow immediately so book processing can advance page by
@@ -150,8 +154,9 @@ async def upload_admin_document(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
     return await AdminOcrService(db).upload_document(
-        actor_id, book_id, document, upload_id=upload_id
+        actor_id, book_id, document, upload_id=resolved_upload_id
     )
 
 
@@ -168,7 +173,10 @@ async def reupload_admin_page_image(
     db: AsyncSession = Depends(get_db),
 ):
     """Replace the candidate image and OCR only this page; retain the live source until verification."""
-    return await AdminOcrService(db).replace_page_image(actor_id, page_id, image, upload_id=upload_id)
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
+    return await AdminOcrService(db).replace_page_image(
+        actor_id, page_id, image, upload_id=resolved_upload_id
+    )
 
 
 @router.post("/admin/pages/{page_id}/revisions/draft", response_model=AdminRevisionDetailRead, status_code=201)
@@ -230,8 +238,9 @@ async def enqueue_admin_page_ocr_job(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
     return await AdminOcrService(db).enqueue_upload_page_job(
-        actor_id, book_id, image, upload_id=upload_id
+        actor_id, book_id, image, upload_id=resolved_upload_id
     )
 
 
@@ -243,8 +252,9 @@ async def enqueue_admin_document_ocr_jobs(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
     return await AdminOcrService(db).enqueue_upload_document_jobs(
-        actor_id, book_id, document, upload_id=upload_id
+        actor_id, book_id, document, upload_id=resolved_upload_id
     )
 
 
@@ -256,8 +266,9 @@ async def enqueue_admin_reupload_ocr_job(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_upload_id = upload_id if isinstance(upload_id, UUID) else None
     return await AdminOcrService(db).enqueue_reupload_ocr_job(
-        actor_id, page_id, image, upload_id=upload_id
+        actor_id, page_id, image, upload_id=resolved_upload_id
     )
 
 
@@ -279,7 +290,10 @@ async def get_admin_ocr_job_status(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).get_job_status_payload(job_id)
+    return await OcrInferenceJobService(db).get_job_status_payload(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.get("/admin/catalog/{book_id}/ocr-jobs")
@@ -291,7 +305,10 @@ async def list_admin_book_ocr_jobs(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).list_book_jobs_payload(book_id)
+    return await OcrInferenceJobService(db).list_book_jobs_payload(
+        book_id,
+        admin_only=True,
+    )
 
 
 @router.post("/admin/ocr-jobs/{job_id}/retry")
@@ -303,7 +320,10 @@ async def retry_admin_ocr_job(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).retry_job(job_id)
+    return await OcrInferenceJobService(db).retry_job(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.delete("/admin/ocr-jobs/{job_id}")
@@ -315,7 +335,10 @@ async def cancel_admin_ocr_job(
     from app.services.ocr_inference_job_service import OcrInferenceJobService
 
     await AdminOcrService(db).require_admin(actor_id)
-    return await OcrInferenceJobService(db).cancel_job(job_id)
+    return await OcrInferenceJobService(db).cancel_job(
+        job_id,
+        admin_only=True,
+    )
 
 
 @router.post(

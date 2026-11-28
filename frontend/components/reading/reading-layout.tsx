@@ -19,6 +19,7 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import { cn } from "@/lib/utils/cn";
 
 interface ReadingLayoutProps {
   selfCorrectedWordIds?: ReadonlySet<string>;
@@ -46,6 +47,7 @@ interface ReadingLayoutProps {
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   retryMode?: boolean;
+  retryFocusKey?: string | null;
   onSkipRetryWord?: () => void;
   retryWordPosition?: number;
   retryWordCount?: number;
@@ -125,6 +127,7 @@ export function ReadingLayout({
   isMicRecording = false,
   isPageTransitioning = false,
   retryMode = false,
+  retryFocusKey = null,
   onSkipRetryWord,
   retryWordPosition = 0,
   retryWordCount = 0,
@@ -301,6 +304,8 @@ export function ReadingLayout({
           onWordClick={onWordClick}
           page={page}
           previewSnapshot={previewSnapshot}
+          retryMode={retryMode}
+          retryFocusKey={retryFocusKey}
           spokenWords={spokenWords}
           skippedWordIds={skippedWordIds}
           repeatedWordIds={repeatedWordIds}
@@ -317,7 +322,12 @@ export function ReadingLayout({
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1 max-h-[15dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
+            className={cn(
+              "mx-auto mb-1 w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:space-y-2",
+              phonicsPanel || retryMode || sentenceReinforcementPanel
+                ? "max-h-[44dvh] sm:max-h-[38dvh]"
+                : "max-h-[15dvh] sm:max-h-[24dvh]",
+            )}
           >
             {retryMode ? (
               <div
@@ -549,7 +559,7 @@ export function ReadingLayout({
                   </span>
                 </p>
               ) : null
-            ) : latestTranscript ? (
+            ) : !phonicsPanel && latestTranscript ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
                 <span className="shrink-0 text-sm font-semibold text-purple-ink">
                   {t("layout.latestRecording")}

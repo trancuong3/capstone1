@@ -1,0 +1,405 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "f5ccf648-823d-5bc9-8a6c-d4cc6887bf79",
+      "text": "Tập tầm vông tay không tay có",
+      "start_ms": 2308,
+      "end_ms": 6345,
+      "syllables": [
+        {
+          "id": "58229b8d-be95-5190-b535-adf6f922f6f3",
+          "text": "Tập",
+          "start_ms": 2308,
+          "end_ms": 2827
+        },
+        {
+          "id": "66c22a1b-281f-5e4e-9282-3149cd4a22eb",
+          "text": "tầm",
+          "start_ms": 2827,
+          "end_ms": 3346
+        },
+        {
+          "id": "96315366-7fd2-5eb9-b590-bb6dc1872cbb",
+          "text": "vông",
+          "start_ms": 3346,
+          "end_ms": 3865
+        },
+        {
+          "id": "2f26a7e7-d660-53d9-98b0-99a7fd5fe921",
+          "text": "tay",
+          "start_ms": 3865,
+          "end_ms": 4384
+        },
+        {
+          "id": "4b54c78a-1660-5ffd-80ae-62f58766e21d",
+          "text": "không",
+          "start_ms": 4384,
+          "end_ms": 4903
+        },
+        {
+          "id": "b1770aba-7103-5de9-908c-e139e7b83490",
+          "text": "tay",
+          "start_ms": 4903,
+          "end_ms": 5422
+        },
+        {
+          "id": "41bb8918-6dfa-5699-9a41-acc6e5718151",
+          "text": "có",
+          "start_ms": 5422,
+          "end_ms": 6345
+        }
+      ]
+    },
+    {
+      "id": "4b546bce-d5f0-55db-bf4e-fe08e7d6f319",
+      "text": "Tập tầm vó tay có tay không",
+      "start_ms": 6922,
+      "end_ms": 10959,
+      "syllables": [
+        {
+          "id": "07986b37-49a4-5802-a8f3-5df065c5d15c",
+          "text": "Tập",
+          "start_ms": 6922,
+          "end_ms": 7441
+        },
+        {
+          "id": "3d9d636a-d13f-5117-b0a8-1adf17396f82",
+          "text": "tầm",
+          "start_ms": 7441,
+          "end_ms": 7960
+        },
+        {
+          "id": "c5572b4b-ec72-5d79-9b23-9d139f64a9ff",
+          "text": "vó",
+          "start_ms": 7960,
+          "end_ms": 8479
+        },
+        {
+          "id": "9174b9b9-828b-51c2-9d15-94e40fe76dce",
+          "text": "tay",
+          "start_ms": 8479,
+          "end_ms": 8998
+        },
+        {
+          "id": "9e1de60b-8a7e-53fa-b513-a1ea9092dbc3",
+          "text": "có",
+          "start_ms": 8998,
+          "end_ms": 9517
+        },
+        {
+          "id": "5bddb077-9eea-5b42-be62-a40274912d64",
+          "text": "tay",
+          "start_ms": 9517,
+          "end_ms": 10036
+        },
+        {
+          "id": "0600b971-8b86-5a2e-b41e-b4cc044130e7",
+          "text": "không",
+          "start_ms": 10036,
+          "end_ms": 10959
+        }
+      ]
+    },
+    {
+      "id": "ad2b0aa1-3f5b-500c-a1ac-3d08758b39e7",
+      "text": "Mời các bạn đoán sao cho trúng",
+      "start_ms": 11536,
+      "end_ms": 15573,
+      "syllables": [
+        {
+          "id": "bc5e17a7-f4a4-5766-aa14-44c2041a944c",
+          "text": "Mời",
+          "start_ms": 11536,
+          "end_ms": 12055
+        },
+        {
+          "id": "6312021b-e5fa-5593-87ef-84263ac3c3c2",
+          "text": "các",
+          "start_ms": 12055,
+          "end_ms": 12574
+        },
+        {
+          "id": "79d6ecfa-281a-5235-ba2b-975407d58f7a",
+          "text": "bạn",
+          "start_ms": 12574,
+          "end_ms": 13093
+        },
+        {
+          "id": "3181664f-5f49-5c2e-87a6-2395af572907",
+          "text": "đoán",
+          "start_ms": 13093,
+          "end_ms": 13612
+        },
+        {
+          "id": "763d9615-ca71-569c-b196-4ba976113260",
+          "text": "sao",
+          "start_ms": 13612,
+          "end_ms": 14131
+        },
+        {
+          "id": "28ca5e02-3d19-5a27-b53a-9fc650dcc4a8",
+          "text": "cho",
+          "start_ms": 14131,
+          "end_ms": 14650
+        },
+        {
+          "id": "6bd8cca0-d8b6-5ff4-97a8-205811cdaa18",
+          "text": "trúng",
+          "start_ms": 14650,
+          "end_ms": 15573
+        }
+      ]
+    },
+    {
+      "id": "e43f857f-973a-57e8-881f-f24d52988680",
+      "text": "Tập tầm vó tay nào có đố",
+      "start_ms": 16150,
+      "end_ms": 20187,
+      "syllables": [
+        {
+          "id": "442dc426-e4a1-5af8-b661-99f44ff39bc8",
+          "text": "Tập",
+          "start_ms": 16150,
+          "end_ms": 16669
+        },
+        {
+          "id": "e3cefd6b-54f5-5a7f-9484-6eabf54552ba",
+          "text": "tầm",
+          "start_ms": 16669,
+          "end_ms": 17188
+        },
+        {
+          "id": "332bd373-4b19-5841-8ab4-c4334fbab661",
+          "text": "vó",
+          "start_ms": 17188,
+          "end_ms": 17707
+        },
+        {
+          "id": "250e0ad0-0ebf-53f8-81c2-82b9bf27e535",
+          "text": "tay",
+          "start_ms": 17707,
+          "end_ms": 18226
+        },
+        {
+          "id": "e530d375-c561-5058-9a35-27060b855c15",
+          "text": "nào",
+          "start_ms": 18226,
+          "end_ms": 18745
+        },
+        {
+          "id": "87907831-92b9-5943-97a2-a245de63873e",
+          "text": "có",
+          "start_ms": 18745,
+          "end_ms": 19264
+        },
+        {
+          "id": "98912a0c-e31f-52fe-b020-a2a7b25116c9",
+          "text": "đố",
+          "start_ms": 19264,
+          "end_ms": 20187
+        }
+      ]
+    },
+    {
+      "id": "b25d2af0-750c-5f32-8c25-9ff3f551b36e",
+      "text": "Tay nào không đố bạn tìm ra",
+      "start_ms": 20764,
+      "end_ms": 24801,
+      "syllables": [
+        {
+          "id": "80002111-30e8-57f5-bd26-9206a34e666c",
+          "text": "Tay",
+          "start_ms": 20764,
+          "end_ms": 21283
+        },
+        {
+          "id": "783feae0-7714-55f8-91c7-673f98cf2a30",
+          "text": "nào",
+          "start_ms": 21283,
+          "end_ms": 21802
+        },
+        {
+          "id": "3c5ac17f-df00-5d5b-9134-32c390d7d723",
+          "text": "không",
+          "start_ms": 21802,
+          "end_ms": 22321
+        },
+        {
+          "id": "c0f61a8c-e8ba-5a67-a83b-a2d2daef5055",
+          "text": "đố",
+          "start_ms": 22321,
+          "end_ms": 22840
+        },
+        {
+          "id": "062ea739-dbc3-5294-9210-59f6dbc697d8",
+          "text": "bạn",
+          "start_ms": 22840,
+          "end_ms": 23359
+        },
+        {
+          "id": "853248ed-aaec-5d35-aeac-fa0a383c4bef",
+          "text": "tìm",
+          "start_ms": 23359,
+          "end_ms": 23878
+        },
+        {
+          "id": "2e056fcb-eb74-50dc-b38d-783e80db698f",
+          "text": "ra",
+          "start_ms": 23878,
+          "end_ms": 24801
+        }
+      ]
+    },
+    {
+      "id": "e743d414-1436-5251-a927-57e32cba5097",
+      "text": "Có có không không vui cùng bạn",
+      "start_ms": 25378,
+      "end_ms": 29415,
+      "syllables": [
+        {
+          "id": "d46cc50c-f9a2-5bbf-87e9-45efcc47154f",
+          "text": "Có",
+          "start_ms": 25378,
+          "end_ms": 25897
+        },
+        {
+          "id": "961350d2-64cf-5976-821a-35572276f2d4",
+          "text": "có",
+          "start_ms": 25897,
+          "end_ms": 26416
+        },
+        {
+          "id": "9410b8d5-fa44-52ec-8211-84d9e0ed8935",
+          "text": "không",
+          "start_ms": 26416,
+          "end_ms": 26935
+        },
+        {
+          "id": "aaf13d8c-7446-5f67-bbf7-d05df407da70",
+          "text": "không",
+          "start_ms": 26935,
+          "end_ms": 27454
+        },
+        {
+          "id": "0f9acf8e-8117-5394-ac52-6007a0a6d455",
+          "text": "vui",
+          "start_ms": 27454,
+          "end_ms": 27973
+        },
+        {
+          "id": "3c9ace14-e369-5662-a85b-d798527b560a",
+          "text": "cùng",
+          "start_ms": 27973,
+          "end_ms": 28492
+        },
+        {
+          "id": "cbbb3fb8-544a-5558-99e7-52dc4532e617",
+          "text": "bạn",
+          "start_ms": 28492,
+          "end_ms": 29415
+        }
+      ]
+    },
+    {
+      "id": "5be640f9-c5f5-5caa-b1a0-9098e3c48de5",
+      "text": "Xòe bàn tay nắng mai tươi hồng",
+      "start_ms": 29992,
+      "end_ms": 34029,
+      "syllables": [
+        {
+          "id": "5241fda4-fbb3-52a4-9f71-c0d257047217",
+          "text": "Xòe",
+          "start_ms": 29992,
+          "end_ms": 30511
+        },
+        {
+          "id": "a6d7397e-45ca-5f64-8d43-e547eadd83a1",
+          "text": "bàn",
+          "start_ms": 30511,
+          "end_ms": 31030
+        },
+        {
+          "id": "36a64a32-9e99-5bcb-8d8e-440d26edfca7",
+          "text": "tay",
+          "start_ms": 31030,
+          "end_ms": 31549
+        },
+        {
+          "id": "c81e96b5-3418-5c4b-8c49-fa9bb1648a83",
+          "text": "nắng",
+          "start_ms": 31549,
+          "end_ms": 32068
+        },
+        {
+          "id": "fab1ea92-a87d-5604-9c16-7c945ecd07be",
+          "text": "mai",
+          "start_ms": 32068,
+          "end_ms": 32587
+        },
+        {
+          "id": "e753e19e-6e62-504f-868b-c73062dc6dc1",
+          "text": "tươi",
+          "start_ms": 32587,
+          "end_ms": 33106
+        },
+        {
+          "id": "b447f00f-b30f-53d5-977e-de46e0fec3dd",
+          "text": "hồng",
+          "start_ms": 33106,
+          "end_ms": 34029
+        }
+      ]
+    },
+    {
+      "id": "4bd8042a-4b24-5d12-a349-f4d4f4d5c99c",
+      "text": "Cười giòn tan giữa sân trường đông",
+      "start_ms": 34606,
+      "end_ms": 38643,
+      "syllables": [
+        {
+          "id": "ce9e4eff-fcd4-5b83-8807-78962d1eb80c",
+          "text": "Cười",
+          "start_ms": 34606,
+          "end_ms": 35125
+        },
+        {
+          "id": "9142eba6-e407-5976-a323-b09c17c2cfd0",
+          "text": "giòn",
+          "start_ms": 35125,
+          "end_ms": 35644
+        },
+        {
+          "id": "0c9e7cda-b555-55db-a3e9-0eddfa262534",
+          "text": "tan",
+          "start_ms": 35644,
+          "end_ms": 36163
+        },
+        {
+          "id": "1e626d42-6e9f-5574-9a5c-85f1eb4ea788",
+          "text": "giữa",
+          "start_ms": 36163,
+          "end_ms": 36682
+        },
+        {
+          "id": "a4c49c2b-a7ec-5cbd-afcb-a4a0556a041d",
+          "text": "sân",
+          "start_ms": 36682,
+          "end_ms": 37201
+        },
+        {
+          "id": "4e580c29-aa53-5a27-bdbd-cc0e0281648f",
+          "text": "trường",
+          "start_ms": 37201,
+          "end_ms": 37720
+        },
+        {
+          "id": "5bcef6b7-c95f-5799-901e-d3e4cbfedb34",
+          "text": "đông",
+          "start_ms": 37720,
+          "end_ms": 38643
+        }
+      ]
+    }
+  ]
+}

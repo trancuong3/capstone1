@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.providers.email_layout import render_support_feedback_html
 from app.providers.support_email_provider import SupportEmailProvider
 from app.schemas.support import SupportFeedbackRequest
 
@@ -40,8 +41,18 @@ class SupportService:
             ]
         )
 
+        email_html = render_support_feedback_html(
+            category=request.category,
+            category_label=category_label,
+            subject=request.subject,
+            contact_email=str(request.contact_email),
+            submitted_at_utc=submitted_at,
+            message=request.message,
+        )
+
         await self.email_provider.send(
             subject=email_subject,
             body=email_body,
             reply_to=str(request.contact_email),
+            html_body=email_html,
         )

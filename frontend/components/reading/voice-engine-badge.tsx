@@ -49,11 +49,15 @@ function getTierStyles(tier: VoiceEngineTier): {
 type SpeechTranslateFn = ReturnType<typeof useTranslations>;
 
 function buildTooltip(
-  kind: "STT" | "TTS",
+  kind: "listen" | "speak",
   snap: EngineSourceSnapshot,
   t: SpeechTranslateFn,
 ): string {
-  const base = `${kind}: ${snap.engineLabel}`;
+  const prefix =
+    kind === "listen"
+      ? t("engineBadge.listenPrefix")
+      : t("engineBadge.speakPrefix");
+  const base = `${prefix}: ${snap.engineLabel}`;
   if (snap.fallbackReason) {
     return t("engineBadge.fallbackDetail", {
       base,
@@ -131,7 +135,7 @@ export function VoiceEngineBadge({
     >
       <span
         data-testid="voice-engine-stt-chip"
-        title={buildTooltip("STT", status.stt, t)}
+        title={buildTooltip("listen", status.stt, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${sttStyles.chip}`}
       >
         <span
@@ -139,14 +143,14 @@ export function VoiceEngineBadge({
           aria-hidden="true"
         />
         <span>
-          STT:{" "}
+          {t("engineBadge.listenPrefix")}:{" "}
           {compact ? resolveShortLabel(status.stt, t) : status.stt.engineLabel}
         </span>
       </span>
 
       <span
         data-testid="voice-engine-tts-chip"
-        title={buildTooltip("TTS", status.tts, t)}
+        title={buildTooltip("speak", status.tts, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${ttsStyles.chip}`}
       >
         <span
@@ -154,7 +158,7 @@ export function VoiceEngineBadge({
           aria-hidden="true"
         />
         <span>
-          TTS:{" "}
+          {t("engineBadge.speakPrefix")}:{" "}
           {compact ? resolveShortLabel(status.tts, t) : status.tts.engineLabel}
         </span>
       </span>

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import * as browserAuth from "@/lib/api/browser-auth";
 import type { SynthesizedPhonicsSpeech } from "@/lib/api/speech-service";
 import type { TimedSpeech } from "@/lib/api/voice-studio-service";
 import { buildPhonicsLesson } from "@/lib/reading/phonics-lesson";
@@ -10,7 +11,9 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   countUnintendedVoiceSwitches,
+  getActiveSessionVoiceLock,
   getSessionVoiceAudit,
+  hasPendingSessionVoiceSwitch,
   lockSessionVoice,
   releaseSessionVoiceLock,
   resetVoiceLockAndPolicyForTests,
@@ -23,6 +26,7 @@ import {
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import { computeEffectivePlaybackRate } from "@/lib/reading/tts-playback";
 import {
+  fetchVoiceEngineHealth,
   getVoiceEngineStatus,
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
@@ -261,9 +265,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(speech.synthesize).not.toHaveBeenCalled();
     expect(synthesis.speak).toHaveBeenCalledTimes(1);
     expect(getVoiceEngineStatus().tts.tier).toBe("browser_default");
-    expect(getVoiceEngineStatus().tts.shortLabel).toBe(
-      "Online (Google/Trình duyệt)",
-    );
+    expect(getVoiceEngineStatus().tts.shortLabel).toBe("Trình duyệt");
   });
 
   it("auto-falls back to browser TTS immediately on 503 when Google fallback is opted-in without wasting a second Google backend call", async () => {
@@ -930,7 +932,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(onEnded).toHaveBeenCalledOnce();
   });
 
-  it("handles Android WebView local_only /phonics 503: prefers step-by-step Android native phonics when unlocked, and falls back to cached word audio when session-locked", async () => {
+  it("handles Android WebView local_only /phonics 503: spells every phonics step via on-device Android native TTS on LOCAL_VOICE_UNCONFIGURED without 'tạm bận'", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
@@ -961,10 +963,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
-      // Case 1: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
-      // (One-Session-One-Voice), so /phonics 503 falls back to cached word audio with zero Android native TTS calls.
+      // Case 1: Under local_only with an active SessionVoiceLock and hosted LOCAL_VOICE_UNCONFIGURED,
+      // on-device Android native TTS spells every phonics step in the matching gender and speed.
       lockSessionVoice("android-lock-test", {
-        voiceId: "local_north_truc_ly",
+        voiceId: "local_north_thien_minh",
+        speed: 0.9,
         forceUpdate: true,
       });
       speech.synthesizePhonics.mockRejectedValueOnce(
@@ -973,65 +976,19 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
           code: "TTS_UNAVAILABLE",
         }),
       );
-      const cachedWordBlob = new Blob(["cached-mot-1p00"], {
-        type: "audio/mpeg",
-      });
-      setSynthesizedAudioMeta(cachedWordBlob, {
-        resolvedVoiceId: "local_north_truc_ly",
-        usedFallbackVoice: false,
-        provider: "precomputed_cache",
-        cachedSpeed: 1.0,
-      });
-      speech.synthesize.mockResolvedValueOnce(cachedWordBlob);
-
-      const { result } = renderHook(() => useSpeechPlayer());
-      const firstPlay = result.current.playPhonicsLesson(plan, {
-        cacheScope: "COACHING",
-      });
-      const cachedAudio = await audioAt(0);
-      act(() => cachedAudio.finish());
-      await firstPlay;
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
-
-      // Case 2: Under local_only with an active SessionVoiceLock and cache miss, throws without OS fallback.
-      const planMiss = buildPhonicsLesson("bàn");
-      expect(planMiss.supported).toBe(true);
-      if (!planMiss.supported) return;
-      speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
-      speech.synthesize.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
-      await expect(
-        result.current.playPhonicsLesson(planMiss, {
-          cacheScope: "COACHING",
-        }),
-      ).rejects.toThrow();
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
-      releaseSessionVoiceLock("android-lock-test");
-
-      // Case 3: Once unlocked, Android native TTS spells every phonics step rather than only speaking the whole word.
-      speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
 
       const onEnded = vi.fn();
-      await result.current.playPhonicsLesson(planMiss, {
+      const { result } = renderHook(() => useSpeechPlayer());
+      await result.current.playPhonicsLesson(plan, {
         cacheScope: "COACHING",
         onEnded,
       });
       const speakMsgs = sent.filter((m) => m.action === "speak");
-      expect(speakMsgs.length).toBe(planMiss.steps.length);
+      expect(speakMsgs.length).toBe(plan.steps.length);
+      for (const msg of speakMsgs) {
+        expect(msg.voiceGender).toBe("male");
+        expect(msg.rate).toBe(0.9);
+      }
       expect(onEnded).toHaveBeenCalledOnce();
     } finally {
       releaseSessionVoiceLock("android-lock-test");
@@ -1068,16 +1025,20 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
+      // Transient local worker error (NOT LOCAL_VOICE_UNCONFIGURED) -> falls back to server word audio without OS voice switch
       speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+        Object.assign(new Error("worker busy"), {
           status: 503,
           code: "TTS_UNAVAILABLE",
+          providerCode: "LOCAL_TTS_BUSY",
         }),
       );
       const cachedWordBlob = new Blob(["cached-mot-partial"], {
         type: "audio/mpeg",
       });
-      speech.synthesize.mockResolvedValueOnce(cachedWordBlob);
+      speech.synthesize
+        .mockRejectedValueOnce(new Error("step-1-busy"))
+        .mockResolvedValueOnce(cachedWordBlob);
 
       const { result } = renderHook(() => useSpeechPlayer());
       const playback = result.current.playPhonicsLesson(plan, {
@@ -1127,15 +1088,18 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       if (!plan.supported) return;
 
       speech.synthesizePhonics.mockRejectedValue(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+        Object.assign(new Error("worker busy"), {
           status: 503,
           code: "TTS_UNAVAILABLE",
+          providerCode: "LOCAL_TTS_BUSY",
         }),
       );
       const badMp3 = new Blob(["corrupt-mp3"], { type: "audio/mpeg" });
       const goodWav = new Blob(["good-wav"], { type: "audio/wav" });
       speech.synthesize
+        .mockRejectedValueOnce(new Error("step-busy-1"))
         .mockResolvedValueOnce(badMp3)
+        .mockRejectedValueOnce(new Error("step-busy-2"))
         .mockResolvedValueOnce(goodWav);
 
       const { result } = renderHook(() => useSpeechPlayer());
@@ -1156,7 +1120,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       const freshAudio = await audioAt(1);
       act(() => freshAudio.finish());
       await secondPlay;
-      expect(speech.synthesize).toHaveBeenCalledTimes(2);
+      expect(speech.synthesize).toHaveBeenCalledTimes(4);
     } finally {
       releaseSessionVoiceLock("android-evict-lock-test");
       resetAndroidNativeSpeechBridgeForTests();
@@ -1210,5 +1174,216 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(customAudio.playbackRate).toBe(1);
     act(() => customAudio.finish());
     await customPromise;
+  });
+
+  it("preserves elevenlabs health metadata in fetchVoiceEngineHealth", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const tokenSpy = vi
+      .spyOn(browserAuth, "getBrowserAccessToken")
+      .mockResolvedValue("test-access-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              default_mode: "local_only",
+              default_voice_id: "local_north_truc_ly",
+              local: {
+                configured: false,
+                available: false,
+                stt_ready: false,
+                tts_ready: false,
+                error_code: "LOCAL_VOICE_UNCONFIGURED",
+              },
+              google: {
+                stt_configured: false,
+                tts_configured: false,
+                stt_cooldown: false,
+                tts_cooldown: false,
+              },
+              elevenlabs: {
+                configured: true,
+                stt_configured: true,
+                tts_configured: true,
+                stt_cooldown: false,
+                tts_cooldown: false,
+                error_code: null,
+                model_id: "eleven_v3",
+                voice_id: "el_female_1",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    try {
+      resetVoiceEngineStatus();
+      const health = await fetchVoiceEngineHealth();
+      expect(health?.elevenlabs).toEqual({
+        configured: true,
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+        error_code: null,
+        model_id: "eleven_v3",
+        voice_id: "el_female_1",
+      });
+    } finally {
+      tokenSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("queries backend precomputed cache before browser TTS on hosted LOCAL_VOICE_UNCONFIGURED and respects configured ElevenLabs", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      region: "central",
+    });
+    lockSessionVoice("hosted-offline-first-central", {
+      voiceId: "local_central_quang_son",
+      speed: 0.9,
+      region: "central",
+      forceUpdate: true,
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    // Coaching audio hits backend cache FIRST instead of skipping directly to Browser TTS
+    const coachPlay = result.current.play("Thầy đọc mẫu cho con nghe nhé.", {
+      coaching: true,
+    });
+    const coachAudio = await audioAt(0);
+    act(() => coachAudio.finish());
+    await coachPlay;
+    expect(speech.synthesize).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+
+    // Book page timed audio also queries backend cache FIRST
+    const pagePlay = result.current.playWithWordTimings(["Mặt", "trời"], {
+      bookId: "book-central-1",
+      pageId: "page-1",
+    });
+    const pageAudio = await audioAt(1);
+    act(() => pageAudio.finish());
+    await pagePlay;
+    expect(studio.synthesizeTimed).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+
+    // When ElevenLabs cloud TTS is configured (no cooldown), uncached text still calls backend
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+      elevenlabs: {
+        configured: true,
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const cloudPlay = result.current.play("Câu không nằm trong cache.");
+    const cloudAudio = await audioAt(2);
+    act(() => cloudAudio.finish());
+    await cloudPlay;
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("never switches to Browser TTS mid-utterance after chunk 1 already played via backend audio", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+    });
+    lockSessionVoice("no-mid-utterance-switch", {
+      voiceId: "local_north_truc_ly",
+      forceUpdate: true,
+    });
+    speech.synthesize
+      .mockResolvedValueOnce(new Blob(["chunk-1"], { type: "audio/wav" }))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+          status: 503,
+          code: "TTS_UNAVAILABLE",
+        }),
+      );
+
+    // Construct a long 2-chunk text (> SHORT_TTS_MAX_CHARACTERS = 2,500 chars across two sentences)
+    const sentence1 = `${"Hôm nay trời rất đẹp và chim hót líu lo khắp khu vườn xanh mát. ".repeat(25)}`;
+    const sentence2 = `${"Bé cùng bạn dạo chơi dưới ánh nắng dịu nhẹ buổi sáng thật vui. ".repeat(25)}`;
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playback = result.current.play(`${sentence1}${sentence2}`, {
+      coaching: true,
+    });
+    const firstChunkAudio = await audioAt(0);
+    act(() => firstChunkAudio.finish());
+
+    await expect(playback).rejects.toThrow();
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("preserves nested reading lock on practice release, preserves male gender on local downgrade, and ignores speed-only switches", () => {
+    // 1. Male Google voice downgraded under local_only stays male (Thầy Thiên Minh)
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      region: "north",
+    });
+    setSpeechPreferences({ voiceId: "google_vi_vn_neural2_d", speed: 0.9 });
+    const readingLock = lockSessionVoice("reading-main-1");
+    expect(readingLock.voiceId).toBe("local_north_thien_minh");
+    expect(readingLock.provider).toBe("local");
+
+    // 2. Speed-only update does NOT flag a voice switch
+    lockSessionVoice("reading-main-1", { speed: 1.0, forceUpdate: true });
+    expect(hasPendingSessionVoiceSwitch("reading-main-1")).toBe(false);
+
+    // 3. Nested practice session lock restores reading-main-1 on release
+    lockSessionVoice("practice-nested-1", {
+      voiceId: "local_central_quang_son",
+      region: "central",
+    });
+    expect(getActiveSessionVoiceLock()?.sessionId).toBe("practice-nested-1");
+    releaseSessionVoiceLock("practice-nested-1");
+    expect(getActiveSessionVoiceLock()?.sessionId).toBe("reading-main-1");
+    expect(getActiveSessionVoiceLock()?.voiceId).toBe("local_north_thien_minh");
+
+    releaseSessionVoiceLock("reading-main-1");
+    expect(getActiveSessionVoiceLock()).toBeNull();
   });
 });

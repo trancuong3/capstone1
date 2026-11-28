@@ -9,10 +9,17 @@ const ALLOWED_SCOPES = new Set(["all", "reminders", "presence", "engagement"]);
 const RETRYABLE_UPSTREAM_STATUSES = new Set([
   502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530,
 ]);
-const FIRST_ATTEMPT_TIMEOUT_MS = 30_000;
-const RETRY_BACKOFF_MS = 1_500;
-const RETRY_ATTEMPT_TIMEOUT_MS = 22_000;
 const TOTAL_DISPATCH_BUDGET_MS = 55_000;
+const FIRST_ATTEMPT_TIMEOUT_MS = 40_000;
+const MIN_ATTEMPT_TIMEOUT_MS = 8_000;
+const FAST_FAILURE_THRESHOLD_MS = 10_000;
+const RETRY_DELAYS_MS = [500, 2_000, 5_000, 10_000, 12_000] as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
 
 function constantTimeMatch(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate, "utf8");
@@ -45,17 +52,32 @@ async function postDispatchOnce(
   timeoutMs: number,
   requestId: string,
 ): Promise<Response> {
-  return fetch(dispatchUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "X-Cron-Secret": backendSecret,
-      "X-Request-ID": requestId,
-    },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const controller = new AbortController();
+  const timerId = globalThis.setTimeout(() => {
+    controller.abort(
+      typeof DOMException !== "undefined"
+        ? new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          )
+        : new Error("TimeoutError"),
+    );
+  }, timeoutMs);
+  try {
+    return await fetch(dispatchUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "X-Cron-Secret": backendSecret,
+        "X-Request-ID": requestId,
+      },
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+  } finally {
+    globalThis.clearTimeout(timerId);
+  }
 }
 
 function sanitizeRequestId(
@@ -133,18 +155,21 @@ async function handleCronDispatch(request: NextRequest) {
     process.env.PARENT_EMAIL_CRON_SECRET?.trim() || cronSecret;
 
   const startedAt = Date.now();
+  const deadlineAt = startedAt + TOTAL_DISPATCH_BUDGET_MS;
   let upstream: Response | null = null;
   let lastErrorName: string | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const remainingBudgetMs =
-      TOTAL_DISPATCH_BUDGET_MS - (Date.now() - startedAt);
-    if (remainingBudgetMs <= 1_000) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs < MIN_ATTEMPT_TIMEOUT_MS) {
       break;
     }
-    const attemptCapMs =
-      attempt === 0 ? FIRST_ATTEMPT_TIMEOUT_MS : RETRY_ATTEMPT_TIMEOUT_MS;
-    const timeoutMs = Math.min(attemptCapMs, remainingBudgetMs);
+
+    const timeoutMs =
+      attempt === 0
+        ? Math.min(FIRST_ATTEMPT_TIMEOUT_MS, remainingMs)
+        : remainingMs;
+    const attemptStartedAt = Date.now();
 
     try {
       upstream = await postDispatchOnce(
@@ -153,11 +178,7 @@ async function handleCronDispatch(request: NextRequest) {
         timeoutMs,
         requestId,
       );
-      if (
-        upstream.ok ||
-        !RETRYABLE_UPSTREAM_STATUSES.has(upstream.status) ||
-        attempt === 1
-      ) {
+      if (upstream.ok || !RETRYABLE_UPSTREAM_STATUSES.has(upstream.status)) {
         break;
       }
       const upstreamRequestId = sanitizeRequestId(
@@ -183,17 +204,25 @@ async function handleCronDispatch(request: NextRequest) {
         errorName: lastErrorName,
         requestId,
       });
-      if (attempt === 1) {
-        break;
-      }
     }
 
-    const remainingBeforeWait =
-      TOTAL_DISPATCH_BUDGET_MS - (Date.now() - startedAt);
-    if (remainingBeforeWait <= RETRY_BACKOFF_MS + 1_000) {
+    if (attempt >= RETRY_DELAYS_MS.length) {
       break;
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
+
+    const remainingAfterAttempt = deadlineAt - Date.now();
+    if (remainingAfterAttempt < MIN_ATTEMPT_TIMEOUT_MS) {
+      break;
+    }
+
+    const attemptElapsedMs = Date.now() - attemptStartedAt;
+    if (attemptElapsedMs < FAST_FAILURE_THRESHOLD_MS) {
+      const maxDelayMs = remainingAfterAttempt - MIN_ATTEMPT_TIMEOUT_MS;
+      const delayMs = Math.min(RETRY_DELAYS_MS[attempt] ?? 0, maxDelayMs);
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+    }
   }
 
   if (!upstream) {

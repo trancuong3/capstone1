@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -24,6 +24,7 @@ class ChildProjection:
     Id: UUID
     ParentId: UUID
     Grade: int
+    Settings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +89,12 @@ class PictureDescriptionRepository:
         parent_id: UUID,
     ) -> ChildProjection | None:
         result = await self.db.execute(
-            select(ChildProfile.Id, ChildProfile.ParentId, ChildProfile.Grade).where(
+            select(
+                ChildProfile.Id,
+                ChildProfile.ParentId,
+                ChildProfile.Grade,
+                ChildProfile.Settings,
+            ).where(
                 ChildProfile.Id == child_id,
                 ChildProfile.ParentId == parent_id,
             )
@@ -96,7 +102,13 @@ class PictureDescriptionRepository:
         row = result.one_or_none()
         if row is None:
             return None
-        return ChildProjection(Id=row.Id, ParentId=row.ParentId, Grade=row.Grade)
+        raw_settings = getattr(row, "Settings", None)
+        return ChildProjection(
+            Id=row.Id,
+            ParentId=row.ParentId,
+            Grade=row.Grade,
+            Settings=dict(raw_settings) if isinstance(raw_settings, dict) else {},
+        )
 
     async def list_book_pages_for_grade(
         self,

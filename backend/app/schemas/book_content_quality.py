@@ -132,7 +132,7 @@ class BookQualityFindingRead(BaseModel):
     excerpt_end: int
     suggested_correction: str | None
     explanation: str
-    detection_source: Literal["RULE", "OLLAMA_TEXT"]
+    detection_source: Literal["RULE", "OLLAMA_TEXT", "CLOUD_AI"]
     model_name: str | None
     confidence: float | None
     status: BookQualityFindingStatus
@@ -190,6 +190,7 @@ class BookQualityScanRead(BaseModel):
     failed_pages: int
     ai_completed_pages: int
     ai_unavailable_pages: int
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     error_summary: str | None
     started_at: datetime | None
     completed_at: datetime | None

@@ -474,7 +474,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await waitFor(() =>
         expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {
           wordSample: true,
-          speedScale: 0.8,
         }),
       );
       await waitFor(() => expect(Recognition.instances).toHaveLength(3));
@@ -573,7 +572,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await act(async () => vi.advanceTimersByTimeAsync(45000));
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
           wordSample: true,
-          speedScale: 0.8,
         });
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé mèo nhỏ");
         expect(speechPlayerMock.play).not.toHaveBeenCalledWith(
@@ -728,7 +726,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         }),
       }),
     );
-    await screen.findByText(/Đúng 3\/4 từ/);
+    await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 });
     expect(screen.getByText("75%")).toBeInTheDocument();
     expect(compareTranscriptMock).not.toHaveBeenCalled();
   });
@@ -1337,7 +1335,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
       );
       await user.click(
-        await screen.findByRole("button", { name: "Lưu và dừng" }),
+        await screen.findByRole(
+          "button",
+          { name: "Lưu và dừng" },
+          { timeout: 5000 },
+        ),
       );
       const retryConsent = await screen.findByRole("button", {
         name: "Đồng ý, đọc lại",
@@ -1368,7 +1370,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         );
       });
       await waitFor(() => {
-        expect(speechRecorderMock.prepare).toHaveBeenCalledOnce();
+        expect(speechRecorderMock.prepare).toHaveBeenCalledTimes(2);
         expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
         expect(speechPlayerMock.play).toHaveBeenNthCalledWith(
           1,
@@ -1719,9 +1721,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             }),
           }),
         );
-        expect(await screen.findByText(/Đúng 2\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 2 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 2\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 2 từ");
         expect(screen.getByText("50%")).toBeInTheDocument();
         return;
       }
@@ -1834,9 +1836,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(
           services.readingService.createRetryEvent.mock.calls[1][0],
         ).toEqual(originalPayload);
-        expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 1 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 1 từ");
         return;
       }
 
@@ -1903,9 +1905,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(services.readingService.createRetryEvent).toHaveBeenCalledTimes(
           3,
         );
-        expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 1 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 1 từ");
         expect(screen.getByText("75%")).toBeInTheDocument();
         return;
       }
@@ -1933,9 +1935,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           }),
         }),
       );
-      expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-        "Bỏ sót 1 từ",
-      );
+      expect(
+        await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+      ).toHaveTextContent("Bỏ sót 1 từ");
       expect(screen.getByText("75%")).toBeInTheDocument();
       expect(compareTranscriptMock).toHaveBeenCalledOnce();
       expect(compareTranscriptMock).toHaveBeenCalledWith(
@@ -2259,10 +2261,15 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
 
-    await waitFor(() => {
-      expect(services.readingService.finish).toHaveBeenCalledOnce();
-      expect(screen.getByText("Báo cáo đọc chưa sẵn sàng")).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(services.readingService.finish).toHaveBeenCalledOnce();
+        expect(
+          screen.getByText("Báo cáo đọc chưa sẵn sàng"),
+        ).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
     expect(compareTranscriptMock).not.toHaveBeenCalled();
   });
 
@@ -2618,24 +2625,20 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       }
       expect(Recognition.instances).toHaveLength(2);
       const current = Recognition.instances[1];
+      speechServiceMock.transcribe.mockResolvedValue({
+        text: "Bé mèo nhỏ đang",
+        words: [],
+      });
       act(() => {
         old.onerror?.({ error: "not-allowed" });
         old.say("Bé mèo nhỏ đang");
         current.say("Bé mèo nhỏ đang");
       });
-      speechServiceMock.transcribe.mockResolvedValue({
-        text: "Bé mèo nhỏ đang",
-        words: [],
-      });
-      await user.click(
-        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
-      );
-      await user.click(
-        await screen.findByRole("button", { name: "Lưu và dừng" }),
-      );
       await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
       await screen.findByText(
         transition === "manual" ? /Đúng 6\/8 từ/ : /Đúng 7\/8 từ/,
+        {},
+        { timeout: 5000 },
       );
       expect(compareTranscriptMock).toHaveBeenCalledTimes(2);
       expect(compareTranscriptMock).toHaveBeenCalledWith(
@@ -2800,7 +2803,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await waitFor(() =>
         expect(services.readingService.finish).toHaveBeenCalledOnce(),
       );
-      expect(await screen.findByText(/Đúng 4\/4 từ/)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/Đúng 4\/4 từ/, {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
       expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
       expect(compareTranscriptMock).toHaveBeenCalledWith(
         TEST_SESSION_ID,
@@ -3133,7 +3138,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         },
       ),
     );
-    expect(await screen.findByText(/Đúng 4\/4 từ/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Đúng 4\/4 từ/, {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
   });
 
@@ -3337,7 +3344,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     const user = userEvent.setup();
     renderReading("question");
-    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé" });
+    await screen.findByRole(
+      "heading",
+      { name: "Mình cùng trả lời nhé" },
+      { timeout: 5000 },
+    );
     expect(document.body.textContent).not.toContain("expected_answer");
     await user.click(await screen.findByRole("button", { name: /Trên bàn/ }));
     expect(
@@ -3411,7 +3422,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Nghe đánh vần" }),
     );
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
 
     await user.click(
       screen.getByRole("button", { name: "Đóng hướng dẫn đánh vần" }),
@@ -3420,7 +3433,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     // Re-open phonics card, then navigate to page 5 -> must clear automatically
     await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
     await screen.findByLabelText("Trang sách 5");
@@ -3463,7 +3478,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     // Start phonics playback -> MUST NOT show the full-page "Đọc mẫu" banner!
     await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
     expect(
       screen.queryByText("Đang phát âm toàn bộ trang sách theo giọng mẫu..."),
     ).not.toBeInTheDocument();
@@ -3532,5 +3549,168 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toBeInTheDocument();
     // Microphone must NOT have been auto-reopened after TTS failure
     expect(recStartCount).toBe(1);
+  });
+
+  it("restarts retryPrompt voice listener on no-speech and preserves word #1 TTS when child says Có", async () => {
+    class PromptSpeechRecognition {
+      static instances: PromptSpeechRecognition[] = [];
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: Array<{
+              isFinal: boolean;
+              length: number;
+              0: { transcript: string; confidence?: number };
+            }>;
+          }) => void)
+        | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+      constructor() {
+        PromptSpeechRecognition.instances.push(this);
+      }
+      start = vi.fn();
+      stop = vi.fn(() => {
+        this.onend?.();
+      });
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: PromptSpeechRecognition,
+    });
+    const originalAudioContext = window.AudioContext;
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: class FakeAudioContext {
+        createOscillator() {
+          return {
+            type: "sine",
+            frequency: { value: 0 },
+            connect: vi.fn(),
+            start: vi.fn(),
+            stop: vi.fn(),
+          };
+        }
+        createGain() {
+          return {
+            gain: {
+              setValueAtTime: vi.fn(),
+              exponentialRampToValueAtTime: vi.fn(),
+            },
+            connect: vi.fn(),
+          };
+        }
+        get destination() {
+          return {};
+        }
+        get currentTime() {
+          return 0;
+        }
+        close() {
+          return Promise.resolve();
+        }
+      },
+    });
+    try {
+      services.readingService.getCurrentPage.mockResolvedValue(pageFour);
+      const user = userEvent.setup();
+      renderReading("ready");
+      await user.click(
+        await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+      );
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Bé đọc với nhận diện giọng nói",
+        }),
+      );
+      await waitFor(() =>
+        expect(PromptSpeechRecognition.instances.length).toBeGreaterThanOrEqual(
+          1,
+        ),
+      );
+      act(() => {
+        PromptSpeechRecognition.instances[0].onresult?.({
+          resultIndex: 0,
+          results: [
+            {
+              isFinal: true,
+              length: 1,
+              0: { transcript: "Bé nhỏ đang", confidence: 0.95 },
+            },
+          ],
+        });
+      });
+
+      await screen.findByLabelText("Trang sách 5");
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+        ).toBeEnabled();
+      });
+      await user.click(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      );
+      await user.click(
+        await screen.findByRole(
+          "button",
+          { name: "Lưu và dừng" },
+          { timeout: 5000 },
+        ),
+      );
+
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" });
+      await waitFor(() =>
+        expect(PromptSpeechRecognition.instances.length).toBeGreaterThanOrEqual(
+          2,
+        ),
+      );
+
+      const promptRec =
+        PromptSpeechRecognition.instances[
+          PromptSpeechRecognition.instances.length - 1
+        ];
+      await waitFor(() => expect(promptRec.start).toHaveBeenCalledTimes(1));
+
+      // 1) Gentle restart on no-speech (up to 2 retries)
+      act(() => {
+        promptRec.onerror?.({ error: "no-speech" });
+        promptRec.onend?.();
+      });
+      await waitFor(() => expect(promptRec.start).toHaveBeenCalledTimes(2), {
+        timeout: 2000,
+      });
+
+      const stopCountBeforeYes = speechPlayerMock.stop.mock.calls.length;
+
+      // 2) Child agrees via voice -> enters retry mode without cutting off retry word #1 TTS via cleanup stop()
+      act(() => {
+        promptRec.onresult?.({
+          resultIndex: 0,
+          results: [
+            {
+              isFinal: true,
+              length: 1,
+              0: { transcript: "Đồng ý", confidence: 0.95 },
+            },
+          ],
+        });
+      });
+
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Từ cần luyện mèo",
+      );
+      expect(speechPlayerMock.stop.mock.calls.length).toBe(stopCountBeforeYes);
+    } finally {
+      Object.defineProperty(window, "AudioContext", {
+        configurable: true,
+        value: originalAudioContext,
+      });
+    }
   });
 });

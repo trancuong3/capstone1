@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
@@ -43,7 +43,7 @@ _PRIVATE_NO_STORE_HEADERS = {
 }
 
 _CATALOG_MEDIA_HEADERS = {
-    "Cache-Control": "private, max-age=300",
+    "Cache-Control": "private, max-age=1200",
     "Vary": "Authorization",
     "X-Content-Type-Options": "nosniff",
 }
@@ -89,6 +89,11 @@ async def upload_book_cover(
     _rate_limited: None = Depends(rate_limit("studio_assets_write", default_max=60, default_window=60.0)),
 ) -> BookPresentationAssetRead:
     _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
+    resolved_crop_x = float(crop_x) if isinstance(crop_x, (int, float)) and not isinstance(crop_x, bool) else None
+    resolved_crop_y = float(crop_y) if isinstance(crop_y, (int, float)) and not isinstance(crop_y, bool) else None
+    resolved_crop_w = float(crop_w) if isinstance(crop_w, (int, float)) and not isinstance(crop_w, bool) else None
+    resolved_crop_h = float(crop_h) if isinstance(crop_h, (int, float)) and not isinstance(crop_h, bool) else None
+    resolved_rotation = rotation if isinstance(rotation, int) and not isinstance(rotation, bool) else 0
     try:
         raw_bytes = await file.read(MAX_COVER_UPLOAD_BYTES + 1)
     finally:
@@ -98,11 +103,11 @@ async def upload_book_cover(
         book_id,
         raw_bytes,
         file.content_type,
-        crop_x=crop_x,
-        crop_y=crop_y,
-        crop_w=crop_w,
-        crop_h=crop_h,
-        rotation=rotation,
+        crop_x=resolved_crop_x,
+        crop_y=resolved_crop_y,
+        crop_w=resolved_crop_w,
+        crop_h=resolved_crop_h,
+        rotation=resolved_rotation,
     )
 
 
@@ -262,12 +267,21 @@ async def moderate_page_illustration(
 @router.get("/assets/{asset_id}/media")
 async def stream_studio_asset_media(
     asset_id: UUID,
+    request: Request,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(rate_limit("studio_assets_read", default_max=180, default_window=60.0)),
 ) -> Response:
-    content, mime_type, is_private = await BookCoverService(
+    content, mime_type, is_private, etag = await BookCoverService(
         db
-    ).get_authorized_asset_media(actor_id, asset_id)
-    headers = _PRIVATE_NO_STORE_HEADERS if is_private else _CATALOG_MEDIA_HEADERS
-    return Response(content=content, media_type=mime_type, headers=dict(headers))
+    ).get_authorized_asset_media_response(
+        actor_id,
+        asset_id,
+        if_none_match=request.headers.get("if-none-match"),
+    )
+    headers = dict(_PRIVATE_NO_STORE_HEADERS if is_private else _CATALOG_MEDIA_HEADERS)
+    if etag is not None:
+        headers["ETag"] = etag
+    if content is None:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=content, media_type=mime_type, headers=headers)

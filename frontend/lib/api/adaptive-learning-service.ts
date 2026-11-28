@@ -49,11 +49,11 @@ export const entertainmentRecommendationsSchema = z.object({
 });
 
 const skillMasterySchema = z.object({
-  skill_key: z.string().min(1),
+  skill_key: z.string(),
   label_vi: z.string(),
   domain: skillDomainSchema,
   status: skillStatusSchema,
-  mastery_pct: z.number().int().nullable(),
+  mastery_pct: z.number().nullable(),
   confidence: z.number(),
   evidence_count: z.number().int(),
   high_confidence_count: z.number().int(),
@@ -64,6 +64,8 @@ const skillMasterySchema = z.object({
 const spacedDifficultWordSchema = z.object({
   normalized_word: z.string(),
   display_text: z.string(),
+  phonics_category: z.string().optional(),
+  phonics_label_vi: z.string().optional(),
   priority_score: z.number(),
   practice_count: z.number().int(),
   last_practiced_at: z.string().nullable(),
@@ -76,7 +78,7 @@ const moduleActivitySummarySchema = z.object({
   game_key: gameKeySchema,
   title_vi: z.string(),
   sessions_count: z.number().int(),
-  recent_average_pct: z.number().int().nullable(),
+  recent_average_pct: z.number().nullable(),
   highlight_vi: z.string(),
 });
 
@@ -128,27 +130,44 @@ function normalizeWindowDays(windowDays: number): number {
 }
 
 export interface AdaptiveLearningService {
-  getRecommendations(childId: string): Promise<EntertainmentRecommendationsDTO>;
+  getRecommendations(
+    childId: string,
+    teacherGender?: "female" | "male",
+  ): Promise<EntertainmentRecommendationsDTO>;
   getParentAnalytics(
     childId: string,
     windowDays?: number,
+    teacherGender?: "female" | "male",
   ): Promise<ParentEntertainmentAnalyticsDTO>;
 }
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
   return {
-    async getRecommendations(childId: string) {
+    async getRecommendations(
+      childId: string,
+      teacherGender?: "female" | "male",
+    ) {
       const normalizedChildId = assertNonEmptyChildId(childId);
+      const suffix = teacherGender
+        ? `?teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(normalizedChildId)}/recommendations`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/recommendations${suffix}`,
         entertainmentRecommendationsSchema,
       );
     },
-    async getParentAnalytics(childId: string, windowDays = 30) {
+    async getParentAnalytics(
+      childId: string,
+      windowDays = 30,
+      teacherGender?: "female" | "male",
+    ) {
       const normalizedChildId = assertNonEmptyChildId(childId);
       const normalizedWindowDays = normalizeWindowDays(windowDays);
+      const genderParam = teacherGender
+        ? `&teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(normalizedChildId)}/parent-analytics?window_days=${normalizedWindowDays}`,
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/parent-analytics?window_days=${normalizedWindowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
       );
     },

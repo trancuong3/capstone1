@@ -37,6 +37,7 @@ from app.services.catalog_tts_cache import (
 )
 from app.services import storage_service as _storage_service_module
 from app.services.storage_service import (
+    create_cached_signed_image_urls,
     create_cached_signed_image_urls_async,
     create_signed_image_url,
     is_local_storage_enabled,
@@ -45,6 +46,7 @@ from app.services.word_box_geometry import has_verified_geometry
 
 _ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
 _ORIGINAL_PRIVATE_PAGE_IMAGE_URL = private_page_image_url
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS = create_cached_signed_image_urls
 _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC = create_cached_signed_image_urls_async
 
 
@@ -1430,53 +1432,10 @@ class ReadingContentService:
                     if tts_cached_speed is None:
                         tts_cached_speed = expected_speed
 
-        await self.repository.db.rollback()
-
-        image_url = None
-        if book_is_private and book_id_value is not None:
-            if private_page_image_url is not _ORIGINAL_PRIVATE_PAGE_IMAGE_URL:
-                image_url = await asyncio.to_thread(
-                    private_page_image_url,
-                    book_id_value,
-                    page_id,
-                    revision_id=page_revision_id,
-                    base_url=base_url,
-                    storage_path=image_path,
-                    owner_id=owner_parent_id,
-                )
-            else:
-                image_url = (
-                    await private_page_image_urls_async(
-                        book_id_value,
-                        [(page_id, page_revision_id, image_path)],
-                        base_url=base_url,
-                        owner_id=owner_parent_id,
-                    )
-                )[0]
-        elif image_path:
-            try:
-                if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
-                    image_url = await asyncio.to_thread(create_signed_image_url, image_path)
-                else:
-                    image_url = (await create_cached_signed_image_urls_async([image_path]))[0]
-            except Exception:
-                # Keep reading text available if Storage preview URLs are temporarily unavailable.
-                image_url = None
-
-        def safe_line_indices(name: str) -> list[int]:
-            value = processing_meta.get(name, [])
-            if not isinstance(value, (list, tuple)):
-                return []
-            return sorted({
-                item for item in value
-                if isinstance(item, int) and not isinstance(item, bool) and item >= 0
-            })
-
-        illustration_url = None
-        illustration_text_free = False
-        ill_id = None
-        ill_path: str | None = None
+        ill_id: UUID | None = None
+        ill_storage_path: str | None = None
         ill_owner_id = None
+        illustration_text_free = False
         try:
             from sqlalchemy import desc, select
             from app.models.smart_book_studio import BookPresentationAsset
@@ -1499,42 +1458,120 @@ class ReadingContentService:
                     if ill_asset is not None:
                         ill_id = ill_asset.Id
                         raw_ill_path = getattr(ill_asset, "StoragePath", None)
-                        ill_path = raw_ill_path.strip() if isinstance(raw_ill_path, str) and raw_ill_path.strip() else None
+                        if isinstance(raw_ill_path, str) and raw_ill_path.strip():
+                            ill_storage_path = raw_ill_path.strip()
                         ill_owner_id = getattr(ill_asset, "OwnerId", None)
-                        illustration_url = f"/studio/assets/{ill_id}/media"
                         illustration_text_free = True
-            if (
-                ill_id is not None
-                and not book_is_private
-                and ill_owner_id is None
-                and ill_path is not None
-                and not is_local_storage_enabled()
-            ):
-                skip_unpatched_test_signing = (
-                    APP_ENVIRONMENT == "test"
-                    and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
-                    and not _storage_service_module.SUPABASE_ADMIN_KEY
-                    and create_cached_signed_image_urls_async is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC
-                    and _storage_service_module.create_signed_image_urls is _storage_service_module._ORIGINAL_CREATE_SIGNED_IMAGE_URLS
-                    and _storage_service_module.get_supabase_admin_client is _storage_service_module._ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
-                    and httpx.AsyncClient is _storage_service_module._ORIGINAL_HTTPX_ASYNC_CLIENT
-                )
-                if not skip_unpatched_test_signing:
-                    rollback_fn = getattr(db_session, "rollback", None)
-                    if inspect.iscoroutinefunction(rollback_fn):
-                        await rollback_fn()
-                    try:
-                        illustration_url = (
-                            await create_cached_signed_image_urls_async(
-                                [ill_path],
-                                bucket_name=SUPABASE_STORAGE_BUCKET,
-                            )
-                        )[0]
-                    except Exception:
-                        illustration_url = f"/studio/assets/{ill_id}/media"
         except Exception:
-            illustration_url = None
+            ill_id = None
+            ill_storage_path = None
+            ill_owner_id = None
             illustration_text_free = False
+
+        rollback = getattr(self.repository.db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+
+        image_url = None
+        illustration_url = f"/studio/assets/{ill_id}/media" if ill_id is not None else None
+        if book_is_private and book_id_value is not None:
+            if private_page_image_url is not _ORIGINAL_PRIVATE_PAGE_IMAGE_URL:
+                image_url = await asyncio.to_thread(
+                    private_page_image_url,
+                    book_id_value,
+                    page_id,
+                    revision_id=page_revision_id,
+                    base_url=base_url,
+                    storage_path=image_path,
+                    owner_id=owner_parent_id,
+                )
+            else:
+                image_url = (
+                    await private_page_image_urls_async(
+                        book_id_value,
+                        [(page_id, page_revision_id, image_path)],
+                        base_url=base_url,
+                        owner_id=owner_parent_id,
+                    )
+                )[0]
+        elif not book_is_private:
+            skip_unpatched_ill_signing = (
+                APP_ENVIRONMENT == "test"
+                and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
+                and not _storage_service_module.SUPABASE_ADMIN_KEY
+                and create_cached_signed_image_urls is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS
+                and create_cached_signed_image_urls_async is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC
+                and _storage_service_module.create_signed_image_urls is _storage_service_module._ORIGINAL_CREATE_SIGNED_IMAGE_URLS
+                and _storage_service_module.get_supabase_admin_client is _storage_service_module._ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
+                and httpx.AsyncClient is _storage_service_module._ORIGINAL_HTTPX_ASYNC_CLIENT
+            )
+            can_sign_ill = (
+                ill_id is not None
+                and ill_owner_id is None
+                and ill_storage_path is not None
+                and not is_local_storage_enabled()
+                and not skip_unpatched_ill_signing
+            )
+
+            async def _sign_paths(paths: list[str]) -> list[str]:
+                if create_cached_signed_image_urls is not _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS:
+                    return await asyncio.to_thread(create_cached_signed_image_urls, paths)
+                return await create_cached_signed_image_urls_async(paths)
+
+            if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
+                if image_path:
+                    try:
+                        image_url = await asyncio.to_thread(create_signed_image_url, image_path)
+                    except Exception:
+                        # Keep reading text available if Storage preview URLs are temporarily unavailable.
+                        image_url = None
+                if can_sign_ill and ill_storage_path is not None:
+                    try:
+                        signed_ill = (await _sign_paths([ill_storage_path]))[0]
+                        if signed_ill:
+                            illustration_url = signed_ill
+                    except Exception:
+                        pass
+            elif image_path and can_sign_ill and ill_storage_path is not None:
+                try:
+                    signed_pair = await _sign_paths([image_path, ill_storage_path])
+                    image_url = signed_pair[0]
+                    if signed_pair[1]:
+                        illustration_url = signed_pair[1]
+                except Exception:
+                    try:
+                        image_url = (await _sign_paths([image_path]))[0]
+                    except Exception:
+                        image_url = None
+                    try:
+                        signed_ill = (await _sign_paths([ill_storage_path]))[0]
+                        if signed_ill:
+                            illustration_url = signed_ill
+                    except Exception:
+                        pass
+            elif image_path:
+                try:
+                    image_url = (await _sign_paths([image_path]))[0]
+                except Exception:
+                    image_url = None
+            elif can_sign_ill and ill_storage_path is not None:
+                try:
+                    signed_ill = (await _sign_paths([ill_storage_path]))[0]
+                    if signed_ill:
+                        illustration_url = signed_ill
+                except Exception:
+                    pass
+
+        def safe_line_indices(name: str) -> list[int]:
+            value = processing_meta.get(name, [])
+            if not isinstance(value, (list, tuple)):
+                return []
+            return sorted({
+                item for item in value
+                if isinstance(item, int) and not isinstance(item, bool) and item >= 0
+            })
 
         return ReadingPageDTO(
             page_id=page_id,

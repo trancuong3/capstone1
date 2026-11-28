@@ -48,6 +48,8 @@ from app.providers.local_voice_provider import (
     resolve_local_stt_mode,
 )
 from app.schemas.voice import (
+    PhonicsAnalyzeRequest,
+    PhonicsAnalyzeResponse,
     PhonicsSpeechRead,
     PhonicsSpeechRequest,
     PhonicsStepTimingRead,
@@ -57,6 +59,7 @@ from app.schemas.voice import (
     TextToSpeechRequest,
     VoiceProviderMode,
 )
+from app.services.phonics_ai_service import analyze_phonics_with_ai
 from app.services.rate_limiter import rate_limit
 from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 
@@ -347,15 +350,25 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
-    voice_gender = "female"
-    for item in STATIC_LOCAL_VOICES:
-        if item.get("voice_id") == audio.resolved_voice_id:
-            voice_gender = str(item.get("gender") or "female")
-            break
-    else:
-        g_meta = GOOGLE_VOICE_BY_ID.get(audio.resolved_voice_id)
+    def _lookup_voice_gender(candidate_voice_id: str | None) -> str | None:
+        if not candidate_voice_id:
+            return None
+        for item in STATIC_LOCAL_VOICES:
+            if item.get("voice_id") == candidate_voice_id:
+                return str(item.get("gender") or "female")
+        g_meta = GOOGLE_VOICE_BY_ID.get(candidate_voice_id)
         if g_meta is not None:
-            voice_gender = str(g_meta.get("gender") or "female")
+            return str(g_meta.get("gender") or "female")
+        el_male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+        if el_male_voice_id and candidate_voice_id == el_male_voice_id:
+            return "male"
+        return None
+
+    voice_gender = (
+        _lookup_voice_gender(audio.resolved_voice_id)
+        or _lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
 
     cache_headers = _tts_cache_headers(audio)
     headers = {
@@ -451,6 +464,28 @@ async def phonics_text_to_speech(
         region=speech.region,
         model_version=speech.model_version,
         cached_speed=getattr(speech, "cached_speed", None),
+    )
+
+
+@router.post("/phonics/analyze", response_model=PhonicsAnalyzeResponse)
+async def analyze_phonics_endpoint(
+    payload: PhonicsAnalyzeRequest,
+    response: Response,
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit(
+            "voice_phonics_analyze",
+            default_max=30,
+            default_window=60.0,
+            actor_dependency=require_active_profile_id,
+        )
+    ),
+) -> PhonicsAnalyzeResponse:
+    """Analyze a word/phrase with AI when static Grade-1 Vietnamese phonics rules do not cover it."""
+    response.headers["Cache-Control"] = "no-store"
+    return await analyze_phonics_with_ai(
+        payload.text,
+        context_phrase=payload.context_phrase,
     )
 
 

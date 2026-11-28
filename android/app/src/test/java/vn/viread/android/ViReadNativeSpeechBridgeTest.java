@@ -3,6 +3,7 @@ package vn.viread.android;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
@@ -153,20 +154,30 @@ public final class ViReadNativeSpeechBridgeTest {
         boolean ready;
         int viVoicesCount = 2;
         boolean viAvailable = true;
+        boolean hasMaleViVoice = true;
+        boolean hasFemaleViVoice = true;
+        String activeVoiceGender = "female";
         ViReadNativeSpeechBridge.TtsInitCallback pendingInitCallback;
 
+        int initCount;
+        boolean speakShouldSucceed = true;
         int speakCount;
         int stopCount;
         int shutdownCount;
         String lastText;
         float lastRate;
         float lastPitch;
+        String lastVoiceGender;
+        String lastVoiceId;
         String lastUtteranceId;
         AudioAttributes lastAttributes;
         ViReadNativeSpeechBridge.TtsCallback lastCallback;
+        boolean voiceGenderMismatch;
+        String resolvedVoiceName;
 
         @Override
         public void initialize(ViReadNativeSpeechBridge.TtsInitCallback callback) {
+            initCount++;
             if (autoCompleteInit) {
                 ready = initSuccess;
                 callback.onInitComplete(initSuccess);
@@ -201,6 +212,21 @@ public final class ViReadNativeSpeechBridgeTest {
         }
 
         @Override
+        public boolean hasMaleVietnameseVoice() {
+            return hasMaleViVoice;
+        }
+
+        @Override
+        public boolean hasFemaleVietnameseVoice() {
+            return hasFemaleViVoice;
+        }
+
+        @Override
+        public String getActiveVoiceGender() {
+            return activeVoiceGender;
+        }
+
+        @Override
         public boolean speak(
                 String text,
                 float rate,
@@ -208,14 +234,42 @@ public final class ViReadNativeSpeechBridgeTest {
                 String utteranceId,
                 AudioAttributes attributes,
                 ViReadNativeSpeechBridge.TtsCallback callback) {
+            return speak(text, rate, pitch, null, null, utteranceId, attributes, callback);
+        }
+
+        @Override
+        public boolean speak(
+                String text,
+                float rate,
+                float pitch,
+                String voiceGender,
+                String voiceId,
+                String utteranceId,
+                AudioAttributes attributes,
+                ViReadNativeSpeechBridge.TtsCallback callback) {
             speakCount++;
             lastText = text;
             lastRate = rate;
             lastPitch = pitch;
+            lastVoiceGender = voiceGender;
+            lastVoiceId = voiceId;
+            if (voiceGender != null) {
+                activeVoiceGender = voiceGender;
+            }
             lastUtteranceId = utteranceId;
             lastAttributes = attributes;
             lastCallback = callback;
-            return true;
+            return speakShouldSucceed;
+        }
+
+        @Override
+        public boolean isLastVoiceGenderMismatch() {
+            return voiceGenderMismatch;
+        }
+
+        @Override
+        public String getLastResolvedVoiceName() {
+            return resolvedVoiceName;
         }
 
         @Override
@@ -417,6 +471,8 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("cap-async", cap.getString("requestId"));
         assertTrue(cap.getBoolean("ttsAvailable"));
         assertEquals(3, cap.getInt("viVoicesCount"));
+        assertTrue(cap.getBoolean("hasMaleViVoice"));
+        assertTrue(cap.getBoolean("hasFemaleViVoice"));
         assertTrue(cap.getBoolean("sttAvailable"));
         assertTrue(cap.getBoolean("onDeviceSttAvailable"));
         assertEquals("android-webview", cap.getString("platform"));
@@ -457,6 +513,7 @@ public final class ViReadNativeSpeechBridgeTest {
 
         assertEquals(3, h.events.size());
         assertEquals("tts_start", h.events.get(0).getString("type"));
+        assertEquals("female", h.events.get(0).getString("actualVoiceGender"));
         assertEquals("tts_range", h.events.get(1).getString("type"));
         assertEquals(4, h.events.get(1).getInt("start"));
         assertEquals(8, h.events.get(1).getInt("end"));
@@ -518,6 +575,53 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("tts_settings_unavailable", h.events.get(1).getString("type"));
     }
 
+    @Test
+    public void selectBestVietnameseVoicePrioritizesGenderOverOfflineAndNeverMatchesVietnamAsMale() {
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice offlineFemaleVietnamNamed = new Voice(
+                "vi-vn-x-vietnam-female",
+                viVn,
+                Voice.QUALITY_VERY_HIGH,
+                Voice.LATENCY_VERY_LOW,
+                false,
+                Collections.emptySet());
+        Voice offlineFemaleGft = new Voice(
+                "vi-vn-x-gft-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+        Voice onlineMaleVid = new Voice(
+                "vi-vn-x-vid-network",
+                viVn,
+                Voice.QUALITY_NORMAL,
+                Voice.LATENCY_NORMAL,
+                true,
+                Collections.emptySet());
+
+        // "vietnam" must NEVER falsely trigger male classification!
+        assertEquals("female", ViReadNativeSpeechBridge.classifyVoiceGender(offlineFemaleVietnamNamed));
+        assertEquals("female", ViReadNativeSpeechBridge.classifyVoiceGender(offlineFemaleGft));
+        assertEquals("male", ViReadNativeSpeechBridge.classifyVoiceGender(onlineMaleVid));
+
+        Set<Voice> voices = new HashSet<>(Arrays.asList(
+                offlineFemaleVietnamNamed, offlineFemaleGft, onlineMaleVid));
+        assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceWithGender(voices, "male"));
+        assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceWithGender(voices, "female"));
+
+        // Selecting male MUST pick the male voice even when female voice is offline
+        Voice chosenMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "male");
+        assertNotNull(chosenMale);
+        assertEquals("vi-vn-x-vid-network", chosenMale.getName());
+
+        // Selecting female picks an offline female voice
+        Voice chosenFemale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "female");
+        assertNotNull(chosenFemale);
+        assertFalse(chosenFemale.isNetworkConnectionRequired());
+        assertEquals("female", ViReadNativeSpeechBridge.classifyVoiceGender(chosenFemale));
+    }
+
     // ---- STT, Extras, Permission, Fallback & Mutual Exclusion Tests ----
 
     @Test
@@ -544,13 +648,13 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(session.startedIntent.getBooleanExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false));
         assertEquals(3, session.startedIntent.getIntExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 0));
         assertEquals(
-                1500L,
-                session.startedIntent.getLongExtra(
-                        RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
+                1500,
+                session.startedIntent.getIntExtra(
+                        RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 0));
         assertEquals(
-                1000L,
-                session.startedIntent.getLongExtra(
-                        RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
+                1000,
+                session.startedIntent.getIntExtra(
+                        RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 0));
 
         // Drive full SpeechRecognizer event stream
         session.callback.onReadyForSpeech();
@@ -577,6 +681,22 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("hoa thơm ngát", alts.getString(0));
         assertEquals("hoa thôm ngát", alts.getString(1));
         assertEquals("stt_end", h.events.get(5).getString("type"));
+        // Clean completion parks SpeechRecognizer for zero-cold-start reuse on the next continuous cycle.
+        assertEquals(0, session.destroyCount);
+        assertTrue(h.bridge.hasReusableSttSessionForTest());
+
+        // Starting the next continuous cycle reuses the exact same SpeechRecognizer instance!
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-2\",\"lang\":\"vi-VN\",\"partialResults\":true,\"maxResults\":3}");
+        assertEquals(1, h.sttFactory.createdSessions.size());
+        assertEquals(2, session.startCount);
+        assertFalse(h.bridge.hasReusableSttSessionForTest());
+        session.callback.onReadyForSpeech();
+        assertEquals("stt_ready", h.events.get(0).getString("type"));
+        assertEquals("stt-2", h.events.get(0).getString("requestId"));
+
+        // Canceling destroys the session cleanly
+        h.sendTrusted("{\"action\":\"cancelStt\",\"requestId\":\"stt-cancel\"}");
         assertEquals(1, session.destroyCount);
 
         // Permission denial emits permission_denied + stt_end
@@ -642,7 +762,8 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(h.audioFocus.currentlyHeld);
         assertTrue(h.bridge.hasActiveTtsForTest());
 
-        // 3. Start STT while TTS is speaking -> TTS stopped & audio focus abandoned immediately
+        // 3. Start STT while TTS is speaking -> TTS stopped & audio focus abandoned immediately,
+        //    and STT waits TTS_TO_STT_SETTLE_MS (120ms) before opening the mic to avoid ERROR_RECOGNIZER_BUSY.
         h.events.clear();
         int stopCountBeforePreempt = h.tts.stopCount;
         h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-preempt\"}");
@@ -651,7 +772,14 @@ public final class ViReadNativeSpeechBridgeTest {
         assertFalse(h.bridge.hasActiveTtsForTest());
         assertEquals("tts_stopped", h.events.get(0).getString("type"));
         assertEquals("tts-after-stt", h.events.get(0).getString("requestId"));
+        assertFalse("STT must NOT start before TTS->STT 120ms settle", h.bridge.hasActiveSttForTest());
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+
+        h.scheduler.advanceBy(80L);
+        assertFalse(h.bridge.hasActiveSttForTest());
+        h.scheduler.advanceBy(40L);
         assertTrue(h.bridge.hasActiveSttForTest());
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
 
         // 4. stopStt calls stopListening and cancelStt destroys cleanly
         FakeSttSession preemptSession = h.sttFactory.latest();
@@ -687,6 +815,7 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals(1, h.tts.stopCount);
 
         // Active STT -> onHostStop cancels & destroys recognizer
+        h.clock.advance(ViReadNativeSpeechBridge.TTS_TO_STT_SETTLE_MS);
         h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-life\"}");
         FakeSttSession sttSession = h.sttFactory.latest();
         assertTrue(h.bridge.hasActiveSttForTest());
@@ -767,5 +896,334 @@ public final class ViReadNativeSpeechBridgeTest {
 
         // Clean lifecycle teardown
         controller.pause().stop().destroy();
+    }
+
+    @Test
+    public void stopSttDoesNotEmitPrematureSttEndAndStartSttHonorsPreferOnDeviceFlag()
+            throws Exception {
+        BridgeHarness h = new BridgeHarness();
+
+        // 1. preferOnDevice: false must request standard recognizer rather than on-device
+        h.sendTrusted(
+                "{\"action\":\"startStt\",\"requestId\":\"stt-cloud\",\"lang\":\"vi-VN\",\"preferOnDevice\":false}");
+        assertEquals(1, h.sttFactory.createdSessions.size());
+        FakeSttSession cloudSession = h.sttFactory.latest();
+        assertFalse("preferOnDevice=false must skip on-device recognizer", cloudSession.onDevice);
+        assertTrue(h.bridge.isAudioSessionActive());
+
+        // 2. stopStt with a distinct requestId must NOT emit a premature stt_end before final results
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"stopStt\",\"requestId\":\"stop-distinct\"}");
+        assertEquals(1, cloudSession.stopListeningCount);
+        assertTrue(
+                "stopStt must wait for recognizer finalization instead of emitting premature stt_end",
+                h.events.isEmpty());
+        assertTrue(h.bridge.hasActiveSttForTest());
+
+        // 3. Final results deliver stt_final + single terminal stt_end for active requestId
+        cloudSession.callback.onFinalResults(Collections.singletonList("xin chào"), null);
+        assertEquals(2, h.events.size());
+        assertEquals("stt_final", h.events.get(0).getString("type"));
+        assertEquals("stt-cloud", h.events.get(0).getString("requestId"));
+        assertEquals("stt_end", h.events.get(1).getString("type"));
+        assertEquals("stt-cloud", h.events.get(1).getString("requestId"));
+        assertFalse(h.bridge.isAudioSessionActive());
+
+        // 4. Stopping when idle still resolves immediately with stt_end
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"stopStt\",\"requestId\":\"stop-idle\"}");
+        assertEquals(1, h.events.size());
+        assertEquals("stt_end", h.events.get(0).getString("type"));
+        assertEquals("stop-idle", h.events.get(0).getString("requestId"));
+
+        // 5. On-device error 13 AFTER stopStt must NOT spawn a zombie cloud recognizer
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-stop-err13\"}");
+        int sessionsBeforeStop = h.sttFactory.createdSessions.size();
+        FakeSttSession stoppingSession = h.sttFactory.latest();
+        assertTrue(stoppingSession.onDevice);
+        h.sendTrusted("{\"action\":\"stopStt\",\"requestId\":\"stop-err13\"}");
+        stoppingSession.callback.onError(13);
+        assertEquals(
+                "stopStt followed by on-device error 13 must not spawn cloud fallback",
+                sessionsBeforeStop,
+                h.sttFactory.createdSessions.size());
+        assertFalse(h.bridge.hasActiveSttForTest());
+        assertEquals("stt_error", h.events.get(0).getString("type"));
+        assertEquals("stt_end", h.events.get(1).getString("type"));
+
+        // 6. Subsequent startStt with preferOnDevice=true skips SODA once error 13 was seen during stop
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-after-stop-err13\",\"lang\":\"vi-VN\",\"preferOnDevice\":true}");
+        assertEquals(sessionsBeforeStop + 1, h.sttFactory.createdSessions.size());
+        assertFalse(
+                "onDeviceViUnsupported must latch even when error 13 arrives after stopStt",
+                h.sttFactory.latest().onDevice);
+    }
+
+    @Test
+    public void selectBestVietnameseVoiceMatchesRequestedGenderAndSpeakForwardsVoiceMetadata()
+            throws Exception {
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice femaleOffline = new Voice(
+                "vi-vn-x-gft-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        Voice maleOffline = new Voice(
+                "vi-vn-x-vid-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        Voice genericAlias = new Voice(
+                "vi-VN-language", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        assertNull(
+                "Generic -language alias must not falsely match 'lan' as female",
+                ViReadNativeSpeechBridge.detectVietnameseVoiceGender(genericAlias));
+        Set<Voice> voices = new HashSet<>(Arrays.asList(femaleOffline, maleOffline, genericAlias));
+
+        assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceForGender(voices, "male"));
+        assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceForGender(voices, "female"));
+        Voice chosenMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "male");
+        Voice chosenFemale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "female");
+        assertNotNull(chosenMale);
+        assertNotNull(chosenFemale);
+        assertEquals("vi-vn-x-vid-local", chosenMale.getName());
+        assertEquals("vi-vn-x-gft-local", chosenFemale.getName());
+
+        BridgeHarness h = new BridgeHarness();
+        h.tts.hasMaleViVoice = true;
+        h.tts.hasFemaleViVoice = true;
+        h.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-gender\"}");
+        assertTrue(h.events.get(0).getBoolean("hasMaleViVoice"));
+        assertTrue(h.events.get(0).getBoolean("hasFemaleViVoice"));
+
+        h.events.clear();
+        h.sendTrusted(
+                "{\"action\":\"speak\",\"requestId\":\"tts-male\",\"text\":\"Xin chào\",\"voiceId\":\"local_north_thien_minh\"}");
+        assertEquals("male", h.tts.lastVoiceGender);
+        assertEquals("local_north_thien_minh", h.tts.lastVoiceId);
+        h.tts.lastCallback.onStart(h.tts.lastUtteranceId);
+        assertEquals("tts_start", h.events.get(0).getString("type"));
+        assertEquals("male", h.events.get(0).getString("actualVoiceGender"));
+    }
+
+    @Test
+    public void ttsInitFailureTimeoutAndSpeakFailureRecoverCleanly() throws Exception {
+        // 1. Synchronous init failure -> getCapabilities reports false, explicit speak retries cleanly
+        BridgeHarness h = new BridgeHarness();
+        h.tts.autoCompleteInit = false;
+        h.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-fail-1\"}");
+        assertEquals(1, h.tts.initCount);
+        h.tts.completeInit(false);
+        assertEquals(1, h.events.size());
+        assertFalse(h.events.get(0).getBoolean("ttsAvailable"));
+
+        h.events.clear();
+        h.tts.initSuccess = true;
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"spk-recover\",\"text\":\"Xin chào\"}");
+        assertEquals(2, h.tts.initCount);
+        h.tts.completeInit(true);
+        assertEquals(1, h.tts.speakCount);
+        assertEquals("Xin chào", h.tts.lastText);
+
+        // 2. Init timeout -> suppresses rapid cap retry before cooldown, recovers after cooldown
+        BridgeHarness t = new BridgeHarness();
+        t.tts.autoCompleteInit = false;
+        t.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-to-1\"}");
+        assertEquals(1, t.tts.initCount);
+        t.scheduler.advanceBy(ViReadNativeSpeechBridge.TTS_INIT_TIMEOUT_MS);
+        assertEquals(1, t.events.size());
+        assertFalse(t.events.get(0).getBoolean("ttsAvailable"));
+
+        t.events.clear();
+        t.scheduler.advanceBy(1_000L);
+        t.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-cooldown\"}");
+        assertEquals("Cooldown must suppress rapid cap retry", 1, t.tts.initCount);
+        assertFalse(t.events.get(0).getBoolean("ttsAvailable"));
+
+        t.events.clear();
+        t.tts.initSuccess = true;
+        t.scheduler.advanceBy(ViReadNativeSpeechBridge.TTS_INIT_RETRY_COOLDOWN_MS);
+        t.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-recover\"}");
+        assertEquals(2, t.tts.initCount);
+        t.tts.completeInit(true);
+        assertEquals(1, t.events.size());
+        assertTrue(t.events.get(0).getBoolean("ttsAvailable"));
+
+        // 3. speak() failure marks binding unready and next speak() re-initializes
+        t.events.clear();
+        t.tts.speakShouldSucceed = false;
+        t.sendTrusted("{\"action\":\"speak\",\"requestId\":\"spk-fail\",\"text\":\"Thử lại\"}");
+        assertEquals("tts_error", t.events.get(0).getString("type"));
+        assertEquals("tts_speak_failed", t.events.get(0).getString("code"));
+
+        t.events.clear();
+        t.tts.speakShouldSucceed = true;
+        t.sendTrusted("{\"action\":\"speak\",\"requestId\":\"spk-rebind\",\"text\":\"Thành công\"}");
+        assertEquals(3, t.tts.initCount);
+        t.tts.completeInit(true);
+        assertEquals(2, t.tts.speakCount);
+    }
+
+    @Test
+    public void sttBusyRetryCancelledOnSpeakStopAndHostStopWithoutZombieSession() throws Exception {
+        // 1. Preempted by speak during 220ms busy retry backoff
+        BridgeHarness h = new BridgeHarness();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-busy-1\"}");
+        FakeSttSession s1 = h.sttFactory.latest();
+        s1.callback.onError(SpeechRecognizer.ERROR_RECOGNIZER_BUSY);
+        assertTrue(h.bridge.isAudioSessionActive());
+        int sessionsAfterBusy = h.sttFactory.createdSessions.size();
+
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-preempt\",\"text\":\"Đọc mẫu\"}");
+        assertTrue(
+                h.events.stream()
+                        .anyMatch(e -> e.optString("type").equals("stt_end")
+                                && e.optString("requestId").equals("stt-busy-1")));
+        h.scheduler.advanceBy(400L);
+        assertEquals("Cancelled busy retry must NOT spawn zombie STT", sessionsAfterBusy, h.sttFactory.createdSessions.size());
+        assertEquals(1, h.tts.speakCount);
+
+        // 2. Cancelled by stopStt during 220ms busy retry backoff
+        BridgeHarness h2 = new BridgeHarness();
+        h2.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-busy-2\"}");
+        h2.sttFactory.latest().callback.onError(SpeechRecognizer.ERROR_RECOGNIZER_BUSY);
+        int sessionsBeforeStop = h2.sttFactory.createdSessions.size();
+        h2.events.clear();
+        h2.sendTrusted("{\"action\":\"stopStt\",\"requestId\":\"stop-busy-2\"}");
+        assertFalse(h2.bridge.isAudioSessionActive());
+        assertTrue(
+                h2.events.stream()
+                        .anyMatch(e -> e.optString("type").equals("stt_end")
+                                && e.optString("requestId").equals("stt-busy-2")));
+        h2.scheduler.advanceBy(400L);
+        assertEquals(sessionsBeforeStop, h2.sttFactory.createdSessions.size());
+
+        // 3. Cancelled by onHostStop during 220ms busy retry backoff
+        BridgeHarness h3 = new BridgeHarness();
+        h3.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-busy-3\"}");
+        h3.sttFactory.latest().callback.onError(SpeechRecognizer.ERROR_RECOGNIZER_BUSY);
+        int sessionsBeforeHostStop = h3.sttFactory.createdSessions.size();
+        h3.events.clear();
+        h3.bridge.onHostStop();
+        assertFalse(h3.bridge.isAudioSessionActive());
+        h3.scheduler.advanceBy(400L);
+        assertEquals(sessionsBeforeHostStop, h3.sttFactory.createdSessions.size());
+    }
+
+    @Test
+    public void warmUpTtsPreBindsEngineOnceAndSharesPendingInitWithCapabilities() throws Exception {
+        BridgeHarness h = new BridgeHarness();
+        h.tts.autoCompleteInit = false;
+
+        h.bridge.warmUpTts();
+        assertEquals(1, h.tts.initCount);
+
+        // Repeated warmUpTts or getCapabilities while init is pending must reuse the active bind
+        h.bridge.warmUpTts();
+        h.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-warm-share\"}");
+        assertEquals(1, h.tts.initCount);
+        assertTrue(h.events.isEmpty());
+
+        h.tts.completeInit(true);
+        assertEquals(1, h.events.size());
+        assertEquals("cap-warm-share", h.events.get(0).getString("requestId"));
+        assertTrue(h.events.get(0).getBoolean("ttsAvailable"));
+
+        // Subsequent warmUpTts after completion must be a no-op
+        h.bridge.warmUpTts();
+        assertEquals(1, h.tts.initCount);
+    }
+
+    @Test
+    public void teacherVoiceGenderSelectionAndMismatchTelemetry() throws Exception {
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice femaleVoice = new Voice(
+                "vi-vn-x-vie-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.singleton("female"));
+        Voice maleVoice = new Voice(
+                "vi-vn-x-gft-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.singleton("male"));
+        Set<Voice> voices = new HashSet<>(Arrays.asList(femaleVoice, maleVoice));
+
+        Voice chosenMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "male");
+        assertNotNull(chosenMale);
+        assertEquals("vi-vn-x-gft-local", chosenMale.getName());
+
+        Voice chosenFemale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "female");
+        assertNotNull(chosenFemale);
+        assertEquals("vi-vn-x-vie-local", chosenFemale.getName());
+
+        BridgeHarness h = new BridgeHarness();
+        h.tts.voiceGenderMismatch = true;
+        h.tts.resolvedVoiceName = "vi-vn-x-vie-local";
+        h.sendTrusted(
+                "{\"action\":\"speak\",\"requestId\":\"req-male-1\",\"text\":\"Thầy chào con\","
+                        + "\"voiceGender\":\"male\",\"voiceId\":\"local_north_thien_minh\"}");
+        assertEquals("male", h.tts.lastVoiceGender);
+        assertEquals("local_north_thien_minh", h.tts.lastVoiceId);
+
+        assertNotNull(h.tts.lastCallback);
+        h.tts.lastCallback.onStart(h.tts.lastUtteranceId);
+
+        JSONObject startEvent = null;
+        for (JSONObject ev : h.events) {
+            if ("tts_start".equals(ev.optString("type"))) {
+                startEvent = ev;
+            }
+        }
+        assertNotNull("Expected tts_start event", startEvent);
+        assertTrue(startEvent.optBoolean("voiceGenderMismatch", false));
+        assertEquals("vi-vn-x-vie-local", startEvent.optString("resolvedVoiceName"));
+    }
+
+    @Test
+    public void androidTtsEngineDoesNotPoisonVoiceCacheWhenColdGetVoicesHasNoVietnamese() {
+        ViReadNativeSpeechBridge.AndroidTtsEngine engine =
+                new ViReadNativeSpeechBridge.AndroidTtsEngine(
+                        androidx.test.core.app.ApplicationProvider.getApplicationContext());
+        Voice englishOnly = new Voice(
+                "en-us-x-sfg-local",
+                Locale.US,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+
+        // Cold boot: getVoices returns non-empty English voice set without vi-VN packs yet
+        engine.cacheFetchedVoicesIfViReady(Collections.singleton(englishOnly));
+        assertEquals(-1, engine.getCachedViVoicesCountForTest());
+        assertFalse(engine.hasMaleFromCacheOrEmpty());
+        assertTrue(
+                "When Vi voices aren't cached yet, female availability must still follow isVietnameseAvailable()",
+                engine.hasFemaleFromCacheOrAvailability(true));
+        assertFalse(engine.hasFemaleFromCacheOrAvailability(false));
+
+        // Subsequent query after Google TTS finishes loading vi-VN packs populates cache cleanly
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice femaleVi = new Voice(
+                "vi-vn-x-gft-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+        Voice maleVi = new Voice(
+                "vi-vn-x-vid-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+        Set<Voice> readyVoices = new HashSet<>(Arrays.asList(englishOnly, femaleVi, maleVi));
+        engine.cacheFetchedVoicesIfViReady(readyVoices);
+
+        assertEquals(2, engine.getCachedViVoicesCountForTest());
+        assertTrue(engine.hasMaleFromCacheOrEmpty());
+        assertTrue(engine.hasFemaleFromCacheOrAvailability(true));
     }
 }

@@ -189,7 +189,7 @@
     "submitFeedback": "Gửi phản hồi",
     "charCount": "{count}/{max}",
     "privacyNote": "Thông tin được sử dụng để tiếp nhận và xử lý yêu cầu hỗ trợ. Không gửi mật khẩu hoặc mã xác thực trong nội dung phản hồi.",
-    "sentSuccessDetail": "Máy chủ email đã tiếp nhận phản hồi của ba mẹ. ViRead sẽ sử dụng email liên hệ để phản hồi khi có thông tin cập nhật.",
+    "sentSuccessDetail": "Hệ thống đã tiếp nhận phản hồi của ba mẹ. ViRead sẽ sử dụng email liên hệ để phản hồi khi có thông tin cập nhật.",
     "submitError": "Chưa gửi được phản hồi. Ba mẹ vui lòng thử lại sau.",
     "categories": {
       "technical_issue": "Báo lỗi kỹ thuật",
@@ -220,8 +220,8 @@
         "title": "Sách và nhận diện",
         "q1": "Làm thế nào để lựa chọn sách?",
         "a1": "Mở danh mục sách, chọn một cuốn sách đang được cung cấp trong danh mục rồi làm theo hướng dẫn trên màn hình để bắt đầu.",
-        "q2": "Tôi cần làm gì khi nội dung OCR không chính xác?",
-        "a2": "Ba mẹ có thể gửi phản hồi tại trang này, ghi rõ tên sách, số trang gặp vấn đề và mô tả nội dung nhận diện chưa chính xác. Nội dung OCR cần được kiểm tra trước khi sử dụng cho hoạt động đọc."
+        "q2": "Tôi cần làm gì khi nội dung nhận diện từ trang sách chưa chính xác?",
+        "a2": "Ba mẹ có thể gửi phản hồi tại trang này, ghi rõ tên sách, số trang gặp vấn đề và mô tả nội dung chưa chính xác để đội ngũ ViRead kiểm tra và cập nhật."
       },
       "reading": {
         "title": "Hoạt động đọc",
@@ -233,5 +233,27 @@
         "a3": "Mở mục Tiến bộ để xem báo cáo hoặc mục Lịch sử để xem các buổi đọc đã được lưu."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Đồng bộ giọng đọc toàn hệ thống",
+    "title": "Chọn Cô giáo / Thầy giáo AI",
+    "subtitle": "Giọng đã chọn sẽ đồng hành xuyên suốt Đọc sách · Đánh vần · Đọc lại từ sai · Đọc hiểu · Trò chơi.",
+    "savedForChild": "Đang lưu cho bé {alias}",
+    "previewButton": "Nghe thử giọng",
+    "stopPreviewButton": "Dừng nghe thử",
+    "personaGroupAria": "Chọn nhân vật Cô giáo AI hoặc Thầy giáo AI",
+    "femaleTitle": "Cô giáo AI",
+    "femaleDesc": "Giọng nữ dịu dàng, ấm áp",
+    "maleTitle": "Thầy giáo AI",
+    "maleDesc": "Giọng nam trầm ấm, truyền cảm",
+    "selectedBadge": "Đang chọn",
+    "regionLabel": "Vùng miền",
+    "voiceListLabel": "Chọn giọng cụ thể",
+    "voiceListAria": "Danh sách giọng đọc theo nhân vật và vùng miền",
+    "policyLabel": "Chế độ nguồn giọng đọc",
+    "policyAria": "Chọn chế độ nguồn giọng đọc",
+    "policyLocalOnly": "Chỉ máy này",
+    "policyOnlineBackup": "Máy này + Dự phòng trực tuyến",
+    "workerOfflineHint": "Máy trạm giọng đọc trên máy đang tạm nghỉ. Hãy bật “Máy này + Dự phòng trực tuyến” để bé vẫn nghe được các câu sách mới và trò chơi chưa dựng sẵn."
   }
 }

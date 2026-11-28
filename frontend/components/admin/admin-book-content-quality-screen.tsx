@@ -10,7 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   AdminBadge,
@@ -25,11 +25,13 @@ import {
   type AdminBadgeTone,
 } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -75,6 +77,70 @@ const ISSUE_TYPE_KEYS: readonly BookContentIssueType[] = [
   "COPYRIGHT_CONCERN",
   "OTHER",
 ];
+
+function formatQualitySeverity(value: unknown): string {
+  const key = String(value ?? "REVIEW").toUpperCase();
+  const map: Record<string, string> = {
+    HIGH: "Nghiêm trọng",
+    MEDIUM: "Trung bình",
+    LOW: "Nhẹ",
+    REVIEW: "Cần xem xét",
+  };
+  return map[key] ?? "Cần xem xét";
+}
+
+function formatQualityEnum(value: unknown): string {
+  const key = String(value ?? "").toUpperCase();
+  const map: Record<string, string> = {
+    COMPLETED: "Hoàn tất",
+    IN_PROGRESS: "Đang xử lý",
+    PENDING: "Đang chờ",
+    FAILED: "Gặp lỗi",
+    STALE: "Cần quét lại",
+    NOT_STARTED: "Chưa quét",
+    PROVISIONAL: "Tạm tính",
+    CONFIRMED: "Đã xác nhận",
+    AUTO_CONFIRMED: "Tự động xác nhận",
+    READY_FOR_ADMIN_REVIEW: "Chờ quản trị viên duyệt",
+    SUITABLE: "Phù hợp",
+    SUITABLE_WITH_GUIDANCE: "Phù hợp (cần lưu ý)",
+    REVIEW_REQUIRED: "Cần kiểm tra",
+    NOT_RECOMMENDED: "Không khuyến nghị",
+    PASSED: "Đạt",
+    WARN: "Cảnh báo",
+    BLOCKED: "Bị chặn",
+    SKIPPED: "Đã bỏ qua",
+    APPROVE: "Phê duyệt",
+    REJECT: "Từ chối",
+    REQUEST_CHANGES: "Yêu cầu sửa",
+    SEXUAL_CONTENT: "Nội dung nhạy cảm",
+    VIOLENCE: "Bạo lực",
+    HATE_SPEECH: "Ngôn từ thù ghét",
+    SELF_HARM: "Tự hại",
+    PROFANITY: "Ngôn từ thô tục",
+    AGE_INAPPROPRIATE: "Chưa phù hợp độ tuổi",
+    OTHER_SENSITIVE: "Nội dung nhạy cảm khác",
+    MENTION: "Đề cập",
+    DEPICTION: "Mô tả",
+    INSTRUCTION: "Hướng dẫn",
+    SPELLING_ERROR: "Lỗi chính tả",
+    MISSING_CONTENT: "Thiếu nội dung",
+    OCR_MISMATCH: "Sai lệch nội dung nhận diện",
+    IMAGE_QUALITY_ERROR: "Chất lượng hình ảnh",
+    DUPLICATE_PAGE: "Trùng trang",
+    PAGE_ORDER_ERROR: "Sai thứ tự trang",
+    CHILD_SAFETY_CONCERN: "Cảnh báo an toàn trẻ em",
+    COPYRIGHT_CONCERN: "Vấn đề bản quyền",
+    BOOK_METADATA_ERROR: "Lỗi thông tin sách",
+    OTHER: "Khác",
+    RULE: "Quy tắc tự động",
+    CLOUD_AI: "Kiểm tra AI",
+    LOCAL_AI: "AI cục bộ",
+    OLLAMA: "AI cục bộ",
+  };
+  if (!key) return "Không rõ";
+  return map[key] ?? "Cần kiểm tra";
+}
 
 const APPROVAL_STATUS_KEYS: readonly BookApprovalStatus[] = [
   "PROCESSING",
@@ -180,19 +246,18 @@ function FindingCard({
   ) => void;
 }) {
   const t = useTranslations("admin");
-  const { formatPercent } = useI18n();
   return (
     <article className="rounded-xl border border-border bg-white p-3.5 shadow-2xs">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="text-sm font-bold text-ink">
           {t("contentQuality.findingCard.pageIssue", {
             pageNumber: finding.page_number,
-            issueType: finding.issue_type,
+            issueType: formatQualityEnum(finding.issue_type),
           })}
         </div>
         <div className="flex flex-wrap gap-1.5">
           <AdminBadge tone={finding.severity === "HIGH" ? "danger" : "warning"}>
-            {finding.severity}
+            {formatQualitySeverity(finding.severity)}
           </AdminBadge>
           <AdminBadge tone={findingStatusTones[finding.status] ?? "neutral"}>
             {t(`contentQuality.findingStatuses.${finding.status}`)}
@@ -228,20 +293,10 @@ function FindingCard({
           {t("contentQuality.findingCard.sourcePrefix")}{" "}
           {finding.detection_source === "RULE"
             ? t("contentQuality.findingCard.sourceDeterministic")
-            : t("contentQuality.findingCard.sourceOllama")}
+            : finding.detection_source === "CLOUD_AI"
+              ? t("contentQuality.findingCard.sourceCloudAi")
+              : t("contentQuality.findingCard.sourceOllama")}
         </span>
-        {finding.model_name ? <span>Model: {finding.model_name}</span> : null}
-        {finding.confidence !== null ? (
-          <span className="tabular-nums">
-            Confidence:{" "}
-            {formatPercent(finding.confidence, { maximumFractionDigits: 0 })}
-          </span>
-        ) : null}
-        {finding.page_revision_id ? (
-          <span className="font-mono">
-            Revision: {finding.page_revision_id}
-          </span>
-        ) : null}
       </div>
       <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3">
         <OcrLink bookId={bookId} finding={finding}>
@@ -278,6 +333,184 @@ function FindingCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+const DRAWER_LIST_PAGE_SIZE = 5;
+const PAGE_DIAGNOSTICS_PAGE_SIZE = 8;
+
+function ScanPageFindingsList({
+  findings,
+  bookId,
+  busyKey,
+  onUpdate,
+}: {
+  findings: readonly BookQualityFindingDTO[];
+  bookId: string;
+  busyKey: string | null;
+  onUpdate: (
+    finding: BookQualityFindingDTO,
+    status: Exclude<BookQualityFindingStatus, "STALE">,
+  ) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(findings.length / DRAWER_LIST_PAGE_SIZE),
+  );
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const visibleFindings = findings.slice(
+    (safePage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safePage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  return (
+    <div className="mt-3 grid gap-2.5">
+      {visibleFindings.map((finding) => (
+        <FindingCard
+          bookId={bookId}
+          busy={busyKey === `finding:${finding.id}`}
+          finding={finding}
+          key={finding.id}
+          onUpdate={onUpdate}
+        />
+      ))}
+      <PaginationBar
+        compact
+        onPageChange={setPage}
+        page={safePage}
+        pageSize={DRAWER_LIST_PAGE_SIZE}
+        total={findings.length}
+      />
+    </div>
+  );
+}
+
+function QualityScanProgressBar({
+  scan,
+  enqueuing = false,
+  testId,
+}: {
+  scan: {
+    status: string;
+    progress_pct?: number | null;
+    total_pages: number;
+    completed_pages: number;
+  } | null;
+  enqueuing?: boolean;
+  testId?: string;
+}) {
+  const tCommon = useTranslations("common");
+  const { formatNumber } = useI18n();
+  const isScanActive =
+    enqueuing || scan?.status === "QUEUED" || scan?.status === "RUNNING";
+  const hasMeasuredPages = Boolean(scan && scan.total_pages > 0);
+  const derivedPct =
+    enqueuing && !scan
+      ? 10
+      : typeof scan?.progress_pct === "number" &&
+          Number.isFinite(scan.progress_pct)
+        ? scan.progress_pct
+        : hasMeasuredPages
+          ? Math.round((scan!.completed_pages / scan!.total_pages) * 100)
+          : scan?.status === "RUNNING"
+            ? 35
+            : 10;
+
+  const stages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 20, label: tCommon("aiProgress.analyzing") },
+      { atPct: 55, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+
+  const progress = useAiProgress({
+    active: isScanActive,
+    realPercent: derivedPct,
+    progressMode: "staged",
+    stages,
+    expectedDurationMs: 18_000,
+  });
+
+  if (!isScanActive) return null;
+
+  return (
+    <AiProgressBar
+      active
+      className="mt-2.5"
+      detail={
+        hasMeasuredPages
+          ? `${formatNumber(scan!.completed_pages)}/${formatNumber(scan!.total_pages)}`
+          : undefined
+      }
+      elapsedSeconds={progress.elapsedSeconds}
+      label={progress.stageLabel ?? tCommon("aiProgress.safetyChecking")}
+      percent={progress.percent}
+      size="sm"
+      testId={testId}
+    />
+  );
+}
+
+function WorkflowInlineProgressBar({
+  status,
+  completedChunks,
+  totalChunks,
+  progressPct,
+}: {
+  status: string;
+  completedChunks: number;
+  totalChunks: number;
+  progressPct?: number | null;
+}) {
+  const tCommon = useTranslations("common");
+  const { formatNumber } = useI18n();
+  const isActive =
+    status === "QUEUED" ||
+    status === "PROOFREADING" ||
+    status === "CHILD_SAFETY_SCANNING";
+  const derivedPct =
+    typeof progressPct === "number" && Number.isFinite(progressPct)
+      ? progressPct
+      : status === "CHILD_SAFETY_SCANNING"
+        ? totalChunks > 0
+          ? Math.round(55 + (completedChunks / totalChunks) * 38)
+          : 65
+        : status === "PROOFREADING"
+          ? totalChunks > 0
+            ? Math.round(10 + (completedChunks / totalChunks) * 45)
+            : 18
+          : 8;
+  const progress = useAiProgress({
+    active: isActive,
+    realPercent: derivedPct,
+    progressMode: "staged",
+    expectedDurationMs: 14_000,
+  });
+  if (!isActive) return null;
+  const label =
+    status === "CHILD_SAFETY_SCANNING"
+      ? tCommon("aiProgress.safetyChecking")
+      : status === "PROOFREADING"
+        ? tCommon("aiProgress.proofreading")
+        : tCommon("aiProgress.preparing");
+  return (
+    <AiProgressBar
+      active
+      className="mt-2.5"
+      detail={
+        totalChunks > 0
+          ? `${formatNumber(completedChunks)}/${formatNumber(totalChunks)}`
+          : undefined
+      }
+      elapsedSeconds={progress.elapsedSeconds}
+      label={label}
+      percent={progress.percent}
+      size="compact"
+    />
   );
 }
 
@@ -345,6 +578,12 @@ export function AdminBookContentQualityScreen({
   const [pageDiagnosticFilter, setPageDiagnosticFilter] = useState<
     "ALL" | "ISSUES" | "UNVERIFIED" | "MEDIA_OCR"
   >("ALL");
+  const [reportHistoryPage, setReportHistoryPage] = useState(1);
+  const [reportRelatedFindingsPage, setReportRelatedFindingsPage] = useState(1);
+  const [pageDiagnosticsPage, setPageDiagnosticsPage] = useState(1);
+  const [findingGroupsPage, setFindingGroupsPage] = useState(1);
+  const [aiWorkflowsPage, setAiWorkflowsPage] = useState(1);
+  const [scanPagesPage, setScanPagesPage] = useState(1);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const reportRequestId = useRef(0);
   const bookRequestId = useRef(0);
@@ -526,6 +765,8 @@ export function AdminBookContentQualityScreen({
     try {
       const detail = await bookContentQuality.getReport(reportId);
       setSelectedReport(detail);
+      setReportHistoryPage(1);
+      setReportRelatedFindingsPage(1);
       setResolutionNote(detail.admin_resolution_note ?? "");
     } catch (error) {
       setActionError(errorMessage(error, t));
@@ -573,6 +814,11 @@ export function AdminBookContentQualityScreen({
       const detail = await bookContentQuality.getBook(bookId);
       setSelectedBook(detail);
       setSelectedScan(detail.latest_scan_detail);
+      setPageDiagnosticFilter("ALL");
+      setPageDiagnosticsPage(1);
+      setFindingGroupsPage(1);
+      setAiWorkflowsPage(1);
+      setScanPagesPage(1);
       syncRightsForm(detail);
       setBookDecisionReason("");
       setFalsePositiveCategory("");
@@ -673,6 +919,7 @@ export function AdminBookContentQualityScreen({
     setActionError(null);
     try {
       setSelectedScan(await bookContentQuality.getScan(scanId));
+      setScanPagesPage(1);
     } catch (error) {
       setActionError(errorMessage(error, t));
     } finally {
@@ -732,6 +979,87 @@ export function AdminBookContentQualityScreen({
         workflow.safety_status === "FAILED" ||
         workflow.safety_status === "STALE",
     ).length ?? 0;
+
+  const reportHistoryItems = selectedReport?.history ?? [];
+  const safeReportHistoryPage = Math.min(
+    Math.max(1, reportHistoryPage),
+    Math.max(1, Math.ceil(reportHistoryItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleReportHistory = reportHistoryItems.slice(
+    (safeReportHistoryPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeReportHistoryPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const reportRelatedFindings = selectedReport?.related_findings ?? [];
+  const safeReportRelatedFindingsPage = Math.min(
+    Math.max(1, reportRelatedFindingsPage),
+    Math.max(
+      1,
+      Math.ceil(reportRelatedFindings.length / DRAWER_LIST_PAGE_SIZE),
+    ),
+  );
+  const visibleReportRelatedFindings = reportRelatedFindings.slice(
+    (safeReportRelatedFindingsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeReportRelatedFindingsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const filteredPageDiagnostics = (selectedBook?.page_diagnostics ?? []).filter(
+    (item) => {
+      if (pageDiagnosticFilter === "ALL") return true;
+      if (pageDiagnosticFilter === "ISSUES") {
+        return item.codes.some((code) => code !== "OK");
+      }
+      if (pageDiagnosticFilter === "UNVERIFIED") {
+        return item.codes.includes("UNVERIFIED_PAGE");
+      }
+      return item.codes.some((code) =>
+        ["MISSING_IMAGE", "EMPTY_OCR", "OCR_ERROR", "IMAGE_ONLY_PAGE"].includes(
+          code,
+        ),
+      );
+    },
+  );
+  const safePageDiagnosticsPage = Math.min(
+    Math.max(1, pageDiagnosticsPage),
+    Math.max(
+      1,
+      Math.ceil(filteredPageDiagnostics.length / PAGE_DIAGNOSTICS_PAGE_SIZE),
+    ),
+  );
+  const visiblePageDiagnostics = filteredPageDiagnostics.slice(
+    (safePageDiagnosticsPage - 1) * PAGE_DIAGNOSTICS_PAGE_SIZE,
+    safePageDiagnosticsPage * PAGE_DIAGNOSTICS_PAGE_SIZE,
+  );
+
+  const findingGroupItems = selectedBook?.assessment.finding_groups ?? [];
+  const safeFindingGroupsPage = Math.min(
+    Math.max(1, findingGroupsPage),
+    Math.max(1, Math.ceil(findingGroupItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleFindingGroups = findingGroupItems.slice(
+    (safeFindingGroupsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeFindingGroupsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const aiWorkflowItems = selectedBook?.ai_workflows ?? [];
+  const safeAiWorkflowsPage = Math.min(
+    Math.max(1, aiWorkflowsPage),
+    Math.max(1, Math.ceil(aiWorkflowItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleAiWorkflows = aiWorkflowItems.slice(
+    (safeAiWorkflowsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeAiWorkflowsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const scanPageItems = selectedScan?.pages ?? [];
+  const safeScanPagesPage = Math.min(
+    Math.max(1, scanPagesPage),
+    Math.max(1, Math.ceil(scanPageItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleScanPages = scanPageItems.slice(
+    (safeScanPagesPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeScanPagesPage * DRAWER_LIST_PAGE_SIZE,
+  );
 
   const hasReportFilters = Boolean(
     search.trim() ||
@@ -871,6 +1199,7 @@ export function AdminBookContentQualityScreen({
         ariaLabel={t("contentQuality.reports.heading")}
       >
         <AdminSearchInput
+          containerClassName="sm:min-w-44!"
           label={t("contentQuality.reports.searchLabel")}
           onChange={(value) => {
             setReportOffset(0);
@@ -880,7 +1209,7 @@ export function AdminBookContentQualityScreen({
           value={search}
         />
         <AdminSelect
-          containerClassName="w-full sm:w-44"
+          containerClassName="w-full sm:w-36"
           label={t("contentQuality.reports.statusLabel")}
           onChange={(value) => {
             setReportOffset(0);
@@ -896,7 +1225,7 @@ export function AdminBookContentQualityScreen({
           ))}
         </AdminSelect>
         <AdminSelect
-          containerClassName="w-full sm:w-52"
+          containerClassName="w-full sm:w-44"
           label={t("contentQuality.reports.issueTypeLabel")}
           onChange={(value) => {
             setReportOffset(0);
@@ -912,7 +1241,7 @@ export function AdminBookContentQualityScreen({
           ))}
         </AdminSelect>
         <AdminSelect
-          containerClassName="w-full sm:w-48"
+          containerClassName="w-full sm:w-40"
           label={t("contentQuality.reports.bookLabel")}
           onChange={(value) => {
             setReportOffset(0);
@@ -927,10 +1256,10 @@ export function AdminBookContentQualityScreen({
             </option>
           ))}
         </AdminSelect>
-        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-36">
+        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-34">
           {t("contentQuality.reports.fromDateLabel")}
           <input
-            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2.5 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             onChange={(event) => {
               setReportOffset(0);
               setCreatedAfter(event.target.value);
@@ -939,10 +1268,10 @@ export function AdminBookContentQualityScreen({
             value={createdAfter}
           />
         </label>
-        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-36">
+        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-34">
           {t("contentQuality.reports.toDateLabel")}
           <input
-            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2.5 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             onChange={(event) => {
               setReportOffset(0);
               setCreatedBefore(event.target.value);
@@ -1037,6 +1366,7 @@ export function AdminBookContentQualityScreen({
                       </p>
                     </div>
                     <Button
+                      className="min-w-[8.25rem] shrink-0 whitespace-nowrap"
                       disabled={busyKey === `report:${report.id}`}
                       onClick={() => void openReport(report.id)}
                       size="admin"
@@ -1060,9 +1390,6 @@ export function AdminBookContentQualityScreen({
                       </span>
                     </p>
                   ) : null}
-                  <p className="mt-2 break-all font-mono text-[11px] text-muted">
-                    {report.id}
-                  </p>
                 </article>
               );
             })}
@@ -1405,13 +1732,17 @@ export function AdminBookContentQualityScreen({
 
                       <p className="mt-1 text-xs text-muted">
                         {t("contentQuality.booksScan.assessmentSummaryLine", {
-                          proofreading: book.assessment.proofreading_status,
-                          safety: book.assessment.child_safety_status,
+                          proofreading: formatQualityEnum(
+                            book.assessment.proofreading_status,
+                          ),
+                          safety: formatQualityEnum(
+                            book.assessment.child_safety_status,
+                          ),
                         })}{" "}
                         {t(
                           `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
                           undefined,
-                          book.assessment.copyright_status,
+                          formatQualityEnum(book.assessment.copyright_status),
                         )}
                       </p>
 
@@ -1422,12 +1753,12 @@ export function AdminBookContentQualityScreen({
                             count: formatNumber(book.assessment.finding_count),
                           },
                         )}
-                        {` · HIGH ${formatNumber(book.assessment.high_finding_count)}`}
-                        {` · MEDIUM ${formatNumber(book.assessment.medium_finding_count)}`}
+                        {` · Nghiêm trọng ${formatNumber(book.assessment.high_finding_count)}`}
+                        {` · Trung bình ${formatNumber(book.assessment.medium_finding_count)}`}
                         {` · ${t(
                           `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
                           undefined,
-                          book.assessment.copyright_status,
+                          formatQualityEnum(book.assessment.copyright_status),
                         )}`}
                       </p>
 
@@ -1467,10 +1798,16 @@ export function AdminBookContentQualityScreen({
                           )}
                         </span>
                       </div>
+                      <QualityScanProgressBar
+                        enqueuing={busyKey === `scan:${book.book_id}`}
+                        scan={book.latest_scan}
+                        testId={`quality-book-scan-progress-${book.book_id}`}
+                      />
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap gap-2">
+                    <div className="grid w-full grid-cols-2 gap-2 sm:w-[20rem] sm:shrink-0 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                       <Button
+                        className="w-full whitespace-nowrap px-2.5"
                         disabled={busyKey === `book:${book.book_id}`}
                         onClick={() => void openBook(book.book_id)}
                         size="admin"
@@ -1479,6 +1816,7 @@ export function AdminBookContentQualityScreen({
                         {t("contentQuality.booksScan.viewResults")}
                       </Button>
                       <Button
+                        className="w-full whitespace-nowrap px-2.5"
                         disabled={
                           busyKey === `scan:${book.book_id}` || isScanning
                         }
@@ -1639,7 +1977,6 @@ export function AdminBookContentQualityScreen({
       {/* Report Detail Drawer */}
       <AdminDrawer
         closeLabel={t("contentQuality.reports.closeDetail")}
-        description={selectedReport?.id}
         footer={
           <Button onClick={closeReportDrawer} size="admin" variant="outline">
             {t("contentQuality.reports.closeDetail")}
@@ -1706,11 +2043,6 @@ export function AdminBookContentQualityScreen({
                     {t("contentQuality.reports.openOriginalInOcr")}
                   </ButtonLink>
                 ) : null}
-                {selectedReport.content_hash_snapshot ? (
-                  <p className="break-all font-mono text-[11px] text-muted">
-                    Content hash: {selectedReport.content_hash_snapshot}
-                  </p>
-                ) : null}
               </div>
 
               <div className="space-y-4">
@@ -1719,7 +2051,7 @@ export function AdminBookContentQualityScreen({
                     {t("contentQuality.reports.historyHeading")}
                   </h3>
                   <ol className="mt-2.5 space-y-3 border-s-2 border-border ps-3.5">
-                    {selectedReport.history.map((item, index) => (
+                    {visibleReportHistory.map((item, index) => (
                       <li key={`${item.created_at}-${index}`}>
                         <p className="text-xs font-bold text-ink">
                           {item.from_status
@@ -1738,6 +2070,14 @@ export function AdminBookContentQualityScreen({
                       </li>
                     ))}
                   </ol>
+                  <PaginationBar
+                    className="mt-3"
+                    compact
+                    onPageChange={setReportHistoryPage}
+                    page={safeReportHistoryPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={reportHistoryItems.length}
+                  />
                 </div>
 
                 <div className="rounded-xl border border-border bg-white p-4">
@@ -1746,7 +2086,7 @@ export function AdminBookContentQualityScreen({
                   </h3>
                   {selectedReport.related_findings.length ? (
                     <div className="mt-2.5 grid gap-2">
-                      {selectedReport.related_findings.map((finding) => (
+                      {visibleReportRelatedFindings.map((finding) => (
                         <div
                           className="rounded-control border border-border bg-surface-subtle/60 p-3"
                           key={finding.id}
@@ -1754,14 +2094,14 @@ export function AdminBookContentQualityScreen({
                           <p className="text-xs font-bold text-ink">
                             {t("contentQuality.findingCard.pageIssue", {
                               pageNumber: finding.page_number,
-                              issueType: finding.issue_type,
+                              issueType: formatQualityEnum(finding.issue_type),
                             })}
                           </p>
                           <p className="mt-0.5 text-[11px] text-muted">
                             {t(
                               `contentQuality.findingStatuses.${finding.status}`,
                             )}{" "}
-                            · {finding.detection_source}
+                            · {formatQualityEnum(finding.detection_source)}
                           </p>
                           <p
                             className="viread-learning-content mt-1.5 whitespace-pre-wrap text-xs text-ink"
@@ -1772,6 +2112,14 @@ export function AdminBookContentQualityScreen({
                           </p>
                         </div>
                       ))}
+                      <PaginationBar
+                        className="mt-1"
+                        compact
+                        onPageChange={setReportRelatedFindingsPage}
+                        page={safeReportRelatedFindingsPage}
+                        pageSize={DRAWER_LIST_PAGE_SIZE}
+                        total={reportRelatedFindings.length}
+                      />
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-muted">
@@ -1933,6 +2281,12 @@ export function AdminBookContentQualityScreen({
                 </AdminBadge>
               </div>
 
+              <QualityScanProgressBar
+                enqueuing={busyKey === `scan:${selectedBook.book_id}`}
+                scan={selectedBook.latest_scan_detail}
+                testId="quality-drawer-scan-progress"
+              />
+
               <AdminKpiGrid columns={4}>
                 <AdminKpiCard
                   detail={t(
@@ -1946,7 +2300,7 @@ export function AdminBookContentQualityScreen({
                         selectedBook.assessment.failed_or_unscanned_page_count,
                       ),
                     },
-                    "Hash hợp lệ: {valid}/{total} · Chưa quét: {unscanned}",
+                    "Đã khớp: {valid}/{total} · Chưa quét: {unscanned}",
                   )}
                   label={t("contentQuality.bookDetail.metrics.activePages")}
                   tone="neutral"
@@ -1956,9 +2310,11 @@ export function AdminBookContentQualityScreen({
                   detail={t(
                     "contentQuality.bookDetail.compactSafetyDetail",
                     {
-                      proofreading: selectedBook.assessment.proofreading_status,
+                      proofreading: formatQualityEnum(
+                        selectedBook.assessment.proofreading_status,
+                      ),
                     },
-                    "Proofreading: {proofreading}",
+                    "Kiểm tra chính tả: {proofreading}",
                   )}
                   label={t(
                     "contentQuality.bookDetail.metrics.childSafetyLabel",
@@ -1984,7 +2340,7 @@ export function AdminBookContentQualityScreen({
                         selectedBook.assessment.warning_page_count,
                       ),
                     },
-                    "HIGH {high} · MEDIUM {medium} · {pages} trang cảnh báo",
+                    "Nghiêm trọng {high} · Trung bình {medium} · {pages} trang cảnh báo",
                   )}
                   label={t("contentQuality.bookDetail.metrics.findingsLabel")}
                   tone={
@@ -2005,7 +2361,7 @@ export function AdminBookContentQualityScreen({
                         selectedBook.assessment.processing_pages,
                       ),
                     },
-                    "Stale: {stale} · Đang xử lý: {processing}",
+                    "Cần quét lại: {stale} · Đang xử lý: {processing}",
                   )}
                   label={t(
                     "contentQuality.bookDetail.metrics.failedOrUnscanned",
@@ -2026,7 +2382,7 @@ export function AdminBookContentQualityScreen({
                   {t(
                     "contentQuality.bookDetail.compactMetricsToggle",
                     undefined,
-                    "Xem chi tiết chỉ số AI, workflow & assessment hash",
+                    "Xem chi tiết chỉ số kiểm tra AI & đánh giá",
                   )}
                 </summary>
                 <div
@@ -2041,16 +2397,10 @@ export function AdminBookContentQualityScreen({
                       {t(
                         `contentQuality.rightsStatuses.${selectedBook.assessment.copyright_status}`,
                         undefined,
-                        selectedBook.assessment.copyright_status,
+                        formatQualityEnum(
+                          selectedBook.assessment.copyright_status,
+                        ),
                       )}
-                    </p>
-                  </div>
-                  <div className="rounded-control bg-surface-subtle p-2">
-                    <p className="text-[11px] text-muted">
-                      {t("contentQuality.bookDetail.metrics.assessmentHash")}
-                    </p>
-                    <p className="mt-0.5 break-all font-mono font-bold text-ink">
-                      {selectedBook.assessment.assessment_hash.slice(0, 16)}
                     </p>
                   </div>
                   {(
@@ -2127,12 +2477,11 @@ export function AdminBookContentQualityScreen({
                           selectedBook.assessment.copyright_status
                         }`,
                         undefined,
-                        selectedBook.rights_evidence?.effective_status ??
-                          selectedBook.assessment.copyright_status,
+                        formatQualityEnum(
+                          selectedBook.rights_evidence?.effective_status ??
+                            selectedBook.assessment.copyright_status,
+                        ),
                       )}
-                      {selectedBook.rights_evidence?.version
-                        ? ` · v${selectedBook.rights_evidence.version}`
-                        : ""}
                     </AdminBadge>
                   </span>
                 </div>
@@ -2355,7 +2704,10 @@ export function AdminBookContentQualityScreen({
                               : "border-border bg-surface-subtle text-ink hover:border-primary/40",
                           )}
                           key={value}
-                          onClick={() => setPageDiagnosticFilter(value)}
+                          onClick={() => {
+                            setPageDiagnosticFilter(value);
+                            setPageDiagnosticsPage(1);
+                          }}
                           type="button"
                         >
                           {t(
@@ -2365,66 +2717,53 @@ export function AdminBookContentQualityScreen({
                       ))}
                     </div>
                   </div>
-                  <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto">
-                    {selectedBook.page_diagnostics
-                      .filter((item) => {
-                        if (pageDiagnosticFilter === "ALL") return true;
-                        if (pageDiagnosticFilter === "ISSUES") {
-                          return item.codes.some((code) => code !== "OK");
-                        }
-                        if (pageDiagnosticFilter === "UNVERIFIED") {
-                          return item.codes.includes("UNVERIFIED_PAGE");
-                        }
-                        return item.codes.some((code) =>
-                          [
-                            "MISSING_IMAGE",
-                            "EMPTY_OCR",
-                            "OCR_ERROR",
-                            "IMAGE_ONLY_PAGE",
-                          ].includes(code),
-                        );
-                      })
-                      .map((item, idx) => (
-                        <li
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
-                          key={`${item.page_number}:${item.page_id ?? idx}`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <span className="font-extrabold text-ink">
-                              {t(
-                                "contentQuality.bookDetail.pageNumberHeading",
-                                {
-                                  pageNumber: formatNumber(item.page_number),
-                                },
-                              )}
-                            </span>
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {item.codes.map((code) => (
-                                <AdminBadge
-                                  key={code}
-                                  tone={code === "OK" ? "success" : "warning"}
-                                >
-                                  {t(
-                                    `contentQuality.diagnosticStatuses.${code}`,
-                                    undefined,
-                                    code,
-                                  )}
-                                </AdminBadge>
-                              ))}
-                            </div>
-                            <p className="mt-1 text-muted">{item.summary}</p>
+                  <ul className="mt-3 grid gap-2">
+                    {visiblePageDiagnostics.map((item, idx) => (
+                      <li
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
+                        key={`${item.page_number}:${item.page_id ?? idx}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-extrabold text-ink">
+                            {t("contentQuality.bookDetail.pageNumberHeading", {
+                              pageNumber: formatNumber(item.page_number),
+                            })}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {item.codes.map((code) => (
+                              <AdminBadge
+                                key={code}
+                                tone={code === "OK" ? "success" : "warning"}
+                              >
+                                {t(
+                                  `contentQuality.diagnosticStatuses.${code}`,
+                                  undefined,
+                                  code,
+                                )}
+                              </AdminBadge>
+                            ))}
                           </div>
-                          {item.page_id ? (
-                            <Link
-                              className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary transition-colors hover:bg-surface-subtle"
-                              href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
-                            >
-                              {t("contentQuality.bookDetail.openOcrPage")}
-                            </Link>
-                          ) : null}
-                        </li>
-                      ))}
+                          <p className="mt-1 text-muted">{item.summary}</p>
+                        </div>
+                        {item.page_id ? (
+                          <Link
+                            className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary transition-colors hover:bg-surface-subtle"
+                            href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
+                          >
+                            {t("contentQuality.bookDetail.openOcrPage")}
+                          </Link>
+                        ) : null}
+                      </li>
+                    ))}
                   </ul>
+                  <PaginationBar
+                    className="mt-3"
+                    compact
+                    onPageChange={setPageDiagnosticsPage}
+                    page={safePageDiagnosticsPage}
+                    pageSize={PAGE_DIAGNOSTICS_PAGE_SIZE}
+                    total={filteredPageDiagnostics.length}
+                  />
                 </section>
               ) : null}
 
@@ -2434,15 +2773,15 @@ export function AdminBookContentQualityScreen({
                   <h4 className="text-sm font-extrabold text-ink">
                     {t("contentQuality.bookDetail.childSafetySummaryHeading")}
                   </h4>
-                  {selectedBook.assessment.finding_groups.map((group) => (
+                  {visibleFindingGroups.map((group) => (
                     <article
                       className="rounded-xl border border-border bg-white p-3.5"
                       key={`${group.category}:${group.severity}`}
                     >
                       <p className="text-sm font-bold text-ink">
                         {t("contentQuality.bookDetail.groupSummaryLine", {
-                          category: group.category,
-                          severity: group.severity,
+                          category: formatQualityEnum(group.category),
+                          severity: formatQualitySeverity(group.severity),
                           findingCount: formatNumber(group.finding_count),
                           pageCount: formatNumber(group.page_count),
                         })}
@@ -2479,6 +2818,13 @@ export function AdminBookContentQualityScreen({
                       ))}
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setFindingGroupsPage}
+                    page={safeFindingGroupsPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={findingGroupItems.length}
+                  />
                 </div>
               ) : null}
 
@@ -2633,7 +2979,7 @@ export function AdminBookContentQualityScreen({
                           key={`${decision.action}:${decision.created_at}:${index}`}
                         >
                           <p className="font-bold text-ink">
-                            {decision.action} ·{" "}
+                            {formatQualityEnum(decision.action)} ·{" "}
                             <span className="tabular-nums">
                               {decision.created_at
                                 ? formatDate(decision.created_at)
@@ -2705,7 +3051,7 @@ export function AdminBookContentQualityScreen({
               ) : null}
               {selectedBook.ai_workflows.length ? (
                 <div className="mt-3 grid gap-3">
-                  {selectedBook.ai_workflows.map((workflow) => (
+                  {visibleAiWorkflows.map((workflow) => (
                     <article
                       className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
                       key={workflow.workflow_id}
@@ -2713,23 +3059,19 @@ export function AdminBookContentQualityScreen({
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <h4 className="text-sm font-bold text-ink">
-                            {workflow.status} · {workflow.safety_status}
+                            {formatQualityEnum(workflow.status)} ·{" "}
+                            {formatQualityEnum(workflow.safety_status)}
                           </h4>
                           <p className="mt-0.5 text-xs text-muted">
-                            {workflow.suitability ??
-                              t(
-                                "contentQuality.bookDetail.noSuitabilityFallback",
-                              )}{" "}
-                            · Candidate v{workflow.candidate_version}
+                            {workflow.suitability
+                              ? formatQualityEnum(workflow.suitability)
+                              : t(
+                                  "contentQuality.bookDetail.noSuitabilityFallback",
+                                )}{" "}
+                            · Phiên bản {workflow.candidate_version}
                             {workflow.hash_match
                               ? t("contentQuality.bookDetail.safetyHashMatch")
                               : t("contentQuality.bookDetail.safetyHashStale")}
-                          </p>
-                          <p className="mt-0.5 break-all font-mono text-[11px] text-muted">
-                            {t("contentQuality.bookDetail.workflowIdLine", {
-                              workflowId: workflow.workflow_id,
-                              revisionId: workflow.page_revision_id,
-                            })}
                           </p>
                         </div>
                         <ButtonLink
@@ -2743,11 +3085,16 @@ export function AdminBookContentQualityScreen({
 
                       {workflow.error_code ? (
                         <p className="mt-2 text-xs font-semibold text-danger">
-                          {t("contentQuality.bookDetail.workflowError", {
-                            code: workflow.error_code,
-                          })}
+                          {t("contentQuality.bookDetail.workflowError")}
                         </p>
                       ) : null}
+
+                      <WorkflowInlineProgressBar
+                        completedChunks={workflow.progress.completed_chunks}
+                        progressPct={workflow.progress_pct}
+                        status={workflow.status}
+                        totalChunks={workflow.progress.total_chunks}
+                      />
 
                       {workflow.findings.length ? (
                         <div className="mt-2.5 grid gap-2">
@@ -2757,13 +3104,13 @@ export function AdminBookContentQualityScreen({
                               key={String(finding.finding_id ?? index)}
                             >
                               <p className="text-xs font-bold text-ink">
-                                {String(finding.category ?? "OTHER_SENSITIVE")}{" "}
-                                · {String(finding.content_type ?? "MENTION")} ·{" "}
-                                {String(finding.severity ?? "REVIEW")}
+                                {formatQualityEnum(finding.category)} ·{" "}
+                                {formatQualityEnum(finding.content_type)} ·{" "}
+                                {formatQualitySeverity(finding.severity)}
                               </p>
                               <p className="mt-0.5 text-[11px] text-muted">
-                                {String(finding.review_status ?? "PROVISIONAL")}{" "}
-                                · {String(finding.evidence_start ?? "?")}–
+                                {formatQualityEnum(finding.review_status)} ·{" "}
+                                {String(finding.evidence_start ?? "?")}–
                                 {String(finding.evidence_end ?? "?")}
                               </p>
                               <blockquote
@@ -2813,13 +3160,12 @@ export function AdminBookContentQualityScreen({
                                 key={`${String(scan.scan_id)}-${index}`}
                               >
                                 <p className="font-bold text-ink">
-                                  {String(scan.status)} ·{" "}
-                                  {String(
-                                    scan.suitability ??
-                                      t(
+                                  {formatQualityEnum(scan.status)} ·{" "}
+                                  {scan.suitability
+                                    ? formatQualityEnum(scan.suitability)
+                                    : t(
                                         "contentQuality.bookDetail.noSuitabilityFallback",
-                                      ),
-                                  )}{" "}
+                                      )}{" "}
                                   ·{" "}
                                   {t(
                                     "contentQuality.bookDetail.findingsCountLabel",
@@ -2832,15 +3178,13 @@ export function AdminBookContentQualityScreen({
                                     },
                                   )}
                                 </p>
-                                <p className="mt-1 font-mono text-[11px] text-muted">
-                                  {t("contentQuality.bookDetail.hashPrefix", {
-                                    hash: String(scan.content_hash ?? "?"),
-                                  })}{" "}
-                                  ·{" "}
+                                <p className="mt-1 text-[11px] text-muted">
                                   {t(
                                     "contentQuality.bookDetail.archivedPrefix",
                                   )}{" "}
-                                  {String(scan.archived_at ?? "")}
+                                  {scan.archived_at
+                                    ? formatDate(String(scan.archived_at))
+                                    : t("common.unknown")}
                                 </p>
                               </li>
                             ))}
@@ -2860,7 +3204,7 @@ export function AdminBookContentQualityScreen({
                             "contentQuality.bookDetail.providerProvenanceHeading",
                           )}
                         </summary>
-                        <div className="mt-2.5 grid gap-3 border-t border-border/70 pt-2.5 lg:grid-cols-3">
+                        <div className="mt-2.5 grid gap-3 border-t border-border/70 pt-2.5 lg:grid-cols-2">
                           <div>
                             <h5 className="text-xs font-bold text-ink">
                               {t(
@@ -2871,14 +3215,13 @@ export function AdminBookContentQualityScreen({
                               {workflow.candidate_history.map(
                                 (version, index) => (
                                   <li
-                                    className="break-all"
+                                    className="break-words"
                                     key={`${String(version.version)}-${index}`}
                                   >
-                                    v{String(version.version)} ·{" "}
-                                    {String(
-                                      version.changed_by ?? t("common.unknown"),
-                                    )}{" "}
-                                    · {String(version.content_hash ?? "")}
+                                    Phiên bản {String(version.version)} ·{" "}
+                                    {version.changed_by
+                                      ? "Quản trị viên"
+                                      : t("common.unknown")}
                                   </li>
                                 ),
                               )}
@@ -2895,43 +3238,16 @@ export function AdminBookContentQualityScreen({
                                 <li
                                   key={`${String(event.created_at)}-${index}`}
                                 >
-                                  {String(event.event)} ·{" "}
-                                  {String(
-                                    event.actor_id ?? t("common.unknown"),
-                                  )}{" "}
-                                  · {String(event.created_at ?? "")}
+                                  {formatQualityEnum(event.event)} ·{" "}
+                                  {event.actor_id
+                                    ? "Quản trị viên"
+                                    : t("common.unknown")}{" "}
+                                  ·{" "}
+                                  {event.created_at
+                                    ? formatDate(String(event.created_at))
+                                    : ""}
                                   {event.reason
                                     ? ` · ${t("contentQuality.bookDetail.reasonPrefix", { reason: String(event.reason) })}`
-                                    : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div>
-                            <h5 className="text-xs font-bold text-ink">
-                              {t(
-                                "contentQuality.bookDetail.providerProvenanceHeading",
-                              )}
-                            </h5>
-                            <ul className="mt-1 space-y-1 text-[11px] text-muted">
-                              {workflow.provider_events.map((event, index) => (
-                                <li
-                                  key={`${String(event.provider)}-${String(event.chunk_id)}-${index}`}
-                                >
-                                  {String(event.provider)} ·{" "}
-                                  {String(event.model)} ·{" "}
-                                  {event.availability
-                                    ? t(
-                                        "contentQuality.bookDetail.providerAvailable",
-                                      )
-                                    : t(
-                                        "contentQuality.bookDetail.providerUnavailable",
-                                      )}
-                                  {event.http_status
-                                    ? ` · HTTP ${String(event.http_status)}`
-                                    : ""}
-                                  {event.duration_ms !== undefined
-                                    ? ` · ${String(event.duration_ms)} ms`
                                     : ""}
                                 </li>
                               ))}
@@ -2941,6 +3257,13 @@ export function AdminBookContentQualityScreen({
                       </details>
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setAiWorkflowsPage}
+                    page={safeAiWorkflowsPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={aiWorkflowItems.length}
+                  />
                 </div>
               ) : (
                 <p className="mt-2 text-xs text-muted">
@@ -2958,14 +3281,15 @@ export function AdminBookContentQualityScreen({
                       status: t(
                         `contentQuality.scanStatuses.${selectedScan.status}`,
                         undefined,
-                        selectedScan.status,
+                        formatQualityEnum(selectedScan.status),
                       ),
                     })}
                   </h3>
-                  <span className="font-mono text-[11px] text-muted">
-                    {selectedScan.id}
-                  </span>
                 </div>
+                <QualityScanProgressBar
+                  scan={selectedScan}
+                  testId="quality-selected-scan-progress"
+                />
                 <div className="mt-2.5 flex flex-wrap gap-2 text-xs tabular-nums">
                   {(
                     [
@@ -3010,7 +3334,7 @@ export function AdminBookContentQualityScreen({
                 ) : null}
 
                 <div className="mt-3.5 grid gap-3">
-                  {selectedScan.pages.map((page) => (
+                  {visibleScanPages.map((page) => (
                     <article
                       className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
                       key={page.id}
@@ -3026,28 +3350,27 @@ export function AdminBookContentQualityScreen({
                             {t(
                               `contentQuality.pageScanStatuses.${page.status}`,
                               undefined,
-                              page.status,
+                              formatQualityEnum(page.status),
                             )}
                             {` · ${t("contentQuality.bookDetail.rulePrefix")} `}
-                            {page.rule_check_status}
+                            {formatQualityEnum(page.rule_check_status)}
                             {` · ${t("contentQuality.bookDetail.aiPrefix")} `}
                             {t(
                               `contentQuality.aiCheckStatuses.${page.ai_analysis_status}`,
                               undefined,
-                              page.ai_analysis_status,
+                              formatQualityEnum(page.ai_analysis_status),
                             )}
                           </p>
-                          {page.page_revision_id ? (
-                            <p className="mt-0.5 break-all font-mono text-[11px] text-muted">
-                              {t(
-                                "contentQuality.bookDetail.sourceRevisionPrefix",
-                              )}{" "}
-                              {page.page_revision_id}
-                            </p>
-                          ) : null}
-                          {page.error_summary ? (
+                          {page.error_code || page.error_summary ? (
                             <p className="mt-1.5 text-xs font-semibold text-danger">
-                              {page.error_summary}
+                              {page.error_code === "CLOUD_AI_UNAVAILABLE" ||
+                              page.error_code === "CLOUD_AI_INVALID_RESPONSE"
+                                ? t(
+                                    `contentQuality.pageErrorCodes.${page.error_code}`,
+                                    undefined,
+                                    page.error_summary ?? page.error_code,
+                                  )
+                                : (page.error_summary ?? page.error_code)}
                             </p>
                           ) : null}
                         </div>
@@ -3079,17 +3402,12 @@ export function AdminBookContentQualityScreen({
                         </div>
                       </div>
                       {page.findings.length ? (
-                        <div className="mt-3 grid gap-2.5">
-                          {page.findings.map((finding) => (
-                            <FindingCard
-                              bookId={selectedBook.book_id}
-                              busy={busyKey === `finding:${finding.id}`}
-                              finding={finding}
-                              key={finding.id}
-                              onUpdate={updateFinding}
-                            />
-                          ))}
-                        </div>
+                        <ScanPageFindingsList
+                          bookId={selectedBook.book_id}
+                          busyKey={busyKey}
+                          findings={page.findings}
+                          onUpdate={updateFinding}
+                        />
                       ) : (
                         <p className="mt-2 text-xs text-muted">
                           {page.status === "COMPLETED"
@@ -3099,6 +3417,13 @@ export function AdminBookContentQualityScreen({
                       )}
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setScanPagesPage}
+                    page={safeScanPagesPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={scanPageItems.length}
+                  />
                 </div>
               </section>
             ) : null}

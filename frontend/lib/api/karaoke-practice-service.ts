@@ -5,6 +5,7 @@ import type {
   MusicalEvaluationResult,
   MusicalProfileData,
 } from "@/lib/karaoke/musical-scoring";
+import { melodyProfileSchema } from "@/types/karaoke";
 
 const practiceModeSchema = z.enum([
   "FULL_SONG",
@@ -84,6 +85,7 @@ export const musicalProfileResponseSchema = z.object({
     .array(z.object({ start_ms: z.number().int(), end_ms: z.number().int() }))
     .optional()
     .default([]),
+  melody_profile: melodyProfileSchema.nullable().optional(),
   updated_at: z.string().nullable().optional(),
 });
 
@@ -104,6 +106,7 @@ export interface SavePracticeSessionPayload {
   segmentStartMs?: number | null;
   segmentEndMs?: number | null;
   evaluation: MusicalEvaluationResult;
+  matchedDifficultWords?: string[];
 }
 
 /**
@@ -146,6 +149,14 @@ export function createKaraokePracticeService() {
           active_vocal_coverage: ev.activeVocalCoverage,
           mean_cents_error: ev.meanCentsError,
           mean_signed_timing_offset_ms: ev.meanSignedTimingOffsetMs,
+          ...(payload.matchedDifficultWords?.length
+            ? {
+                matched_difficult_words: payload.matchedDifficultWords.slice(
+                  0,
+                  8,
+                ),
+              }
+            : {}),
           segments: ev.segments.slice(0, 60).map((seg) => ({
             line_index: seg.lineIndex,
             line_id: seg.lineId,
@@ -212,6 +223,7 @@ export function createKaraokePracticeService() {
           hz: pt.hz,
           midi: pt.midi ?? undefined,
         })),
+        melodyProfile: dto.melody_profile ?? null,
       };
     },
   };

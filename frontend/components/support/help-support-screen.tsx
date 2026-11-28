@@ -1,8 +1,10 @@
 "use client";
 
-import { Send, ShieldCheck } from "lucide-react";
+import { BookOpenCheck, Bot, Send, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { openViReadAssistant } from "@/components/assistant/viread-assistant-widget";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { FormPage } from "@/components/common/form-page";
@@ -272,6 +274,64 @@ export function HelpSupportScreen() {
       />
 
       <section
+        aria-labelledby="support-quick-guide-heading"
+        className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6"
+        id="user-guide"
+      >
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-sky text-primary"
+          >
+            <BookOpenCheck className="size-5" />
+          </span>
+          <div>
+            <h2
+              className="text-xl font-extrabold text-ink sm:text-2xl"
+              id="support-quick-guide-heading"
+            >
+              {t("navigation.guide.title")}
+            </h2>
+            <p className="text-sm text-muted">
+              {t("navigation.guide.subtitle")}
+            </p>
+          </div>
+        </div>
+
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {(
+            [
+              { key: "1", href: "/children" },
+              { key: "2", href: "/my-books" },
+              { key: "3", href: "/device-permissions" },
+              { key: "4", href: "/reports/difficult-words" },
+              { key: "5", href: "/reading-management" },
+            ] as const
+          ).map((step) => (
+            <li
+              className="flex flex-col justify-between gap-2.5 rounded-control border border-border bg-canvas/60 p-3.5"
+              key={step.key}
+            >
+              <div>
+                <p className="text-sm font-extrabold text-ink">
+                  {t(`navigation.guide.steps.${step.key}.title`)}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  {t(`navigation.guide.steps.${step.key}.body`)}
+                </p>
+              </div>
+              <Link
+                className="inline-flex min-h-9 self-start items-center rounded-control border border-primary/30 bg-white px-3 text-xs font-bold text-primary transition-colors hover:bg-sky"
+                href={step.href}
+              >
+                {t(`navigation.guide.steps.${step.key}.action`)}
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section
         aria-labelledby="support-faq-heading"
         className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6"
       >
@@ -339,13 +399,23 @@ export function HelpSupportScreen() {
           >
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
-          <Button
-            className="mt-2 sm:max-w-72"
-            variant="secondary"
-            onClick={() => setShowFeedbackEditor(true)}
-          >
-            {t("parent.support.openFeedbackButton")}
-          </Button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              className="sm:max-w-72"
+              variant="secondary"
+              onClick={() => setShowFeedbackEditor(true)}
+            >
+              {t("parent.support.openFeedbackButton")}
+            </Button>
+            <Button
+              className="sm:max-w-72"
+              variant="outline"
+              onClick={() => openViReadAssistant()}
+            >
+              <Bot aria-hidden="true" className="size-4" />
+              {t("common.assistant.openFromSupport")}
+            </Button>
+          </div>
         </Card>
       </section>
     </section>

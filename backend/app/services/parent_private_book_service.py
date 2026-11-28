@@ -76,6 +76,7 @@ from app.schemas.parent_private_book import (
 )
 from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
+    RasterizedDocumentPage,
     iter_rasterized_spooled_document,
     spool_upload_file,
 )
@@ -261,14 +262,14 @@ def _parent_safe_notice(sub: ParentBookPageSubmission) -> str | None:
     """Return a parent-appropriate explanation without exposing sensitive raw excerpts to children."""
     status_val = sub.WorkflowStatus
     if status_val == "CHECKING":
-        return "Hệ thống đang chạy OCR, rà chính tả và Tool Check cho trang này."
+        return "Hệ thống đang nhận diện chữ, rà chính tả và kiểm tra an toàn nội dung cho trang này."
     if status_val == "PASSED_READY_TO_ADD":
         if sub.ProofreadSuggestionsJson and sub.SpellingAcceptedAt is None:
-            return "Tool Check đã đạt. Hãy xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách."
-        return "Trang đã đạt toàn bộ kiểm tra OCR, chính tả và Tool Check. Bạn có thể thêm vào sách."
+            return "Kiểm tra an toàn nội dung đã đạt. Hãy xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách."
+        return "Trang đã đạt toàn bộ kiểm tra nhận diện chữ, chính tả và an toàn nội dung. Bạn có thể thêm vào sách."
     if status_val == "NEEDS_ADMIN_REVIEW":
         if sub.IsImageOnly:
-            return "Trang không phát hiện chữ hoặc chỉ có hình ảnh. Tool Check chỉ kiểm tra văn bản nên trang này cần Admin xem xét trực tiếp."
+            return "Trang không phát hiện chữ hoặc chỉ có hình ảnh. Hệ thống kiểm tra an toàn nội dung chỉ kiểm tra văn bản nên trang này cần Admin xem xét trực tiếp."
         if sub.ToolCheckPolicyBlocked:
             return "Trang này có nội dung bị chính sách an toàn cho trẻ gắn cờ mức nghiêm trọng. Bạn cần chỉnh sửa nội dung hoặc gửi Admin xem xét."
         return "Trang này cần Admin xem xét trước khi có thể thêm vào sách riêng."
@@ -289,9 +290,23 @@ def _parent_safe_notice(sub: ParentBookPageSubmission) -> str | None:
     return None
 
 
+def _default_local_ai_enforced() -> bool:
+    try:
+        from app.services.ocr_ai.config import OcrCorrectionConfig
+
+        return not OcrCorrectionConfig.private_book_allow_cloud_ai()
+    except Exception:
+        return True
+
+
 def _build_scope(raw: dict[str, Any] | None) -> ToolCheckScopeRead:
     data = raw if isinstance(raw, dict) else {}
     default_local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
+    local_enforced = (
+        bool(data["local_ai_enforced"])
+        if "local_ai_enforced" in data and data["local_ai_enforced"] is not None
+        else default_local_ai_enforced
+    )
     return ToolCheckScopeRead(
         modality=str(data.get("modality") or "TEXT_ONLY_WITH_OCR_IMAGE_PROOFREAD"),
         covers_all_chunks=bool(data.get("covers_all_chunks", False)),
@@ -300,7 +315,7 @@ def _build_scope(raw: dict[str, Any] | None) -> ToolCheckScopeRead:
         image_visual_safety_checked=bool(data.get("image_visual_safety_checked", False)),
         requires_admin_visual_review=bool(data.get("requires_admin_visual_review", False)),
         copyright_scanner_status=str(data.get("copyright_scanner_status") or "NOT_CONFIGURED"),
-        local_ai_enforced=bool(data.get("local_ai_enforced", default_local_ai_enforced)),
+        local_ai_enforced=local_enforced,
     )
 
 
@@ -408,6 +423,15 @@ class ParentPrivateBookService:
                 owner_id=sub.OwnerParentId,
             )
         )
+        from app.services.ai_task_progress import compute_parent_submission_progress
+
+        _stages_done, _total_stages, progress_pct, _progress_mode = compute_parent_submission_progress(
+            workflow_status=sub.WorkflowStatus,
+            ocr_status=sub.OcrStatus,
+            proofread_status=sub.ProofreadStatus,
+            tool_check_status=sub.ToolCheckStatus,
+            is_image_only=bool(sub.IsImageOnly),
+        )
         return ParentPageSubmissionRead(
             id=sub.Id,
             book_id=sub.BookId,
@@ -427,6 +451,7 @@ class ParentPrivateBookService:
             optimistic_lock_version=int(sub.OptimisticLockVersion),
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
+            progress_pct=progress_pct,
             ocr_status=sub.OcrStatus,
             ocr_text=sub.OcrText,
             ocr_error_code=sub.OcrErrorCode,
@@ -534,12 +559,12 @@ class ParentPrivateBookService:
         if ocr_contribution is not None and getattr(ocr_contribution, "enabled", False):
             privacy_notice = (
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này. "
-                "Đóng góp mẫu OCR (Luồng 2) đang BẬT cho cuốn sách này — bạn có thể ngừng đóng góp bất kỳ lúc nào."
+                "Đóng góp dữ liệu cải thiện nhận diện chữ đang BẬT cho cuốn sách này — bạn có thể ngừng đóng góp bất kỳ lúc nào."
             )
         else:
             privacy_notice = (
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. "
-                "Sách này hiện không được dùng để huấn luyện OCR."
+                "Sách này hiện không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ."
             )
         try:
             from app.services.ocr_ai.config import OcrCorrectionConfig
@@ -1540,6 +1565,53 @@ class ParentPrivateBookService:
 
         return await self._serialize_submission_async(locked_book, sub, base_url=base_url)
 
+    async def _rasterize_single_spooled_page(
+        self, upload: UploadFile
+    ) -> tuple[str, str, RasterizedDocumentPage]:
+        """Spool upload to disk and stream at most 2 pages so multi-page files fail fast in O(1) RAM."""
+        spooled = await spool_upload_file(upload, max_bytes=MAX_DOCUMENT_BYTES)
+        if spooled.byte_length <= 0:
+            spooled.close()
+            raise HTTPException(
+                status_code=422, detail="The uploaded document is empty or corrupted"
+            )
+        try:
+            with iter_rasterized_spooled_document(spooled) as (
+                file_name,
+                source_format,
+                _source_sha256,
+                page_iter,
+            ):
+                def _take_max_two(
+                    it: Any,
+                ) -> tuple[RasterizedDocumentPage | None, RasterizedDocumentPage | None]:
+                    try:
+                        first = next(it, None)
+                        second = next(it, None) if first is not None else None
+                        return first, second
+                    finally:
+                        close_fn = getattr(it, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+
+                first_page, second_page = await asyncio.to_thread(_take_max_two, page_iter)
+
+            if first_page is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="The uploaded document is empty or corrupted",
+                )
+            if second_page is not None:
+                del second_page
+                raise HTTPException(
+                    status_code=422,
+                    detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
+                )
+            return file_name, source_format, first_page
+        finally:
+            spooled.close()
+            gc.collect()
+
     async def replace_committed_page_file(
         self,
         actor_id: UUID,
@@ -1573,48 +1645,16 @@ class ParentPrivateBookService:
         if source_type is not None and source_type not in VALID_SOURCE_TYPES:
             raise HTTPException(status_code=422, detail="Loại nguồn sử dụng không hợp lệ.")
 
-        spooled = await spool_upload_file(upload, max_bytes=MAX_DOCUMENT_BYTES)
-        if spooled.byte_length <= 0:
-            spooled.close()
-            raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
-        if not spooled.file_name:
-            spooled.file_name = "page.png"
-
-        try:
-            def _extract_single_page():
-                with iter_rasterized_spooled_document(spooled) as (
-                    fname,
-                    fmt,
-                    _sha,
-                    page_iter,
-                ):
-                    first_page = next(page_iter, None)
-                    if first_page is None:
-                        raise HTTPException(
-                            status_code=422,
-                            detail="The uploaded document is empty or corrupted",
-                        )
-                    second_page = next(page_iter, None)
-                    if second_page is not None:
-                        del second_page
-                        raise HTTPException(
-                            status_code=422,
-                            detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
-                        )
-                    return fname, fmt, first_page
-
-            bundle_file_name, bundle_source_format, page_img = await asyncio.to_thread(
-                _extract_single_page
-            )
-        finally:
-            spooled.close()
-
+        source_file_name, source_format, page_img = await self._rasterize_single_spooled_page(
+            upload
+        )
         page_bytes = page_img.image_bytes
         page_content_type = page_img.content_type
         page_extension = page_img.extension
         page_width = page_img.width
         page_height = page_img.height
         del page_img
+        gc.collect()
         new_sha = hashlib.sha256(page_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
@@ -1661,8 +1701,8 @@ class ParentPrivateBookService:
                     SourcePageNumber=int(locked_page.PageNumber),
                     TargetPageNumber=int(locked_page.PageNumber),
                     IdempotencyKey=f"page-replace-{uuid4().hex[:16]}",
-                    SourceFileName=bundle_file_name,
-                    SourceFormat=bundle_source_format,
+                    SourceFileName=source_file_name,
+                    SourceFormat=source_format,
                     SourceStoragePath=new_storage_path,
                     SourceSha256=new_sha,
                     ImageWidth=page_width,
@@ -1681,8 +1721,8 @@ class ParentPrivateBookService:
                 )
                 await self.repo.add_submissions([sub])
             else:
-                sub.SourceFileName = bundle_file_name
-                sub.SourceFormat = bundle_source_format
+                sub.SourceFileName = source_file_name
+                sub.SourceFormat = source_format
                 sub.SourceStoragePath = new_storage_path
                 sub.SourceSha256 = new_sha
                 sub.ImageWidth = page_width
@@ -2178,48 +2218,16 @@ class ParentPrivateBookService:
             raise HTTPException(status_code=409, detail="Không thể thay ảnh cho bản nộp đã hoàn tất hoặc đã hủy.")
         await self.repo.rollback()
 
-        spooled = await spool_upload_file(upload, max_bytes=MAX_DOCUMENT_BYTES)
-        if spooled.byte_length <= 0:
-            spooled.close()
-            raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
-        if not spooled.file_name:
-            spooled.file_name = "page.png"
-
-        try:
-            def _extract_single_page():
-                with iter_rasterized_spooled_document(spooled) as (
-                    fname,
-                    fmt,
-                    _sha,
-                    page_iter,
-                ):
-                    first_page = next(page_iter, None)
-                    if first_page is None:
-                        raise HTTPException(
-                            status_code=422,
-                            detail="The uploaded document is empty or corrupted",
-                        )
-                    second_page = next(page_iter, None)
-                    if second_page is not None:
-                        del second_page
-                        raise HTTPException(
-                            status_code=422,
-                            detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
-                        )
-                    return fname, fmt, first_page
-
-            bundle_file_name, bundle_source_format, page = await asyncio.to_thread(
-                _extract_single_page
-            )
-        finally:
-            spooled.close()
-
+        source_file_name, source_format, page = await self._rasterize_single_spooled_page(
+            upload
+        )
         page_bytes = page.image_bytes
         page_content_type = page.content_type
         page_extension = page.extension
         page_width = page.width
         page_height = page.height
         del page
+        gc.collect()
         new_sha = hashlib.sha256(page_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{submission_id}/"
@@ -2254,8 +2262,8 @@ class ParentPrivateBookService:
             now = datetime.now(timezone.utc)
             sub.SubmissionVersion = int(sub.SubmissionVersion) + 1
             sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
-            sub.SourceFileName = bundle_file_name
-            sub.SourceFormat = bundle_source_format
+            sub.SourceFileName = source_file_name
+            sub.SourceFormat = source_format
             sub.SourceStoragePath = new_storage_path
             sub.SourceSha256 = new_sha
             sub.ImageWidth = page_width
@@ -2623,7 +2631,7 @@ class ParentPrivateBookService:
                 ):
                     raise HTTPException(
                         status_code=409,
-                        detail="Trang chưa hoàn tất sạch OCR, rà chính tả và Tool Check cho đúng phiên bản hiện tại.",
+                        detail="Trang chưa hoàn tất nhận diện chữ, rà chính tả và kiểm tra an toàn nội dung cho đúng phiên bản hiện tại.",
                     )
                 if (sub_row.ProofreadSuggestionsJson or []) and sub_row.SpellingAcceptedAt is None:
                     if payload.accept_spelling:

@@ -13,7 +13,7 @@
     "noChildDescription": "Create a profile and start reading so the system can capture evidence.",
     "createChildAction": "Create child profile",
     "unsupportedTitle": "Data pending",
-    "unsupportedDescription": "Data for this item is not available in the current format. No sample data available.",
+    "unsupportedDescription": "Data for this section is not ready yet. Please try again later.",
     "retry": "Retry",
     "manageChildren": "Manage child profiles",
     "notFoundTitle": "Data not found",
@@ -52,7 +52,12 @@
     "emptyFilterDescription": "No words match the selected practice status.",
     "viewAllWords": "View all words ({count})",
     "paginationAria": "Paginate word practice book groups",
-    "paginationItemLabel": "books"
+    "paginationItemLabel": "books",
+    "statTotal": "Total words",
+    "statCompleted": "Read clearly",
+    "statRemaining": "To review",
+    "quickMastered": "Mastered",
+    "quickNeedsMoreFull": "Needs review"
   },
   "bookCard": {
     "gradeSingle": "Grade {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Not re-read",
     "badgeNeedsMore": "Needs practice",
     "badgeInProgress": "Practicing",
-    "badgeCompleted": "Read correctly"
+    "badgeCompleted": "Read correctly",
+    "showMoreWords": "+{count} more",
+    "showFewerWords": "Show less",
+    "tagMispronounced": "Misread {count}",
+    "tagOmitted": "Skipped {count}",
+    "tagRepeated": "Repeated {count}"
   },
   "item": {
     "notPracticed": "Not practiced",
@@ -146,7 +156,7 @@
     "sampleErrorDevice": "Cannot play sample audio on this device. The child can still read with parents.",
     "phonicsLockedBusy": "Phonics audio is temporarily busy. Please follow the steps on screen and tap Retry.",
     "evaluationTimeoutError": "System check is taking longer than expected. You can resend the recording.",
-    "evaluationSaveError": "Failed to save results to server. The child's voice recording is preserved — tap Save results.",
+    "evaluationSaveError": "Could not save the result yet. The child's recording is kept — tap Save result to retry.",
     "micPermissionError": "Browser microphone permission denied. Parents, please enable microphone access in browser settings and try again.",
     "micNotFoundError": "Microphone not found. Please check your connection.",
     "micUnsupportedError": "Your browser does not support direct recording.",

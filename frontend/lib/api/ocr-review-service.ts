@@ -16,6 +16,7 @@ export const aiCorrectionJobSchema = z.object({
   status: z.enum(["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]),
   completed_chunks: z.number().int().nonnegative(),
   total_chunks: z.number().int().positive(),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
   result: z.string().nullable(),
   error: z.string().nullable(),
   created_at: z.iso.datetime({ offset: true }),
@@ -58,6 +59,7 @@ export const adminAiWorkflowSchema = z.object({
     completed_chunks: z.number().int().nonnegative(),
     total_chunks: z.number().int().positive(),
   }),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
   attempts: z.number().int().nonnegative(),
   error_code: z.string().nullable(),
   original_ocr_hash: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -494,7 +496,7 @@ export function createOcrReviewService(): OcrReviewService {
         }
         if (pollAttempt >= MAX_AI_WORKFLOW_POLL_ATTEMPTS) {
           throw new Error(
-            "Tác vụ AI OCR vượt quá thời gian chờ phản hồi. Hãy thử lại sau ít giây.",
+            "Quá trình hỗ trợ chỉnh sửa văn bản mất nhiều thời gian hơn dự kiến. Vui lòng thử lại sau ít giây.",
           );
         }
         if (current.status === "QUEUED") {
@@ -560,7 +562,8 @@ export function createOcrReviewService(): OcrReviewService {
         throw new AiCorrectionCancelledError();
       }
       throw new Error(
-        current.error ?? "AI OCR cục bộ không thể hoàn tất tác vụ.",
+        current.error ??
+          "Hệ thống hỗ trợ chỉnh sửa văn bản chưa thể hoàn tất yêu cầu.",
       );
     },
     runCombinedWorkflow: async (

@@ -8,9 +8,11 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
+  DEFAULT_USER_CACHE_TTL_MS,
   invalidateUserCacheKey,
   readUserCacheWithStale,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO } from "@/types/profile";
 
@@ -42,8 +44,42 @@ function findCachedChild(
   return children?.data.find((candidate) => candidate.id === childId) ?? null;
 }
 
+function findFreshCachedChild(
+  userId: string | null | undefined,
+  childId: string,
+): ChildProfileDTO | null {
+  if (!userId || !childId) return null;
+
+  const summary = readUserCacheWithStale<DashboardSummaryDTO>(
+    userId,
+    "dashboard-summary",
+    DEFAULT_USER_CACHE_TTL_MS,
+  );
+  if (summary && !summary.isStale) {
+    const fromSummary = summary.data.children.find(
+      (candidate) => candidate.id === childId,
+    );
+    if (fromSummary) return fromSummary;
+  }
+
+  const children = readUserCacheWithStale<ChildProfileDTO[]>(
+    userId,
+    "children",
+    DEFAULT_USER_CACHE_TTL_MS,
+  );
+  if (children && !children.isStale) {
+    return children.data.find((candidate) => candidate.id === childId) ?? null;
+  }
+
+  return null;
+}
+
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
+  const replaceRef = useRef(replace);
+  useEffect(() => {
+    replaceRef.current = replace;
+  }, [replace]);
   const authRuntime = useAuthRuntime();
   const childService = useChildService();
   const userId = authRuntime?.session?.user?.id ?? null;
@@ -72,9 +108,13 @@ export function useValidatedSelectedChild() {
     return findCachedChild(userId, selectedChildId);
   }, [selectedChildId, userId, validatedSelectedChild]);
   const immediateChildRef = useRef<ChildProfileDTO | null>(immediateChild);
+  const validatedSelectedChildRef = useRef<ChildProfileDTO | null>(
+    validatedSelectedChild,
+  );
   useEffect(() => {
     immediateChildRef.current = immediateChild;
-  }, [immediateChild]);
+    validatedSelectedChildRef.current = validatedSelectedChild;
+  }, [immediateChild, validatedSelectedChild]);
 
   useEffect(() => {
     if (waitingForAuthInit) {
@@ -97,7 +137,7 @@ export function useValidatedSelectedChild() {
           };
         }
       }
-      replace("/dashboard?focus=child-selection&reason=missing");
+      replaceRef.current("/dashboard?focus=child-selection&reason=missing");
       return () => {
         active = false;
       };
@@ -105,6 +145,17 @@ export function useValidatedSelectedChild() {
 
     consumedQueryChildRef.current = true;
     const requestChildId = selectedChildId;
+    const freshCachedChild =
+      retryKey === 0 ? findFreshCachedChild(userId, requestChildId) : null;
+    if (freshCachedChild) {
+      if (validatedSelectedChildRef.current?.id !== freshCachedChild.id) {
+        setValidatedSelectedChild(freshCachedChild);
+      }
+      return () => {
+        active = false;
+      };
+    }
+
     const hadImmediateChild = Boolean(immediateChildRef.current);
 
     void childService
@@ -116,7 +167,7 @@ export function useValidatedSelectedChild() {
           invalidateUserCacheKey(userId, "dashboard-summary");
           invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
-          replace("/dashboard?focus=child-selection&reason=invalid");
+          replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
         setValidatedSelectedChild(child);
@@ -134,7 +185,7 @@ export function useValidatedSelectedChild() {
           invalidateUserCacheKey(userId, "dashboard-summary");
           invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
-          replace("/dashboard?focus=child-selection&reason=invalid");
+          replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
         if (!hadImmediateChild) {
@@ -149,7 +200,6 @@ export function useValidatedSelectedChild() {
     childService,
     clearSelectedChild,
     retryKey,
-    replace,
     selectChild,
     selectedChildId,
     setValidatedSelectedChild,
@@ -182,6 +232,14 @@ export function useValidatedSelectedChild() {
     }
     return { status: "loading", childId: selectedChildId };
   }, [immediateChild, selectedChildId, state, waitingForAuthInit]);
+
+  const visibleChild =
+    visibleState.status === "ready" ? visibleState.child : null;
+  useEffect(() => {
+    if (visibleChild) {
+      hydrateTeacherVoiceFromChildProfile(visibleChild);
+    }
+  }, [visibleChild]);
 
   return {
     state: visibleState,

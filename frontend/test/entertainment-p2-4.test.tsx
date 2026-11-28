@@ -15,6 +15,7 @@ import {
   setEntertainmentPreferences,
   useEntertainmentPreferences,
 } from "@/hooks/use-entertainment-preferences";
+import type { EntertainmentRecommendationsDTO } from "@/types/adaptive-learning";
 import type { ChildProfileDTO } from "@/types/child";
 import type { MemoryThemesCatalogDTO, SceneSpecDTO } from "@/types/memory-game";
 import {
@@ -158,19 +159,10 @@ const memoryCatalog: MemoryThemesCatalogDTO = {
   total_sprites: 10,
 };
 
-function makeRecommendationPayload(child: ChildProfileDTO) {
-  const targetWord = child.id === CHILD_TWO_ID ? "bình minh" : "nắng mai";
-  const primaryRecommendation = {
-    game_key: "PICTURE_DESCRIPTION" as const,
-    zone_title_vi: "Thế giới kể chuyện",
-    game_title_vi: "Kể chuyện qua tranh",
-    reason_vi: `Gợi ý dành riêng cho ${child.alias}`,
-    suggested_mode: "OBSERVE",
-    suggested_difficulty: 1,
-    target_words: [targetWord],
-    href: "/entertainment/picture-description",
-    priority: 1,
-  };
+function makeRecommendationPayload(
+  child: ChildProfileDTO,
+): EntertainmentRecommendationsDTO {
+  const focusWord = child.id === CHILD_TWO_ID ? "bình minh" : "nắng mai";
   return {
     child_id: child.id,
     child_alias: child.alias,
@@ -178,9 +170,19 @@ function makeRecommendationPayload(child: ChildProfileDTO) {
     mascot_greeting_vi: `Chào ${child.alias}! Hôm nay mình học vui nhé!`,
     natural_break_reminder_vi: "Nghỉ mắt nhẹ sau 15 phút nhé!",
     today_activities_count: 1,
-    focus_difficult_words: [targetWord],
-    primary_recommendation: primaryRecommendation,
-    recommendations: [primaryRecommendation],
+    focus_difficult_words: [focusWord],
+    primary_recommendation: {
+      game_key: "PICTURE_DESCRIPTION",
+      zone_title_vi: "Góc kể chuyện",
+      game_title_vi: "Kể chuyện qua tranh",
+      reason_vi: `Gợi ý dành riêng cho ${child.alias}`,
+      suggested_mode: "GUIDED_STORY",
+      suggested_difficulty: 1,
+      target_words: [focusWord],
+      href: "/entertainment/picture-description",
+      priority: 1,
+    },
+    recommendations: [],
   };
 }
 
@@ -269,6 +271,7 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
     expect(getEntertainmentPreferences()).toEqual({
       reducedMotion: true,
       calmSound: true,
+      autopilotEnabled: true,
     });
 
     render(<PreferenceProbe />);
@@ -301,7 +304,11 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
         window.localStorage.getItem(ENTERTAINMENT_PREFERENCES_STORAGE_KEY) ||
           "{}",
       ),
-    ).toEqual({ reducedMotion: false, calmSound: false });
+    ).toEqual({
+      reducedMotion: false,
+      calmSound: false,
+      autopilotEnabled: true,
+    });
 
     act(() => {
       window.localStorage.setItem(

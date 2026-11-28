@@ -235,7 +235,7 @@ async def _try_proxyless_private_signed_urls_async(
         in {"1", "true", "yes", "on"}
     )
     if (
-        APP_ENVIRONMENT == "test"
+        APP_ENVIRONMENT != "production"
         and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
         and create_signed_image_url is _ORIGINAL_CREATE_SIGNED_IMAGE_URL
         and create_cached_signed_image_urls_async is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC

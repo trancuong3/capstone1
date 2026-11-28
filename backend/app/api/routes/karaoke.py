@@ -11,8 +11,8 @@ from app.api.deps import get_current_parent_id, get_db
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.karaoke_repository import ConcurrentKaraokeUpdate, KaraokeRepository
 from app.schemas.karaoke import (
-    AdminDetail, AdminList, DraftPreview, DraftRequest, DraftWrite, Playback,
-    RevisionRequest, SongCreate, SongList, ValidationRead, VisibilityRequest,
+    AdminDetail, AdminList, DraftPreview, DraftRequest, DraftWrite, MelodyExtractResponse,
+    Playback, RevisionRequest, SongCreate, SongList, ValidationRead, VisibilityRequest,
 )
 from app.services.karaoke_service import KaraokeService
 
@@ -55,7 +55,16 @@ async def admin_songs(
     limit: int = Query(default=12, ge=1, le=50), offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id), service=Depends(get_karaoke_service),
 ):
-    return await service.admin_list(actor_id, search=search, status=status, limit=limit, offset=offset)
+    resolved_search = search if isinstance(search, str) else ""
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 12
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
+    return await service.admin_list(
+        actor_id,
+        search=resolved_search,
+        status=status,
+        limit=resolved_limit,
+        offset=resolved_offset,
+    )
 
 
 @router.post("/admin/songs", response_model=AdminDetail, status_code=201)
@@ -151,13 +160,31 @@ async def set_visibility(song_id: UUID, payload: VisibilityRequest,
     return await service.visibility(actor_id, song_id, payload)
 
 
+@router.post("/admin/songs/{song_id}/extract-melody", response_model=MelodyExtractResponse)
+async def extract_song_melody(
+    song_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    service=Depends(get_karaoke_service),
+):
+    return await service.extract_melody(actor_id, song_id)
+
+
 @router.get("/songs", response_model=SongList)
 async def songs(
     child_id: UUID, search: str = Query(default="", max_length=120),
     limit: int = Query(default=12, ge=1, le=50), offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id), service=Depends(get_karaoke_service),
 ):
-    return await service.catalog(actor_id, child_id, search=search, limit=limit, offset=offset)
+    resolved_search = search if isinstance(search, str) else ""
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 12
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
+    return await service.catalog(
+        actor_id,
+        child_id,
+        search=resolved_search,
+        limit=resolved_limit,
+        offset=resolved_offset,
+    )
 
 
 @router.get("/songs/{song_id}/playback", response_model=Playback)

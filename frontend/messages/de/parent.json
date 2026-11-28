@@ -189,7 +189,7 @@
     "submitFeedback": "Feedback senden",
     "charCount": "{count}/{max}",
     "privacyNote": "Diese Informationen werden verwendet, um Supportanfragen zu empfangen und zu bearbeiten. Gib keine Passwörter oder OTPs im Feedback-Inhalt ein.",
-    "sentSuccessDetail": "Der E-Mail-Server hat dein Feedback erhalten. ViRead wird die Kontakt-E-Mail verwenden, um bei Neuigkeiten zu antworten.",
+    "sentSuccessDetail": "ViRead hat Ihr Feedback erhalten. Wir nutzen Ihre Kontakt-E-Mail-Adresse für Updates.",
     "submitError": "Feedback konnte nicht gesendet werden. Bitte versuche es später noch einmal.",
     "categories": {
       "technical_issue": "Technischen Fehler melden",
@@ -220,8 +220,8 @@
         "title": "Bücher und Erkennung",
         "q1": "Wie wähle ich ein Buch aus?",
         "a1": "Öffnen Sie den Buchkatalog, wählen Sie ein verfügbares Buch aus und folgen Sie den Anweisungen auf dem Bildschirm, um zu beginnen.",
-        "q2": "Was soll ich tun, wenn der OCR-Inhalt falsch ist?",
-        "a2": "Eltern können auf dieser Seite Feedback geben. Bitte geben Sie den Buchtitel, die Seitenzahl und eine Beschreibung der fehlerhaften Erkennung an. Der OCR-Inhalt muss vor der Verwendung in einer Lesesitzung überprüft werden."
+        "q2": "Was soll ich tun, wenn der erkannte Seitentext ungenau ist?",
+        "a2": "Sie können auf dieser Seite Feedback mit Buchtitel, Seitenzahl und Fehlerbeschreibung senden, damit ViRead den Text prüfen und aktualisieren kann."
       },
       "reading": {
         "title": "Lesesitzung",
@@ -233,5 +233,27 @@
         "a3": "Öffnen Sie den Bereich Fortschritt, um Berichte anzuzeigen, oder den Bereich Verlauf, um gespeicherte Lesesitzungen zu sehen."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Systemweite Stimmsynchronisierung",
+    "title": "KI-Lehrerin oder KI-Lehrer wählen",
+    "subtitle": "Die gewählte Stimme begleitet Lesen · Buchstabieren · Schwierige Wörter · Verständnis · Spiele.",
+    "savedForChild": "Gespeichert für {alias}",
+    "previewButton": "Stimme anhören",
+    "stopPreviewButton": "Vorschau stoppen",
+    "personaGroupAria": "KI-Lehrerin oder KI-Lehrer auswählen",
+    "femaleTitle": "KI-Lehrerin",
+    "femaleDesc": "Sanfte, warme Frauenstimme",
+    "maleTitle": "KI-Lehrer",
+    "maleDesc": "Warme, ausdrucksstarke Männerstimme",
+    "selectedBadge": "Aktiv",
+    "regionLabel": "Region",
+    "voiceListLabel": "Stimme auswählen",
+    "voiceListAria": "Verfügbare Stimmen nach Lehrkraft und Region",
+    "policyLabel": "Sprachmodus",
+    "policyAria": "Sprachmodus auswählen",
+    "policyLocalOnly": "Nur dieses Gerät",
+    "policyOnlineBackup": "Dieses Gerät + Online-Backup",
+    "workerOfflineHint": "Der lokale Sprachdienst ist offline. Aktivieren Sie „Dieses Gerät + Online-Backup“, damit nicht zwischengespeicherte Sätze und Spiele vorgelesen werden."
   }
 }
