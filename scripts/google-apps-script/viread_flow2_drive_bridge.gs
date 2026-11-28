@@ -11,6 +11,8 @@
  * 1. Mở https://script.google.com/ bằng ĐÚNG tài khoản Google chủ Drive (vd: cuongtran290605@gmail.com).
  * 2. Bấm "Dự án mới" (New project), đặt tên: ViRead-Flow2-Drive-Bridge.
  * 3. Xóa code mặc định trong Code.gs và dán toàn bộ file này vào, bấm Lưu (Ctrl+S).
+ * 3b. BẬT XÓA VĨNH VIỄN (QUAN TRỌNG — tránh file xóa bị kẹt 30 ngày trong Thùng rác chiếm 15 GiB):
+ *     Ở thanh bên trái Apps Script, bấm **Dịch vụ (+)** (Services) -> chọn **Drive API** (v2/v3, Identifier: `Drive`) -> bấm **Thêm (Add)**.
  * 4. Vào Cài đặt dự án (biểu tượng bánh răng bên trái) -> Thuộc tính tập lệnh (Script Properties):
  *    Thêm thuộc tính:
  *      Property: VIREAD_BRIDGE_SECRET
@@ -356,16 +358,35 @@ function quotaInfo_() {
   };
 }
 
+function isAdvancedDriveServiceEnabled_() {
+  try {
+    return (
+      typeof Drive !== "undefined" &&
+      Boolean(
+        Drive &&
+          Drive.Files &&
+          (typeof Drive.Files.remove === "function" ||
+            typeof Drive.Files["delete"] === "function")
+      )
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
 function handleHealth_() {
   var tree = ensureRootTree_();
   var email = String(Session.getEffectiveUser().getEmail() || "").trim().toLowerCase();
+  var advancedDriveEnabled = isAdvancedDriveServiceEnabled_();
   return {
     ok: true,
     account_email: email || null,
     account_display_name: email ? email.split("@")[0] : null,
     root_folder_id: tree.rootFolderId,
     subfolder_ids: tree.subfolderIds,
-    quota: quotaInfo_()
+    quota: quotaInfo_(),
+    advanced_drive_enabled: advancedDriveEnabled,
+    delete_mode: advancedDriveEnabled ? "permanent_delete" : "trash_fallback"
   };
 }
 
@@ -527,7 +548,7 @@ function handleGetFile_(payload) {
 
 function deleteFilePermanentlyOrTrash_(file) {
   if (!file) {
-    return;
+    return { method: "noop", permanent: false, trashed_fallback: false };
   }
   var fileId = "";
   try {
@@ -537,11 +558,11 @@ function deleteFilePermanentlyOrTrash_(file) {
     try {
       if (typeof Drive.Files.remove === "function") {
         Drive.Files.remove(fileId);
-        return;
+        return { method: "permanent_delete", permanent: true, trashed_fallback: false };
       }
       if (typeof Drive.Files["delete"] === "function") {
         Drive.Files["delete"](fileId);
-        return;
+        return { method: "permanent_delete", permanent: true, trashed_fallback: false };
       }
     } catch (ignoreApiErr) {}
   }
@@ -549,7 +570,9 @@ function deleteFilePermanentlyOrTrash_(file) {
     if (!file.isTrashed()) {
       file.setTrashed(true);
     }
+    return { method: "trash_fallback", permanent: false, trashed_fallback: true };
   } catch (ignoreTrashErr) {}
+  return { method: "noop", permanent: false, trashed_fallback: false };
 }
 
 function handleDeleteFile_(payload) {
@@ -559,16 +582,17 @@ function handleDeleteFile_(payload) {
   try {
     file = DriveApp.getFileById(cleanId);
   } catch (e) {
-    return { ok: true, deleted: false };
+    return { ok: true, deleted: false, delete_mode: "noop", permanent_delete: false, trashed_fallback: false };
   }
   if (!isDescendantOfFolder_(file, tree.rootFolderId)) {
     throw makeError_("DRIVE_PERMISSION_DENIED", "Refusing to delete file outside ViRead Flow 2 folder");
   }
   if (file.isTrashed()) {
-    return { ok: true, deleted: false };
+    return { ok: true, deleted: false, delete_mode: "noop", permanent_delete: false, trashed_fallback: false };
   }
-  // If this is a chunked manifest, trash all referenced parts inside the root tree first.
+  // If this is a chunked manifest, delete (or trash fallback) all referenced parts inside the root tree first.
   var info = serializeFileInfo_(file, null);
+  var anyTrashFallback = false;
   if (info.is_chunked) {
     try {
       var manifest = JSON.parse(file.getBlob().getDataAsString("UTF-8"));
@@ -579,7 +603,10 @@ function handleDeleteFile_(payload) {
             try {
               var partFile = DriveApp.getFileById(String(partId));
               if (!partFile.isTrashed() && isDescendantOfFolder_(partFile, tree.rootFolderId)) {
-                deleteFilePermanentlyOrTrash_(partFile);
+                var partRes = deleteFilePermanentlyOrTrash_(partFile);
+                if (partRes && partRes.trashed_fallback) {
+                  anyTrashFallback = true;
+                }
               }
             } catch (ignorePartErr) {}
           }
@@ -587,8 +614,16 @@ function handleDeleteFile_(payload) {
       }
     } catch (ignoreManifestErr) {}
   }
-  deleteFilePermanentlyOrTrash_(file);
-  return { ok: true, deleted: true };
+  var mainRes = deleteFilePermanentlyOrTrash_(file);
+  var usedTrashFallback = anyTrashFallback || Boolean(mainRes && mainRes.trashed_fallback);
+  var permanentDelete = Boolean(mainRes && mainRes.permanent) && !usedTrashFallback;
+  return {
+    ok: true,
+    deleted: true,
+    delete_mode: usedTrashFallback ? "trash_fallback" : (mainRes ? mainRes.method : "noop"),
+    permanent_delete: permanentDelete,
+    trashed_fallback: usedTrashFallback
+  };
 }
 
 function handleListResumeFiles_(payload) {
@@ -720,11 +755,27 @@ function handleDeleteResumeFile_(payload) {
   }
   var matches = findMatchingFilesInFolder_(current, parts[parts.length - 1]);
   var deletedAny = false;
+  var anyTrashFallback = false;
+  var anyPermanent = false;
   for (var j = 0; j < matches.length; j++) {
     try {
-      deleteFilePermanentlyOrTrash_(matches[j]);
+      var res = deleteFilePermanentlyOrTrash_(matches[j]);
       deletedAny = true;
+      if (res && res.trashed_fallback) {
+        anyTrashFallback = true;
+      } else if (res && res.permanent) {
+        anyPermanent = true;
+      }
     } catch (ignoreErr) {}
   }
-  return { ok: true, deleted: deletedAny };
+  var deleteMode = !deletedAny
+    ? "noop"
+    : (anyTrashFallback ? "trash_fallback" : (anyPermanent ? "permanent_delete" : "noop"));
+  return {
+    ok: true,
+    deleted: deletedAny,
+    delete_mode: deleteMode,
+    permanent_delete: deletedAny && anyPermanent && !anyTrashFallback,
+    trashed_fallback: anyTrashFallback
+  };
 }

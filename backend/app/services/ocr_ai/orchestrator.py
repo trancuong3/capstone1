@@ -7,6 +7,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 from app.diagnostic_logging import log_diagnostic
+from app.services.ai_capability_router import (
+    CircuitBreakerRegistry,
+    CircuitState,
+    get_shared_ai_circuit_breaker,
+)
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text, reconstruct_ocr_text
 from app.services.admin_ocr_local import (
     LocalCorrectionError,
@@ -23,6 +28,12 @@ from app.services.ocr_ai.exceptions import (
 from app.services.ocr_ai.gemini_provider import GeminiOcrProvider
 from app.services.ocr_ai.groq_provider import GroqOcrProvider
 from app.services.ocr_ai.ollama_provider import OllamaOcrProvider
+from app.services.ocr_ai.runtime import (
+    classify_ocr_provider_error,
+    is_cloud_family,
+    provider_circuit_key,
+    quota_circuit_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -41,9 +52,15 @@ class OcrCorrectionOrchestrator:
         config: OcrCorrectionConfig,
         *,
         providers: Sequence[OcrCorrectionProvider] | None = None,
+        circuit_breaker: CircuitBreakerRegistry | None = None,
     ) -> None:
         self.config = config
         self._owns_providers = providers is None
+        self._circuit_breaker: CircuitBreakerRegistry | None = (
+            circuit_breaker
+            if circuit_breaker is not None
+            else (get_shared_ai_circuit_breaker() if providers is None else None)
+        )
         self.providers = tuple(providers) if providers is not None else self._providers()
         if config.cloud_enabled:
             for provider, configured in (
@@ -228,6 +245,44 @@ class OcrCorrectionOrchestrator:
             # Admin review after the remaining cloud providers are tried.
             if is_local and has_valid_cloud_response:
                 continue
+            cb = self._circuit_breaker
+            provider_key: str | None = None
+            quota_key: str | None = None
+            prov_probe_acquired = False
+            quota_probe_acquired = False
+            if cb is not None and not is_local and is_cloud_family(provider.family):
+                provider_key = provider_circuit_key(provider.name)
+                quota_key = quota_circuit_key(provider.family)
+                if quota_key is not None:
+                    quota_allowed, quota_state = cb.allow_request(quota_key)
+                    if not quota_allowed:
+                        log_diagnostic(
+                            logger,
+                            logging.INFO,
+                            event="ocr_provider_circuit_skipped",
+                            stage="chunk_correction",
+                            provider=provider.name,
+                            quota_group=quota_key,
+                            circuit_state=quota_state.value,
+                            chunk_id=chunk_id,
+                        )
+                        continue
+                    quota_probe_acquired = quota_state == CircuitState.HALF_OPEN
+                prov_allowed, prov_state = cb.allow_request(provider_key)
+                if not prov_allowed:
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+                    log_diagnostic(
+                        logger,
+                        logging.INFO,
+                        event="ocr_provider_circuit_skipped",
+                        stage="chunk_correction",
+                        provider=provider.name,
+                        circuit_state=prov_state.value,
+                        chunk_id=chunk_id,
+                    )
+                    continue
+                prov_probe_acquired = prov_state == CircuitState.HALF_OPEN
             attempted = True
             started = time.perf_counter()
             attempt_number = sum(
@@ -285,6 +340,28 @@ class OcrCorrectionOrchestrator:
                 else:
                     result = await coro
             except OcrProviderError as exc:
+                if cb is not None and provider_key is not None:
+                    kind, trips_quota = classify_ocr_provider_error(
+                        exc.code, exc.upstream_status_code
+                    )
+                    if kind is not None:
+                        cb.record_failure(
+                            provider_key,
+                            kind=kind,
+                            http_status=exc.upstream_status_code,
+                            limit_zero=exc.limit_zero,
+                            retry_after_seconds=exc.retry_after_seconds,
+                        )
+                        prov_probe_acquired = False
+                        if trips_quota and quota_key is not None:
+                            cb.record_failure(
+                                quota_key,
+                                kind=kind,
+                                http_status=exc.upstream_status_code,
+                                limit_zero=exc.limit_zero,
+                                retry_after_seconds=exc.retry_after_seconds,
+                            )
+                            quota_probe_acquired = False
                 if exc.disables_family:
                     disabled_families.add(provider.family)
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -352,6 +429,16 @@ class OcrCorrectionOrchestrator:
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
                 continue
+            finally:
+                if cb is not None:
+                    if prov_probe_acquired and provider_key is not None:
+                        cb.release_half_open_probe(provider_key)
+                    if quota_probe_acquired and quota_key is not None:
+                        cb.release_half_open_probe(quota_key)
+            if cb is not None and provider_key is not None:
+                cb.record_success(provider_key)
+                if quota_key is not None:
+                    cb.record_success(quota_key)
             has_valid_response = True
             if not is_local:
                 has_valid_cloud_response = True

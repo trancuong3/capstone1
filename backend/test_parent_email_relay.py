@@ -89,6 +89,7 @@ class EmailRelayTests(unittest.TestCase):
         self.smtp_mock.assert_called_once()
         args, kwargs = self.smtp_mock.call_args
         self.assertEqual(args, ("smtp.gmail.com", 465))
+        self.assertEqual(kwargs["timeout"], 20)
         self.assertTrue(kwargs["context"].check_hostname)
         client = self.smtp_mock.return_value.__enter__.return_value
         client.login.assert_called_once_with("sender@example.test", "testpassword")

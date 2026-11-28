@@ -73,8 +73,8 @@ from app.schemas.parent_private_book import (
 )
 from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
+    RasterizedDocumentPage,
     iter_rasterized_spooled_document,
-    rasterize_uploaded_document,
     spool_upload_file,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
@@ -1434,6 +1434,53 @@ class ParentPrivateBookService:
 
         return self._serialize_submission(locked_book, sub, base_url=base_url)
 
+    async def _rasterize_single_spooled_page(
+        self, upload: UploadFile
+    ) -> tuple[str, str, RasterizedDocumentPage]:
+        """Spool upload to disk and stream at most 2 pages so multi-page files fail fast in O(1) RAM."""
+        spooled = await spool_upload_file(upload, max_bytes=MAX_DOCUMENT_BYTES)
+        if spooled.byte_length <= 0:
+            spooled.close()
+            raise HTTPException(
+                status_code=422, detail="The uploaded document is empty or corrupted"
+            )
+        try:
+            with iter_rasterized_spooled_document(spooled) as (
+                file_name,
+                source_format,
+                _source_sha256,
+                page_iter,
+            ):
+                def _take_max_two(
+                    it: Any,
+                ) -> tuple[RasterizedDocumentPage | None, RasterizedDocumentPage | None]:
+                    try:
+                        first = next(it, None)
+                        second = next(it, None) if first is not None else None
+                        return first, second
+                    finally:
+                        close_fn = getattr(it, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+
+                first_page, second_page = await asyncio.to_thread(_take_max_two, page_iter)
+
+            if first_page is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="The uploaded document is empty or corrupted",
+                )
+            if second_page is not None:
+                del second_page
+                raise HTTPException(
+                    status_code=422,
+                    detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
+                )
+            return file_name, source_format, first_page
+        finally:
+            spooled.close()
+            gc.collect()
+
     async def replace_committed_page_file(
         self,
         actor_id: UUID,
@@ -1467,24 +1514,9 @@ class ParentPrivateBookService:
         if source_type is not None and source_type not in VALID_SOURCE_TYPES:
             raise HTTPException(status_code=422, detail="Loại nguồn sử dụng không hợp lệ.")
 
-        raw_bytes = await upload.read(MAX_DOCUMENT_BYTES + 1)
-        if not raw_bytes:
-            raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
-        if len(raw_bytes) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
-
-        bundle = await asyncio.to_thread(
-            rasterize_uploaded_document,
-            filename=upload.filename or "page.png",
-            content_type=upload.content_type or "",
-            data=raw_bytes,
+        source_file_name, source_format, page_img = await self._rasterize_single_spooled_page(
+            upload
         )
-        if len(bundle.pages) != 1:
-            raise HTTPException(
-                status_code=422,
-                detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
-            )
-        page_img = bundle.pages[0]
         new_sha = hashlib.sha256(page_img.image_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
@@ -1529,8 +1561,8 @@ class ParentPrivateBookService:
                     SourcePageNumber=int(locked_page.PageNumber),
                     TargetPageNumber=int(locked_page.PageNumber),
                     IdempotencyKey=f"page-replace-{uuid4().hex[:16]}",
-                    SourceFileName=bundle.file_name,
-                    SourceFormat=bundle.source_format,
+                    SourceFileName=source_file_name,
+                    SourceFormat=source_format,
                     SourceStoragePath=new_storage_path,
                     SourceSha256=new_sha,
                     ImageWidth=page_img.width,
@@ -1549,8 +1581,8 @@ class ParentPrivateBookService:
                 )
                 await self.repo.add_submissions([sub])
             else:
-                sub.SourceFileName = bundle.file_name
-                sub.SourceFormat = bundle.source_format
+                sub.SourceFileName = source_file_name
+                sub.SourceFormat = source_format
                 sub.SourceStoragePath = new_storage_path
                 sub.SourceSha256 = new_sha
                 sub.ImageWidth = page_img.width
@@ -2040,24 +2072,9 @@ class ParentPrivateBookService:
             raise HTTPException(status_code=409, detail="Không thể thay ảnh cho bản nộp đã hoàn tất hoặc đã hủy.")
         await self.repo.rollback()
 
-        raw_bytes = await upload.read(MAX_DOCUMENT_BYTES + 1)
-        if not raw_bytes:
-            raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
-        if len(raw_bytes) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
-
-        bundle = await asyncio.to_thread(
-            rasterize_uploaded_document,
-            filename=upload.filename or "page.png",
-            content_type=upload.content_type or "",
-            data=raw_bytes,
+        source_file_name, source_format, page = await self._rasterize_single_spooled_page(
+            upload
         )
-        if len(bundle.pages) != 1:
-            raise HTTPException(
-                status_code=422,
-                detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
-            )
-        page = bundle.pages[0]
         new_sha = hashlib.sha256(page.image_bytes).hexdigest()
         new_storage_path = (
             f"private-books/{actor_id}/{book_id}/staging/{submission_id}/"
@@ -2090,8 +2107,8 @@ class ParentPrivateBookService:
             now = datetime.now(timezone.utc)
             sub.SubmissionVersion = int(sub.SubmissionVersion) + 1
             sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
-            sub.SourceFileName = bundle.file_name
-            sub.SourceFormat = bundle.source_format
+            sub.SourceFileName = source_file_name
+            sub.SourceFormat = source_format
             sub.SourceStoragePath = new_storage_path
             sub.SourceSha256 = new_sha
             sub.ImageWidth = page.width

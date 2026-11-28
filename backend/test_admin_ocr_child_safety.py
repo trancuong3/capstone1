@@ -779,5 +779,75 @@ class ImageSafetyDecisionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.review_history[-1]["event"], "IMAGE_SAFETY_REVIEWED")
 
 
+class ChildSafetyTimeoutAndCircuitTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services.ocr_ai.runtime import reset_ocr_ai_runtime
+
+        reset_ocr_ai_runtime()
+
+    def tearDown(self) -> None:
+        from app.services.ocr_ai.runtime import reset_ocr_ai_runtime
+
+        reset_ocr_ai_runtime()
+
+    async def test_early_inner_timeout_does_not_trigger_premature_document_timeout(self):
+        import asyncio as _asyncio
+
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            cloud_timeout_seconds=60,
+            total_timeout_seconds=10,
+            local_enabled=False,
+        )
+        orch = ChildSafetyOrchestrator(cfg)
+        calls: list[str] = []
+
+        async def fake_request(provider, _source: str):
+            calls.append(provider.name)
+            if provider.family == "google":
+                raise _asyncio.TimeoutError()
+            return {"suitability": "SUITABLE", "findings": []}, 200, "json_object", 0
+
+        orch._request = fake_request  # type: ignore[method-assign]
+        # remaining (~10s) <= provider_timeout (60s), yet Google failed immediately (<10s elapsed).
+        # Must NOT prematurely raise DOCUMENT_TIMEOUT; must fall back to Groq and succeed!
+        res = await orch.analyze("Câu chuyện vui vẻ cho bé.")
+        self.assertEqual(res["suitability"], "SUITABLE")
+        self.assertEqual(calls, ["gemini_primary", "groq_qwen"])
+
+    async def test_all_providers_skipped_by_circuit_breaker_raises_all_providers_skipped(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry
+
+        now = [500.0]
+        cb = CircuitBreakerRegistry(clock=lambda: now[0], base_cooldown_seconds=30.0)
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key=None,
+            local_enabled=False,
+        )
+        http_calls = 0
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            nonlocal http_calls
+            http_calls += 1
+            return httpx.Response(429, headers={"Retry-After": "30"}, json={"error": "rate"})
+
+        orch = ChildSafetyOrchestrator(
+            cfg, transport=httpx.MockTransport(handler), circuit_breaker=cb
+        )
+        with self.assertRaises(ChildSafetyError) as first_exc:
+            await orch.analyze("Bé đọc sách.")
+        self.assertEqual(first_exc.exception.code, "PROVIDER_QUOTA")
+        self.assertEqual(http_calls, 1)
+
+        with self.assertRaises(ChildSafetyError) as second_exc:
+            await orch.analyze("Bé đọc sách.")
+        self.assertEqual(second_exc.exception.code, "ALL_PROVIDERS_SKIPPED")
+        self.assertEqual(http_calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

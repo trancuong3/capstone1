@@ -1,12 +1,12 @@
 """Repository for precomputed and cached TTS audio metadata & daily egress tracking."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, case, func, literal_column, or_, select, true, update
+from sqlalchemy import and_, case, delete, func, literal_column, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -1068,3 +1068,132 @@ class TtsAudioCacheRepository:
             "hit_count": int(row.hit_count or 0),
             "miss_count": int(row.miss_count or 0),
         }
+
+    async def is_storage_ready(self) -> bool:
+        """Check whether TTS cache tables exist without mutating or aborting transactions."""
+        try:
+            dialect = self._get_dialect_name()
+            if dialect == "sqlite":
+                rows = (
+                    await self.db.execute(
+                        text(
+                            "SELECT name FROM sqlite_master "
+                            "WHERE type = 'table' "
+                            "AND name IN ('tts_audio_cache_entries', 'tts_audio_cache_daily_usage')"
+                        )
+                    )
+                ).scalars().all()
+                return {str(r) for r in rows} == {
+                    "tts_audio_cache_entries",
+                    "tts_audio_cache_daily_usage",
+                }
+            entries_tbl = await self.db.scalar(
+                select(text("to_regclass('public.tts_audio_cache_entries')"))
+            )
+            daily_tbl = await self.db.scalar(
+                select(text("to_regclass('public.tts_audio_cache_daily_usage')"))
+            )
+            return entries_tbl is not None and daily_tbl is not None
+        except Exception:
+            return False
+
+    async def prune_inactive_entries(
+        self,
+        *,
+        older_than_days: int = 14,
+        limit: int = 200,
+        now: datetime | None = None,
+    ) -> tuple[int, list[tuple[str, str]]]:
+        """Delete aged DELETED/STALE TTS metadata rows and return unreferenced STALE objects."""
+        ts = now or datetime.now(timezone.utc)
+        cutoff = ts - timedelta(days=max(1, int(older_than_days)))
+        effective_limit = max(1, min(1000, int(limit)))
+        stmt = (
+            select(
+                TtsAudioCacheEntry.Id,
+                TtsAudioCacheEntry.Status,
+                TtsAudioCacheEntry.StorageBucket,
+                TtsAudioCacheEntry.StoragePath,
+            )
+            .where(
+                TtsAudioCacheEntry.Status.in_(("DELETED", "STALE")),
+                TtsAudioCacheEntry.UpdatedAt < cutoff,
+            )
+            .order_by(TtsAudioCacheEntry.UpdatedAt.asc(), TtsAudioCacheEntry.Id.asc())
+            .limit(effective_limit)
+        )
+        if self._get_dialect_name() == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+
+        rows = (await self.db.execute(stmt)).all()
+        if not rows:
+            return 0, []
+
+        stale_candidates: list[tuple[str, str]] = []
+        seen_stale: set[tuple[str, str]] = set()
+        for row in rows:
+            if row.Status == "STALE" and row.StorageBucket and row.StoragePath:
+                pair = (str(row.StorageBucket), str(row.StoragePath))
+                if pair not in seen_stale:
+                    seen_stale.add(pair)
+                    stale_candidates.append(pair)
+
+        active_pairs: set[tuple[str, str]] = set()
+        if stale_candidates:
+            active_rows = (
+                await self.db.execute(
+                    select(
+                        TtsAudioCacheEntry.StorageBucket,
+                        TtsAudioCacheEntry.StoragePath,
+                    ).where(
+                        TtsAudioCacheEntry.Status == "ACTIVE",
+                        TtsAudioCacheEntry.StoragePath.in_(
+                            [path for _, path in stale_candidates]
+                        ),
+                    )
+                )
+            ).all()
+            active_pairs = {
+                (str(bucket), str(path))
+                for bucket, path in active_rows
+                if bucket and path
+            }
+
+        unreferenced_stale_objects = [
+            pair for pair in stale_candidates if pair not in active_pairs
+        ]
+        ids = [row.Id for row in rows]
+        await self.db.execute(
+            delete(TtsAudioCacheEntry).where(TtsAudioCacheEntry.Id.in_(ids))
+        )
+        return len(ids), unreferenced_stale_objects
+
+    async def prune_daily_usage(
+        self,
+        *,
+        retain_days: int = 90,
+        limit: int = 500,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete aged daily TTS egress counters older than retain_days."""
+        ts = now or datetime.now(timezone.utc)
+        cutoff_date = ts.date() - timedelta(days=max(7, int(retain_days)))
+        effective_limit = max(1, min(2000, int(limit)))
+        stmt = (
+            select(TtsAudioCacheDailyUsage.UsageDate)
+            .where(TtsAudioCacheDailyUsage.UsageDate < cutoff_date)
+            .order_by(TtsAudioCacheDailyUsage.UsageDate.asc())
+            .limit(effective_limit)
+        )
+        if self._get_dialect_name() == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+
+        dates = list((await self.db.execute(stmt)).scalars().all())
+        if not dates:
+            return 0
+        res = await self.db.execute(
+            delete(TtsAudioCacheDailyUsage).where(
+                TtsAudioCacheDailyUsage.UsageDate.in_(dates)
+            )
+        )
+        return int(res.rowcount or len(dates))

@@ -108,13 +108,20 @@ async def send_test_email(
 @router.post("/cron/dispatch", response_model=ParentEmailCronDispatchResponse)
 async def trigger_cron_dispatch(
     scope: CronDispatchScope = Query(default="all"),
+    dry_run: bool = Query(default=False),
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> ParentEmailCronDispatchResponse:
     """Server-to-server scheduled dispatch endpoint for Vercel Cron / GitHub Actions."""
     effective_scope = scope if isinstance(scope, str) else "all"
+    effective_dry_run = dry_run if isinstance(dry_run, bool) else False
     effective_secret = x_cron_secret if isinstance(x_cron_secret, str) else None
     effective_auth = authorization if isinstance(authorization, str) else None
     _verify_cron_secret(effective_secret, effective_auth)
-    summary = await dispatch_all_once(scope=effective_scope)
-    return ParentEmailCronDispatchResponse(**summary)
+    if effective_dry_run:
+        summary = await dispatch_all_once(scope=effective_scope, dry_run=True)
+    else:
+        summary = await dispatch_all_once(scope=effective_scope)
+    payload = dict(summary)
+    payload.setdefault("dry_run", effective_dry_run)
+    return ParentEmailCronDispatchResponse(**payload)
