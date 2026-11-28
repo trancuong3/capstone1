@@ -576,5 +576,35 @@
     "tooEasy": "Ligero de calentamiento (Grado {min}–{max})",
     "estimatedGrade": "Grado est. {min}–{max}",
     "phonicsScore": "Fonética {score}%"
+  },
+  "offlinePack": {
+    "heading": "Paquete de lectura sin conexion y Tarjeta QR",
+    "description": "Guarde las paginas verificadas en este dispositivo para leer sin internet o imprima una tarjeta QR para el libro fisico.",
+    "readyBadge": "Guardado ({count} paginas)",
+    "downloadButton": "Descargar paquete sin conexion",
+    "openOfflineReader": "Leer sin conexion",
+    "removeButton": "Eliminar paquete",
+    "syncPendingButton": "Sincronizar ({count})",
+    "stageDownloadingPages": "Descargando paginas verificadas y audio guia…",
+    "stageSavingDevice": "Guardando paquete de forma segura en el dispositivo…",
+    "savedNotice": "Paquete sin conexion ({count} paginas) guardado en el dispositivo.",
+    "removedNotice": "Se elimino el paquete sin conexion de este libro.",
+    "downloadError": "No se pudo descargar el paquete ahora. Intentelo de nuevo con mejor conexion.",
+    "syncedNotice": "Se sincronizaron {count} sesion(es) sin conexion.",
+    "syncDeferredNotice": "Red inestable: la sesion sigue en cola segura para sincronizarse despues.",
+    "queuedOfflineNotice": "Sesion guardada en el dispositivo: se sincronizara al recuperar conexion.",
+    "readerHeaderBadge": "Modo sin conexion · Pagina {page}/{total}",
+    "listenCachedAudio": "Escuchar muestra",
+    "tapWordsHint": "Toque las palabras practicadas para registrar el avance sin conexion:",
+    "prevPage": "Pagina anterior",
+    "nextPage": "Pagina siguiente",
+    "finishAndQueueSync": "Finalizar y Sincronizar"
+  },
+  "qrCard": {
+    "openButton": "Tarjeta QR imprimible",
+    "modalTitle": "Tarjeta QR de lectura ViRead",
+    "eyebrow": "Marcador QR para libro impreso",
+    "scanInstruction": "Escanee este codigo QR con la camara para abrir directamente este libro en ViRead.",
+    "printButton": "Imprimir tarjeta QR"
   }
 }

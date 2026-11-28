@@ -494,5 +494,12 @@
     "subtitle": "直接基於剛讀完的書頁拓展詞彙表達與句子結構。",
     "pictureCta": "看圖說話（本頁插畫）",
     "shooterCta": "句子射擊（本頁好句）"
+  },
+  "lucBat": {
+    "toggleLabel": "六八體詩（6–8）節拍引導",
+    "toggleActive": "已開啟六八詩節拍",
+    "coupletBadge": "{count} 組六八聯句",
+    "beatGuide": "停頓節拍 2/2/2（六言句）· 2/2/2/2（八言句）",
+    "rhymePairLabel": "第六音節腰韻配對：「{sixthLuc}」↔「{sixthBat}」"
   }
 }

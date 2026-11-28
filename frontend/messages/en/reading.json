@@ -494,5 +494,12 @@
     "subtitle": "Build vocabulary and sentence skills directly from the page you just read.",
     "pictureCta": "Describe Page Art",
     "shooterCta": "Build Page Sentences"
+  },
+  "lucBat": {
+    "toggleLabel": "Luc Bat 6-8 Poetry Cadence",
+    "toggleActive": "Luc Bat Cadence Active",
+    "coupletBadge": "{count} couplet(s) (6-8)",
+    "beatGuide": "Pacing 2/2/2 (6-syllable line) · 2/2/2/2 (8-syllable line)",
+    "rhymePairLabel": "6th-syllable internal rhyme: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

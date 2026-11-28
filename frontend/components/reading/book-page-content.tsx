@@ -24,6 +24,10 @@ import {
   type WordPresentationState,
   wordStateForPage,
 } from "@/lib/reading/word-presentation";
+import type {
+  LucBatWordAnnotation,
+  LucBatWordRole,
+} from "@/lib/reading/luc-bat-cadence";
 
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageWordDTO } from "@/types/reading";
@@ -38,6 +42,8 @@ interface BookPageContentProps extends PageWordEvidence {
   scrollContainerRef?: RefObject<HTMLElement | null>;
   /** Optional word node registrar when parent manages container auto-scroll. */
   registerWordNode?: (wordId: string, node: HTMLElement | null) => void;
+  /** Optional Lục Bát 6-8 cadence & 6th-syllable rhyme annotations (zero extra DOM nodes). */
+  lucBatAnnotations?: ReadonlyMap<string, LucBatWordAnnotation> | null;
 }
 
 interface WordTokenProps {
@@ -51,6 +57,8 @@ interface WordTokenProps {
   readonly titleText?: string;
   readonly isCurrent: boolean;
   readonly readOnly: boolean;
+  readonly lucBatRole?: LucBatWordRole;
+  readonly lucBatCaesura?: boolean;
   readonly onSelectWord: (word: ReadingPageWordDTO) => void;
   readonly registerNode: (wordId: string, node: HTMLSpanElement | null) => void;
   readonly onRender?: (wordId: string) => void;
@@ -67,6 +75,8 @@ const MemoWordToken = memo(function WordToken({
   titleText,
   isCurrent,
   readOnly,
+  lucBatRole,
+  lucBatCaesura,
   onSelectWord,
   registerNode,
   onRender,
@@ -101,6 +111,11 @@ const MemoWordToken = memo(function WordToken({
         ref={handleRef}
         className={cn(
           "relative me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-2 py-0.5 motion-reduce:transition-none",
+          lucBatCaesura && "me-3.5",
+          (lucBatRole === "rhyme6_luc" || lucBatRole === "rhyme6_bat") &&
+            "underline decoration-amber-500 decoration-wavy underline-offset-4",
+          lucBatRole === "rhyme8_bat" &&
+            "underline decoration-emerald-600 decoration-dotted underline-offset-4",
           isCurrent || presentationState === "current"
             ? "transition-none"
             : "transition-[background-color,color,border-color,box-shadow] duration-75 ease-out",
@@ -120,6 +135,8 @@ const MemoWordToken = memo(function WordToken({
         )}
         data-bbox={word.bbox.join(",")}
         data-line-index={lineIndex}
+        data-luc-bat-caesura={lucBatCaesura ? "true" : undefined}
+        data-luc-bat-role={lucBatRole}
         data-page-revision-id={pageRevisionId}
         data-word-id={word.word_id}
         data-reading-state={presentationState}
@@ -199,6 +216,7 @@ export function BookPageContent(props: BookPageContentProps) {
     onWordTokenRender,
     scrollContainerRef,
     registerWordNode,
+    lucBatAnnotations = null,
   } = props;
   const stateFor = wordStateForPage(props);
   const hasWords = page.words.length > 0;
@@ -291,6 +309,7 @@ export function BookPageContent(props: BookPageContentProps) {
               : isCurr && pState === "incorrect"
                 ? t("pageContent.incorrectWordAria", { word: entry.word.text })
                 : t("pageContent.tapToListenAria", { word: entry.word.text });
+            const lb = lucBatAnnotations?.get(entry.word.word_id);
             return (
               <MemoWordToken
                 key={entry.word.word_id}
@@ -304,6 +323,8 @@ export function BookPageContent(props: BookPageContentProps) {
                 titleText={titleText}
                 isCurrent={isCurr}
                 readOnly={readOnly}
+                lucBatRole={lb?.role}
+                lucBatCaesura={lb?.caesuraAfter}
                 onSelectWord={handleSelectWord}
                 registerNode={registerNode}
                 onRender={onWordTokenRender}

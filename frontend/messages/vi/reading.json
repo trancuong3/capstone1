@@ -494,5 +494,12 @@
     "subtitle": "Tiếp tục mở rộng vốn từ và câu văn từ chính trang sách bé vừa đọc.",
     "pictureCta": "Tả tranh trang sách",
     "shooterCta": "Xếp câu trang sách"
+  },
+  "lucBat": {
+    "toggleLabel": "Nhịp thơ Lục Bát 6–8",
+    "toggleActive": "Đang bật nhịp Lục Bát",
+    "coupletBadge": "{count} cặp câu 6–8",
+    "beatGuide": "Nhịp ngắt 2/2/2 (câu 6) · 2/2/2/2 (câu 8)",
+    "rhymePairLabel": "Vần lưng chữ thứ 6: “{sixthLuc}” ↔ “{sixthBat}”"
   }
 }

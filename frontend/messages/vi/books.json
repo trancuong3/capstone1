@@ -576,5 +576,35 @@
     "tooEasy": "Nhẹ nhàng (Lớp {min}–{max})",
     "estimatedGrade": "Ước lượng Lớp {min}–{max}",
     "phonicsScore": "Đánh vần {score}%"
+  },
+  "offlinePack": {
+    "heading": "Đọc ngoại tuyến & Phiếu QR sách giấy",
+    "description": "Lưu trọn bộ trang đã xác minh trên thiết bị để bé đọc khi không có mạng, hoặc in phiếu QR kẹp vào sách giấy.",
+    "readyBadge": "Đã lưu ({count} trang)",
+    "downloadButton": "Tải gói đọc ngoại tuyến",
+    "openOfflineReader": "Đọc ngoại tuyến ngay",
+    "removeButton": "Xóa gói ngoại tuyến",
+    "syncPendingButton": "Đồng bộ ({count})",
+    "stageDownloadingPages": "Đang tải gói trang & âm thanh đọc mẫu…",
+    "stageSavingDevice": "Đang lưu an toàn vào bộ nhớ thiết bị…",
+    "savedNotice": "Đã lưu gói đọc ngoại tuyến ({count} trang) trên thiết bị.",
+    "removedNotice": "Đã xóa gói đọc ngoại tuyến của cuốn sách này.",
+    "downloadError": "Chưa tải được gói đọc ngoại tuyến lúc này. Ba mẹ vui lòng thử lại khi mạng ổn định.",
+    "syncedNotice": "Đã đồng bộ thành công {count} phiên đọc ngoại tuyến.",
+    "syncDeferredNotice": "Mạng chưa ổn định — phiên đọc vẫn được giữ an toàn để tự đồng bộ sau.",
+    "queuedOfflineNotice": "Đã lưu phiên đọc trên thiết bị — ViRead sẽ tự đồng bộ ngay khi có mạng.",
+    "readerHeaderBadge": "Chế độ ngoại tuyến · Trang {page}/{total}",
+    "listenCachedAudio": "Nghe mẫu",
+    "tapWordsHint": "Chạm vào từng tiếng bé vừa đọc đúng để đánh dấu tiến độ ngoại tuyến:",
+    "prevPage": "Trang trước",
+    "nextPage": "Trang tiếp",
+    "finishAndQueueSync": "Hoàn tất & Lưu đồng bộ"
+  },
+  "qrCard": {
+    "openButton": "Phiếu QR in ấn",
+    "modalTitle": "Phiếu QR đọc sách ViRead",
+    "eyebrow": "Phiếu QR kẹp sách giấy",
+    "scanInstruction": "Quét mã QR bằng camera điện thoại để mở thẳng trang đọc của cuốn sách này trên ViRead.",
+    "printButton": "In phiếu QR"
   }
 }

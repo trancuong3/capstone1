@@ -35,6 +35,7 @@ class ViReadPageMatcher:
             else _resolve_cache_max_entries()
         )
         self._descriptor_cache: OrderedDict[DescriptorCacheKey, PageFeatures] = OrderedDict()
+        self._size_cache: Dict[DescriptorCacheKey, Tuple[int, int]] = {}
         self._cache_hits = 0
         self._cache_misses = 0
         # Retain attributes for any caller/test that inspects matcher.orb / matcher.bf.
@@ -54,6 +55,7 @@ class ViReadPageMatcher:
     def clear_descriptor_cache(self) -> None:
         with self._cache_lock:
             self._descriptor_cache.clear()
+            self._size_cache.clear()
             self._cache_hits = 0
             self._cache_misses = 0
 
@@ -76,17 +78,28 @@ class ViReadPageMatcher:
             self._cache_misses += 1
             return None
 
+    def get_cached_size(self, cache_key: DescriptorCacheKey) -> Tuple[int, int] | None:
+        with self._cache_lock:
+            return self._size_cache.get(cache_key)
+
     def _store_cached_features(
-        self, cache_key: DescriptorCacheKey, features: PageFeatures
+        self,
+        cache_key: DescriptorCacheKey,
+        features: PageFeatures,
+        resized_size: Tuple[int, int] | None = None,
     ) -> None:
         with self._cache_lock:
             self._descriptor_cache[cache_key] = features
+            if resized_size is not None:
+                self._size_cache[cache_key] = resized_size
             self._descriptor_cache.move_to_end(cache_key)
             while len(self._descriptor_cache) > self._cache_max_entries:
-                self._descriptor_cache.popitem(last=False)
+                evicted_key, _ = self._descriptor_cache.popitem(last=False)
+                self._size_cache.pop(evicted_key, None)
 
-    def extract_features(self, image_bytes: bytes) -> PageFeatures | None:
-        """Compute lightweight ORB keypoint coordinates + uint8 descriptors (~40 KB/page)."""
+    def _extract_features_with_size(
+        self, image_bytes: bytes
+    ) -> Tuple[PageFeatures, Tuple[int, int]] | None:
         if not image_bytes:
             return None
         db_arr = np.frombuffer(image_bytes, np.uint8)
@@ -109,14 +122,23 @@ class ViReadPageMatcher:
         if des_db is None or len(kp_db) < 15:
             return None
         pts = np.array([kp.pt for kp in kp_db], dtype=np.float32)
-        return pts, np.ascontiguousarray(des_db)
+        return (pts, np.ascontiguousarray(des_db)), (target_w, target_h)
+
+    def extract_features(self, image_bytes: bytes) -> PageFeatures | None:
+        """Compute lightweight ORB keypoint coordinates + uint8 descriptors (~40 KB/page)."""
+        extracted = self._extract_features_with_size(image_bytes)
+        if extracted is None:
+            return None
+        return extracted[0]
 
     def compute_and_cache_features(
         self, cache_key: DescriptorCacheKey, image_bytes: bytes
     ) -> PageFeatures | None:
-        features = self.extract_features(image_bytes)
-        if features is not None:
-            self._store_cached_features(cache_key, features)
+        extracted = self._extract_features_with_size(image_bytes)
+        if extracted is None:
+            return None
+        features, resized_size = extracted
+        self._store_cached_features(cache_key, features, resized_size)
         return features
 
     def check_framing(self, image_bytes: bytes) -> Dict[str, Any]:
@@ -209,9 +231,8 @@ class ViReadPageMatcher:
 
         cam_h, cam_w = cam_gray.shape
         target_w = 800
-        cam_resized = cv2.resize(
-            cam_gray, (target_w, max(1, int(target_w * cam_h / max(cam_w, 1))))
-        )
+        cam_rh = max(1, int(target_w * cam_h / max(cam_w, 1)))
+        cam_resized = cv2.resize(cam_gray, (target_w, cam_rh))
         orb, bf = self._get_thread_detectors()
         kp_cam, des_cam = orb.detectAndCompute(cam_resized, None)
 
@@ -223,30 +244,45 @@ class ViReadPageMatcher:
         best_page = None
         best_inliers = 0
         best_confidence = 0.0
+        best_homography: np.ndarray | None = None
+        best_db_size: Tuple[int, int] | None = None
 
         for page in candidate_pages:
             features = page.get("features")
+            db_size = page.get("db_resized_size")
+            cache_key = page.get("cache_key")
+            valid_cache_key = isinstance(cache_key, tuple) and len(cache_key) == 2
+
             if features is None:
-                cache_key = page.get("cache_key")
-                if (
-                    isinstance(cache_key, tuple)
-                    and len(cache_key) == 2
-                ):
+                if valid_cache_key:
                     features = self.get_cached_features(cache_key)
+                    if db_size is None:
+                        db_size = self.get_cached_size(cache_key)
                 if features is None:
                     raw_bytes = page.get("image_bytes")
                     if not raw_bytes:
                         continue
-                    features = self.extract_features(raw_bytes)
-                    if (
-                        features is not None
-                        and isinstance(cache_key, tuple)
-                        and len(cache_key) == 2
-                    ):
-                        self._store_cached_features(cache_key, features)
+                    extracted = self._extract_features_with_size(raw_bytes)
+                    if extracted is not None:
+                        features, db_size = extracted
+                        if valid_cache_key:
+                            self._store_cached_features(cache_key, features, db_size)
+            elif db_size is None and valid_cache_key:
+                db_size = self.get_cached_size(cache_key)
 
             if features is None:
                 continue
+
+            if not (
+                isinstance(db_size, tuple)
+                and len(db_size) == 2
+                and db_size[0] > 0
+                and db_size[1] > 0
+            ):
+                page_orm = page.get("page_orm")
+                pw = max(1, int(getattr(page_orm, "Width", 1000) or 1000))
+                ph = max(1, int(getattr(page_orm, "Height", 1400) or 1400))
+                db_size = (800, max(1, int(800 * ph / pw)))
 
             pts_db, des_db = features
             if des_db is None or len(pts_db) < 15:
@@ -268,7 +304,7 @@ class ViReadPageMatcher:
                     [pts_db[m.trainIdx] for m in good_matches]
                 ).reshape(-1, 1, 2)
 
-                _, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                homography, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
                 if mask is not None:
                     inliers = int(np.sum(mask))
                     confidence = min(1.0, round(inliers / 40.0, 2))
@@ -276,6 +312,8 @@ class ViReadPageMatcher:
                         best_inliers = inliers
                         best_confidence = confidence
                         best_page = page
+                        best_homography = homography
+                        best_db_size = db_size
 
         # Ngưỡng xác nhận khớp trang: tối thiểu 12 điểm khớp đồng phẳng (inliers)
         if best_page is not None and best_inliers >= 12:
@@ -283,12 +321,199 @@ class ViReadPageMatcher:
                 "matched": True,
                 "confidence": max(0.75, best_confidence),
                 "page": best_page,
+                "homography_cam_to_db": best_homography,
+                "cam_resized_size": (target_w, cam_rh),
+                "db_resized_size": best_db_size,
             }
 
         return {
             "matched": False,
             "confidence": best_confidence,
         }
+
+
+def _signed_quad_area(pts: np.ndarray) -> float:
+    """Signed shoelace area in image coordinates (clockwise (0,0)->(1,0)->(1,1)->(0,1) > 0)."""
+    x = pts[:, 0]
+    y = pts[:, 1]
+    return 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+
+
+def _project_norm_quad(
+    h_inv: np.ndarray,
+    corners: list[tuple[float, float]],
+    *,
+    min_coord: float,
+    max_coord: float,
+    min_area: float,
+    max_area: float,
+) -> list[tuple[float, float]] | None:
+    homog = np.array([[c[0], c[1], 1.0] for c in corners], dtype=np.float64).T
+    projected_h = h_inv @ homog
+    denom = projected_h[2, :]
+    if not np.all(np.isfinite(projected_h)) or np.any(denom <= 1e-4):
+        return None
+
+    pts = (projected_h[:2, :] / denom).T.astype(np.float64)
+    if not np.all(np.isfinite(pts)):
+        return None
+    if np.any(pts < min_coord) or np.any(pts > max_coord):
+        return None
+
+    signed_area = _signed_quad_area(pts)
+    if signed_area <= 0.0:
+        return None
+
+    quad_i32 = np.round(pts * 10000.0).astype(np.int32).reshape(-1, 1, 2)
+    if not bool(cv2.isContourConvex(quad_i32)):
+        return None
+
+    area = float(cv2.contourArea(pts.astype(np.float32).reshape(-1, 1, 2)))
+    if not (min_area <= area <= max_area):
+        return None
+
+    return [(round(float(px), 5), round(float(py), 5)) for px, py in pts]
+
+
+def project_page_lines_to_camera(
+    homography_cam_to_db: np.ndarray | None,
+    *,
+    cam_size: Tuple[int, int] | None,
+    db_size: Tuple[int, int] | None,
+    words: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Project verified page line boxes into normalized [0..1] camera space via H_norm^{-1}."""
+    empty: Dict[str, Any] = {
+        "homography_matrix": None,
+        "page_quad": None,
+        "spotlight_lines": [],
+    }
+    if (
+        homography_cam_to_db is None
+        or not isinstance(homography_cam_to_db, np.ndarray)
+        or homography_cam_to_db.shape != (3, 3)
+        or cam_size is None
+        or db_size is None
+    ):
+        return empty
+
+    cam_w, cam_h = int(cam_size[0]), int(cam_size[1])
+    db_w, db_h = int(db_size[0]), int(db_size[1])
+    if cam_w <= 0 or cam_h <= 0 or db_w <= 0 or db_h <= 0:
+        return empty
+
+    h_mat = homography_cam_to_db.astype(np.float64)
+    if not np.all(np.isfinite(h_mat)):
+        return empty
+
+    s_cam = np.array(
+        [[float(cam_w), 0.0, 0.0], [0.0, float(cam_h), 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    s_db_inv = np.array(
+        [[1.0 / float(db_w), 0.0, 0.0], [0.0, 1.0 / float(db_h), 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    h_norm = s_db_inv @ h_mat @ s_cam
+    if not np.all(np.isfinite(h_norm)) or abs(float(h_norm[2, 2])) <= 1e-8:
+        return empty
+
+    h_norm = h_norm / float(h_norm[2, 2])
+    det_h = float(np.linalg.det(h_norm))
+    if not np.isfinite(det_h) or det_h < 1e-4 or det_h > 1e4:
+        return empty
+
+    try:
+        cond_h = float(np.linalg.cond(h_norm))
+        if not np.isfinite(cond_h) or cond_h >= 1e5:
+            return empty
+        h_inv = np.linalg.inv(h_norm)
+    except np.linalg.LinAlgError:
+        return empty
+
+    if not np.all(np.isfinite(h_inv)) or abs(float(h_inv[2, 2])) <= 1e-8:
+        return empty
+    h_inv = h_inv / float(h_inv[2, 2])
+
+    page_quad = _project_norm_quad(
+        h_inv,
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        min_coord=-0.75,
+        max_coord=1.75,
+        min_area=1e-4,
+        max_area=4.0,
+    )
+    if page_quad is None:
+        return empty
+
+    by_line: Dict[int, List[Dict[str, Any]]] = {}
+    for w in words:
+        line_idx = max(0, int(w.get("line_index", 0) or 0))
+        by_line.setdefault(line_idx, []).append(w)
+
+    spotlight_lines: List[Dict[str, Any]] = []
+    for line_idx in sorted(by_line.keys()):
+        line_words = sorted(
+            by_line[line_idx], key=lambda item: int(item.get("word_index", 0) or 0)
+        )
+        xs0: List[float] = []
+        ys0: List[float] = []
+        xs1: List[float] = []
+        ys1: List[float] = []
+        tokens: List[str] = []
+        for item in line_words:
+            bbox = item.get("bbox")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            bx, by, bw, bh = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+            if (
+                not (np.isfinite(bx) and np.isfinite(by) and np.isfinite(bw) and np.isfinite(bh))
+                or bw <= 0.0
+                or bh <= 0.0
+                or bx < -0.05
+                or by < -0.05
+                or bx + bw > 1.05
+                or by + bh > 1.05
+            ):
+                continue
+            xs0.append(max(0.0, min(1.0, bx)))
+            ys0.append(max(0.0, min(1.0, by)))
+            xs1.append(max(0.0, min(1.0, bx + bw)))
+            ys1.append(max(0.0, min(1.0, by + bh)))
+            tok = str(item.get("text") or "").strip()
+            if tok:
+                tokens.append(tok)
+
+        if not xs0 or not tokens:
+            continue
+        x0, y0, x1, y1 = min(xs0), min(ys0), max(xs1), max(ys1)
+        if x1 - x0 <= 1e-4 or y1 - y0 <= 1e-4:
+            continue
+
+        quad = _project_norm_quad(
+            h_inv,
+            [(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+            min_coord=-0.5,
+            max_coord=1.5,
+            min_area=1e-6,
+            max_area=1.0,
+        )
+        if quad is None:
+            continue
+        spotlight_lines.append(
+            {
+                "line_index": line_idx,
+                "text": " ".join(tokens),
+                "word_count": len(tokens),
+                "points": quad,
+            }
+        )
+
+    return {
+        "homography_matrix": [round(float(v), 6) for v in h_inv.reshape(-1)],
+        "page_quad": page_quad,
+        "spotlight_lines": spotlight_lines,
+    }
 
 
 vision_page_matcher = ViReadPageMatcher()

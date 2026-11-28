@@ -494,5 +494,12 @@
     "subtitle": "הרחיבו אוצר מילים ומשפטים ישירות מהעמוד שקראתם כעת.",
     "pictureCta": "תיאור איור העמוד",
     "shooterCta": "הרכבת משפטי העמוד"
+  },
+  "lucBat": {
+    "toggleLabel": "מקצב שירה 6-8 (Luc Bat)",
+    "toggleActive": "מקצב השירה פעיל",
+    "coupletBadge": "{count} צמדי שורות (6-8)",
+    "beatGuide": "חלוקת קצב 2/2/2 (שורת 6) · 2/2/2/2 (שורת 8)",
+    "rhymePairLabel": "חריזה פנימית בהברה ה-6: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

@@ -29,6 +29,7 @@ import {
   buildDuetTurnsForPage,
   resolveActiveDuetTurn,
 } from "@/lib/reading/duet-reading";
+import { analyzeLucBatPage } from "@/lib/reading/luc-bat-cadence";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
@@ -812,6 +813,7 @@ function ReadingSessionScreen({
     percent: number | null;
     file?: string;
   } | null>(null);
+  const [lucBatModeEnabled, setLucBatModeEnabled] = useState(false);
 
   useEffect(() => {
     const wasmClient = getBrowserWasmSttClient();
@@ -8620,9 +8622,12 @@ function ReadingSessionScreen({
   }
 
   const canUseDuetMode = !retryMode && duetTurns.length >= 2;
+  const lucBatGuide = analyzeLucBatPage(page);
+  const canUseLucBatGuide = !retryMode && lucBatGuide.isLucBat;
   const hasTopBarContent = Boolean(
     pageProgress ||
     canUseDuetMode ||
+    canUseLucBatGuide ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
     isWasmDownloading ||
@@ -8831,6 +8836,52 @@ function ReadingSessionScreen({
           ) : null}
         </div>
       ) : null}
+      {canUseLucBatGuide ? (
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              aria-pressed={lucBatModeEnabled}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+                lucBatModeEnabled
+                  ? "border-amber-600 bg-amber-500 text-white shadow-2xs"
+                  : "border-border bg-white text-ink hover:bg-sky"
+              }`}
+              data-testid="luc-bat-mode-toggle"
+              onClick={() => setLucBatModeEnabled((prev) => !prev)}
+              type="button"
+            >
+              {lucBatModeEnabled
+                ? t("lucBat.toggleActive")
+                : t("lucBat.toggleLabel")}
+            </button>
+            <span className="text-xs font-semibold text-muted">
+              {t("lucBat.coupletBadge", {
+                count: formatNumber(lucBatGuide.couplets.length),
+              })}
+            </span>
+          </div>
+          {lucBatModeEnabled && lucBatGuide.couplets[0] ? (
+            <div
+              className="rounded-card border border-amber-300 bg-amber-50/85 px-3.5 py-2 text-xs text-ink"
+              data-testid="luc-bat-cadence-banner"
+            >
+              <p className="font-extrabold text-amber-950">
+                {t("lucBat.beatGuide")}
+              </p>
+              <p
+                className="viread-learning-content mt-0.5 font-semibold text-amber-900"
+                dir="ltr"
+                lang="vi"
+              >
+                {t("lucBat.rhymePairLabel", {
+                  sixthLuc: lucBatGuide.couplets[0].lucSixthWord,
+                  sixthBat: lucBatGuide.couplets[0].batSixthWord,
+                })}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {pageNavigationError && pickerIndex === null ? (
         <div
           data-topbar-notice-overlay="true"
@@ -8986,6 +9037,11 @@ function ReadingSessionScreen({
           isSamplePaused={speechPlayer.isPaused}
           readingMode={readingMode}
           onReadingModeChange={setReadingMode}
+          lucBatAnnotations={
+            lucBatModeEnabled && canUseLucBatGuide
+              ? lucBatGuide.wordAnnotations
+              : null
+          }
           onToggleSamplePause={() => {
             if (speechPlayer.isPaused)
               void speechPlayer.resume().catch(() => setUiState("tts-error"));

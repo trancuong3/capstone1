@@ -494,5 +494,12 @@
     "subtitle": "Enrichissez le vocabulaire et les phrases à partir de la page lue.",
     "pictureCta": "Décrire l’illustration",
     "shooterCta": "Construire les phrases"
+  },
+  "lucBat": {
+    "toggleLabel": "Cadence poetique Luc Bat 6-8",
+    "toggleActive": "Cadence Luc Bat active",
+    "coupletBadge": "{count} distique(s) (6-8)",
+    "beatGuide": "Rythme 2/2/2 (vers de 6) · 2/2/2/2 (vers de 8)",
+    "rhymePairLabel": "Rime interne 6e syllabe : \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

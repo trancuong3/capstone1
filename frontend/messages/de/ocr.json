@@ -102,7 +102,12 @@
     "captureAndScan": "Aufnehmen & direkt scannen",
     "autoScanOn": "Automatisches Scannen: AN",
     "autoScanOff": "Automatisches Scannen: AUS",
-    "fallbackUploadAction": "Mit Kamera aufnehmen / Klares Bild wählen"
+    "fallbackUploadAction": "Mit Kamera aufnehmen / Klares Bild wählen",
+    "spotlightModeOn": "Zeilen-Spotlight fuer Papierbuch: EIN",
+    "spotlightModeOff": "Zeilen-Spotlight fuer Papierbuch: AUS",
+    "spotlightLineBadge": "Zeile {current}/{total}",
+    "spotlightPrevLine": "Vorherige Zeile",
+    "spotlightNextLine": "Naechste Zeile"
   },
   "review": {
     "title": "Seitentext prüfen",

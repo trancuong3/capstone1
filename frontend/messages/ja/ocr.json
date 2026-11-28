@@ -102,7 +102,12 @@
     "captureAndScan": "撮影してスキャン",
     "autoScanOn": "自動スキャン: オン",
     "autoScanOff": "自動スキャン: オフ",
-    "fallbackUploadAction": "カメラで撮影 / 鮮明な画像を選択"
+    "fallbackUploadAction": "カメラで撮影 / 鮮明な画像を選択",
+    "spotlightModeOn": "紙面の行スポットライト: オン",
+    "spotlightModeOff": "紙面の行スポットライト: オフ",
+    "spotlightLineBadge": "{current}/{total}行目をハイライト",
+    "spotlightPrevLine": "前の行",
+    "spotlightNextLine": "次の行"
   },
   "review": {
     "title": "ページ内容の確認",

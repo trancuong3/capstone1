@@ -102,7 +102,12 @@
     "captureAndScan": "Capturar y escanear ahora",
     "autoScanOn": "Escaneo automático: ACTIVADO",
     "autoScanOff": "Escaneo automático: DESACTIVADO",
-    "fallbackUploadAction": "Tomar foto con cámara / Elegir imagen nítida"
+    "fallbackUploadAction": "Tomar foto con cámara / Elegir imagen nítida",
+    "spotlightModeOn": "Foco de linea en libro fisico: ACTIVADO",
+    "spotlightModeOff": "Foco de linea en libro fisico: DESACTIVADO",
+    "spotlightLineBadge": "Linea {current}/{total}",
+    "spotlightPrevLine": "Linea anterior",
+    "spotlightNextLine": "Linea siguiente"
   },
   "review": {
     "title": "Revisar texto de la página",

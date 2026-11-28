@@ -433,3 +433,44 @@ export type BookPageDiagnosticCode = z.infer<
   typeof bookPageDiagnosticCodeSchema
 >;
 export type BookPageDiagnosticDTO = z.infer<typeof bookPageDiagnosticSchema>;
+
+export const adminOcrHardSampleItemSchema = z.object({
+  book_id: z.string(),
+  book_title: z.string(),
+  visibility_scope: z.enum(["CATALOG", "PARENT_PRIVATE"]),
+  training_rights_basis: z.string(),
+  page_id: z.string(),
+  page_number: z.number().int().positive(),
+  page_revision_id: z.string(),
+  line_index: z.number().int().nonnegative(),
+  word_id: z.string(),
+  word_index: z.number().int().nonnegative(),
+  word_text: z.string(),
+  line_text: z.string(),
+  ocr_confidence: z.number().min(0).max(1).nullable().optional(),
+  retry_fail_count: z.number().int().nonnegative().default(0),
+  comparison_mismatch_count: z.number().int().nonnegative().default(0),
+  distinct_session_count: z.number().int().nonnegative().default(0),
+  hard_sample_score: z.number().min(0).max(100),
+  recommended_action: z.enum([
+    "PRIORITIZE_FLOW2_CROP_REVIEW",
+    "INSPECT_CATALOG_PAGE_OCR",
+    "MONITOR_PHONICS_VS_OCR",
+  ]),
+});
+
+export const adminOcrHardSampleRadarResponseSchema = z.object({
+  generated_at: z.string(),
+  total_candidates: z.number().int().nonnegative(),
+  catalog_count: z.number().int().nonnegative(),
+  consented_private_count: z.number().int().nonnegative(),
+  privacy_policy_version: z.string().default("FLOW2_OPT_IN_STRICT_V1"),
+  items: z.array(adminOcrHardSampleItemSchema).default([]),
+});
+
+export type AdminOcrHardSampleItemDTO = z.infer<
+  typeof adminOcrHardSampleItemSchema
+>;
+export type AdminOcrHardSampleRadarResponseDTO = z.infer<
+  typeof adminOcrHardSampleRadarResponseSchema
+>;
