@@ -30,8 +30,19 @@ import unicodedata
 import wave
 
 import numpy as np
-from scipy.io import wavfile
-from scipy.signal import butter, medfilt, resample_poly, sosfiltfilt
+
+try:
+    from scipy.io import wavfile
+except ImportError:  # pragma: no cover - lightweight web runtime without scipy
+    wavfile = None  # type: ignore[assignment]
+
+try:
+    from scipy.signal import butter, medfilt, resample_poly, sosfiltfilt
+except ImportError:  # pragma: no cover - lightweight web runtime without scipy
+    butter = None  # type: ignore[assignment]
+    medfilt = None  # type: ignore[assignment]
+    resample_poly = None  # type: ignore[assignment]
+    sosfiltfilt = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +202,7 @@ def _resample_to_target(samples: np.ndarray, src_sr: int, target_sr: int) -> tup
     g = math.gcd(src_sr, target_sr)
     up = target_sr // g
     down = src_sr // g
-    if up > 256 or down > 256:
+    if resample_poly is None or up > 256 or down > 256:
         new_len = max(1, int(round(samples.size * (target_sr / float(src_sr)))))
         x_old = np.linspace(0.0, 1.0, num=samples.size, dtype=np.float64)
         x_new = np.linspace(0.0, 1.0, num=new_len, dtype=np.float64)
@@ -203,11 +214,12 @@ def _resample_to_target(samples: np.ndarray, src_sr: int, target_sr: int) -> tup
 def _decode_wav_bytes(raw: bytes) -> tuple[np.ndarray, int] | None:
     if len(raw) < 44 or raw[:4] != b"RIFF":
         return None
-    try:
-        sr, data = wavfile.read(BytesIO(raw))
-        return _normalize_pcm_array(data), int(sr)
-    except Exception:
-        pass
+    if wavfile is not None:
+        try:
+            sr, data = wavfile.read(BytesIO(raw))
+            return _normalize_pcm_array(data), int(sr)
+        except Exception:
+            pass
     try:
         with wave.open(BytesIO(raw), "rb") as wf:
             sr = wf.getframerate()
@@ -268,7 +280,7 @@ def decode_speech_audio(
 
 
 def _highpass_vocal(samples: np.ndarray, sr: int) -> np.ndarray:
-    if samples.size < 32 or sr <= 400:
+    if samples.size < 32 or sr <= 400 or butter is None or sosfiltfilt is None:
         return samples
     try:
         sos = butter(2, 75.0 / (0.5 * sr), btype="highpass", output="sos")
@@ -386,7 +398,16 @@ def _suppress_octave_jumps(f0_hz: np.ndarray) -> np.ndarray:
             elif abs((voiced_vals[i] + 12.0) - local_ref) < abs(diff):
                 voiced_vals[i] += 12.0
 
-    smoothed = medfilt(voiced_vals, kernel_size=3)
+    if medfilt is not None:
+        smoothed = medfilt(voiced_vals, kernel_size=3)
+    elif voiced_vals.size >= 3:
+        padded = np.pad(voiced_vals, (1, 1), mode="edge")
+        smoothed = np.median(
+            np.stack([padded[:-2], padded[1:-1], padded[2:]], axis=0),
+            axis=0,
+        )
+    else:
+        smoothed = voiced_vals
     out = f0_hz.copy()
     out[voiced_indices] = np.array([_midi_to_hz(float(m)) for m in smoothed], dtype=np.float64)
     return out
