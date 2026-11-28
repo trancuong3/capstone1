@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "노트북 열기",
     "colabGuideSuffix": ", 그다음 클릭",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "Colab 대기 중인 작업 있음",
+    "colabGuideSummary": "Google Colab 열기 (원클릭)를 클릭하고 Runtime → Change runtime type → T4 GPU → Run all을 선택한 뒤 VIREAD_TRAINING_WORKER_TOKEN을 입력하면 작업이 자동으로 실행됩니다.",
+    "colabGuideNoOauthNote": "Colab에서 별도의 OAuth 설정이나 수동 Drive 마운트가 필요 없으며, 어떤 Google Colab 계정으로도 실행할 수 있습니다.",
+    "openColabBtn": "Google Colab 열기 (원클릭)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

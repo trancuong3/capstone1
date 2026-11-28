@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "פתח את המחברת",
     "colabGuideSuffix": ", ולאחר מכן לחץ על",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "משימה ממתינה ל-Colab",
+    "colabGuideSummary": "לחצו על פתח את Google Colab (לחיצה אחת), בחרו Runtime → Change runtime type → T4 GPU → Run all והזינו את VIREAD_TRAINING_WORKER_TOKEN כדי להפעיל את המשימה אוטומטית.",
+    "colabGuideNoOauthNote": "אין צורך בהגדרת OAuth או בחיבור Drive ידני ב-Colab; ניתן להשתמש בכל חשבון Google Colab.",
+    "openColabBtn": "פתח את Google Colab (לחיצה אחת)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

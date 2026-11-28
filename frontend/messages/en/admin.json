@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "Open notebook",
     "colabGuideSuffix": ", then click",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "Task waiting for Colab",
+    "colabGuideSummary": "Click Open Google Colab (1-Click), select Runtime → Change runtime type → T4 GPU → Run all, and enter VIREAD_TRAINING_WORKER_TOKEN to automatically claim and run the job.",
+    "colabGuideNoOauthNote": "No OAuth setup or manual Drive mount needed in Colab; any Google Colab account works.",
+    "openColabBtn": "Open Google Colab (1-Click)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "開啟筆記本",
     "colabGuideSuffix": "，接著點擊",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "有任務正在等待 Colab",
+    "colabGuideSummary": "點擊「開啟 Google Colab（一鍵啟動）」，選擇 Runtime → Change runtime type → T4 GPU → Run all，並輸入 VIREAD_TRAINING_WORKER_TOKEN，即可自動領取並執行任務。",
+    "colabGuideNoOauthNote": "無需在 Colab 中設定 OAuth 或手動掛載 Drive；任何 Google Colab 帳號皆可使用。",
+    "openColabBtn": "開啟 Google Colab（一鍵啟動）",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

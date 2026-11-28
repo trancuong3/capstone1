@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tarfile
 import threading
 import time
 import uuid
@@ -656,8 +657,112 @@ class ColabWorker:
             local_drive_candidates=manifest_candidates,
         )
         image_root = run_dir / f"{prefix}-images"
-        total_items = len(items)
         workers = max(1, int(self.artifact_download_workers))
+        raw_pack_shards = dataset.get("pack_shards")
+        pack_shards = (
+            [shard for shard in raw_pack_shards if isinstance(shard, dict) and shard.get("download_url")]
+            if isinstance(raw_pack_shards, list)
+            else []
+        )
+        expected_by_lower = {
+            str(item["image_sha256"]).lower(): str(item["image_sha256"])
+            for item in items
+            if item.get("image_sha256")
+        }
+        if pack_shards and expected_by_lower:
+            image_root.mkdir(parents=True, exist_ok=True)
+            pack_tmp_dir = run_dir / f".{prefix}-pack-shards"
+            pack_tmp_dir.mkdir(parents=True, exist_ok=True)
+            pack_started = time.monotonic()
+            extract_lock = threading.Lock()
+            unpacked_hashes: set[str] = set()
+
+            def _process_pack_shard(shard_idx: int, shard: dict[str, Any]) -> None:
+                shard_tar_path = pack_tmp_dir / f"shard-{shard_idx:04d}-{uuid.uuid4().hex}.tar"
+                try:
+                    self._fetch_artifact(
+                        shard["download_url"],
+                        shard_tar_path,
+                        shard.get("sha256"),
+                    )
+                    with tarfile.open(shard_tar_path, mode="r:*") as tf:
+                        for member in tf:
+                            if not member.isfile():
+                                continue
+                            member_name = Path(member.name).name
+                            member_stem = Path(member_name).stem.lower()
+                            if member_stem not in expected_by_lower:
+                                continue
+                            target_path = image_root / expected_by_lower[member_stem]
+                            with extract_lock:
+                                if target_path.is_file() and sha256_file(target_path) == member_stem:
+                                    unpacked_hashes.add(member_stem)
+                                    continue
+                            extracted = tf.extractfile(member)
+                            if extracted is None:
+                                continue
+                            temp_path = image_root / f".{member_stem}.{uuid.uuid4().hex}.tmp"
+                            try:
+                                with extracted, temp_path.open("wb") as out_stream:
+                                    shutil.copyfileobj(extracted, out_stream, length=1024 * 1024)
+                                if sha256_file(temp_path) != member_stem:
+                                    logger.warning(
+                                        "Pack shard %d member %s failed SHA-256 verification; leaving for item fallback",
+                                        shard_idx,
+                                        member_name,
+                                    )
+                                    temp_path.unlink(missing_ok=True)
+                                    continue
+                                with extract_lock:
+                                    if target_path.is_file() and sha256_file(target_path) == member_stem:
+                                        temp_path.unlink(missing_ok=True)
+                                    else:
+                                        temp_path.replace(target_path)
+                                    unpacked_hashes.add(member_stem)
+                            finally:
+                                temp_path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning(
+                        "Pack shard %d download/extraction skipped (%s); falling back for remaining items",
+                        shard_idx,
+                        type(exc).__name__,
+                    )
+                finally:
+                    shard_tar_path.unlink(missing_ok=True)
+
+            try:
+                shard_workers = min(workers, 2)
+                if shard_workers > 1 and len(pack_shards) > 1:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=shard_workers) as executor:
+                        futures = [
+                            executor.submit(_process_pack_shard, idx, shard)
+                            for idx, shard in enumerate(pack_shards)
+                        ]
+                        for future in concurrent.futures.as_completed(futures):
+                            future.result()
+                else:
+                    for idx, shard in enumerate(pack_shards):
+                        _process_pack_shard(idx, shard)
+            finally:
+                shutil.rmtree(pack_tmp_dir, ignore_errors=True)
+            pack_elapsed = time.monotonic() - pack_started
+            print(
+                f"Unpacked {prefix} pack shards: {len(unpacked_hashes)}/{len(expected_by_lower)} crops "
+                f"from {len(pack_shards)} shard(s) in {pack_elapsed:.1f}s",
+                flush=True,
+            )
+
+        if pack_shards:
+            remaining_items = [
+                item for item in items
+                if not (
+                    (image_root / item["image_sha256"]).is_file()
+                    and sha256_file(image_root / item["image_sha256"]) == str(item["image_sha256"]).lower()
+                )
+            ]
+        else:
+            remaining_items = items
+        total_items = len(remaining_items)
         progress_lock = threading.Lock()
         completed_count = [0]
         refresh_lock = threading.Lock()
@@ -722,14 +827,15 @@ class ColabWorker:
                 if completed % 25 == 0 or completed == total_items:
                     print(f"Downloaded {prefix} images: {completed}/{total_items}", flush=True)
 
-        if workers > 1 and total_items > 1:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = [executor.submit(_download_item, item) for item in items]
-                for future in concurrent.futures.as_completed(futures):
-                    future.result()
-        else:
-            for item in items:
-                _download_item(item)
+        if total_items > 0:
+            if workers > 1 and total_items > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = [executor.submit(_download_item, item) for item in remaining_items]
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+            else:
+                for item in remaining_items:
+                    _download_item(item)
 
         rows = []
         for item in items:
@@ -1113,18 +1219,22 @@ class ColabWorker:
                 from .train import run_training
 
                 is_remote_store = isinstance(state_store, RemoteBackendJobStateStore)
-                sync_interval = (
-                    max(500, int(os.getenv("VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS", "2500")))
-                    if is_remote_store
-                    else 500
-                )
+                if is_remote_store:
+                    raw_remote_sync = os.getenv("VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS", "0").strip()
+                    try:
+                        parsed_remote_sync = int(raw_remote_sync) if raw_remote_sync else 0
+                    except ValueError:
+                        parsed_remote_sync = 0
+                    sync_interval = max(500, parsed_remote_sync) if parsed_remote_sync > 0 else 0
+                else:
+                    sync_interval = 500
                 last_synced_step = [0]
 
                 def persist_training_progress(completed: int, total: int) -> None:
                     progress.update({"stage": "training", "completed_steps": completed, "total_steps": total})
                     if completed > 0 and (completed % 100 == 0 or completed >= total):
                         print(f"Training progress: {completed}/{total} steps", flush=True)
-                    if state_store is None:
+                    if state_store is None or sync_interval <= 0:
                         return
                     if completed <= 0 or completed >= total:
                         return
@@ -1165,18 +1275,9 @@ class ColabWorker:
                 manifest_temporary.replace(stable_manifest)
             if candidate.get("config_sha256") != job.get("config_sha256"):
                 raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
-            if state_store is not None:
-                # Commit the finished candidate before registering its run in the database.
-                if isinstance(state_store, RemoteBackendJobStateStore):
-                    try:
-                        state_store.sync()
-                    except Exception as sync_exc:
-                        logger.warning(
-                            "Post-training remote resume sync skipped (%s); proceeding directly to candidate upload",
-                            type(sync_exc).__name__,
-                        )
-                else:
-                    state_store.sync()
+            if state_store is not None and not isinstance(state_store, RemoteBackendJobStateStore):
+                # Commit the finished candidate to local Drive before registering its run in the database.
+                state_store.sync()
             progress["stage"] = "uploading_candidate"
             run_id, run_status, stable_candidate = self.upload_candidate(job, candidate, run_dir)
             if run_status == "BENCHMARKED":
@@ -1243,17 +1344,8 @@ class ColabWorker:
             if (report["candidate_checkpoint_sha256"] != candidate["checkpoint_sha256"]
                     or report["locked_manifest_sha256"] != test_job["locked_test_manifest_sha256"]):
                 raise ValueError("BENCHMARK_REPORT_HASH_MISMATCH")
-            if state_store is not None:
-                if isinstance(state_store, RemoteBackendJobStateStore):
-                    try:
-                        state_store.sync()
-                    except Exception as sync_exc:
-                        logger.warning(
-                            "Pre-benchmark remote resume sync skipped (%s); proceeding directly to benchmark registration",
-                            type(sync_exc).__name__,
-                        )
-                else:
-                    state_store.sync()
+            if state_store is not None and not isinstance(state_store, RemoteBackendJobStateStore):
+                state_store.sync()
             registered_benchmark = self.call("POST", f"{API_PREFIX}/jobs/{job_id}/benchmarks",
                       params={"worker_id": self.worker_id}, json={
                           "run_id": run_id,

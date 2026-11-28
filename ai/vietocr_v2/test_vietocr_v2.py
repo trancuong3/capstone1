@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 import sys
 import types
 
@@ -458,7 +459,7 @@ def test_flow2_profile_hyperparams_runtime_shims_and_step0_baseline(tmp_path, mo
     assert flow2_profile["learning_rate"] == 3e-5
     assert flow2_profile["weight_decay"] == 1e-3
     assert flow2_profile["image_aug"] is False
-    assert flow2_profile["valid_every"] == 100
+    assert flow2_profile["valid_every"] == 200
 
     # Ensure np.bool shim is restored alongside np.sctypes and np.complex
     monkeypatch.delattr(np, "bool", raising=False)
@@ -836,6 +837,7 @@ def test_run_locked_benchmark_deduplicates_predictors_preprocessing_and_strips_c
     from PIL import Image
     from ai.vietocr_v2 import benchmark as bench_mod
     from ai.vietocr_v2.contracts import ORIGINAL_CHECKPOINT_SHA256
+    monkeypatch.syspath_prepend(str(Path(bench_mod.__file__).resolve().parents[2] / "backend"))
     from app.services.viread_flow2_hygiene import LOCKED_VIETOCR_VOCAB
 
     img_path = tmp_path / "line.png"
@@ -949,3 +951,184 @@ def test_run_locked_benchmark_deduplicates_predictors_preprocessing_and_strips_c
     assert report["outputs"][0]["candidate"] == "Xin chào"
     assert report["outputs"][0]["parent"] == "Xin chào"
     assert report["outputs"][0]["active"] == "Xin chào"
+
+
+def test_flow2_freeze_steps_cap_and_unfreeze_resets_early_stopping(tmp_path, monkeypatch):
+    import numpy as np
+    from PIL import Image
+    import torch
+    import torch.nn as nn
+    from ai.vietocr_v2 import train as train_mod
+
+    lock = json.loads((Path(train_mod.__file__).parent / "original_artifact.json").read_text(encoding="utf-8"))
+    arch = lock["architecture"]
+    service_dir = Path(train_mod.__file__).resolve().parents[2] / "backend" / "app" / "services"
+    if str(service_dir) not in sys.path:
+        sys.path.insert(0, str(service_dir))
+    from viread_flow2_hygiene import LOCKED_VIETOCR_VOCAB
+
+    base_cfg = {
+        "backbone": arch["backbone"],
+        "cnn": dict(arch["cnn"]),
+        "seq_modeling": arch["seq_modeling"],
+        "transformer": dict(arch["transformer"]),
+        "vocab": LOCKED_VIETOCR_VOCAB,
+        "dataset": dict(arch["input"]),
+        "trainer": {},
+        "aug": {},
+        "optimizer": {},
+        "dataloader": {},
+    }
+
+    img_t = tmp_path / "train.png"
+    img_v = tmp_path / "val.png"
+    for idx, p in enumerate((img_t, img_v)):
+        arr = np.full((36, 120, 3), 255, dtype=np.uint8)
+        arr[8:28, 10 + idx * 5 : 100 : 8] = 20
+        Image.fromarray(arr).save(p, format="PNG")
+
+    sha_t = hashlib.sha256(img_t.read_bytes()).hexdigest()
+    sha_v = hashlib.sha256(img_v.read_bytes()).hexdigest()
+    rows = [
+        DatasetRow(str(img_t), "xin", "g-train", "FLOW1_VERIFIED", "train", image_sha256=sha_t, verified=True),
+        DatasetRow(str(img_v), "chào", "g-val", "FLOW1_VERIFIED", "validation", image_sha256=sha_v, verified=True),
+    ]
+    manifest_path = tmp_path / "manifest.jsonl"
+    write_jsonl(manifest_path, rows)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps({
+        "schema": "viread-dataset-v1",
+        "source_flow": "FLOW1_VERIFIED",
+        "samples": [
+            {"source_flow": "FLOW1_VERIFIED", "group_id": r.group_id, "split": r.split,
+             "image_sha256": r.image_sha256, "label": r.label}
+            for r in rows
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+
+    class TinyOcrModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.cnn = nn.Linear(4, 4)
+            self.decoder = nn.Linear(4, 4)
+
+        def forward(self, img, _tgt_input, tgt_key_padding_mask=None):
+            return self.decoder(self.cnn(img)).unsqueeze(1)
+
+    parent_path = tmp_path / "parent.pth"
+    torch.save(TinyOcrModel().state_dict(), parent_path)
+
+    batch = {
+        "img": torch.ones(2, 4),
+        "tgt_input": torch.zeros(2, 4),
+        "tgt_padding_mask": None,
+        "tgt_output": torch.zeros(2, 4),
+    }
+    val_losses = [0.20, 0.30, 0.35, 0.40, 0.45, 0.50]
+
+    class FakeTrainer:
+        def __init__(self, cfg, pretrained=False):
+            self.config = cfg
+            self.iter = 0
+            self.model = TinyOcrModel()
+            self.train_gen = [batch] * 100
+            self.optimizer = None
+            self.scheduler = None
+
+        def batch_to_device(self, b):
+            return b
+
+        def criterion(self, out, _tgt):
+            return (out - 1.0).pow(2).sum()
+
+        def validate(self):
+            return val_losses.pop(0)
+
+    monkeypatch.setattr(train_mod, "prepare_vietocr_training_runtime", lambda: {})
+    monkeypatch.setitem(train_mod.PROFILES["FLOW2_ADMIN_VERIFIED"], "valid_every", 100)
+    monkeypatch.setenv("VIETOCR_EARLY_STOPPING_PATIENCE", "2")
+    fake_trainer_mod = types.ModuleType("vietocr.model.trainer")
+    fake_trainer_mod.Trainer = FakeTrainer
+    fake_cfg_mod = types.ModuleType("vietocr.tool.config")
+    fake_cfg_mod.Cfg = types.SimpleNamespace(load_config_from_name=lambda _name: base_cfg)
+    fake_vietocr = types.ModuleType("vietocr")
+    fake_vietocr.model = types.ModuleType("vietocr.model")
+    fake_vietocr.model.trainer = fake_trainer_mod
+    fake_vietocr.tool = types.ModuleType("vietocr.tool")
+    fake_vietocr.tool.config = fake_cfg_mod
+    monkeypatch.setitem(sys.modules, "vietocr", fake_vietocr)
+    monkeypatch.setitem(sys.modules, "vietocr.model", fake_vietocr.model)
+    monkeypatch.setitem(sys.modules, "vietocr.model.trainer", fake_trainer_mod)
+    monkeypatch.setitem(sys.modules, "vietocr.tool", fake_vietocr.tool)
+    monkeypatch.setitem(sys.modules, "vietocr.tool.config", fake_cfg_mod)
+
+    res = train_mod.run_training(
+        profile="FLOW2_ADMIN_VERIFIED",
+        manifest_path=str(manifest_path),
+        output_dir=str(tmp_path / "run_cap"),
+        parent_checkpoint=str(parent_path),
+        total_steps=1200,
+        dataset_receipt_path=str(receipt_path),
+        dataset_version_sha256=receipt_sha,
+        batch_size=8,
+        freeze_epochs=5,
+        use_fp16=False,
+    )
+    assert res["freeze_steps"] == 240
+    assert res["steps"] == 400
+    assert res["early_stopped"] is True
+    assert res["best_step"] == 0
+
+
+def test_prepare_vietocr_runtime_accepts_abi_ranges_and_rejects_incompatible_pins(monkeypatch):
+    import numpy as np
+    from ai.vietocr_v2 import train as train_mod
+
+    monkeypatch.setattr(train_mod, "_install_vietocr_numpy_bytes_compatibility", lambda *_a: None)
+    fake_vietocr = types.ModuleType("vietocr")
+    fake_vietocr.model = types.ModuleType("vietocr.model")
+    fake_vietocr.model.trainer = types.ModuleType("vietocr.model.trainer")
+    fake_vietocr.model.trainer.Trainer = object
+    fake_vietocr.tool = types.ModuleType("vietocr.tool")
+    fake_vietocr.tool.config = types.ModuleType("vietocr.tool.config")
+    fake_vietocr.tool.config.Cfg = object
+    monkeypatch.setitem(sys.modules, "vietocr", fake_vietocr)
+    monkeypatch.setitem(sys.modules, "vietocr.model", fake_vietocr.model)
+    monkeypatch.setitem(sys.modules, "vietocr.model.trainer", fake_vietocr.model.trainer)
+    monkeypatch.setitem(sys.modules, "vietocr.tool", fake_vietocr.tool)
+    monkeypatch.setitem(sys.modules, "vietocr.tool.config", fake_vietocr.tool.config)
+
+    def _setup(np_ver: str, torch_ver: str, tv_ver: str, cv2_ver: str, vietocr_ver: str = "0.3.12", imgaug_ver: str = "0.4.0", pg_ver: str = "1.0.1"):
+        monkeypatch.setattr(np, "__version__", np_ver)
+        monkeypatch.setattr("importlib.metadata.version", lambda pkg: {
+            "vietocr": vietocr_ver,
+            "imgaug": imgaug_ver,
+            "prefetch-generator": pg_ver,
+            "Pillow": "11.3.0",
+        }.get(pkg, "1.0.0"))
+        monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(__version__=torch_ver, cuda=types.SimpleNamespace(is_available=lambda: False)))
+        monkeypatch.setitem(sys.modules, "torchvision", types.SimpleNamespace(__version__=tv_ver))
+        monkeypatch.setitem(sys.modules, "cv2", types.SimpleNamespace(__version__=cv2_ver))
+
+    _setup("2.0.2", "2.5.1+cu121", "0.20.1+cu121", "4.10.0")
+    info = train_mod.prepare_vietocr_training_runtime()
+    assert info["numpy_version"] == "2.0.2"
+    assert info["torch_version"] == "2.5.1"
+    assert info["opencv_version"] == "4.10.0"
+
+    _setup("1.26.4", "2.14.1+cu126", "0.29.1", "4.13.0.92")
+    info_126 = train_mod.prepare_vietocr_training_runtime()
+    assert info_126["numpy_version"] == "1.26.4"
+
+    _setup("1.25.2", "2.5.1", "0.20.1", "4.10.0")
+    with pytest.raises(RuntimeError, match="COLAB_NUMPY_VERSION_MISMATCH"):
+        train_mod.prepare_vietocr_training_runtime()
+
+    _setup("2.4.6", "1.13.1", "0.14.1", "4.10.0")
+    with pytest.raises(RuntimeError, match="COLAB_TORCH_VERSION_MISMATCH"):
+        train_mod.prepare_vietocr_training_runtime()
+
+    _setup("2.4.6", "2.5.1", "0.20.1", "3.4.18")
+    with pytest.raises(RuntimeError, match="COLAB_OPENCV_VERSION_MISMATCH"):
+        train_mod.prepare_vietocr_training_runtime()

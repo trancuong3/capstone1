@@ -360,14 +360,14 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res1["locked_test_manifest_sha256"], locked_sha)
         self.assertEqual(res1["evaluation_status"], "LOCKED_TEST_PINNED")
         prior_sql, prior_params = next((s, p) for s, p in calls1 if "SELECT generation" in s)
-        self.assertIn("locked_test_version_id IS NOT DISTINCT FROM CAST(:locked_test_id AS uuid)", prior_sql)
-        self.assertEqual(prior_params["locked_test_id"], locked_id)
+        self.assertNotIn("locked_test_version_id", prior_sql)
+        self.assertNotIn("locked_test_id", prior_params)
         ins_sql, ins_params = next((s, p) for s, p in calls1 if "INSERT INTO public.viread_ocr_training_jobs" in s)
         self.assertEqual(ins_params["locked_test_id"], locked_id)
         self.assertEqual(ins_params["locked_test_sha"], locked_sha)
         self.assertEqual(json.loads(ins_params["metadata"])["evaluation_status"], "LOCKED_TEST_PINNED")
 
-        # Case 2: already consumed locked test -> falls back to NULL + WAITING_FOR_HOLDOUT
+        # Case 2: already consumed locked test -> refuses scheduling (LOCKED_TEST_REQUIRED_BEFORE_TRAINING)
         sess2, calls2 = _make_session(locked_test_unconsumed=False)
         with (
             patch.object(worker, "AsyncSessionLocal", return_value=sess2),
@@ -375,13 +375,51 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(worker, "local_training_capacity", return_value=(False, {"reason": "LOCAL_TRAINING_DISABLED"})),
         ):
             res2 = await _schedule_ready_flow2_detailed(ready_locked, actor_id=actor_id)
-        self.assertEqual(res2["scheduled"], 1)
-        self.assertIsNone(res2["locked_test_version_id"])
-        self.assertEqual(res2["evaluation_status"], "WAITING_FOR_HOLDOUT")
-        _, ins_params2 = next((s, p) for s, p in calls2 if "INSERT INTO public.viread_ocr_training_jobs" in s)
-        self.assertIsNone(ins_params2["locked_test_id"])
-        self.assertIsNone(ins_params2["locked_test_sha"])
-        self.assertEqual(json.loads(ins_params2["metadata"])["evaluation_status"], "WAITING_FOR_HOLDOUT")
+        self.assertEqual(res2["scheduled"], 0)
+        self.assertEqual(res2["reason"], "LOCKED_TEST_REQUIRED_BEFORE_TRAINING")
+        self.assertEqual(res2["dataset_version_id"], str(dataset_id))
+        self.assertEqual(res2["manifest_sha256"], "c" * 64)
+        self.assertFalse(any("INSERT INTO public.viread_ocr_training_jobs" in s for s, _ in calls2))
+
+        # Case 3: prior job on same (dataset, config, parent) even with different locked_test_version_id blocks duplicate scheduling
+        sess3_calls = []
+
+        class _PriorExistsSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_a):
+                return None
+
+            async def execute(self, stmt, params=None):
+                sql = str(stmt)
+                sess3_calls.append((sql, params or {}))
+                if "pg_advisory_xact_lock" in sql:
+                    return _Result()
+                if "SELECT EXISTS" in sql:
+                    return _Result(scalar=False)
+                if "FILTER (WHERE split='train')" in sql:
+                    return _Result(row={"train_count": 40, "validation_count": 10})
+                if "FROM public.viread_ocr_active_model" in sql:
+                    return _Result(scalar="b" * 64)
+                if "FROM public.viread_ocr_dataset_versions locked" in sql:
+                    return _Result(scalar=locked_id)
+                if "SELECT generation, metadata->>'candidate_disposition'" in sql:
+                    return _Result(row={"generation": 1, "disposition": None})
+                return _Result()
+
+            async def commit(self):
+                return None
+
+        with (
+            patch.object(worker, "AsyncSessionLocal", return_value=_PriorExistsSession()),
+            patch.object(worker, "VireadOcrTrainingService", return_value=fake_svc),
+            patch.object(worker, "local_training_capacity", return_value=(False, {"reason": "LOCAL_TRAINING_DISABLED"})),
+        ):
+            res3 = await _schedule_ready_flow2_detailed(ready_locked, actor_id=actor_id)
+        self.assertEqual(res3["scheduled"], 0)
+        self.assertEqual(res3["reason"], "ALREADY_TRAINED_FOR_CURRENT_DATASET_AND_CONFIG")
+        self.assertFalse(any("INSERT INTO public.viread_ocr_training_jobs" in s for s, _ in sess3_calls))
 
     async def test_schedule_ready_flow1_pins_ready_unconsumed_locked_test(self):
         from app.jobs import viread_ocr_training_auto_worker as worker
@@ -949,6 +987,45 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(telemetry.get("last_success_at"))
         finally:
             clear_worker_telemetry()
+
+    async def test_ensure_automatic_locked_test_returns_none_when_flow2_ingestion_paused(self):
+        from app.jobs import viread_ocr_training_auto_worker as worker
+
+        with (
+            patch.dict(os.environ, {"VIREAD_FLOW2_INGESTION_PAUSED": "true"}),
+            patch.object(worker, "AsyncSessionLocal") as session_factory,
+        ):
+            res = await worker._ensure_automatic_locked_test(actor_id=uuid4())
+        self.assertIsNone(res)
+        session_factory.assert_not_called()
+
+    def test_training_config_flow2_defaults_and_env_overrides(self):
+        clean_env = {
+            "VIETOCR_TRAINING_BATCH_SIZE": "",
+            "VIETOCR_TRAINING_STEPS": "",
+            "VIETOCR_TRAINING_FREEZE_EPOCHS": "",
+        }
+        with patch.dict(os.environ, clean_env):
+            flow2_cfg, _ = _training_config("FLOW2_ADMIN_VERIFIED", REPO_ROOT)
+            flow1_cfg, _ = _training_config("FLOW1_EXTERNAL_TRDG", REPO_ROOT)
+
+        self.assertEqual(flow2_cfg["batch_size"], 16)
+        self.assertEqual(flow2_cfg["steps"], 5000)
+        self.assertEqual(flow2_cfg["freeze_epochs"], 3)
+        self.assertEqual(flow1_cfg["batch_size"], 8)
+        self.assertEqual(flow1_cfg["steps"], 5000)
+        self.assertEqual(flow1_cfg["freeze_epochs"], 5)
+
+        override_env = {
+            "VIETOCR_TRAINING_BATCH_SIZE": "32",
+            "VIETOCR_TRAINING_STEPS": "2500",
+            "VIETOCR_TRAINING_FREEZE_EPOCHS": "2",
+        }
+        with patch.dict(os.environ, override_env):
+            overridden_cfg, _ = _training_config("FLOW2_ADMIN_VERIFIED", REPO_ROOT)
+        self.assertEqual(overridden_cfg["batch_size"], 32)
+        self.assertEqual(overridden_cfg["steps"], 2500)
+        self.assertEqual(overridden_cfg["freeze_epochs"], 2)
 
 
 if __name__ == "__main__":

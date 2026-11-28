@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "افتح دفتر الملاحظات",
     "colabGuideSuffix": "، ثم انقر على",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "مهمة بانتظار Colab",
+    "colabGuideSummary": "انقر على فتح Google Colab (بنقرة واحدة)، واختر Runtime → Change runtime type → T4 GPU → Run all، ثم أدخل VIREAD_TRAINING_WORKER_TOKEN لاستلام المهمة وتشغيلها تلقائياً.",
+    "colabGuideNoOauthNote": "لا يلزم إعداد OAuth أو ربط Drive يدوياً في Colab؛ يمكنك استخدام أي حساب Google Colab.",
+    "openColabBtn": "فتح Google Colab (بنقرة واحدة)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

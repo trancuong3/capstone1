@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "Mở notebook",
     "colabGuideSuffix": ", rồi bấm",
     "colabGuideTitle": "Hướng dẫn vận hành hệ thống huấn luyện",
+    "colabWaitingBadge": "Đang có tác vụ chờ Colab",
+    "colabGuideSummary": "Nhấn Mở Google Colab (1-Click), chọn Runtime → Change runtime type → T4 GPU → Run all và nhập VIREAD_TRAINING_WORKER_TOKEN để tự động nhận và chạy tác vụ.",
+    "colabGuideNoOauthNote": "Không cần thiết lập OAuth hay kết nối Drive thủ công trên Colab; bạn có thể dùng bất kỳ tài khoản Google Colab nào.",
+    "openColabBtn": "Mở Google Colab (1-Click)",
     "driveUnavailableDesc": "Hệ thống hiện chưa có thông tin cấu hình kho lưu trữ đám mây.",
     "driveUnavailableTitle": "Chưa có cấu hình kho lưu trữ",
     "errors": {

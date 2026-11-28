@@ -2246,6 +2246,10 @@
     "colabGuidePrefix": "ノートブックを開く",
     "colabGuideSuffix": "、その後クリック",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "Colab 待機中のタスクあり",
+    "colabGuideSummary": "「Google Colab を開く (1クリック)」をクリックし、Runtime → Change runtime type → T4 GPU → Run all を選択して VIREAD_TRAINING_WORKER_TOKEN を入力すると、ジョブが自動実行されます。",
+    "colabGuideNoOauthNote": "Colab での OAuth 設定や手動の Drive マウントは不要です。どの Google Colab アカウントでも利用できます。",
+    "openColabBtn": "Google Colab を開く (1クリック)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {
