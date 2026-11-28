@@ -21,8 +21,19 @@ from app.api.routes.assistant import (
     resolve_assistant_actor,
     router as assistant_router,
 )
-from app.schemas.assistant import AssistantChatRequest, AssistantHistoryTurn
-from app.services.assistant_kb import retrieve_kb_matches
+from app.schemas.assistant import (
+    AssistantChatRequest,
+    AssistantHistoryTurn,
+    AssistantNavigationOffer,
+)
+from app.services.assistant_kb import (
+    KB_ARTICLES,
+    PAGE_CONTEXT_SPECS,
+    _NAV_RULES,
+    is_navigation_href_allowed,
+    resolve_navigation_offer,
+    retrieve_kb_matches,
+)
 from app.services.assistant_service import (
     AssistantConfig,
     BANDWIDTH_PROFILES,
@@ -247,7 +258,14 @@ class TieredAssistantServiceTests(unittest.TestCase):
 
         self.assertEqual(res.source_tier, "tier_3_fallback")
         self.assertEqual(res.provider_id, "viread_kb_fallback")
-        self.assertIn("/device-permissions", [a.href for a in res.quick_actions])
+        action_hrefs = [a.href for a in res.quick_actions]
+        self.assertIn("/reading-preparation", action_hrefs)
+        self.assertNotIn("/device-permissions", action_hrefs)
+        self.assertIsNotNone(res.navigation_offer)
+        assert res.navigation_offer is not None
+        self.assertEqual(res.navigation_offer.href, "/reading-preparation")
+        self.assertTrue(res.navigation_offer.requires_child_selection)
+        self.assertEqual(res.navigation_offer.scenario_id, "reading_prep_and_mic_check")
         self.assertIn("Micro", res.reply)
 
     def test_bandwidth_profile_truncates_history_and_escapes_prompt_fences(self) -> None:
@@ -352,7 +370,7 @@ class TieredAssistantServiceTests(unittest.TestCase):
                             "content": {
                                 "parts": [
                                     {
-                                        "text": "Trên iPad, ba mẹ mở /device-permissions để kiểm tra micro và đặt máy gần bé hơn nhé."
+                                        "text": "Trên iPad, ba mẹ chọn hồ sơ bé rồi mở /reading-preparation để kiểm tra micro và đặt máy gần bé hơn nhé."
                                     }
                                 ]
                             }
@@ -681,6 +699,194 @@ class AssistantApiRouteTests(unittest.TestCase):
             self.assertTrue(
                 all(not action.href.startswith("/admin") for action in res.quick_actions)
             )
+
+    def test_navigation_offer_schema_defaults_and_child_gate_flags(self) -> None:
+        default_offer = AssistantNavigationOffer(label="Mở cài đặt", href="/settings")
+        self.assertFalse(default_offer.requires_child_selection)
+        self.assertIsNone(default_offer.scenario_id)
+
+        gated_offer = AssistantNavigationOffer(
+            label="Mở kho sách",
+            href="/books",
+            reason="Chọn sách cho bé",
+            requires_child_selection=True,
+            scenario_id="books_and_reading_start",
+        )
+        self.assertTrue(gated_offer.requires_child_selection)
+        self.assertEqual(gated_offer.scenario_id, "books_and_reading_start")
+
+    def test_no_legacy_device_permissions_trap_and_all_nav_rules_annotated(self) -> None:
+        self.assertFalse(is_navigation_href_allowed("/device-permissions", "parent"))
+        self.assertFalse(is_navigation_href_allowed("/device-permissions", "public"))
+
+        for article in KB_ARTICLES:
+            for action in article.actions:
+                self.assertNotEqual(
+                    action.href,
+                    "/device-permissions",
+                    msg=f"Legacy /device-permissions action in KB article {article.id}",
+                )
+
+        for spec in PAGE_CONTEXT_SPECS:
+            for action in spec.actions:
+                self.assertNotEqual(
+                    action.href,
+                    "/device-permissions",
+                    msg=f"Legacy /device-permissions action in PageContextSpec {spec.prefix}",
+                )
+
+        child_gated_routes = {
+            "/books",
+            "/book-scanner",
+            "/reading-preparation",
+            "/entertainment",
+            "/entertainment/memory-game",
+            "/entertainment/sentence-shooter",
+            "/entertainment/picture-description",
+            "/karaoke",
+        }
+        non_gated_routes = {
+            "/settings",
+            "/forgot-password",
+            "/profile",
+            "/children/new",
+            "/children",
+            "/studio/tasks",
+            "/my-books",
+            "/book-reports",
+            "/reports/difficult-words",
+            "/reports",
+            "/sessions",
+            "/reading-management",
+            "/help-support",
+            "/dashboard",
+            "/login",
+            "/register",
+        }
+        seen_hrefs: set[str] = set()
+        for rule in _NAV_RULES:
+            seen_hrefs.add(rule.href)
+            self.assertNotEqual(rule.href, "/device-permissions")
+            self.assertIsNotNone(rule.scenario_id, msg=f"Missing scenario_id on {rule.href}")
+            if rule.href in child_gated_routes:
+                self.assertTrue(
+                    rule.requires_child_selection,
+                    msg=f"Expected requires_child_selection=True for {rule.href}",
+                )
+            elif rule.href in non_gated_routes:
+                self.assertFalse(
+                    rule.requires_child_selection,
+                    msg=f"Expected requires_child_selection=False for {rule.href}",
+                )
+
+        self.assertTrue(child_gated_routes.issubset(seen_hrefs))
+        self.assertTrue(non_gated_routes.issubset(seen_hrefs))
+
+    def test_resolve_navigation_offer_child_gate_and_public_scope_isolation(self) -> None:
+        cases = [
+            ("Mở kho sách cho bé đọc", "/dashboard", True, "/books", "books_and_reading_start"),
+            ("Đi đến quét sách giấy", "/dashboard", True, "/book-scanner", "quick_scan_vs_my_books"),
+            ("Kiểm tra micro trước khi đọc", "/dashboard", True, "/reading-preparation", "reading_prep_and_mic_check"),
+            ("Mở Memory Game lật thẻ", "/dashboard", True, "/entertainment/memory-game", "reluctant_reader_games"),
+            ("Cho bé hát karaoke thiếu nhi", "/dashboard", True, "/karaoke", "reluctant_reader_games"),
+            ("Mở Sách của tôi và Smart Studio", "/dashboard", False, "/my-books", "quick_scan_vs_my_books"),
+            ("Xem trung tâm tác vụ AI", "/dashboard", False, "/studio/tasks", "ai_task_center"),
+            ("Xem báo cáo tiến bộ của bé", "/dashboard", False, "/reports", "reports_and_session_history"),
+            ("Ôn từ cần luyện của bé", "/dashboard", False, "/reports/difficult-words", "slow_struggling_reader_support"),
+            ("Mở Quản lý đọc đặt mục tiêu tuần", "/dashboard", False, "/reading-management", "weekly_reading_habits_and_reminders"),
+        ]
+        for query, path, expected_gate, expected_href, expected_scenario in cases:
+            offer = resolve_navigation_offer(
+                query, role_scope="parent", current_path=path, locale="vi"
+            )
+            self.assertIsNotNone(offer, msg=f"Missing offer for: {query}")
+            assert offer is not None
+            self.assertEqual(offer.href, expected_href)
+            self.assertEqual(offer.requires_child_selection, expected_gate)
+            self.assertEqual(offer.scenario_id, expected_scenario)
+
+        # Signed-out guest asking about mic/reading-prep must NEVER receive parent-only routes.
+        public_mic_offer = resolve_navigation_offer(
+            "Kiểm tra micro trước khi đọc",
+            role_scope="public",
+            current_path="/",
+            locale="vi",
+        )
+        self.assertIsNone(public_mic_offer)
+
+    def test_kb_covers_all_upgraded_parent_scenarios(self) -> None:
+        scenario_queries = [
+            ("Tại sao phải chọn hồ sơ bé trước khi mở sách?", "/dashboard", "child_selection_gate_and_switching"),
+            ("3 bước bắt đầu cho ba mẹ mới sử dụng ViRead?", "/dashboard", "new_parent_onboarding"),
+            ("Nhà có nhiều bé anh em học khác lớp chuyển đổi thế nào?", "/children", "multi_child_family_switching"),
+            ("Bé đọc chậm muốn chỉnh tốc độ 0.85x và đánh vần AI", "/reading-preparation", "slow_struggling_reader_support"),
+            ("Bé ngại đọc thì có trò chơi giải trí nào?", "/entertainment", "entertainment_games_karaoke"),
+            ("Quét nhanh hay Sách của tôi khác nhau chỗ nào?", "/book-scanner", "book_scanner_and_my_books"),
+            ("Đặt mục tiêu tuần và thói quen đọc hàng tuần", "/reading-management", "reading_management_reminders"),
+            ("Mạng chậm 3G hoặc ngoại tuyến thì trợ lý chạy sao?", "/help-support", "assistant_bandwidth_tiers"),
+            ("Theo dõi báo cáo tiến bộ và lịch sử đọc ở đâu?", "/reports", "reports_sessions_difficult_words"),
+            ("Phạm vi khách và phụ huynh phân quyền bảo mật thế nào?", "/settings", "viread_system_architecture_and_privacy"),
+        ]
+        for query, path, expected_article_id in scenario_queries:
+            matches = retrieve_kb_matches(query, role_scope="parent", current_path=path)
+            self.assertTrue(matches, msg=f"No KB matches for: {query}")
+            matched_ids = [m.article.id for m in matches]
+            self.assertIn(
+                expected_article_id,
+                matched_ids,
+                msg=f"Expected {expected_article_id} in {matched_ids} for query: {query}",
+            )
+
+    def test_system_prompt_includes_child_profile_gate_reminder_for_parents(self) -> None:
+        captured_parent_system = ""
+        captured_public_system = ""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal captured_parent_system, captured_public_system
+            body = json.loads(request.content.decode("utf-8"))
+            sys_text = body["systemInstruction"]["parts"][0]["text"]
+            if "USER_ROLE_SCOPE: parent" in sys_text:
+                captured_parent_system = sys_text
+            else:
+                captured_public_system = sys_text
+            return httpx.Response(
+                200,
+                json={"candidates": [{"content": {"parts": [{"text": "OK"}]}}]},
+            )
+
+        service = _make_service(groq_key=None, ollama_enabled=False, transport=httpx.MockTransport(handler))
+        res_parent = asyncio.run(
+            service.chat(
+                AssistantChatRequest(
+                    message="Mở kho sách cho bé đọc",
+                    current_path="/dashboard",
+                    locale="vi",
+                    bandwidth_profile="high",
+                    force_llm=True,
+                ),
+                role_scope="parent",
+            )
+        )
+        self.assertIn("CHILD PROFILE GATE", captured_parent_system)
+        self.assertIsNotNone(res_parent.navigation_offer)
+        assert res_parent.navigation_offer is not None
+        self.assertTrue(res_parent.navigation_offer.requires_child_selection)
+        self.assertEqual(res_parent.navigation_offer.href, "/books")
+
+        asyncio.run(
+            service.chat(
+                AssistantChatRequest(
+                    message="ViRead có tính năng gì?",
+                    current_path="/",
+                    locale="vi",
+                    bandwidth_profile="high",
+                    force_llm=True,
+                ),
+                role_scope="public",
+            )
+        )
+        self.assertIn("GUEST SCOPE", captured_public_system)
+        self.assertNotIn("CHILD PROFILE GATE", captured_public_system)
 
 
 if __name__ == "__main__":

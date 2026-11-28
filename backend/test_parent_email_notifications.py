@@ -36,6 +36,7 @@ from app.services.parent_email_notification_service import (
     ParentNotificationError,
     compute_reading_streak_days,
     is_in_quiet_hours,
+    sum_unique_reading_minutes,
 )
 from app.jobs.reading_reminder_worker import ParentEmailUnavailable
 
@@ -1976,6 +1977,62 @@ class GlobalDailyCapAndDryRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["presence_sent"], 0)
         self.assertEqual(body["reminders_sent"], 0)
         self.assertEqual(body["engagement_sent"], 0)
+
+    def test_sum_unique_reading_minutes_caps_multi_day_idle_sessions(self):
+        now = SUNDAY_MORNING_UTC
+        abandoned = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=now - timedelta(days=3),
+            EndedAt=now - timedelta(hours=1),
+        )
+        normal = make_session(now - timedelta(hours=2), duration_minutes=20)
+        overlapping_with_abandoned = make_session(
+            now - timedelta(days=3) + timedelta(minutes=30), duration_minutes=45
+        )
+        invalid_state = SimpleNamespace(
+            State="ABORTED",
+            StartedAt=now - timedelta(hours=5),
+            EndedAt=now - timedelta(hours=4),
+        )
+        future_end = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=now - timedelta(minutes=10),
+            EndedAt=now + timedelta(minutes=10),
+        )
+        # Abandoned session caps to [T-3d, T-3d+90m], which completely covers
+        # overlapping [T-3d+30m, T-3d+75m]; plus normal 20m = 110m total.
+        total = sum_unique_reading_minutes(
+            [abandoned, normal, overlapping_with_abandoned, invalid_state, future_end],
+            now,
+        )
+        self.assertEqual(total, 110)
+
+    def test_sum_unique_reading_minutes_handles_dst_spring_forward_and_fall_back(self):
+        from zoneinfo import ZoneInfo
+
+        ny = ZoneInfo("America/New_York")
+        sf_session = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=datetime(2026, 3, 8, 1, 30, tzinfo=ny),
+            EndedAt=datetime(2026, 3, 8, 3, 30, tzinfo=ny),
+        )
+        self.assertEqual(
+            sum_unique_reading_minutes(
+                [sf_session], datetime(2026, 3, 8, 4, 0, tzinfo=ny)
+            ),
+            60,
+        )
+        fb_session = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=datetime(2026, 11, 1, 1, 30, fold=0, tzinfo=ny),
+            EndedAt=datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny),
+        )
+        self.assertEqual(
+            sum_unique_reading_minutes(
+                [fb_session], datetime(2026, 11, 1, 3, 0, tzinfo=ny)
+            ),
+            60,
+        )
 
 
 if __name__ == "__main__":

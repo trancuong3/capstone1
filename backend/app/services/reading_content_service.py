@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -135,21 +135,39 @@ class ReadingContentService:
 
         # Page completion and first-pass assessment use durable evidence.
         # Raw spoken-word counts stay unknown when only an assessment is saved.
+        page_rows = await self.repository.session_page_rows(session.Id)
+        reports = await self.repository.comparison_reports(session.Id)
+        events = await self.repository.events_for_session(session.Id)
+        from app.services.child_progress.metrics import SessionRow, session_minutes
+        from app.services.reading_assessment import aggregate_assessment
+
+        assessment = aggregate_assessment(session.Id, reports, events)
         duration_min = None
         if session.EndedAt and session.StartedAt:
-            start = session.StartedAt
-            end = session.EndedAt
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            if end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            duration_min = max(0, int((end - start).total_seconds() // 60))
-        page_rows = await self.repository.session_page_rows(session.Id)
-        from app.services.reading_assessment import aggregate_assessment
-        assessment = aggregate_assessment(
-            session.Id, await self.repository.comparison_reports(session.Id),
-            await self.repository.events_for_session(session.Id),
-        )
+            activity_ts = [
+                ts
+                for ts in (
+                    *(getattr(r, "CreatedAt", None) for r in reports),
+                    *(getattr(e, "CreatedAt", None) for e in events),
+                    *(getattr(p, "StartedAt", None) for p in page_rows),
+                    *(getattr(p, "CompletedAt", None) for p in page_rows),
+                )
+                if ts is not None
+            ]
+            practiced_words = int(assessment.get("practiced_words") or 0)
+            active_min = session_minutes(
+                SessionRow(
+                    id=session.Id,
+                    book_id=session.BookId,
+                    state=session.State,
+                    started_at=session.StartedAt,
+                    ended_at=session.EndedAt,
+                ),
+                activity_timestamps=activity_ts,
+                words_read=practiced_words,
+                pages_compared=len(reports),
+            )
+            duration_min = max(0, int(active_min))
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
             pages_explored=(
@@ -713,15 +731,22 @@ class ReadingContentService:
 
     @staticmethod
     def _summary(session: ReadingSession) -> SessionSummaryRead:
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
         duration_ms = None
         if session.EndedAt is not None and session.StartedAt is not None:
-            start = session.StartedAt
-            end = session.EndedAt
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            if end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            duration_ms = max(0, int((end - start).total_seconds() * 1000))
+            start = (
+                session.StartedAt.astimezone(timezone.utc)
+                if session.StartedAt.tzinfo is not None
+                else session.StartedAt.replace(tzinfo=timezone.utc)
+            )
+            end = (
+                session.EndedAt.astimezone(timezone.utc)
+                if session.EndedAt.tzinfo is not None
+                else session.EndedAt.replace(tzinfo=timezone.utc)
+            )
+            raw_ms = max(0, (end - start) // timedelta(milliseconds=1))
+            duration_ms = min(raw_ms, MAX_SESSION_MINUTES * 60 * 1000)
 
         if session.State in ("FINISHED", "COMPLETED"):
             wire_state = "FINISHED"

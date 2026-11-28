@@ -107,6 +107,8 @@ class AssistantNavigationOffer(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     href: str = Field(min_length=1, max_length=180)
     reason: str | None = Field(default=None, max_length=160)
+    requires_child_selection: bool = False
+    scenario_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("href")
     @classmethod

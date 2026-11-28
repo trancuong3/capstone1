@@ -208,10 +208,13 @@ function WeeklyChart({
       <div aria-hidden="true" className="overflow-x-auto pb-0.5">
         <div className="flex h-16 min-w-full items-end gap-1.5 border-b border-border/80 pt-1 sm:gap-2">
           {weekly.map((week) => {
+            const hasActivity = week.minutes > 0 || week.sessions > 0;
             const barHeight =
               week.minutes > 0
                 ? Math.max(6, Math.round((week.minutes / maxMinutes) * 28))
-                : 3;
+                : hasActivity
+                  ? 6
+                  : 3;
             return (
               <div
                 className="flex h-full min-w-8 flex-1 flex-col justify-end text-center"
@@ -225,7 +228,7 @@ function WeeklyChart({
                 <div
                   className={cn(
                     "mx-auto mt-0.5 w-full max-w-8 rounded-t-[4px]",
-                    week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                    hasActivity ? "bg-primary/85" : "bg-border",
                   )}
                   style={{ height: `${barHeight}px` }}
                   title={t("overview.assessmentCard.weekBarTitle", {
@@ -402,6 +405,9 @@ export function ChildProgressAssessmentCard({
       })
       .then((next) => {
         if (requestRef.current !== request || controller.signal.aborted) return;
+        if (refreshControllerRef.current === controller) {
+          refreshControllerRef.current = null;
+        }
         const aiSucceeded = next.assessment.source === "AI";
         setView({
           status: "ready",
@@ -412,6 +418,9 @@ export function ChildProgressAssessmentCard({
       })
       .catch((error: unknown) => {
         if (requestRef.current !== request || controller.signal.aborted) return;
+        if (refreshControllerRef.current === controller) {
+          refreshControllerRef.current = null;
+        }
         setView((current) =>
           current.status === "ready"
             ? {
@@ -565,7 +574,9 @@ function AssessmentBody({
   const actionsFor = (audience: "PARENT" | "CHILD") =>
     assessment.actions.filter((action) => action.audience === audience);
 
-  const hasWeekly = data.weekly.some((week) => week.minutes > 0);
+  const hasWeekly = data.weekly.some(
+    (week) => week.minutes > 0 || week.sessions > 0,
+  );
   const hasDetails =
     assessment.strengths.length > 0 ||
     assessment.weaknesses.length > 0 ||
@@ -713,7 +724,9 @@ function AssessmentBody({
               size="admin"
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" className="size-3.5" />
+              {view.ai === "writing" ? null : (
+                <RefreshCw aria-hidden="true" className="size-3.5" />
+              )}
               {view.ai === "writing"
                 ? t("overview.assessmentCard.aiWriting")
                 : t("overview.assessmentCard.aiRefresh")}

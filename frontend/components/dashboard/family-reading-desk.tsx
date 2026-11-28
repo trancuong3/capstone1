@@ -27,6 +27,18 @@ interface RecentReading {
   resumable: boolean;
 }
 
+const MAX_RESUMABLE_SESSION_AGE_MS = 12 * 60 * 60 * 1000;
+
+function isSessionFreshForResume(
+  startedAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!startedAt) return true;
+  const parsed = Date.parse(startedAt);
+  if (!Number.isFinite(parsed)) return true;
+  return nowMs - parsed <= MAX_RESUMABLE_SESSION_AGE_MS;
+}
+
 function mapSummarySessionToRecent(
   childId: string,
   session: DashboardLatestSessionDTO | null | undefined,
@@ -77,7 +89,9 @@ export function FamilyReadingDesk({
       const book = await sessionService.getBook(session.id);
       if (!current || book.id !== session.book_id) return;
       const resumable =
-        !session.ended_at && !["FINISHED", "ABORTED"].includes(session.state);
+        !session.ended_at &&
+        !["FINISHED", "ABORTED"].includes(session.state) &&
+        isSessionFreshForResume(session.started_at);
       setFallbackRecent({
         title: book.title,
         resumable,

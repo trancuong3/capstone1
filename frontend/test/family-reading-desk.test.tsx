@@ -53,3 +53,29 @@ it.each(["ABORTED", "FINISHED"])(
     expect(screen.queryByRole("link", { name: "Đọc tiếp" })).toBeNull();
   },
 );
+
+it("keeps recent unfinished sessions within 12 hours resumable", async () => {
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  sessionService.list.mockResolvedValue({
+    sessions: [{ ...session, state: "PAUSED", started_at: twoHoursAgo }],
+  });
+  openDesk();
+  expect(await screen.findByRole("link", { name: "Đọc tiếp" })).toHaveAttribute(
+    "href",
+    "/reading/reading-a",
+  );
+});
+
+it("treats stale unfinished sessions older than 12 hours as non-resumable", async () => {
+  const thirteenHoursAgo = new Date(
+    Date.now() - 13 * 60 * 60 * 1000,
+  ).toISOString();
+  sessionService.list.mockResolvedValue({
+    sessions: [{ ...session, state: "PAUSED", started_at: thirteenHoursAgo }],
+  });
+  openDesk();
+  expect(
+    await screen.findByRole("link", { name: /Lần đọc gần nhất/ }),
+  ).toHaveAttribute("href", "/sessions/reading-a?childId=child-a");
+  expect(screen.queryByRole("link", { name: "Đọc tiếp" })).toBeNull();
+});
