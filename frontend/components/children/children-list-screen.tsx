@@ -64,15 +64,18 @@ export function ChildrenListScreen() {
       : [];
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
       <PageHeader
         action={
-          <ButtonLink className="sm:min-w-60" href="/children/new">
-            <Plus aria-hidden="true" className="size-5" />
+          <ButtonLink
+            className="min-h-11 sm:min-h-12 sm:min-w-60"
+            href="/children/new"
+          >
+            <Plus aria-hidden="true" className="size-4 sm:size-5" />
             {t("parent.children.createButton")}
           </ButtonLink>
         }
-        className="mb-0"
+        className="mb-0 gap-2.5 pb-3.5 sm:gap-4 sm:pb-5"
         description={t("parent.children.listDescription")}
         title={t("parent.children.listTitle")}
       />
@@ -81,7 +84,7 @@ export function ChildrenListScreen() {
         <div
           aria-busy="true"
           aria-label={t("parent.children.loadingAria")}
-          className="grid gap-6 sm:grid-cols-2"
+          className="grid gap-3 sm:grid-cols-2 sm:gap-6"
         >
           <span className="sr-only" role="status">
             {t("common.states.loading")}
@@ -132,7 +135,7 @@ export function ChildrenListScreen() {
 
       {state.status === "ready" && state.children.length > 0 ? (
         <>
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-6">
             {visibleChildren.map((child) => (
               <ChildProfileCard
                 child={child}

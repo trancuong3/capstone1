@@ -227,8 +227,11 @@ export function AppShell({ children }: AppShellProps) {
   const isChildOnboarding =
     pathname === "/children/new" &&
     (availableChildren.length === 0 || isFromRegister);
-  const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
-  const isReadingRoute = pathname.startsWith("/reading/");
+  const normalizedPathname = normalizeRoutePath(pathname);
+  const isBookCatalogRoute = normalizedPathname === "/books";
+  const isBookRoute =
+    isBookCatalogRoute || normalizedPathname.startsWith("/books/");
+  const isReadingRoute = normalizedPathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;
 
   const displayName = resolveDisplayName(
@@ -548,9 +551,19 @@ export function AppShell({ children }: AppShellProps) {
   if (isBookRoute) {
     return (
       <AiTaskCenterProvider actorId={taskActorId} actorRole={taskActorRole}>
-        <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={cn(
+            "min-h-dvh bg-canvas",
+            isBookCatalogRoute && !isMobileImmersive && "pb-24 sm:pb-8",
+          )}
+        >
           {children}
         </main>
+        {isBookCatalogRoute && !isMobileImmersive ? (
+          <MobileBottomNav pathname={pathname} />
+        ) : null}
       </AiTaskCenterProvider>
     );
   }

@@ -555,28 +555,28 @@ export function ReadingPreparationScreen({
     !data.explicitPageInvalid;
 
   return (
-    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-heading font-extrabold leading-tight text-ink">
+    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-3 px-3.5 py-3 pb-24 sm:gap-4 sm:px-0 sm:py-0 sm:pb-0">
+      <header className="flex flex-col gap-1 sm:gap-2">
+        <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
           {t("preparation.heading")}
         </h1>
-        <p className="max-w-[760px] text-body leading-7 text-muted">
+        <p className="max-w-[760px] text-sm leading-relaxed text-muted sm:text-body sm:leading-7">
           {t("preparation.subtitle")}
         </p>
       </header>
 
-      <article className="flex items-start gap-4 rounded-card border border-border bg-white p-4 sm:items-center">
+      <article className="flex items-start gap-3 rounded-card border border-border bg-white p-3 sm:items-center sm:gap-4 sm:p-4">
         <BookCover book={data.book} size="small" showTitle={false} />
-        <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex min-w-0 flex-col gap-1 sm:gap-1.5">
           <div>
             <h2
-              className="viread-learning-content break-words text-xl font-extrabold text-ink"
+              className="viread-learning-content break-words text-base font-extrabold text-ink sm:text-xl"
               dir="ltr"
               lang="vi"
             >
               {data.book.title}
             </h2>
-            <p className="mt-1 text-sm text-muted">
+            <p className="mt-0.5 text-xs text-muted sm:mt-1 sm:text-sm">
               {[
                 data.book.author,
                 data.child.alias,
@@ -587,7 +587,7 @@ export function ReadingPreparationScreen({
             </p>
           </div>
           {data.startPage && data.endPage && data.rangeValid ? (
-            <p className="w-fit rounded-control bg-sky px-2 py-1 text-sm font-semibold text-primary-hover">
+            <p className="w-fit rounded-control bg-sky px-2 py-0.5 text-xs font-semibold text-primary-hover sm:py-1 sm:text-sm">
               {t("preparation.rangeSummary", {
                 start: formatNumber(data.startPage.page_number),
                 end: formatNumber(data.endPage.page_number),
@@ -595,7 +595,7 @@ export function ReadingPreparationScreen({
             </p>
           ) : null}
           {data.startPage && data.confidence !== null ? (
-            <p className="text-sm text-primary">
+            <p className="text-xs text-primary sm:text-sm">
               {t("preparation.ocrMatchSummary", {
                 page: formatNumber(data.startPage.page_number),
                 percent: Math.round(data.confidence * 100),
@@ -631,32 +631,32 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-border bg-white p-4 sm:p-5"
+        className="rounded-card border border-border bg-white p-3.5 sm:p-5"
       >
         <h2
-          className="flex items-center gap-2 text-lg font-extrabold text-ink"
+          className="flex items-center gap-2 text-base font-extrabold text-ink sm:text-lg"
           id="microphone-check-title"
         >
           <Mic aria-hidden="true" className="size-5 text-primary" />{" "}
           {t("preparation.micCheckSectionTitle")}
         </h2>
-        <p className="mt-3 text-body text-muted">
+        <p className="mt-2 text-xs leading-relaxed text-muted sm:mt-3 sm:text-body">
           {t("preparation.micPrivacyNote")}
         </p>
         <div
           role="status"
-          className={`mt-3 rounded-control p-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
+          className={`mt-2.5 rounded-control p-3 sm:mt-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
         >
-          <p className="font-bold text-ink">
+          <p className="text-sm font-bold text-ink sm:text-base">
             {isVerifying ? t("preparation.checking") : statusText}
           </p>
-          <p className="mt-2 text-body text-muted">
+          <p className="mt-1 text-xs text-muted sm:mt-2 sm:text-body">
             {permissionMessage ??
               microphoneDescription(permissionState, microphoneVerified, t)}
           </p>
         </div>
         <Button
-          className="mt-3 min-h-11 sm:w-auto"
+          className="mt-3 min-h-11 text-sm sm:w-auto sm:text-button"
           disabled={isVerifying || isStarting}
           isLoading={isVerifying}
           onClick={() => void handleVerifyMicrophone()}
@@ -710,9 +710,9 @@ export function ReadingPreparationScreen({
         </StatusMessage>
       ) : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+      <div className="fixed inset-x-0 bottom-0 z-[45] flex flex-row-reverse items-center gap-2 border-t border-border bg-white/95 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(35,62,64,0.08)] backdrop-blur-sm sm:static sm:z-auto sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
         <Button
-          className="min-h-12 sm:w-auto"
+          className="min-h-12 flex-1 sm:w-auto sm:flex-none"
           disabled={!canStart}
           isLoading={isStarting}
           onClick={() => void handleStartReading()}
@@ -722,7 +722,7 @@ export function ReadingPreparationScreen({
             : t("preparation.startReading")}
         </Button>
         <ButtonLink
-          className="min-h-12 sm:order-first sm:w-auto"
+          className="min-h-12 w-auto shrink-0 border border-border px-3 text-sm sm:order-first sm:border-0 sm:px-4 sm:text-button"
           href={detailHref}
           variant="quiet"
         >

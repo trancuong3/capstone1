@@ -1408,7 +1408,7 @@ function ParentPrivateBookManagerContent({
     return (
       <section
         aria-busy="true"
-        className="mx-auto flex w-full max-w-[1200px] flex-col gap-5 px-4 py-6 sm:px-8"
+        className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-5 sm:px-8 sm:py-8"
       >
         <Skeleton className="h-12 w-72 rounded-card" />
         <Skeleton className="h-44 w-full rounded-card" />
@@ -1419,7 +1419,7 @@ function ParentPrivateBookManagerContent({
 
   if (notFound) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
         <EmptyState
           action={
             <ButtonLink
@@ -1443,7 +1443,7 @@ function ParentPrivateBookManagerContent({
 
   if (loadError || !detail) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
         <StatusMessage title={t("privateManager.loadErrorTitle")} tone="error">
           {loadError ?? t("privateManager.loadDataFallback")}
         </StatusMessage>
@@ -1535,8 +1535,8 @@ function ParentPrivateBookManagerContent({
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
         <Link
           href={backHref}
           className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
@@ -1547,7 +1547,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            className="w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
@@ -1558,14 +1558,19 @@ function ParentPrivateBookManagerContent({
           {book.readable_for_children && !isSuspended ? (
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
-              className="w-auto"
+              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
               fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
               {t("myBooks.openReadWithChild")}
             </ButtonLink>
           ) : (
-            <Button className="w-auto" disabled fullWidth={false} type="button">
+            <Button
+              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+              disabled
+              fullWidth={false}
+              type="button"
+            >
               <BookOpen aria-hidden="true" className="size-4" />
               {t("myBooks.notOpenReadYet")}
             </Button>
@@ -1573,9 +1578,9 @@ function ParentPrivateBookManagerContent({
         </div>
       </div>
 
-      <header className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 items-start gap-4">
+      <header className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
             <BookCover
               author={book.author}
               book={{
@@ -1593,8 +1598,8 @@ function ParentPrivateBookManagerContent({
               size="small"
             />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 sm:px-3">
                   <Lock aria-hidden="true" className="size-3" />
                   {t("card.privateFamilyBadge")}
                 </span>
@@ -1614,31 +1619,33 @@ function ParentPrivateBookManagerContent({
                 </span>
               </div>
               <h1
-                className="book-title viread-learning-content mt-2 break-words text-3xl text-ink sm:text-4xl"
+                className="book-title viread-learning-content mt-1.5 break-words text-xl text-ink sm:mt-2 sm:text-4xl"
                 dir="ltr"
                 lang="vi"
               >
                 {book.title}
               </h1>
               {book.author ? (
-                <p className="mt-1 break-words text-sm text-muted">
+                <p className="mt-0.5 break-words text-xs text-muted sm:mt-1 sm:text-sm">
                   {t("privateManager.authorPrefix", { author: book.author })}
                 </p>
               ) : null}
-              <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
+              <p className="mt-1.5 text-xs text-muted sm:mt-2">
+                {book.privacy_notice}
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Link
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:px-3"
               href="/studio/tasks"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />
               {t("privateManager.taskCenterLink")}
             </Link>
             <Button
-              className="min-h-11 w-auto px-3 text-xs"
+              className="min-h-10 w-auto px-2.5 text-xs sm:min-h-11 sm:px-3"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowEditBookForm(false);
@@ -1654,7 +1661,7 @@ function ParentPrivateBookManagerContent({
                 : t("privateManager.changeCoverAction")}
             </Button>
             <Button
-              className="min-h-10 w-auto px-3 text-xs"
+              className="min-h-10 w-auto px-2.5 text-xs sm:px-3"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1672,7 +1679,7 @@ function ParentPrivateBookManagerContent({
             </Button>
             <button
               aria-label={t("myBooks.deleteBookAria", { title: book.title })}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
               disabled={busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1916,11 +1923,11 @@ function ParentPrivateBookManagerContent({
       {/* Upload Section */}
       <form
         aria-label={t("privateManager.uploadSectionAria")}
-        className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+        className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5"
         onSubmit={(event) => void handleUpload(event)}
       >
         <div>
-          <h2 className="text-xl font-extrabold text-ink">
+          <h2 className="text-lg font-extrabold text-ink sm:text-xl">
             {t("privateManager.uploadTitle")}
           </h2>
           <p className="mt-1 text-sm text-muted">
@@ -2065,7 +2072,7 @@ function ParentPrivateBookManagerContent({
           <>
             <div
               aria-label={t("privateManager.filterAria")}
-              className="flex flex-wrap items-center gap-2"
+              className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:gap-2 sm:overflow-visible sm:pb-0"
               role="group"
             >
               {(
@@ -2113,7 +2120,7 @@ function ParentPrivateBookManagerContent({
                   <button
                     key={pill.key}
                     aria-pressed={isSelected}
-                    className={`min-h-9 rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                    className={`min-h-10 shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold transition-colors sm:min-h-9 sm:py-1 ${
                       isSelected
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-canvas text-ink hover:bg-sky/50"
@@ -2966,7 +2973,7 @@ function ParentPrivateBookManagerContent({
           </p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               {visibleCommittedPages.map((page) => {
                 const isEditingPage = editingPageId === page.page_id;
                 const isConfirmingDelete = confirmDeletePageId === page.page_id;
@@ -2979,9 +2986,9 @@ function ParentPrivateBookManagerContent({
                   <article
                     key={page.page_id}
                     data-committed-page-id={page.page_id}
-                    className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm"
+                    className="flex flex-col gap-2.5 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-3 sm:p-4"
                   >
-                    <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
+                    <div className="h-32 w-full overflow-hidden rounded-control bg-cream sm:h-40">
                       <AuthenticatedImage
                         alt={t("privateManager.pageNumberHeading", {
                           page: page.page_number,
@@ -3010,7 +3017,7 @@ function ParentPrivateBookManagerContent({
                       </p>
                     ) : null}
 
-                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                    <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5 sm:gap-2">
                       {!isSuspended ? (
                         <>
                           <button
@@ -3018,7 +3025,7 @@ function ParentPrivateBookManagerContent({
                               "privateManager.editCommittedPageAria",
                               { page: page.page_number },
                             )}
-                            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
+                            className="inline-flex min-h-10 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50 sm:min-h-9"
                             disabled={isPageBusy || busyKey !== null}
                             onClick={() =>
                               isEditingPage
@@ -3030,7 +3037,7 @@ function ParentPrivateBookManagerContent({
                             <Pencil aria-hidden="true" className="size-3.5" />
                             {t("privateManager.editPageAction")}
                           </button>
-                          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
+                          <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-9">
                             <Upload aria-hidden="true" className="size-3.5" />
                             {t("privateManager.replaceImageAction")}
                             <input
@@ -3107,7 +3114,7 @@ function ParentPrivateBookManagerContent({
                           "privateManager.deleteCommittedPageAria",
                           { page: page.page_number },
                         )}
-                        className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 sm:min-h-9"
                         disabled={isPageBusy || busyKey !== null}
                         onClick={() => {
                           setEditingPageId(null);
