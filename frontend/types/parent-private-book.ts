@@ -418,7 +418,7 @@ export type ParentPrivateBookDetailDTO = z.infer<
   typeof parentPrivateBookDetailSchema
 >;
 
-export type StoryweaverStyleMode = "PROSE" | "DUET_DIALOGUE" | "POEM";
+export type StoryweaverStyleMode = "PROSE" | "POEM";
 
 export interface ParentStoryweaverInput {
   readonly child_id?: string | null;

@@ -174,15 +174,6 @@
       "no_device": "No microphone found on device. Please connect a microphone and try again.",
       "device_busy": "Microphone is being used by another app. Please close it and try again.",
       "error": "Unable to check microphone. Please check your secure connection and browser settings, then try again."
-    },
-    "warmupStory": {
-      "spacedEyebrow": "Spaced word review (1-3-7 days)",
-      "starterEyebrow": "Gentle reading warm-up",
-      "title": "2-Sentence Warm-Up Micro-Story",
-      "listenStory": "Listen to story",
-      "stopListen": "Stop audio",
-      "refreshStory": "Refresh warm-up story",
-      "focusWordsLabel": "Today's woven words"
     }
   },
   "ready": {
@@ -479,15 +470,6 @@
     "MULTI_COLUMN": "Multi-column",
     "TEXT_OVER_IMAGE": "Text on Artwork",
     "LOW_QUALITY": "Needs Review"
-  },
-  "duet": {
-    "toggleLabel": "Parent & Child Duet",
-    "toggleActive": "Duet Mode Active",
-    "parentTurnBadge": "Parent's lead turn",
-    "childTurnBadge": "Your turn to read!",
-    "listenParentSample": "Listen to sample",
-    "completeParentTurn": "Parent finished — Child's turn",
-    "turnCounter": "Turn {current}/{total}"
   },
   "multimodalBridge": {
     "title": "Explore Page Artwork & Sentences",

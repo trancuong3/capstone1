@@ -4,7 +4,6 @@ import { requestApi } from "@/lib/api/api-client";
 import type {
   EntertainmentRecommendationsDTO,
   ParentEntertainmentAnalyticsDTO,
-  WarmupMicroStoryDTO,
 } from "@/types/adaptive-learning";
 
 const skillDomainSchema = z.enum([
@@ -107,18 +106,6 @@ const parentEntertainmentAnalyticsSchema = z.object({
   generated_at: z.string(),
 });
 
-const warmupMicroStorySchema = z.object({
-  child_id: z.string().min(1),
-  local_date: z.string(),
-  has_due_words: z.boolean(),
-  target_words: z.array(z.string()).default([]),
-  title_vi: z.string(),
-  sentences: z.array(z.string()).default([]),
-  full_text: z.string(),
-  source: z.enum(["AI", "RULE_BASED"]),
-  cached: z.boolean().default(false),
-});
-
 export interface AdaptiveLearningService {
   getRecommendations(
     childId: string,
@@ -129,10 +116,6 @@ export interface AdaptiveLearningService {
     windowDays?: number,
     teacherGender?: "female" | "male",
   ): Promise<ParentEntertainmentAnalyticsDTO>;
-  getWarmupStory(
-    childId: string,
-    options?: { readonly refresh?: boolean },
-  ): Promise<WarmupMicroStoryDTO>;
 }
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
@@ -157,13 +140,6 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
       return requestApi(
         `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
-      );
-    },
-    getWarmupStory(childId: string, options?: { readonly refresh?: boolean }) {
-      const suffix = options?.refresh ? "?refresh=true" : "";
-      return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/warmup-story${suffix}`,
-        warmupMicroStorySchema,
       );
     },
   };

@@ -174,15 +174,6 @@
       "no_device": "Aucun microphone trouvé sur l'appareil. Veuillez connecter un microphone et réessayer.",
       "device_busy": "Le microphone est utilisé par une autre application. Veuillez la fermer et réessayer.",
       "error": "Impossible de vérifier le microphone. Vérifiez la connexion sécurisée et les paramètres du navigateur puis réessayez."
-    },
-    "warmupStory": {
-      "spacedEyebrow": "Révision espacée des mots (1-3-7 jours)",
-      "starterEyebrow": "Échauffement doux de lecture",
-      "title": "Mini-histoire d'échauffement",
-      "listenStory": "Écouter l'histoire",
-      "stopListen": "Arrêter",
-      "refreshStory": "Actualiser la mini-histoire",
-      "focusWordsLabel": "Mots intégrés aujourd'hui"
     }
   },
   "ready": {
@@ -479,15 +470,6 @@
     "MULTI_COLUMN": "Multi-colonnes",
     "TEXT_OVER_IMAGE": "Texte sur illustration",
     "LOW_QUALITY": "À vérifier"
-  },
-  "duet": {
-    "toggleLabel": "Lecture en duo",
-    "toggleActive": "Mode duo actif",
-    "parentTurnBadge": "Tour du parent",
-    "childTurnBadge": "À ton tour de lire !",
-    "listenParentSample": "Écouter le modèle",
-    "completeParentTurn": "Lu — Au tour de l’enfant",
-    "turnCounter": "Tour {current}/{total}"
   },
   "multimodalBridge": {
     "title": "Explorer l’illustration et les phrases",

@@ -98,15 +98,6 @@ export interface ReadingPageWordTimingDTO {
   readonly end: number;
 }
 
-export interface ReadingDuetSegmentDTO {
-  readonly turn_index: number;
-  readonly role: "PARENT" | "CHILD";
-  readonly block_type?: string;
-  readonly line_indices: readonly number[];
-  readonly word_indices: readonly number[];
-  readonly text: string;
-}
-
 export interface ReadingPageDTO {
   readonly page_id: UUID;
   readonly page_revision_id: UUID;
@@ -126,7 +117,6 @@ export interface ReadingPageDTO {
   readonly illustration_url?: string | null;
   readonly illustration_text_free?: boolean;
   readonly page_kind?: string | null;
-  readonly duet_segments?: readonly ReadingDuetSegmentDTO[];
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
   /** Zero-based line indices that begin a new paragraph. */

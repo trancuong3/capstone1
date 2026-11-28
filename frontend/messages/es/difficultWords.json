@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "Se abrió la práctica #{attempt} para la palabra \"{word}\".",
     "unknownBookSource": "Origen del libro no especificado"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "Calentamiento fonético de 60 s",
-    "title": "Taller de Pares Mínimos y Espejo Tonal",
-    "subtitle": "Ayuda a {alias} a escuchar y distinguir tonos y sonidos iniciales o finales parecidos.",
-    "openButton": "Abrir taller 60s",
-    "collapseButton": "Ocultar",
-    "unavailableHint": "No se pudieron cargar los pares mínimos en este momento.",
-    "pairCounter": "Par {current}/{total}",
-    "listenWord": "Escuchar",
-    "speakWord": "Pronunciar",
-    "listening": "Escuchando...",
-    "spokenMatch": "¡Excelente! ¡Pronunciaste la palabra objetivo con claridad!",
-    "spokenContrast": "Sonó parecido a \"{heard}\" — escucha el ejemplo e inténtalo despacio.",
-    "spokenRetry": "No se escuchó con claridad. Acércate al micrófono y lee despacio.",
-    "earChallengeButton": "Reto auditivo",
-    "earCorrect": "¡Correcto! ¡Muy buen oído!",
-    "earRetry": "¡Casi! Escucha una vez más.",
-    "nextPairButton": "Siguiente par",
-    "nonClinicalDisclaimer": "Sugerencias educativas de lectura basadas en voz automática (no constituyen diagnóstico médico ni logopédico)."
   }
 }

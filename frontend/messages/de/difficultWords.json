@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "Übungseinheit #{attempt} für das Wort „{word}“ geöffnet.",
     "unknownBookSource": "Buchquelle nicht angegeben"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "60-Sekunden-Lauttraining",
-    "title": "Minimalpaar-Werkstatt & Tonspiegel",
-    "subtitle": "Hilft {alias}, ähnliche Töne sowie Anfangs- und Endlaute gezielt zu unterscheiden.",
-    "openButton": "60s-Training öffnen",
-    "collapseButton": "Einklappen",
-    "unavailableHint": "Die Minimalpaar-Übungen konnten gerade nicht geladen werden.",
-    "pairCounter": "Paar {current}/{total}",
-    "listenWord": "Anhören",
-    "speakWord": "Nachsprechen",
-    "listening": "Hört zu...",
-    "spokenMatch": "Super! Das Zielwort wurde klar ausgesprochen!",
-    "spokenContrast": "Klang ähnlich wie \"{heard}\" — bitte noch einmal anhören und langsam sprechen!",
-    "spokenRetry": "Noch nicht deutlich gehört. Bitte näher ans Mikrofon gehen und langsam sprechen!",
-    "earChallengeButton": "Hör-Quiz",
-    "earCorrect": "Richtig! Sehr gut hingehört!",
-    "earRetry": "Fast richtig! Noch einmal anhören!",
-    "nextPairButton": "Nächstes Paar",
-    "nonClinicalDisclaimer": "Unterstützende Leseübung auf Basis der Spracherkennung (keine medizinische oder logopädische Diagnose)."
   }
 }

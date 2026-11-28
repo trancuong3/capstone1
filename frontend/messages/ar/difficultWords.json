@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "تم فتح محاولة التدريب رقم #{attempt} للكلمة \"{word}\".",
     "unknownBookSource": "مصدر الكتاب غير محدد"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "إحماء صوتي لمدة 60 ثانية",
-    "title": "مختبر الأزواج الصوتية ومرآة النغمات",
-    "subtitle": "يساعد {alias} على الاستماع والتمييز بين النغمات والأصوات المتشابهة.",
-    "openButton": "فتح تمرين 60 ثانية",
-    "collapseButton": "طي",
-    "unavailableHint": "تعذر تحميل تمارين الأزواج الصوتية الآن. يرجى المحاولة لاحقا.",
-    "pairCounter": "الزوج {current}/{total}",
-    "listenWord": "استمع",
-    "speakWord": "جرب النطق",
-    "listening": "جار الاستماع...",
-    "spokenMatch": "رائع! نطق واضح وصحيح للكلمة المستهدفة!",
-    "spokenContrast": "بدا قريبا من \"{heard}\" — استمع للنموذج وحاول ببطء!",
-    "spokenRetry": "لم يتم سماع الصوت بوضوح. اقترب من الميكروفون وحاول ببطء!",
-    "earChallengeButton": "تحدي الاستماع",
-    "earCorrect": "صحيح تماما! استماع ممتاز!",
-    "earRetry": "قريب جدا! استمع مرة أخرى وجرب!",
-    "nextPairButton": "الزوج التالي",
-    "nonClinicalDisclaimer": "ملاحظات تدريبية لدعم القراءة وليست تشخيصا طبيا أو علاجيا للنطق."
   }
 }

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for Wave 1 Family Safety, Encouragement Notes, and Warm-Up Micro-Stories."""
+"""SQLAlchemy ORM models for Wave 1 Family Safety and Encouragement Notes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -17,7 +16,7 @@ from sqlalchemy import (
     String,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
 from app.database.session import Base
@@ -124,73 +123,4 @@ class ParentEncouragementNote(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
-    )
-
-
-class ChildWarmupStory(Base):
-    __tablename__ = "child_warmup_stories"
-    __table_args__ = (
-        CheckConstraint(
-            "source IN ('AI', 'RULE_BASED')",
-            name="ck_child_warmup_stories_source",
-        ),
-        Index(
-            "uq_child_warmup_stories_daily",
-            "child_id",
-            "local_date",
-            "words_signature",
-            unique=True,
-        ),
-        Index("ix_child_warmup_stories_child_recent", "child_id", "created_at"),
-    )
-
-    Id = Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ChildId = Column(
-        "child_id",
-        UUID(as_uuid=True),
-        ForeignKey("childprofiles.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    ParentId = Column(
-        "parent_id",
-        UUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    LocalDate = Column("local_date", Date, nullable=False)
-    WordsSignature = Column("words_signature", String(64), nullable=False)
-    TargetWords = Column(
-        "target_words",
-        JSONB,
-        nullable=False,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-    )
-    TitleVi = Column("title_vi", String(120), nullable=False)
-    SentencesJson = Column(
-        "sentences_json",
-        JSONB,
-        nullable=False,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-    )
-    Source = Column(
-        "source",
-        String(24),
-        nullable=False,
-        default="RULE_BASED",
-        server_default=text("'RULE_BASED'"),
-    )
-    TtsPrewarmed = Column(
-        "tts_prewarmed",
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=text("false"),
-    )
-    CreatedAt = Column(
-        "created_at",
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
     )

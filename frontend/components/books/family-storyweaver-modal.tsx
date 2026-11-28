@@ -64,8 +64,7 @@ export function FamilyStoryweaverModal({
     useState<string>(defaultChildId);
   const [theme, setTheme] = useState<string>("khu vườn nắng sớm");
   const [title, setTitle] = useState<string>("");
-  const [styleMode, setStyleMode] =
-    useState<StoryweaverStyleMode>("DUET_DIALOGUE");
+  const [styleMode, setStyleMode] = useState<StoryweaverStyleMode>("PROSE");
   const [pageCount, setPageCount] = useState<3 | 4>(3);
   const [targetGrade, setTargetGrade] = useState<number>(1);
   const [customWordsRaw, setCustomWordsRaw] = useState<string>("");
@@ -307,14 +306,11 @@ export function FamilyStoryweaverModal({
                   }
                   value={styleMode}
                 >
-                  <option value="DUET_DIALOGUE">
-                    {t("myBooks.storyweaver.styleDuet")}
+                  <option value="PROSE">
+                    {t("myBooks.storyweaver.styleProse")}
                   </option>
                   <option value="POEM">
                     {t("myBooks.storyweaver.stylePoem")}
-                  </option>
-                  <option value="PROSE">
-                    {t("myBooks.storyweaver.styleProse")}
                   </option>
                 </select>
               </label>

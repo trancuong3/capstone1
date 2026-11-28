@@ -25,13 +25,11 @@ from PIL import Image
 
 from app.api.routes.picture_description import get_picture_catalog
 from app.schemas.parent_private_book import ParentStoryweaverRequest
-from app.schemas.reading import ReadingPageWordDTO
 from app.schemas.sentence_shooter import SentenceShooterSessionCreate
 from app.services.book_quality_analyzer import (
     analyse_verified_text,
     analyse_vietnamese_readability,
 )
-from app.services.duet_reading import build_duet_segments_for_page
 from app.services.family_storyweaver_service import (
     FamilyStoryweaverService,
     _build_deterministic_story_pages,
@@ -64,60 +62,6 @@ class Wave2StudioMultimodalReadabilityTests(unittest.IsolatedAsyncioTestCase):
         rep_hard = analyse_vietnamese_readability(hard_text, min_grade=1, max_grade=1)
         self.assertEqual(rep_hard.grade_match_status, "TOO_HARD")
         self.assertGreater(rep_hard.complex_phonics_ratio, 0.0)
-
-    def test_duet_reading_segments_studio_v2_blocks_and_poem_fallback(self) -> None:
-        raw_tokens = [
-            ("Sáng", 0),
-            ("sớm", 0),
-            ("vườn", 0),
-            ("hoa", 0),
-            ("nở.", 0),
-            ("—", 1),
-            ("Mẹ", 1),
-            ("ơi", 1),
-            ("đẹp", 1),
-            ("quá!", 1),
-        ]
-        words = [
-            ReadingPageWordDTO(
-                word_id=uuid4(),
-                word_index=idx,
-                line_index=li,
-                text=txt,
-                bbox=(0.1, 0.1, 0.1, 0.05),
-            )
-            for idx, (txt, li) in enumerate(raw_tokens)
-        ]
-
-        blocks = [
-            {
-                "block_id": "b0",
-                "block_type": "STORY_BODY",
-                "reading_order": 0,
-                "source_word_indices": [0, 1, 2, 3, 4],
-                "decision": "KEEP",
-                "in_canonical": True,
-            },
-            {
-                "block_id": "b1",
-                "block_type": "DIALOGUE",
-                "reading_order": 1,
-                "source_word_indices": [5, 6, 7, 8, 9],
-                "decision": "KEEP",
-                "in_canonical": True,
-            },
-        ]
-        v2_segments = build_duet_segments_for_page(
-            words, page_kind="COMIC", blocks_json=blocks
-        )
-        self.assertEqual(len(v2_segments), 2)
-        self.assertEqual(v2_segments[0].role, "PARENT")
-        self.assertEqual(v2_segments[1].role, "CHILD")
-        self.assertEqual(v2_segments[1].block_type, "DIALOGUE")
-
-        fallback_segments = build_duet_segments_for_page(words, page_kind="POEM")
-        self.assertEqual(len(fallback_segments), 2)
-        self.assertEqual([s.role for s in fallback_segments], ["PARENT", "CHILD"])
 
     def test_tutor_questions_poem_and_studio_v2_style_bible(self) -> None:
         poem_text = (
@@ -208,7 +152,7 @@ class Wave2StudioMultimodalReadabilityTests(unittest.IsolatedAsyncioTestCase):
             theme="cánh đồng lúa",
             grade=1,
             page_count=3,
-            style_mode="DUET_DIALOGUE",
+            style_mode="PROSE",
             target_words=["hương lúa", "rộn ràng"],
         )
         self.assertIn("cánh đồng lúa", title)

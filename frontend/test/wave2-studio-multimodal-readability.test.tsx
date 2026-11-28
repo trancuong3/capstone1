@@ -6,11 +6,6 @@ import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
 import { SessionComplete } from "@/components/reading/session-complete";
 import {
-  buildDuetTurnsForPage,
-  resolveActiveDuetTurn,
-} from "@/lib/reading/duet-reading";
-import { RealtimeAlignmentEngine } from "@/lib/reading/realtime-alignment";
-import {
   downloadMilestoneCertificatePng,
   triggerPrintA4Report,
 } from "@/lib/reports/milestone-certificate-canvas";
@@ -39,72 +34,9 @@ vi.mock("@/hooks/use-auth-runtime", () => ({
   }),
 }));
 
-describe("Wave 2 — Studio V2 Multimodal Bridge, Duet Reading, Readability & Storyweaver", () => {
+describe("Wave 2 — Studio V2 Multimodal Bridge, Readability & Storyweaver", () => {
   beforeEach(() => {
     createStoryweaverMock.mockReset();
-  });
-
-  it("builds alternating Parent/Child duet turns and advances parent turn in RealtimeAlignmentEngine", () => {
-    const samplePage: ReadingPageDTO = {
-      page_id: "30000000-0000-4000-8000-000000000001",
-      page_revision_id: "40000000-0000-4000-8000-000000000001",
-      page_number: 1,
-      confidence: null,
-      width: 1000,
-      height: 1400,
-      page_kind: "COMIC",
-      words: [
-        {
-          word_id: "w1",
-          word_index: 0,
-          line_index: 0,
-          text: "Sáng",
-          bbox: [0.1, 0.1, 0.1, 0.05],
-        },
-        {
-          word_id: "w2",
-          word_index: 1,
-          line_index: 0,
-          text: "nay",
-          bbox: [0.22, 0.1, 0.1, 0.05],
-        },
-        {
-          word_id: "w3",
-          word_index: 2,
-          line_index: 1,
-          text: "—",
-          bbox: [0.1, 0.25, 0.05, 0.05],
-        },
-        {
-          word_id: "w4",
-          word_index: 3,
-          line_index: 1,
-          text: "Chào",
-          bbox: [0.18, 0.25, 0.1, 0.05],
-        },
-        {
-          word_id: "w5",
-          word_index: 4,
-          line_index: 1,
-          text: "mẹ!",
-          bbox: [0.3, 0.25, 0.1, 0.05],
-        },
-      ],
-    };
-
-    const turns = buildDuetTurnsForPage(samplePage);
-    expect(turns).toHaveLength(2);
-    expect(turns[0]!.role).toBe("PARENT");
-    expect(turns[1]!.role).toBe("CHILD");
-
-    const activeFirst = resolveActiveDuetTurn(turns, "w1", new Set());
-    expect(activeFirst?.role).toBe("PARENT");
-
-    const engine = new RealtimeAlignmentEngine(samplePage.words);
-    const snap = engine.advanceParentTurnWords(turns[0]!.wordIds);
-    expect(snap.currentWordId).toBe("w3");
-    expect(snap.statusByWordId.get("w1")?.status).toBe("MATCH");
-    expect(snap.statusByWordId.get("w2")?.status).toBe("MATCH");
   });
 
   it("renders Studio V2 page_kind badge inside BookPageViewer without adding extra buttons", () => {

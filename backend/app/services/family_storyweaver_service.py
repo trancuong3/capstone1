@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.models import Book, BookPage, ChildProfile, PageRevision, PageRevisionWord, Profile
+from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
 from app.schemas.parent_private_book import (
     ParentPrivateBookDetailRead,
@@ -33,6 +34,7 @@ from app.schemas.parent_private_book import (
     ParentStoryweaverResponse,
     VietnameseReadabilityRead,
 )
+from app.services.adaptive_learning_service import compute_spaced_difficult_words
 from app.services.book_quality_analyzer import analyse_verified_text
 from app.services.book_style_bible import analyze_book_style_deterministic
 from app.services.ocr_ai.config import OcrCorrectionConfig
@@ -44,11 +46,10 @@ from app.services.parent_private_book_service import (
 )
 from app.services.storage_service import delete_object, upload_object
 from app.services.vietnamese_readability import analyse_vietnamese_readability
-from app.services.warmup_micro_story_service import WarmupMicroStoryService
 
 logger = logging.getLogger(__name__)
 
-StoryStyleMode = Literal["PROSE", "DUET_DIALOGUE", "POEM"]
+StoryStyleMode = Literal["PROSE", "POEM"]
 
 _UNSAFE_PROMPT_RE = re.compile(
     r"(?:https?://|www\.|@|\b(?:giết|máu|ma quỷ|kinh dị|chết chóc|đánh đập|vũ khí|"
@@ -115,21 +116,6 @@ def _build_deterministic_story_pages(
             f"Ba mẹ dắt tay em {w2}.\nĐọc từng trang sách nhỏ thân thương.\nMỗi ngày em rèn thêm {w3}.\nLớn khôn vững bước vạn nẻo đường.",
             f"Chiều buông êm ả nơi {clean_theme}.\nÁnh đèn ấm áp tỏa bên thềm.\nGiữ bao kỷ niệm cùng câu chữ.\nGiấc mơ đẹp đẽ đến dịu êm.",
         ]
-    elif style_mode == "DUET_DIALOGUE":
-        if grade <= 2:
-            base_pages = [
-                f"Buổi sáng ở {clean_theme} có {w0} thật ấm.\n— Hôm nay nhà mình cùng dạo bước nhé! Ba mẹ dịu dàng nói.\n— Dạ vâng ạ, con thích lắm!",
-                f"Đi qua lối nhỏ, hai mẹ con nhìn thấy {w1} xinh xắn.\n— Con thử nhìn xem {w1} có đẹp không nào?\n— Ôi đẹp quá, nhìn thật {w2} mẹ ơi!",
-                f"Hai mẹ con ngồi bên ghế gỗ đọc sách rất {w3}.\n— Con đọc rõ từng tiếng giỏi lắm!\n— Ngày mai mình lại cùng đọc nữa nhé ạ!",
-                f"Nắng chiều dịu nhẹ phủ xuống {clean_theme}.\n— Hôm nay con nhớ nhất điều gì nào?\n— Con nhớ {w0}, {w1} và giờ đọc sách ấm áp bên gia đình!",
-            ]
-        else:
-            base_pages = [
-                f"Sáng cuối tuần, cả gia đình cùng ghé thăm {clean_theme} khi {w0} vừa lên rực rỡ.\n— Hôm nay chúng mình sẽ cùng quan sát thật kỹ mọi điều kỳ diệu quanh đây nhé!\n— Con sẵn sàng rồi ạ, khung cảnh buổi sớm mới trong lành làm sao!",
-                f"Dọc theo con đường rợp bóng mát, cả nhà bắt gặp {w1} đang khoe sắc.\n— Con hãy lắng nghe tiếng gió và miêu tả vẻ đẹp của {w1} theo cách riêng nhé.\n— Con thấy mọi thứ đều tràn đầy sức sống và mang lại cảm giác {w2} lạ thường!",
-                f"Sau chuyến dạo chơi, cả nhà mở cuốn sổ nhỏ để ghi lại câu chuyện một cách {w3}.\n— Nhờ đọc sách đều đặn, vốn từ của con ngày càng phong phú hơn rồi đấy.\n— Con muốn tự viết thêm nhiều trang sách kỷ niệm cho gia đình mình!",
-                f"Hoàng hôn buông nhẹ trên {clean_theme}, khép lại một ngày khám phá trọn vẹn.\n— Mỗi trang sách con đọc hôm nay đều là một hạt mầm tri thức quý giá.\n— Con cảm ơn ba mẹ đã luôn đồng hành cùng con qua từng câu chữ!",
-            ]
     else:
         if grade <= 2:
             base_pages = [
@@ -182,9 +168,6 @@ class FamilyStoryweaverService:
 
         style_instruction = {
             "POEM": "Mỗi trang là một khổ thơ 4 dòng ngắn gọn, giàu vần điệu tiếng Việt.",
-            "DUET_DIALOGUE": (
-                "Mỗi trang gồm 1 câu dẫn chuyện cho ba mẹ và 1–2 câu lời thoại bắt đầu bằng dấu gạch ngang '— ' để ba mẹ và bé đọc phân vai."
-            ),
             "PROSE": "Mỗi trang gồm 2–3 câu văn xuôi ngắn gọn, trong sáng.",
         }[style_mode]
         sentence_budget = "tối đa 8 tiếng mỗi câu" if grade == 1 else "tối đa 12 tiếng mỗi câu" if grade == 2 else "tối đa 16 tiếng mỗi câu"
@@ -300,8 +283,14 @@ class FamilyStoryweaverService:
                 raise HTTPException(status_code=404, detail="Resource not found")
             resolved_grade = payload.target_grade or max(1, min(5, int(child.Grade or 1)))
             try:
-                due_tuples = await WarmupMicroStoryService(self.db)._collect_due_words(payload.child_id)
-                due_words = [w for w, _ in due_tuples if w]
+                word_attempts = await AdaptiveLearningRepository(self.db).list_difficult_word_attempts(
+                    payload.child_id, window_days=90
+                )
+                due_words = [
+                    item.display_text
+                    for item in compute_spaced_difficult_words(word_attempts, limit=4)
+                    if item.display_text
+                ]
             except Exception:
                 due_words = []
 
@@ -535,13 +524,7 @@ class FamilyStoryweaverService:
         try:
             from app.models.smart_book_studio import BookStyleBible, PageOcrExtraction
 
-            page_kind = (
-                "POEM"
-                if style_mode == "POEM"
-                else "COMIC"
-                if style_mode == "DUET_DIALOGUE"
-                else "TEXT_ONLY"
-            )
+            page_kind = "POEM" if style_mode == "POEM" else "TEXT_ONLY"
             sample_texts = [p[3] for p in committed_revisions]
             bible = analyze_book_style_deterministic(
                 title=title,

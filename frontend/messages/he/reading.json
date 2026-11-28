@@ -174,15 +174,6 @@
       "no_device": "לא נמצא מיקרופון במכשיר. אנא חבר מיקרופון ונסה שוב.",
       "device_busy": "המיקרופון נמצא בשימוש על ידי אפליקציה אחרת. אנא סגור אותה ונסה שוב.",
       "error": "לא ניתן לבדוק את המיקרופון. אנא בדקו את החיבור המאובטח והגדרות הדפדפן ונסו שוב."
-    },
-    "warmupStory": {
-      "spacedEyebrow": "חזרה מרווחת על מילים (1-3-7 ימים)",
-      "starterEyebrow": "חימום נעים לפני קריאה",
-      "title": "סיפורון חימום קצר",
-      "listenStory": "האזנה לסיפורון",
-      "stopListen": "עצירה",
-      "refreshStory": "רענון סיפורון החימום",
-      "focusWordsLabel": "מילים משולבות להיום"
     }
   },
   "ready": {
@@ -479,15 +470,6 @@
     "MULTI_COLUMN": "רב-עמודות",
     "TEXT_OVER_IMAGE": "טקסט על איור",
     "LOW_QUALITY": "דרוש בדיקה"
-  },
-  "duet": {
-    "toggleLabel": "קריאה משותפת בתורות",
-    "toggleActive": "מצב תורות פעיל",
-    "parentTurnBadge": "תור ההורה להוביל",
-    "childTurnBadge": "עכשיו תור הילד/ה לקרוא!",
-    "listenParentSample": "האזנה לדוגמה",
-    "completeParentTurn": "סיימתי לקרוא — תור הילד/ה",
-    "turnCounter": "תור {current}/{total}"
   },
   "multimodalBridge": {
     "title": "גלו את האיור והמשפטים שבעמוד",

@@ -174,15 +174,6 @@
       "no_device": "No se encontró ningún micrófono en el dispositivo. Conecta un micrófono e inténtalo de nuevo.",
       "device_busy": "El micrófono está siendo utilizado por otra aplicación. Ciérrala e inténtalo de nuevo.",
       "error": "No se pudo comprobar el micrófono. Verifica la conexión segura y la configuración del navegador e inténtalo de nuevo."
-    },
-    "warmupStory": {
-      "spacedEyebrow": "Repaso espaciado de palabras (1-3-7 días)",
-      "starterEyebrow": "Calentamiento suave de lectura",
-      "title": "Microcuento de calentamiento",
-      "listenStory": "Escuchar cuento",
-      "stopListen": "Detener audio",
-      "refreshStory": "Actualizar microcuento",
-      "focusWordsLabel": "Palabras integradas hoy"
     }
   },
   "ready": {
@@ -479,15 +470,6 @@
     "MULTI_COLUMN": "Multicolumna",
     "TEXT_OVER_IMAGE": "Texto sobre ilustración",
     "LOW_QUALITY": "Requiere revisión"
-  },
-  "duet": {
-    "toggleLabel": "Lectura por turnos",
-    "toggleActive": "Modo por turnos activo",
-    "parentTurnBadge": "Turno guía de mamá/papá",
-    "childTurnBadge": "¡Turno del niño para leer!",
-    "listenParentSample": "Escuchar muestra",
-    "completeParentTurn": "Leído — Turno del niño",
-    "turnCounter": "Turno {current}/{total}"
   },
   "multimodalBridge": {
     "title": "Explora la ilustración y oraciones",

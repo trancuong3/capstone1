@@ -19,17 +19,11 @@ from app.schemas.child_progress import (
     ChildProgressAssessmentRead,
     ComprehensionTypeRead,
     DifficultWordStatRead,
-    MinimalPairExerciseRead,
     PhonologicalPatternRead,
-    PhonologySandboxRead,
     ProgressMetricsRead,
     ScoreComponentRead,
     ScoreRead,
     WeeklyPointRead,
-)
-from app.services.child_progress.phonology_profiler import (
-    NON_CLINICAL_DISCLAIMER_VI,
-    default_starter_minimal_pairs,
 )
 from app.services.child_progress.ai import (
     AssessmentAIError,
@@ -268,90 +262,6 @@ class ChildProgressService:
             assessment=text,
             ai_cached=cached,
             ai_fallback_reason=fallback_reason,
-        )
-
-    async def get_phonology_sandbox(
-        self,
-        child_id: UUID,
-        actor_id: UUID,
-        *,
-        days: int = 30,
-    ) -> PhonologySandboxRead:
-        if not 7 <= days <= 90:
-            raise HTTPException(422, "Invalid period")
-        if await self.repository.owned_child(child_id, actor_id) is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Child profile not found")
-
-        end: date = self._now().astimezone(VIETNAM_TZ).date()
-        start = end - timedelta(days=days - 1)
-        since = datetime.combine(start, day_time.min, tzinfo=VIETNAM_TZ)
-
-        sessions = await self.repository.sessions(child_id, since)
-        reports = await self.repository.reports(child_id, since)
-        retries = await self.repository.word_retries(child_id, since)
-        answers = await self.repository.answers(child_id, since)
-        practice_fn = getattr(self.repository, "practice_attempts", None)
-        practice_attempts = (
-            await practice_fn(child_id, since) if callable(practice_fn) else []
-        )
-        await self.repository.release()
-
-        window = compute_window(
-            start=start,
-            end=end,
-            sessions=sessions,
-            reports=reports,
-            retries=retries,
-            answers=answers,
-            practice_attempts=practice_attempts,
-        )
-        patterns = [
-            PhonologicalPatternRead.model_validate(item)
-            for item in window.phonological_patterns
-        ]
-        recommended_pairs: list[MinimalPairExerciseRead] = []
-        seen_pairs: set[tuple[str, str]] = set()
-        for pat in patterns:
-            for pair in pat.minimal_pairs:
-                canon = (
-                    (pair.word_a, pair.word_b)
-                    if pair.word_a <= pair.word_b
-                    else (pair.word_b, pair.word_a)
-                )
-                if canon in seen_pairs:
-                    continue
-                seen_pairs.add(canon)
-                recommended_pairs.append(
-                    MinimalPairExerciseRead(
-                        pattern_key=pat.pattern_key,
-                        word_a=pair.word_a,
-                        word_b=pair.word_b,
-                        target_word=pair.target_word,
-                        contrast_word=pair.contrast_word,
-                        hint_vi=pair.hint_vi,
-                        origin=pair.origin,
-                    )
-                )
-                if len(recommended_pairs) >= 6:
-                    break
-            if len(recommended_pairs) >= 6:
-                break
-
-        if not recommended_pairs:
-            recommended_pairs = [
-                MinimalPairExerciseRead.model_validate(item)
-                for item in default_starter_minimal_pairs()
-            ]
-
-        return PhonologySandboxRead(
-            child_id=child_id,
-            days=days,
-            is_diagnostic=False,
-            disclaimer_vi=NON_CLINICAL_DISCLAIMER_VI,
-            has_recurring_patterns=bool(patterns),
-            patterns=patterns,
-            recommended_pairs=recommended_pairs,
-            duration_seconds=60,
         )
 
     async def _comments(

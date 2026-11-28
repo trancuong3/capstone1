@@ -1495,32 +1495,6 @@ export class RealtimeAlignmentEngine {
   }
 
   /**
-   * Duet / Turn-Taking Shared Reading: marks parent-read turn words as MATCH
-   * and advances cursor cleanly to the child's next turn (or end of page).
-   */
-  advanceParentTurnWords(
-    wordIds: readonly string[],
-  ): RealtimeAlignmentSnapshot {
-    if (wordIds.length === 0) return this.getSnapshot();
-    const idSet = new Set(wordIds);
-    let maxIdx = -1;
-    for (let i = 0; i < this.bookWords.length; i += 1) {
-      if (idSet.has(this.bookWords[i]!.wordId)) {
-        this.setWordStatus(i, "MATCH");
-        if (i > maxIdx) maxIdx = i;
-      }
-    }
-    if (maxIdx === -1) return this.getSnapshot();
-    this.pendingToken = null;
-    this.replayPos = null;
-    this.spellingBuffer = null;
-    this.spellingInProgress = false;
-    this.trailingMismatch = null;
-    this.currentBookIndex = Math.max(this.currentBookIndex, maxIdx + 1);
-    return this.getSnapshot();
-  }
-
-  /**
    * Gọi khi kết thúc đọc một trang.
    * Những từ còn lại phía sau con trỏ được đánh dấu DELETE.
    */

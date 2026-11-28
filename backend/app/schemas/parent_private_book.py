@@ -367,7 +367,7 @@ class ParentStoryweaverRequest(BaseModel):
     theme: str = Field(default="khu vườn nhỏ", min_length=2, max_length=120)
     page_count: int = Field(default=3, ge=3, le=4)
     target_grade: int | None = Field(default=None, ge=1, le=5)
-    style_mode: Literal["PROSE", "DUET_DIALOGUE", "POEM"] = "DUET_DIALOGUE"
+    style_mode: Literal["PROSE", "POEM"] = "PROSE"
     custom_words: list[str] = Field(default_factory=list, max_length=8)
 
     model_config = ConfigDict(extra="forbid")
