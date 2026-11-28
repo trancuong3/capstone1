@@ -148,10 +148,17 @@
   overflow: hidden;
   border-radius: 4px 12px 12px 4px;
 }
+.family-reading-desk--passport {
+  grid-template-columns: minmax(0, 1fr);
+}
 .desk-copy {
   align-self: center;
   padding: clamp(24px, 2.4vw, 40px);
   min-width: 0;
+}
+.family-reading-desk--passport .desk-copy {
+  align-self: stretch;
+  padding: clamp(20px, 2.2vw, 32px);
 }
 .desk-label {
   display: flex;
@@ -167,7 +174,7 @@
   line-height: 1.17;
   letter-spacing: -0.015em;
   overflow-wrap: anywhere;
-  margin: 24px 0 12px;
+  margin: clamp(14px, 1.8vw, 22px) 0 12px;
   text-wrap: balance;
 }
 .desk-copy p {

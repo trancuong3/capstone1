@@ -536,4 +536,26 @@ describe("DashboardScreen with real API adapters", () => {
       screen.queryByRole("navigation", { name: /Hồ sơ bé/i }),
     ).not.toBeInTheDocument();
   });
+
+  it("renders the 5-minute train CTA banner at full dashboard width outside the reading desk once a child is selected", async () => {
+    apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
+    const user = userEvent.setup();
+    const { container } = renderDashboard();
+
+    const firstProfile = await screen.findByRole("button", {
+      name: `${childFixture.alias}, lớp ${childFixture.grade}`,
+    });
+    expect(screen.queryByTestId("five-minute-train-cta-card")).toBeNull();
+
+    await user.click(firstProfile);
+
+    const trainCard = await screen.findByTestId("five-minute-train-cta-card");
+    const desk = container.querySelector(".family-reading-desk");
+    expect(desk).not.toBeNull();
+    expect(desk?.contains(trainCard)).toBe(false);
+    expect(screen.getByTestId("five-minute-train-launch-btn")).toHaveAttribute(
+      "href",
+      `/learning-train?childId=${childFixture.id}&from=dashboard`,
+    );
+  });
 });
