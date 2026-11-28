@@ -154,7 +154,8 @@ describe("/api/cron/parent-emails route handler", () => {
     ).toBe("a-very-strong-cron-secret-value");
   });
 
-  it("retries once on transient 502 Render cold-start response and succeeds", async () => {
+  it("retries once on transient 502 Render cold-start response after 1500ms backoff and succeeds", async () => {
+    vi.useFakeTimers();
     process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
     process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
 
@@ -177,7 +178,10 @@ describe("/api/cron/parent-emails route handler", () => {
         },
       },
     );
-    const res = await GET(req);
+    const pending = GET(req);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(1_500);
+    const res = await pending;
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = await res.json();
@@ -185,6 +189,7 @@ describe("/api/cron/parent-emails route handler", () => {
   });
 
   it("exports maxDuration = 60 and retries 504/network errors without retrying 401 or 503", async () => {
+    vi.useFakeTimers();
     expect(maxDuration).toBe(60);
 
     process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
@@ -231,13 +236,16 @@ describe("/api/cron/parent-emails route handler", () => {
         }),
       );
     vi.stubGlobal("fetch", fetch504);
-    const res504 = await GET(
+    const pending504 = GET(
       new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
         headers: {
           authorization: "Bearer a-very-strong-cron-secret-value",
         },
       }),
     );
+    await vi.waitFor(() => expect(fetch504).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(1_500);
+    const res504 = await pending504;
     expect(res504.status).toBe(200);
     expect(fetch504).toHaveBeenCalledTimes(2);
 
@@ -252,15 +260,220 @@ describe("/api/cron/parent-emails route handler", () => {
         }),
       );
     vi.stubGlobal("fetch", fetchNetwork);
-    const resNetwork = await GET(
+    const pendingNet = GET(
       new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
         headers: {
           authorization: "Bearer a-very-strong-cron-secret-value",
         },
       }),
     );
+    await vi.waitFor(() => expect(fetchNetwork).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(1_500);
+    const resNetwork = await pendingNet;
     expect(resNetwork.status).toBe(200);
     expect(fetchNetwork).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530])(
+    "retries upstream status %i after 500ms backoff and recovers",
+    async (status) => {
+      vi.useFakeTimers();
+      process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
+      process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(`edge ${status}`, { status }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ engagement_sent: 4 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const pending = GET(
+        new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+          headers: {
+            authorization: "Bearer a-very-strong-cron-secret-value",
+          },
+        }),
+      );
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(1_500);
+      const res = await pending;
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const calledInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(calledInit.redirect).toBe("error");
+    },
+  );
+
+  it.each([401, 403, 422, 429, 503])(
+    "never retries upstream status %i",
+    async (status) => {
+      process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
+      process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response("no retry", { status }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await GET(
+        new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+          headers: {
+            authorization: "Bearer a-very-strong-cron-secret-value",
+          },
+        }),
+      );
+      expect(res.status).toBe(502);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("propagates X-Request-ID and emits secret-free failure diagnostics", async () => {
+    vi.useFakeTimers();
+    process.env.CRON_SECRET = "super-secret-cron-token-123456";
+    process.env.PARENT_EMAIL_CRON_SECRET = "super-secret-backend-token-654321";
+    process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("edge error", {
+          status: 524,
+          headers: { "x-request-id": "render-req-524" },
+        }),
+      )
+      .mockImplementation(
+        async () =>
+          new Response("still failing", {
+            status: 524,
+            headers: { "x-request-id": "render-req-524-b" },
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer super-secret-cron-token-123456",
+          "x-request-id": "vercel-cron-req-1",
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(56_000);
+    const res = await pending;
+
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-request-id")).toBe("render-req-524-b");
+
+    const sentHeaders = (fetchMock.mock.calls[0]?.[1] as RequestInit)
+      .headers as Record<string, string>;
+    expect(sentHeaders["X-Request-ID"]).toBe("vercel-cron-req-1");
+
+    const json = await res.json();
+    expect(json).toEqual({
+      ok: false,
+      error: "UPSTREAM_DISPATCH_FAILED",
+      upstreamStatus: 524,
+      requestId: "render-req-524-b",
+    });
+
+    const serializedResponse = JSON.stringify(json);
+    const serializedLogs = JSON.stringify(consoleErrorSpy.mock.calls);
+    for (const combined of [serializedResponse, serializedLogs]) {
+      expect(combined).not.toContain("super-secret-cron-token-123456");
+      expect(combined).not.toContain("super-secret-backend-token-654321");
+      expect(combined).not.toContain("Bearer");
+    }
+    expect(serializedLogs).toContain("render-req-524-b");
+  });
+
+  it("sanitizes non-ISO-8859-1 and oversized/unsafe upstream x-request-id headers across retry and final paths", async () => {
+    vi.useFakeTimers();
+    process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
+    process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const unicodeHeaders = new Headers();
+    vi.spyOn(unicodeHeaders, "get").mockImplementation((name) =>
+      name.toLowerCase() === "x-request-id" ? "req-\u0100-unicode" : null,
+    );
+    const oversizedUnsafeId = "evil value; " + "x".repeat(4096);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 524,
+        headers: unicodeHeaders,
+        body: null,
+      } as unknown as Response)
+      .mockImplementation(
+        async () =>
+          new Response("bad gateway", {
+            status: 502,
+            headers: { "x-request-id": oversizedUnsafeId },
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer a-very-strong-cron-secret-value",
+          "x-request-id": "safe-caller-req-42",
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(56_000);
+    const res = await pending;
+
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-request-id")).toBe("safe-caller-req-42");
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      error: "UPSTREAM_DISPATCH_FAILED",
+      upstreamStatus: 502,
+      requestId: "safe-caller-req-42",
+    });
+
+    const serializedLogs = JSON.stringify(consoleErrorSpy.mock.calls);
+    expect(serializedLogs).not.toContain("\u0100");
+    expect(serializedLogs).not.toContain("evil value;");
+
+    vi.useRealTimers();
+    const fetchOkUnsafe = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ engagement_sent: 5 }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": oversizedUnsafeId,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchOkUnsafe);
+    const okRes = await GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer a-very-strong-cron-secret-value",
+          "x-request-id": "safe-caller-req-99",
+        },
+      }),
+    );
+    expect(okRes.status).toBe(200);
+    expect(okRes.headers.get("x-request-id")).toBe("safe-caller-req-99");
   });
 
   it("recovers from multi-attempt Render cold-start 502s within the 55s budget", async () => {
@@ -356,6 +569,7 @@ describe("/api/cron/parent-emails route handler", () => {
     expect(await exhaustRes.json()).toEqual({
       ok: false,
       error: "UPSTREAM_UNREACHABLE",
+      requestId: expect.any(String),
     });
   });
 });

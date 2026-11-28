@@ -81,7 +81,7 @@ export function AuthenticatedImage({
 
     return () => {
       active = false;
-      controller.abort();
+      controller.abort(new DOMException("Aborted", "AbortError"));
       if (createdBlob) {
         revokePrivateBlobUrl(createdBlob);
       }

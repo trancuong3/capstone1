@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 import sys
+from typing import Sequence
 
 from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
@@ -150,6 +152,76 @@ CORS_ALLOWED_ORIGINS = tuple(
 )
 if "*" in CORS_ALLOWED_ORIGINS:
     raise ValueError("CORS_ALLOWED_ORIGINS must not contain '*'")
+
+CORS_ALLOWED_ORIGIN_REGEX = (
+    os.getenv("CORS_ALLOWED_ORIGIN_REGEX") or ""
+).strip() or None
+
+_UNSAFE_CORS_ORIGIN_CANARIES = (
+    "",
+    "*",
+    "null",
+    "http://evil.example.com",
+    "https://evil.example.com",
+    "https://attacker.com",
+    "https://evil.vercel.app",
+    "http://viread-frontend.vercel.app",
+    "https://viread-frontend.vercel.app.evil.com",
+)
+
+
+def validate_cors_origin_regex(pattern: str | None) -> re.Pattern[str] | None:
+    """Validate and compile an optional CORS origin regex while rejecting catch-alls."""
+    if pattern is None:
+        return None
+    cleaned = pattern.strip()
+    if not cleaned:
+        return None
+    if cleaned == "*":
+        raise ValueError("CORS_ALLOWED_ORIGIN_REGEX must not be '*'")
+    try:
+        compiled = re.compile(cleaned)
+    except re.error as error:
+        raise ValueError(
+            "CORS_ALLOWED_ORIGIN_REGEX must be a valid regular expression"
+        ) from error
+    for canary in _UNSAFE_CORS_ORIGIN_CANARIES:
+        if compiled.fullmatch(canary):
+            raise ValueError(
+                "CORS_ALLOWED_ORIGIN_REGEX is too permissive and matches untrusted origins"
+            )
+    return compiled
+
+
+_CORS_ALLOWED_ORIGIN_PATTERN = validate_cors_origin_regex(CORS_ALLOWED_ORIGIN_REGEX)
+
+
+def is_allowed_cors_origin(
+    origin: str | None,
+    *,
+    allowed_origins: Sequence[str] = CORS_ALLOWED_ORIGINS,
+    origin_regex: re.Pattern[str] | str | None = _CORS_ALLOWED_ORIGIN_PATTERN,
+) -> bool:
+    """Return True when `origin` matches explicit allowed origins or the validated regex."""
+    cleaned = (origin or "").strip()
+    if not cleaned:
+        return False
+    if cleaned in allowed_origins:
+        return True
+    if origin_regex is None:
+        return False
+    if isinstance(origin_regex, re.Pattern):
+        compiled: re.Pattern[str] | None = origin_regex
+    elif (
+        origin_regex == CORS_ALLOWED_ORIGIN_REGEX
+        and _CORS_ALLOWED_ORIGIN_PATTERN is not None
+    ):
+        compiled = _CORS_ALLOWED_ORIGIN_PATTERN
+    else:
+        compiled = validate_cors_origin_regex(origin_regex)
+    if compiled is None:
+        return False
+    return compiled.fullmatch(cleaned) is not None
 READING_REMINDER_POLL_SECONDS = _int_env(
     "READING_REMINDER_POLL_SECONDS", 30, minimum=5, maximum=300
 )

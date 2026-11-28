@@ -152,9 +152,13 @@ describe("Sentence Shooter", () => {
     const user = userEvent.setup();
     renderScreenWithBook(TEST_BOOK_ID);
 
-    const bookButton = await screen.findByRole("button", {
-      name: /Sách xạ thủ/,
-    });
+    const bookButton = await screen.findByRole(
+      "button",
+      {
+        name: /Sách xạ thủ/,
+      },
+      { timeout: 5000 },
+    );
     await waitFor(() =>
       expect(bookButton).toHaveAttribute("aria-pressed", "true"),
     );

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
 import {
+  createLinkedAttemptController,
+  raceWithSignal,
+} from "@/lib/api/cold-start-retry";
+import {
   readingPageDtoSchema,
   sessionPageProgressSchema,
 } from "@/lib/api/reading-service";
@@ -157,21 +161,29 @@ function makeUnreachableSnapshot(): OcrWorkerHealthSnapshot {
 export async function fetchOcrWorkerHealth(
   signal?: AbortSignal,
 ): Promise<OcrWorkerHealthSnapshot> {
-  if (typeof fetch !== "function") {
+  if (typeof fetch !== "function" || signal?.aborted) {
     return makeUnreachableSnapshot();
   }
+  const attemptHandle = createLinkedAttemptController(8_000, signal);
   try {
-    const response = await fetch(`${getApiBaseUrl()}/health`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      credentials: "omit",
-      signal,
-    });
+    const response = await raceWithSignal(
+      fetch(`${getApiBaseUrl()}/health`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        signal: attemptHandle.signal,
+      }),
+      attemptHandle.signal,
+    );
     if (!response.ok) {
       return makeUnreachableSnapshot();
     }
-    const raw: unknown = await response.json();
+    const raw: unknown = await raceWithSignal(
+      response.json(),
+      attemptHandle.signal,
+    );
     if (!raw || typeof raw !== "object") {
       return makeUnreachableSnapshot();
     }
@@ -236,6 +248,8 @@ export async function fetchOcrWorkerHealth(
     };
   } catch {
     return makeUnreachableSnapshot();
+  } finally {
+    attemptHandle.cleanup();
   }
 }
 

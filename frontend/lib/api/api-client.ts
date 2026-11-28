@@ -12,6 +12,22 @@ import {
   invalidateApiReadCacheByPrefix,
   runCoalescedApiGet,
 } from "@/lib/api/read-cache";
+import {
+  COLD_START_RETRY_DELAY_MS,
+  COLD_START_RETRY_STATUSES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  cancelResponseBodyQuietly,
+  createLinkedAttemptController,
+  delayWithSignal,
+  extractResponseErrorDetail,
+  getAbortReason,
+  isAbortOrTimeoutError,
+  raceWithSignal,
+  resolveTimeoutMs,
+  shouldRetryColdStartResponse as shouldRetryColdStartStatusWithDetail,
+  type LinkedAttemptHandle,
+} from "@/lib/api/cold-start-retry";
 import { translateMessage } from "@/lib/i18n/formatter";
 import {
   DEFAULT_LOCALE,
@@ -144,8 +160,10 @@ const safeBackendMessageKeys: Record<string, string> = {
   "No usable text was detected; check the image quality":
     "errors.backend.ocrNoUsableText",
   "Local OCR engine is unavailable": "errors.backend.localOcrUnavailable",
+  LOCAL_OCR_UNAVAILABLE: "errors.backend.localOcrUnavailable",
   "Local OCR processing timed out; please retry":
     "errors.backend.localOcrTimeout",
+  LOCAL_OCR_TIMEOUT: "errors.backend.localOcrTimeout",
   "Unsupported upload format; use JPEG, PNG, or WebP":
     "errors.backend.unsupportedUploadFormat",
   "Upload identity already belongs to a different image":
@@ -533,103 +551,49 @@ function isKnownBackendDetail(rawCodeOrText: string): boolean {
   );
 }
 
-async function extractBackendDetail(
+async function safeBackendMessage(
   response: Response,
-): Promise<string | null> {
-  try {
-    const payload: unknown = await response.clone().json();
-    if (typeof payload === "object" && payload !== null) {
-      if ("detail" in payload) {
-        if (typeof payload.detail === "string") {
-          return payload.detail;
-        }
-        if (
-          typeof payload.detail === "object" &&
-          payload.detail !== null &&
-          "code" in payload.detail &&
-          typeof payload.detail.code === "string"
-        ) {
-          return payload.detail.code;
-        }
-      }
-      if ("code" in payload && typeof payload.code === "string") {
-        return payload.code;
-      }
-    }
-  } catch {
-    // A non-JSON error body must not be reflected to the browser.
-  }
-  return null;
-}
-
-async function safeBackendMessage(response: Response): Promise<string> {
-  const detail = await extractBackendDetail(response);
+  signal?: AbortSignal,
+): Promise<string> {
+  const detail = await extractResponseErrorDetail(response, signal);
   return detail !== null
     ? resolveSafeMessageText(detail)
     : tApiError("errors.generic");
 }
 
-async function shouldRetryColdStartResponse(
+export async function shouldRetryColdStartResponse(
   response: Response,
+  signal?: AbortSignal,
   statuses: ReadonlySet<number> = COLD_START_RETRY_STATUSES,
 ): Promise<boolean> {
   if (!statuses.has(response.status)) {
     return false;
   }
-  const detail = await extractBackendDetail(response);
+  const detail = await extractResponseErrorDetail(response, signal);
   // Structured FastAPI JSON 503 responses (e.g. DB busy, voice offline) are
   // application-level backpressure and must never be auto-retried; only
   // unstructured/gateway 503 responses (detail === null) count as cold starts.
   if (response.status === 503) {
     return detail === null;
   }
-  // Only treat unstructured/gateway 502/504 responses as cold starts; never
-  // retry structured application domain errors such as async OCR 504 responses.
   return detail === null || !isKnownBackendDetail(detail);
 }
 
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
 const DEFAULT_COLD_START_DEADLINE_MS = 65_000;
-const DEFAULT_GET_RETRY_DELAY_MS = 800;
 const POST_COLD_START_RETRY_DELAY_MS = 1_200;
 
-function createAbortError(): Error {
-  if (typeof DOMException !== "undefined") {
-    return new DOMException("The operation was aborted.", "AbortError");
-  }
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
-}
-
-function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(createAbortError());
-  }
-  if (ms <= 0) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      globalThis.clearTimeout(timerId);
-      reject(createAbortError());
-    };
-    const timerId = globalThis.setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
+export {
+  COLD_START_RETRY_DELAY_MS,
+  COLD_START_RETRY_STATUSES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  shouldRetryColdStartStatusWithDetail,
+};
 
 function isColdStartRetryableGetError(error: ServiceError): boolean {
   return (
     error.retryable &&
-    (error.status === 0 ||
-      error.status === 502 ||
-      error.status === 503 ||
-      error.status === 504)
+    (error.status === 0 || COLD_START_RETRY_STATUSES.has(error.status))
   );
 }
 
@@ -718,8 +682,6 @@ function invalidateReadCacheForMutationPath(path: string): void {
   invalidateApiReadCache();
 }
 
-const COLD_START_RETRY_STATUSES = new Set([502, 503, 504]);
-
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
   readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -745,20 +707,11 @@ export async function requestApi<T>(
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw failure(0);
   }
-
-  let token: string;
-  try {
-    token = await getBrowserAccessToken({
-      onUnauthorized: () => failure(401),
-    });
-  } catch (error) {
-    if (error instanceof ServiceError) throw error;
-    throw failure(401);
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
   }
 
   const method = requestOptions.method ?? "GET";
-  const isTestEnv =
-    typeof process !== "undefined" && process.env.NODE_ENV === "test";
   const allowRetryMethod =
     method === "GET" || requestOptions.retryOnColdStart === true;
   const maxRetries = !allowRetryMethod
@@ -767,11 +720,7 @@ export async function requestApi<T>(
         Number.isFinite(requestOptions.maxRetries) &&
         requestOptions.maxRetries >= 0
       ? Math.floor(requestOptions.maxRetries)
-      : requestOptions.retryOnColdStart === true
-        ? 1
-        : isTestEnv
-          ? 0
-          : 2;
+      : 1;
   const baseRetryDelayMs =
     typeof requestOptions.retryDelayMs === "number" &&
     Number.isFinite(requestOptions.retryDelayMs) &&
@@ -779,7 +728,7 @@ export async function requestApi<T>(
       ? requestOptions.retryDelayMs
       : method !== "GET" && requestOptions.retryOnColdStart === true
         ? POST_COLD_START_RETRY_DELAY_MS
-        : DEFAULT_GET_RETRY_DELAY_MS;
+        : COLD_START_RETRY_DELAY_MS;
   const isFormDataBody =
     typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
   const hasExplicitTimeout =
@@ -792,13 +741,32 @@ export async function requestApi<T>(
       ? DEFAULT_UPLOAD_TIMEOUT_MS
       : DEFAULT_REQUEST_TIMEOUT_MS;
   const totalDeadlineMs =
-    requestOptions.retryOnColdStart === true && hasExplicitTimeout
-      ? singleAttemptTimeoutMs + baseRetryDelayMs + 1_000
-      : hasExplicitTimeout
-        ? requestOptions.timeoutMs!
-        : maxRetries > 0
-          ? Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
-          : singleAttemptTimeoutMs;
+    requestOptions.retryOnColdStart === true
+      ? hasExplicitTimeout
+        ? singleAttemptTimeoutMs + baseRetryDelayMs + 1_000
+        : Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
+      : singleAttemptTimeoutMs;
+
+  let token: string;
+  const authHandle = createLinkedAttemptController(totalDeadlineMs, signal);
+  try {
+    token = await getBrowserAccessToken({
+      signal: authHandle.signal,
+      onUnauthorized: () => failure(401),
+    });
+  } catch (error) {
+    if (signal?.aborted && !authHandle.didTimeout()) {
+      throw getAbortReason(signal);
+    }
+    if (authHandle.didTimeout()) {
+      throw failure(0, "", true);
+    }
+    if (error instanceof ServiceError) throw error;
+    if (isAbortOrTimeoutError(error)) throw error;
+    throw failure(401);
+  } finally {
+    authHandle.cleanup();
+  }
 
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
     const explicitLocale = resolveExplicitLocale();
@@ -815,16 +783,16 @@ export async function requestApi<T>(
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       if (fetchSignal?.aborted) {
-        throw createAbortError();
+        throw getAbortReason(fetchSignal);
       }
       const remainingMs = deadlineAt - Date.now();
-      if (attempt > 0 && remainingMs <= 0) {
-        break;
+      if (remainingMs <= 0) {
+        throw lastError ?? failure(0, "", true);
       }
-      const attemptTimeoutMs =
-        hasExplicitTimeout || maxRetries > 0
-          ? Math.max(1, Math.min(singleAttemptTimeoutMs, remainingMs))
-          : singleAttemptTimeoutMs;
+      const attemptTimeoutMs = Math.max(
+        1,
+        Math.min(singleAttemptTimeoutMs, remainingMs),
+      );
 
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -837,41 +805,37 @@ export async function requestApi<T>(
         headers["Content-Type"] = "application/json";
       }
 
-      const attemptController = new AbortController();
-      let timedOut = false;
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const onParentAbort = () => attemptController.abort(fetchSignal?.reason);
-      fetchSignal?.addEventListener("abort", onParentAbort, { once: true });
-
+      const attemptHandle: LinkedAttemptHandle = createLinkedAttemptController(
+        attemptTimeoutMs,
+        fetchSignal,
+      );
       let response: Response | null = null;
       let attemptError: ServiceError | null = null;
       let allowColdStartAutoRetry = false;
+      let timedOut = false;
 
       try {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          attemptController.abort(
-            typeof DOMException !== "undefined"
-              ? new DOMException("Request timed out", "TimeoutError")
-              : undefined,
-          );
-        }, attemptTimeoutMs);
-        response = await fetch(`${getApiBaseUrl()}${path}`, {
-          method,
-          headers,
-          ...(body !== undefined ? { body: body as BodyInit } : {}),
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          signal: attemptController.signal,
-        });
+        response = await raceWithSignal(
+          fetch(`${getApiBaseUrl()}${path}`, {
+            method,
+            headers,
+            ...(body !== undefined ? { body: body as BodyInit } : {}),
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            signal: attemptHandle.signal,
+          }),
+          attemptHandle.signal,
+        );
       } catch (error) {
-        if (fetchSignal?.aborted && !timedOut) throw error;
-        allowColdStartAutoRetry = method === "GET" || !timedOut;
+        timedOut = attemptHandle.didTimeout();
+        if (fetchSignal?.aborted && !timedOut) {
+          attemptHandle.cleanup();
+          throw error;
+        }
+        allowColdStartAutoRetry =
+          allowRetryMethod && !timedOut && !fetchSignal?.aborted;
         attemptError = failure(0, "", true);
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        fetchSignal?.removeEventListener("abort", onParentAbort);
       }
 
       if (response !== null) {
@@ -882,33 +846,90 @@ export async function requestApi<T>(
             invalidateApiReadCache();
             if (!hasRetriedAuth && !fetchSignal?.aborted) {
               hasRetriedAuth = true;
-              const refreshedToken =
-                await refreshBrowserAccessToken(activeToken);
+              let refreshedToken: string | null = null;
+              try {
+                refreshedToken = await raceWithSignal(
+                  refreshBrowserAccessToken(activeToken),
+                  attemptHandle.signal,
+                );
+              } catch (error) {
+                timedOut = attemptHandle.didTimeout();
+                attemptHandle.cleanup();
+                if (fetchSignal?.aborted && !timedOut) {
+                  throw getAbortReason(fetchSignal);
+                }
+                if (timedOut) {
+                  throw failure(0, requestId, true);
+                }
+                throw error;
+              }
               if (refreshedToken && refreshedToken !== activeToken) {
+                await cancelResponseBodyQuietly(response, attemptHandle.signal);
+                attemptHandle.cleanup();
                 activeToken = refreshedToken;
                 attempt -= 1;
                 continue;
               }
             }
           }
-          const backendMessage = await safeBackendMessage(response);
-          const coldStartGateway =
-            !COLD_START_RETRY_STATUSES.has(response.status) ||
-            (await shouldRetryColdStartResponse(response));
+
+          let backendMessage: string;
+          let coldStartGateway: boolean;
+          try {
+            backendMessage = await safeBackendMessage(
+              response,
+              attemptHandle.signal,
+            );
+            coldStartGateway =
+              !COLD_START_RETRY_STATUSES.has(response.status) ||
+              (await shouldRetryColdStartResponse(
+                response,
+                attemptHandle.signal,
+              ));
+            await cancelResponseBodyQuietly(response, attemptHandle.signal);
+          } catch (error) {
+            timedOut = attemptHandle.didTimeout();
+            attemptHandle.cleanup();
+            if (fetchSignal?.aborted && !timedOut) {
+              throw getAbortReason(fetchSignal);
+            }
+            if (timedOut) {
+              throw failure(0, requestId, true);
+            }
+            throw error;
+          }
+          timedOut = attemptHandle.didTimeout();
+          if (fetchSignal?.aborted && !timedOut) {
+            attemptHandle.cleanup();
+            throw getAbortReason(fetchSignal);
+          }
+          if (timedOut) {
+            attemptHandle.cleanup();
+            throw failure(0, requestId, true);
+          }
+
           allowColdStartAutoRetry =
             method === "GET"
               ? COLD_START_RETRY_STATUSES.has(response.status) &&
                 coldStartGateway
               : (response.status === 502 || response.status === 504) &&
                 coldStartGateway;
+          const messageWithCorrelation =
+            response.status >= 500 && requestId
+              ? tApiError("errors.requestWithId", {
+                  message: backendMessage,
+                  requestId,
+                })
+              : backendMessage;
           attemptError = failure(
             response.status,
             requestId,
             response.status >= 500 &&
               (response.status === 503 || coldStartGateway),
-            backendMessage,
+            messageWithCorrelation,
           );
         } else if (response.status === 204 || response.status === 205) {
+          attemptHandle.cleanup();
           const parsed = schema.safeParse(undefined);
           if (!parsed.success) {
             throw failure(response.status, requestId);
@@ -917,10 +938,22 @@ export async function requestApi<T>(
         } else {
           let payload: unknown;
           try {
-            payload = await response.json();
-          } catch {
+            payload = await raceWithSignal(
+              response.json(),
+              attemptHandle.signal,
+            );
+          } catch (error) {
+            timedOut = attemptHandle.didTimeout();
+            attemptHandle.cleanup();
+            if (fetchSignal?.aborted && !timedOut) {
+              throw error;
+            }
+            if (timedOut) {
+              throw failure(0, requestId, true);
+            }
             throw failure(response.status, requestId);
           }
+          attemptHandle.cleanup();
           const parsed = schema.safeParse(payload);
 
           if (!parsed.success) {
@@ -935,7 +968,10 @@ export async function requestApi<T>(
         }
       }
 
+      attemptHandle.cleanup();
       lastError = attemptError ?? failure(0, "", true);
+      const boundedDelayMs = baseRetryDelayMs * 2 ** attempt;
+      const remainingAfterAttempt = deadlineAt - Date.now();
       if (
         allowRetryMethod &&
         attempt < maxRetries &&
@@ -945,18 +981,10 @@ export async function requestApi<T>(
           ? isColdStartRetryableGetError(lastError)
           : lastError.status === 0 ||
             lastError.status === 502 ||
-            lastError.status === 504)
+            lastError.status === 504) &&
+        remainingAfterAttempt > boundedDelayMs
       ) {
-        await response?.body?.cancel().catch(() => undefined);
-        const remainingAfterAttempt = deadlineAt - Date.now();
-        if (remainingAfterAttempt <= 0) {
-          throw lastError;
-        }
-        const boundedDelayMs = Math.min(
-          baseRetryDelayMs * 2 ** attempt,
-          Math.max(0, remainingAfterAttempt - 1),
-        );
-        await sleepWithAbort(boundedDelayMs, fetchSignal);
+        await delayWithSignal(boundedDelayMs, fetchSignal);
         continue;
       }
 
@@ -1071,39 +1099,195 @@ export function resolvePrivateApiMediaUrl(url: string): string {
 export async function fetchAuthenticatedBlobUrl(
   url: string,
   signal?: AbortSignal,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 ): Promise<string> {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
+
+  const effectiveTimeoutMs = resolveTimeoutMs(
+    timeoutMs,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+  );
+  const deadlineAt = Date.now() + effectiveTimeoutMs;
+
   let token: string;
+  const authHandle = createLinkedAttemptController(effectiveTimeoutMs, signal);
   try {
     token = await getBrowserAccessToken({
+      signal: authHandle.signal,
       onUnauthorized: () => failure(401),
     });
   } catch (error) {
+    if (signal?.aborted && !authHandle.didTimeout()) {
+      throw getAbortReason(signal);
+    }
+    if (authHandle.didTimeout()) {
+      throw failure(0, "", true);
+    }
     if (error instanceof ServiceError) throw error;
+    if (isAbortOrTimeoutError(error)) throw error;
     throw failure(401);
+  } finally {
+    authHandle.cleanup();
   }
 
   const explicitLocale = resolveExplicitLocale();
   const resolvedUrl = resolvePrivateApiMediaUrl(url);
-  const response = await fetch(resolvedUrl, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
-        ? { "X-ViRead-Locale": explicitLocale }
-        : {}),
-    },
-    cache: "no-store",
-    credentials: "omit",
-    redirect: "error",
-    signal,
-  });
 
-  if (!response.ok) {
-    throw failure(response.status);
+  let response!: Response;
+  let activeAttemptHandle: LinkedAttemptHandle | null = null;
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (signal?.aborted) {
+        throw getAbortReason(signal);
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        throw failure(0, "", true);
+      }
+
+      const attemptHandle = createLinkedAttemptController(remainingMs, signal);
+
+      try {
+        response = await raceWithSignal(
+          fetch(resolvedUrl, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
+                ? { "X-ViRead-Locale": explicitLocale }
+                : {}),
+            },
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            signal: attemptHandle.signal,
+          }),
+          attemptHandle.signal,
+        );
+      } catch (error) {
+        const timedOut = attemptHandle.didTimeout();
+        attemptHandle.cleanup();
+        if (signal?.aborted && !timedOut) throw error;
+        if (
+          attempt === 0 &&
+          !timedOut &&
+          !signal?.aborted &&
+          deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+        ) {
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, signal);
+          continue;
+        }
+        throw failure(0, "", true);
+      }
+
+      let shouldRetry = false;
+      if (attempt === 0 && !signal?.aborted) {
+        try {
+          shouldRetry =
+            (await shouldRetryColdStartResponse(
+              response,
+              attemptHandle.signal,
+            )) && deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS;
+        } catch (error) {
+          const timedOut = attemptHandle.didTimeout();
+          attemptHandle.cleanup();
+          if (signal?.aborted && !timedOut) {
+            throw getAbortReason(signal);
+          }
+          if (timedOut) {
+            throw failure(0, "", true);
+          }
+          throw error;
+        }
+      }
+
+      if (shouldRetry) {
+        await cancelResponseBodyQuietly(response, attemptHandle.signal);
+        const timedOut = attemptHandle.didTimeout();
+        attemptHandle.cleanup();
+        if (signal?.aborted && !timedOut) {
+          throw getAbortReason(signal);
+        }
+        if (timedOut) {
+          throw failure(0, "", true);
+        }
+        await delayWithSignal(COLD_START_RETRY_DELAY_MS, signal);
+        continue;
+      }
+
+      activeAttemptHandle = attemptHandle;
+      break;
+    }
+
+    const requestId = response.headers.get("x-request-id") ?? "";
+    if (!response.ok) {
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
+        invalidateApiReadCache();
+      }
+      let backendMessage: string;
+      try {
+        backendMessage = await safeBackendMessage(
+          response,
+          activeAttemptHandle?.signal,
+        );
+        await cancelResponseBodyQuietly(response, activeAttemptHandle?.signal);
+      } catch (error) {
+        const timedOut = activeAttemptHandle?.didTimeout() ?? false;
+        if (signal?.aborted && !timedOut) {
+          throw getAbortReason(signal);
+        }
+        if (timedOut) {
+          throw failure(0, requestId, true);
+        }
+        throw error;
+      }
+      if (signal?.aborted && !(activeAttemptHandle?.didTimeout() ?? false)) {
+        throw getAbortReason(signal);
+      }
+      if (activeAttemptHandle?.didTimeout()) {
+        throw failure(0, requestId, true);
+      }
+      const messageWithCorrelation =
+        response.status >= 500 && requestId
+          ? tApiError("errors.requestWithId", {
+              message: backendMessage,
+              requestId,
+            })
+          : backendMessage;
+      throw failure(
+        response.status,
+        requestId,
+        response.status >= 500,
+        messageWithCorrelation,
+      );
+    }
+
+    let blob: Blob;
+    try {
+      blob = activeAttemptHandle
+        ? await raceWithSignal(response.blob(), activeAttemptHandle.signal)
+        : await response.blob();
+    } catch (error) {
+      const timedOut = activeAttemptHandle?.didTimeout() ?? false;
+      if (signal?.aborted && !timedOut) throw error;
+      throw failure(0, requestId, true);
+    }
+
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
+    if (activeAttemptHandle?.didTimeout()) {
+      throw failure(0, requestId, true);
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    activePrivateBlobUrls.add(objectUrl);
+    return objectUrl;
+  } finally {
+    activeAttemptHandle?.cleanup();
   }
-
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  activePrivateBlobUrls.add(objectUrl);
-  return objectUrl;
 }

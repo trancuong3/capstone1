@@ -110,7 +110,11 @@ async def resolve_assistant_actor(
         return AssistantActorContext(role_scope="public", subject_key=ip_subject)
 
     try:
-        actor_id = await asyncio.to_thread(get_current_parent_id, credentials)
+        if inspect.iscoroutinefunction(get_current_parent_id):
+            actor_id = await get_current_parent_id(credentials)
+        else:
+            auth_res = await asyncio.to_thread(get_current_parent_id, credentials)
+            actor_id = await auth_res if inspect.isawaitable(auth_res) else auth_res
         actor_uuid = actor_id if isinstance(actor_id, UUID) else UUID(str(actor_id))
     except (HTTPException, ValueError, TypeError):
         return AssistantActorContext(role_scope="public", subject_key=ip_subject)

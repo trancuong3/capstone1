@@ -4,6 +4,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 import re
@@ -45,6 +46,8 @@ _signed_url_cache: "OrderedDict[tuple[str, str, int], tuple[float, str]]" = Orde
 _STORAGE_HTTP_CLIENTS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
     weakref.WeakKeyDictionary()
 )
+_ORIGINAL_HTTPX_ASYNC_CLIENT = httpx.AsyncClient
+_ORIGINAL_GET_SUPABASE_ADMIN_CLIENT = get_supabase_admin_client
 
 
 def _get_storage_async_client() -> httpx.AsyncClient:
@@ -64,6 +67,25 @@ def _get_storage_async_client() -> httpx.AsyncClient:
     )
     _STORAGE_HTTP_CLIENTS[loop] = client
     return client
+
+
+async def _evict_storage_http_client(
+    expected_client: httpx.AsyncClient | None = None,
+) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if expected_client is not None and _STORAGE_HTTP_CLIENTS.get(loop) is not expected_client:
+        return
+    client = _STORAGE_HTTP_CLIENTS.pop(loop, None)
+    if client is not None and not getattr(client, "is_closed", False):
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 
 async def aclose_storage_http_clients() -> None:
@@ -578,9 +600,20 @@ async def download_object_async(
     last_exc: Exception | None = None
 
     for attempt in range(1, attempts + 1):
+        pooled_client: httpx.AsyncClient | None = None
         try:
-            client = _get_storage_async_client()
-            response = await client.get(url, headers=headers, timeout=request_timeout)
+            if httpx.AsyncClient is not _ORIGINAL_HTTPX_ASYNC_CLIENT:
+                async with httpx.AsyncClient(
+                    http2=True,
+                    trust_env=False,
+                    timeout=request_timeout,
+                ) as patched_client:
+                    response = await patched_client.get(url, headers=headers)
+            else:
+                pooled_client = _get_storage_async_client()
+                response = await pooled_client.get(
+                    url, headers=headers, timeout=request_timeout
+                )
             if response.status_code == 404:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -602,6 +635,8 @@ async def download_object_async(
             raise
         except Exception as exc:
             last_exc = exc
+            if isinstance(exc, httpx.TransportError) and pooled_client is not None:
+                await _evict_storage_http_client(pooled_client)
             if attempt < attempts and _is_retryable_storage_error(exc):
                 delay = _storage_retry_delay(attempt, base_delay)
                 log_diagnostic(
@@ -908,11 +943,26 @@ def create_cached_signed_image_urls(
         )
 
     if missing_paths:
+        call_kwargs: dict[str, object] = {}
+        if bucket_name is not None:
+            call_kwargs["bucket_name"] = bucket_name
+        if max_workers != 8:
+            call_kwargs["max_workers"] = max_workers
+        if ttl_seconds is not None:
+            call_kwargs["ttl_seconds"] = effective_ttl
+        if create_signed_image_urls is not _ORIGINAL_CREATE_SIGNED_IMAGE_URLS:
+            call_kwargs = _filter_signed_urls_call_kwargs(
+                create_signed_image_urls, call_kwargs
+            )
+        else:
+            call_kwargs = {
+                "bucket_name": bucket_name,
+                "max_workers": max_workers,
+                "ttl_seconds": effective_ttl,
+            }
         freshly_signed = create_signed_image_urls(
             missing_paths,
-            bucket_name=bucket_name,
-            max_workers=max_workers,
-            ttl_seconds=effective_ttl,
+            **call_kwargs,
         )
         expires_at = time.monotonic() + effective_cache_ttl
         with _signed_url_cache_lock:
@@ -929,3 +979,348 @@ def create_cached_signed_image_urls(
         ref if is_ext else resolved_by_path[ref]
         for is_ext, ref in validated_refs
     ]
+
+
+def _filter_signed_urls_call_kwargs(
+    fn: object,
+    candidate_kwargs: dict[str, object],
+) -> dict[str, object]:
+    """Filter optional kwargs to what a patched create_signed_image_urls mock accepts."""
+    if not candidate_kwargs:
+        return {}
+    try:
+        sig = inspect.signature(fn)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return candidate_kwargs
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return candidate_kwargs
+    return {
+        key: value
+        for key, value in candidate_kwargs.items()
+        if key in sig.parameters
+        and sig.parameters[key].kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    }
+
+
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
+_ORIGINAL_CREATE_SIGNED_IMAGE_URLS = create_signed_image_urls
+
+
+async def _create_signed_image_urls_async_chunk(
+    client: httpx.AsyncClient,
+    resolved_bucket: str,
+    chunk: list[str],
+    effective_ttl: int,
+    *,
+    max_workers: int = 8,
+) -> dict[str, str]:
+    base_url = (SUPABASE_URL or "").rstrip("/")
+    headers = supabase_admin_headers(
+        SUPABASE_ADMIN_KEY, extra={"Content-Type": "application/json"}
+    )
+    bucket_q = quote(resolved_bucket, safe="")
+    chunk_map: dict[str, str] = {}
+
+    batch_url = f"{base_url}/storage/v1/object/sign/{bucket_q}"
+    try:
+        batch_resp = await client.post(
+            batch_url,
+            json={"expiresIn": effective_ttl, "paths": chunk},
+            headers=headers,
+        )
+        if batch_resp.status_code < 400:
+            batch_res = batch_resp.json()
+            if isinstance(batch_res, list):
+                for idx, item in enumerate(batch_res):
+                    if not isinstance(item, dict) or item.get("error"):
+                        continue
+                    item_path = item.get("path")
+                    if not isinstance(item_path, str) or not item_path:
+                        if len(batch_res) == len(chunk):
+                            item_path = chunk[idx]
+                        else:
+                            continue
+                    raw_signed = (
+                        item.get("signedURL")
+                        or item.get("signedUrl")
+                        or item.get("signed_url")
+                    )
+                    if isinstance(raw_signed, str) and raw_signed:
+                        chunk_map[item_path] = _normalize_signed_url(raw_signed)
+    except HTTPException:
+        raise
+    except httpx.TransportError:
+        raise
+    except Exception:
+        # Fall back to bounded per-path signing below when batch endpoint rejects or differs.
+        pass
+
+    missing = [path for path in chunk if path not in chunk_map]
+    if missing:
+        sem = asyncio.Semaphore(max(1, min(max_workers, 8)))
+
+        async def _sign_one(path: str) -> tuple[str, str]:
+            async with sem:
+                single_url = (
+                    f"{base_url}/storage/v1/object/sign/"
+                    f"{bucket_q}/{quote(path, safe='/')}"
+                )
+                resp = await client.post(
+                    single_url,
+                    json={"expiresIn": effective_ttl},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Storage did not return a signed URL")
+                signed = (
+                    payload.get("signedURL")
+                    or payload.get("signedUrl")
+                    or payload.get("signed_url")
+                )
+                return path, _normalize_signed_url(signed)
+
+        results = await asyncio.gather(*(_sign_one(p) for p in missing))
+        for path, url in results:
+            chunk_map[path] = url
+
+    return chunk_map
+
+
+async def create_cached_signed_image_urls_async(
+    image_paths: Sequence[str | None],
+    *,
+    bucket_name: str | None = None,
+    max_workers: int = 8,
+    ttl_seconds: int | None = None,
+    cache_ttl_seconds: float = SIGNED_URL_CACHE_TTL_SECONDS,
+) -> list[str]:
+    """Async batch-sign Storage paths via pooled HTTP/2 client and 20-minute TTL LRU cache."""
+    if not image_paths:
+        return []
+
+    effective_ttl = max(
+        30, int(ttl_seconds if ttl_seconds is not None else SIGNED_URL_TTL_SECONDS)
+    )
+    effective_cache_ttl = max(
+        0.0, min(float(cache_ttl_seconds), max(0.0, effective_ttl - 60.0))
+    )
+    bucket_key = (bucket_name or SUPABASE_STORAGE_BUCKET or "").strip()
+    validated_refs = [_validate_image_reference(path) for path in image_paths]
+
+    now = time.monotonic()
+    resolved_by_path: dict[str, str] = {}
+    missing_paths: list[str] = []
+
+    if effective_cache_ttl > 0.0:
+        with _signed_url_cache_lock:
+            for is_ext, ref in validated_refs:
+                if is_ext or ref in resolved_by_path:
+                    continue
+                cache_key = (bucket_key, ref, effective_ttl)
+                cached = _signed_url_cache.get(cache_key)
+                if cached is not None:
+                    expires_at, signed_url = cached
+                    if expires_at > now:
+                        _signed_url_cache.move_to_end(cache_key)
+                        resolved_by_path[ref] = signed_url
+                        continue
+                    _signed_url_cache.pop(cache_key, None)
+                if ref not in missing_paths:
+                    missing_paths.append(ref)
+    else:
+        missing_paths = list(
+            dict.fromkeys(ref for is_ext, ref in validated_refs if not is_ext)
+        )
+
+    if missing_paths:
+        if (
+            create_signed_image_urls is not _ORIGINAL_CREATE_SIGNED_IMAGE_URLS
+            or get_supabase_admin_client is not _ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
+        ):
+            call_kwargs: dict[str, object] = {
+                "bucket_name": bucket_name,
+                "max_workers": max_workers,
+                "ttl_seconds": effective_ttl,
+            }
+            if create_signed_image_urls is not _ORIGINAL_CREATE_SIGNED_IMAGE_URLS:
+                call_kwargs = _filter_signed_urls_call_kwargs(
+                    create_signed_image_urls, call_kwargs
+                )
+            freshly_signed = await asyncio.to_thread(
+                create_signed_image_urls,
+                missing_paths,
+                **call_kwargs,
+            )
+        else:
+            resolved_bucket = _bucket_name(bucket_name)
+            if not SUPABASE_ADMIN_KEY:
+                diagnostics = runtime_configuration_diagnostics(include_ocr=False)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="storage_server_key_missing",
+                    stage="storage_configuration",
+                    **diagnostics,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Server-side Supabase Storage credentials are not configured",
+                )
+            if not SUPABASE_URL:
+                diagnostics = runtime_configuration_diagnostics(include_ocr=False)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="storage_configuration_missing",
+                    stage="storage_configuration",
+                    **diagnostics,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Supabase Storage is not configured",
+                )
+
+            signed_by_path: dict[str, str] = {}
+            for attempt in range(2):
+                remaining_paths = [p for p in missing_paths if p not in signed_by_path]
+                if not remaining_paths:
+                    break
+                attempt_chunks = [
+                    remaining_paths[i : i + _SIGN_BATCH_SIZE]
+                    for i in range(0, len(remaining_paths), _SIGN_BATCH_SIZE)
+                ]
+                pooled_client: httpx.AsyncClient | None = None
+                try:
+                    async def _run_with_client(client: httpx.AsyncClient) -> None:
+                        if len(attempt_chunks) == 1:
+                            signed_by_path.update(
+                                await _create_signed_image_urls_async_chunk(
+                                    client,
+                                    resolved_bucket,
+                                    attempt_chunks[0],
+                                    effective_ttl,
+                                    max_workers=max_workers,
+                                )
+                            )
+                        else:
+                            chunk_sem = asyncio.Semaphore(4)
+
+                            async def _run_chunk(chunk: list[str]) -> dict[str, str]:
+                                async with chunk_sem:
+                                    return await _create_signed_image_urls_async_chunk(
+                                        client,
+                                        resolved_bucket,
+                                        chunk,
+                                        effective_ttl,
+                                        max_workers=max_workers,
+                                    )
+
+                            for chunk_res in await asyncio.gather(
+                                *(_run_chunk(c) for c in attempt_chunks)
+                            ):
+                                signed_by_path.update(chunk_res)
+
+                    if httpx.AsyncClient is not _ORIGINAL_HTTPX_ASYNC_CLIENT:
+                        async with httpx.AsyncClient(
+                            http2=True,
+                            trust_env=False,
+                            timeout=httpx.Timeout(12.0, connect=4.0, read=12.0, write=10.0, pool=4.0),
+                        ) as patched_client:
+                            await _run_with_client(patched_client)
+                    else:
+                        pooled_client = _get_storage_async_client()
+                        await _run_with_client(pooled_client)
+                    break
+                except HTTPException:
+                    raise
+                except httpx.TransportError as exc:
+                    if pooled_client is not None:
+                        await _evict_storage_http_client(pooled_client)
+                    if attempt == 0:
+                        continue
+                    log_diagnostic(
+                        logger,
+                        logging.ERROR,
+                        event="storage_signed_url_failed",
+                        stage="storage_preview",
+                        exception=exc,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Could not create an image preview URL",
+                    ) from exc
+                except Exception as exc:
+                    log_diagnostic(
+                        logger,
+                        logging.ERROR,
+                        event="storage_signed_url_failed",
+                        stage="storage_preview",
+                        exception=exc,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Could not create an image preview URL",
+                    ) from exc
+
+            freshly_signed = [signed_by_path[path] for path in missing_paths]
+
+        expires_at = time.monotonic() + effective_cache_ttl
+        with _signed_url_cache_lock:
+            for path, signed_url in zip(missing_paths, freshly_signed):
+                resolved_by_path[path] = signed_url
+                if effective_cache_ttl > 0.0:
+                    cache_key = (bucket_key, path, effective_ttl)
+                    _signed_url_cache[cache_key] = (expires_at, signed_url)
+                    _signed_url_cache.move_to_end(cache_key)
+            while len(_signed_url_cache) > SIGNED_URL_CACHE_MAX_ENTRIES:
+                _signed_url_cache.popitem(last=False)
+
+    return [
+        ref if is_ext else resolved_by_path[ref]
+        for is_ext, ref in validated_refs
+    ]
+
+
+def create_cached_signed_image_url(
+    image_path: str | None,
+    *,
+    bucket_name: str | None = None,
+    ttl_seconds: int | None = None,
+    cache_ttl_seconds: float = SIGNED_URL_CACHE_TTL_SECONDS,
+) -> str:
+    return create_cached_signed_image_urls(
+        [image_path],
+        bucket_name=bucket_name,
+        ttl_seconds=ttl_seconds,
+        cache_ttl_seconds=cache_ttl_seconds,
+    )[0]
+
+
+async def create_cached_signed_image_url_async(
+    image_path: str | None,
+    *,
+    bucket_name: str | None = None,
+    ttl_seconds: int | None = None,
+    cache_ttl_seconds: float = SIGNED_URL_CACHE_TTL_SECONDS,
+) -> str:
+    return (
+        await create_cached_signed_image_urls_async(
+            [image_path],
+            bucket_name=bucket_name,
+            ttl_seconds=ttl_seconds,
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
+    )[0]
+
+
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS = create_cached_signed_image_urls
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC = create_cached_signed_image_urls_async
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
+_ORIGINAL_DOWNLOAD_OBJECT_ASYNC = download_object_async

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import ipaddress
 import json
 import logging
 import math
@@ -23,9 +22,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.database.config import APP_ENVIRONMENT as _CONFIG_APP_ENVIRONMENT
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.request_context import get_request_id
 from app.services.local_voice_worker_bootstrap import (
+    _is_loopback_host,
+    _is_loopback_url,
+    _is_truthy_render_env,
     ensure_local_voice_worker_running,
     is_local_voice_worker_autostart_armed,
 )
@@ -318,21 +321,12 @@ class LocalVoiceTechnicalError(VoiceProviderError):
 
 
 def _is_production_or_render() -> bool:
-    return bool((os.getenv("RENDER") or "").strip()) or (
-        (os.getenv("APP_ENVIRONMENT") or "").strip().lower() == "production"
-    )
-
-
-def _is_loopback_host(host: str | None) -> bool:
-    if not host:
-        return False
-    cleaned = host.strip().lower()
-    if cleaned == "localhost":
+    if _is_truthy_render_env(os.getenv("RENDER")):
         return True
-    try:
-        return ipaddress.ip_address(cleaned).is_loopback
-    except ValueError:
-        return False
+    app_env = (
+        os.getenv("APP_ENVIRONMENT") or _CONFIG_APP_ENVIRONMENT or ""
+    ).strip().lower()
+    return app_env == "production"
 
 
 def _resolve_worker_url(raw_url: str | None) -> tuple[str | None, bool]:
@@ -492,7 +486,11 @@ class LocalVoiceProvider:
         self._trip_remote_circuit(probe_client, error_code, allow_loopback=True)
 
     def _start_or_get_recovery_task(self) -> asyncio.Task[bool] | None:
-        if not self.is_loopback or not is_local_voice_worker_autostart_armed():
+        if (
+            not self.is_loopback
+            or _is_production_or_render()
+            or not is_local_voice_worker_autostart_armed()
+        ):
             return None
         if self._recovery_task is not None and not self._recovery_task.done():
             return self._recovery_task
@@ -546,7 +544,12 @@ class LocalVoiceProvider:
         return bool(recovered)
 
     async def _is_incompatible_auth_worker(self) -> bool:
-        if not self.base_url or not self.is_loopback or self._get_token():
+        if (
+            not self.base_url
+            or not self.is_loopback
+            or _is_production_or_render()
+            or self._get_token()
+        ):
             return False
         try:
             async with httpx.AsyncClient(timeout=1.5, trust_env=False) as client:
