@@ -1,0 +1,134 @@
+{
+  "audit_id": "reading_deep_audit_20261126",
+  "generated_at": "2026-11-26T04:40:00+07:00",
+  "scope": "Full-stack adversarial audit, live Before/After reproduction, P0/P1 remediation, independent review pass fixes, and real-browser + physical USB Android verification for Vietnamese Grade 1-3 child reading flow on ViRead.",
+  "red_lines_verified": {
+    "backend_requirements_abi_pins_untouched": true,
+    "backend_env_untouched": true,
+    "isolated_staging_used": "https://192.168.1.2:8443 (PostgreSQL viread_qa_local)",
+    "vietnamese_diacritics_and_d_bar_preserved": true,
+    "comprehension_voice_matcher_answer_key_isolated": true,
+    "git_diff_check_exit": 0
+  },
+  "before_after_matrix": [
+    {
+      "workstream": "Mui A - Realtime Alignment & Parity",
+      "issue": "P0 previewAlignment() freeze on >=4-word skip (synth_mr_07) + gap filling + benchmark/production parity",
+      "before": "previewAlignment() lacked findReanchor() and froze cursor when child skipped >=4 words; ReadingEvidencePipeline guards (isImplausibleSpeechSpeed, CaptureScope, out-of-order seq, REPLAY) were not all wired into reading-screen.tsx.",
+      "after": "previewAlignment() invokes findReanchor() on >=4-word skip and fills [cursor..matchedIndex-1] per-word cleanly; ReadingEvidencePipeline exports isImplausibleSpeechSpeed() + previewInterim() and reading-screen.tsx enforces CaptureScope, implausible-speed, monotonic seq, and REPLAY parity.",
+      "verification": "deep-audit-p0-p1-regressions.test.tsx (synth_mr_07 skip recovery PASS) + READING_BENCH_HOLDOUT=1 alignment-gates.test.ts PASS (false_correct=0, false_wrong=0, wrong_class=0)."
+    },
+    {
+      "workstream": "Mui B - Voice Interaction, Stale Closure, Retry & Pedagogy",
+      "issue": "P0 stale closure `page` on Page 2+; P0 dead retryPrompt Yes/No dialog; P1 EchoGuard, REPLAY, sentence-reinforcement, retryProcessingRef, handleReadSample TTS error mic resume, adaptive paceMs, URL pageId sync, Thầy/Cô persona",
+      "before": "ensureAutomationRuntime() closed over Page 1 `page`; retryPrompt exited early on `!liveTrack` after speechRecorder.stop() and stopped permanently on first ignored echo (`continuous=false`); classifyYesNoVoiceIntent() could false-yes negations/echo; 4 TTS paths bypassed EchoGuard; REPLAY marked SUBSTITUTE; sentence-reinforcement mutated addFinalTranscript(); handleReadSample TTS error still auto-resumed mic inside playAssistantAudio finally; paceMs locked at 9000/9000; male persona leaked 'Cô'.",
+      "after": "pageRef.current synced in ensureAutomationRuntime(), rec.onresult, and stopListeningAndTranscribe (Page 2 & Page 3 auto-coaching verified); retryPrompt runs in real browsers (AudioContext) with continuous=true + acousticSettleMs + EchoGuard + hardened classifyYesNoVoiceIntent(); all 4 TTS paths use speakGuarded() + expanded ASSISTANT_BLEED_PHRASES; REPLAY invokes handleReadCurrentWord() without SUBSTITUTE; sentence-reinforcement keeps first-pass immutable & queues banner when assistantAudioPendingRef=true; playAssistantAudio skips mic auto-resume when playbackThrew=true (verified by new test); try/finally resets retryProcessingRef; adaptive paceMs re-enabled (4000..9000ms); URL `?pageId=` synced via replaceState; adaptPersona applied across prompts & phonics-spelling.ts.",
+      "verification": "reading-automation-screen.test.tsx (15/15 PASS), empathetic-reading-flow.test.tsx (8/8 PASS), reading-screen.test.tsx (78/78 PASS incl. handleReadSample TTS failure no-auto-resume), deep-audit-p0-p1-regressions.test.tsx (13/13 PASS), Chromium male persona 0 'Cô' leaks, URL pageId sync PASS."
+    },
+    {
+      "workstream": "Mui C - Audio Quality, WS VAD, Auth & Word Timings",
+      "issue": "P0 1-sample peak>=0.99 clipping rejection; audio-quality.ts clip latch & frame-1 noiseFloor poisoning; WS VAD 520-700ms race, mid-sentence WS readiness truncation & redundant start/ready; Sec-WebSocket-Protocol JWT leak; msg.words loss & worker_task early cancel",
+      "before": "1 sample peak=0.9959 caused WS audio_quality.status='CLIPPING'; audio-quality.ts permanently latched clipped=true and poisoned frame-1 noiseFloor in child-passage; client 520ms VAD raced server 420ms VAD causing wsDisabledForRun=true; speech started before wsReady could stream truncated tail over WS; JWT leaked in Sec-WebSocket-Protocol `bearer.<jwt>`; msg.words dropped & full-page WebM re-uploaded; voice.py cancelled worker_task before draining final frame.",
+      "after": "Both client and voice_worker.py require sustained clipping ratio (>=5% AND >=480 samples, or >=3/8 recent chunks >10%); audio-quality.ts evaluates clipping on sliding window, protects frame-1 noiseFloor in child-passage while adapting stationary fan noise (>=1000ms flat RMS -> BACKGROUND_NOISE); unified `vad_mode: 'client'` + guaranteed flush ACK + `next_turn_id` + per-segment `wsStreamingCurrentSegment` latch eliminates 520-700ms race, mid-sentence truncation, and duplicate start frames; WS uses first-message JSON auth (`['viread-stt-v1']` only) + refresh/reconnect on 1008/4401; msg.words preserved & accumulated for hesitations; redundant full-page WebM upload skipped when WS transcript exists; voice.py drains final frame up to 4s on stop.",
+      "verification": "Live worker: 1-sample spike & 20ms transient -> status='OK'; 10 consecutive WS sentences (pauses 300-900ms) -> 10/10 OK, http_fallback_count=0, ws_disabled_for_run=false. Unit tests: audio-quality.test.ts, local-segment-speech-recognition.test.ts, reading-core-streaming-and-guardrails.test.ts, deep-audit-p0-p1-regressions.test.tsx (incl. mid-sentence wsReady HTTP completeness test)."
+    },
+    {
+      "workstream": "Mui D - Comprehension Quiz, story_hint & Difficult Words",
+      "issue": "P1 4 bugs in _build_story_hint(); comprehension-voice-matcher noun homophones & 1-syllable content match; manual wrong tap silent; B/C/D TTS prefetch voice/speed parity; display_text edge punctuation across all endpoints",
+      "before": "_build_story_hint() returned null for kinship answers ('Bà'), static frame 'Con' collision, and substring 'ô' inside 'cô', and failed to redact 1-char content tokens or AcceptedAnswers; matcher misclassified 'xe'/'cờ'/'bờ'/'dê' as letters B/C/D; manual wrong tap did not read story_hint aloud; B/C/D prefetch bypassed SpeechPlayer cache & locked voice/speed; difficult_words display_text kept edge punctuation in accumulator, event backfill, start_attempt, and practice_history.",
+      "after": "Removed kinship nouns from _HINT_FUNCTION_WORDS; redacts 1-char content words and AcceptedAnswers; anti-leak checks token sequences on excerpt only; matcher guards bare noun homophones & supports unique 1-syllable content match ('ô' -> 'Chiếc ô'); manual wrong tap speaks story_hint aloud with barge-in; TtsPlayback.prefetch() + useSpeechPlayer().prefetch share splitShortChunks(), in-flight deduplication, and locked voiceId/speed parity (incl. wordSample) while ComprehensionQuestion dispatches question TTS first and binds an AbortController to prefetch on barge-in/stop/unmount; clean_difficult_word_display_text() applied across accumulator, event backfill, start_attempt, evaluate_word_direct, and practice_history while preserving NFC tones & đ.",
+      "verification": "Backend 230/230 PASS across 14 reading/voice/tutor/difficult-words test modules (incl. test_start_practice_attempt_and_history_sanitize_display_text); frontend comprehension-voice-matcher.test.ts (46/46), comprehension-voice-flow.test.tsx (18/18 incl. question-first dispatch & barge-in prefetch abort), deep-audit-p0-p1-regressions.test.tsx (14/14 incl. in-flight prefetch dedup, multi-chunk >90-char key parity, and wordSample speed parity); LIVE Chromium active Quiz E2E on rebuilt .next-staging PASS (question dispatched first, full uninterrupted Q->A->B->C->askChoice narration proved live shortCache hit with 1 request each for Choice B & Choice C and locked voice_id='local_north_truc_ly' & speed=0.9 + session_id across all 7 TTS payloads; wrong tap 'C Quyển vở' -> redacted story_hint -> locked hint TTS -> barge-in tap 'B Cái ô' succeeded, 0 errors)."
+    },
+    {
+      "workstream": "Mui E - Live TTS 3 Regions, WAV Headers & 20-Min Soak",
+      "issue": "P0 0x7FFFF000 (22369.58s) WAV headers; P1 8-voice x 3-region quiz stutter/choice-C swallow/Central distortion/hallucination caching; 20-min soak with real RAM RSS",
+      "before": "40/48 WAV responses across 8 voices had 0x7FFFF000 header claiming 22369.58s duration (vs 3.67s actual); 6/8 voices stuttered 'đáp án b quy quyển sách'; 5/8 swallowed C: -> 'đáp án cỏ táo'/'đã tạng cỏ' (prefix bypassed _CHOICE_LETTER_SPOKEN); Central int8 severely distorted; trailing hallucinations ('chiếc ô tô'/'chiếc ô và') cached; '…' dropped silently in hint_wrong.",
+      "after": "Default TTS returns exact 44-byte RIFF/data WAV header + LocalVoiceProvider.fix_wav_header_sizes() repairs any placeholder; 48/48 WAV headers valid (0x7FFFF000 count = 0); Chromium HTMLAudioElement.duration = 3.708s exact; 2-segment Quiz choice synthesis using _CHOICE_LETTER_SPOKEN ('Đáp án xê.') eliminated 'b quy quyển sách' (0/8 voices) and reduced choice-C swallow from 5/8 -> 2/8 (only Southern thuc_doan & my_duyen, both caught with cached=0); varied retry prosody cut 'Chiếc ô' trailing hallucination from 2/8 -> 1/8 (truc_ly caught with cached=0); Central voices & <=8-word utterances routed to fp32; '…' spoken as ', chỗ trống, ' (8/8 voices); norm_v bumped to 8. 20.5-min live soak: 610 TTS + 610 WS STT turns, 0 errors, 0 invalid WAV headers, RSS plateaued at 2659.7 MB (+1.67 MB over final 11 min).",
+      "verification": "before_voice_worker_live.json vs after_v2_8voices_quiz_live.json (48/48 valid headers, 42/48 cached_ok, 0 b_stutter, 2 c_swallow all uncached, 1 short_extra uncached), soak_20min_report.json, browser_e2e_report.json (browserAudioDurationSec=3.708s)."
+    },
+    {
+      "workstream": "Mui F - Real Browser, Mobile Landscape & Physical USB Android",
+      "issue": "P0 landscape auto-scroll collapse & cramped 78px reading slit; P1 mic/WS background leak & MainActivity.onStop() pause ordering & AudioFocus; build-android.ps1 & ErrorAndOfflineRecoveryTest Unicode fix",
+      "before": "@media (max-height: 520px) collapsed .reader-leaf & left only 78px (1.5 lines) in 844x390 landscape; use-reading-auto-scroll ignored external non-gesture scroll; MainActivity.onStop() paused WebView before JS could process viread:android-background and lacked AudioFocus/ACTION_AUDIO_BECOMING_NOISY; build-android.ps1 did not forward -PvireadUrl; ErrorAndOfflineRecoveryTest failed Unicode check on Windows.",
+      "after": "Fixed @media (max-height: 520px) + @media (max-height: 440px) selectors (.reading-shell header, compact controls, hidden redundant bookplate) doubling .reader-leaf height in 844x390 landscape from 78px -> 156px (3 full lines) with z-30 resume button; use-reading-auto-scroll respects outsideProgrammaticWindow with scroll-delta guard; added visibilitychange + viread:android-background + audioTrack.onended cleanup across reading/quiz/recognition; MainActivity.onStop() dispatches viread:android-background with callback before pausing WebView + adds AudioManager AudioFocus & ACTION_AUDIO_BECOMING_NOISY; build-android.ps1 forwards -PvireadUrl & LAN flags; ErrorAndOfflineRecoveryTest Unicode-safe.",
+      "verification": "build-android.ps1 exit 0 (33/33 unit tests, lintDebug, assembleDebug, apksigner, verify_apk_quality PASS); Real Chromium Browser E2E (Desktop 1280x800 509px, Portrait 390x844 418px, Landscape 844x390 156px all detachedVisible=true & reattachedHidden=true, 0 errors); Physical USB Android 16 phone ATSYVB6205006984 (scrollHeight=6050/clientHeight=349, detachedVisible=true, KEYCODE_HOME delivered viread:android-background eventsObserved=1, 0 crashes/console/API errors)."
+    }
+  ],
+  "mandatory_critical_questions": {
+    "Q1_old_test_blind_spots_and_new_regression_tests": {
+      "question": "Bộ test cũ đã 'báo PASS giả' ở những điểm mù cụ thể nào và mỗi điểm mù đã được bịt bằng bài kiểm thử mới nào?",
+      "answer": "Bộ test cũ báo PASS giả ở 8 điểm mù lớn: (1) alignment-benchmark.ts chỉ chạy ReadingEvidencePipeline và addFinalTranscript(), bỏ sót đóng băng con trỏ của previewAlignment() khi nhảy >=4 từ và sự lệch guardrails với reading-screen.tsx -> bịt bằng test synth_mr_07 + isImplausibleSpeechSpeed/previewInterim trong deep-audit-p0-p1-regressions.test.tsx; (2) reading-automation-screen.test.tsx chỉ test auto-coaching ở Trang 1 nên không thấy stale closure `page` trên Trang 2+ -> bịt bằng test đa trang Page 2 & Page 3 trong reading-automation-screen.test.tsx; (3) test không kiểm tra handleReadSample lỗi TTS khi mic đang mở (nên bỏ lọt lỗi `playAssistantAudio` finally tự mở lại mic) -> bịt bằng test mới trong reading-screen.test.tsx; (4) test AudioQualityMonitor/WS chỉ gửi tín hiệu sạch và 1 câu ngắn, không test 1 mẫu peak>=0.99, frame 1 có tiếng nói ngay ở child-passage, race VAD 520-700ms 10 câu liên tiếp, hay speech onset trước khi wsReady -> bịt bằng test mới trong deep-audit-p0-p1-regressions.test.tsx + bài chạy live worker 10 câu; (5) test _build_story_hint chỉ chạy trên cụm danh từ dài, không test đáp án 1 chữ ('Chiếc ô'), từ xưng hô ('Bà'), AcceptedAnswers, và khung tĩnh chứa 'Con' -> bịt bằng 4 test mới trong test_tutor_questions.py; (6) test Quiz không test chạm sai đọc story_hint + barge-in và không kiểm tra prefetch giữ đúng locked voice/speed -> bịt bằng test trong comprehension-voice-flow.test.tsx, deep-audit-p0-p1-regressions.test.tsx (TtsPlayback.prefetch), và Chromium E2E live (browser_live_quiz_report.json); (7) test TTS trước đây chỉ check HTTP 200 mà không parse 44-byte RIFF/data WAV header hay chạy round-trip STT trên 8 giọng Quiz thật -> bịt bằng test_voice_local_and_google_fallback.py + live 48-case matrix (after_v2_8voices_quiz_live.json) + Chromium HTMLAudioElement.duration; (8) JSDOM không chạy CSS media query `@media (max-height: 520px)` hay Android `onStop()` -> bịt bằng real Chromium viewport 844x390 (browser_landscape_detached_v2.png) + USB Android 16 WebView CDP."
+    },
+    "Q2_before_after_latency_false_reject_and_page2_coaching": {
+      "question": "Trước và sau khi sửa, độ trễ (end-of-word to highlight, TTFA), tỷ lệ reject oan (CLIPPING/BACKGROUND_NOISE), và độ ổn định auto-coaching ở Trang 2+ thay đổi ra sao?",
+      "answer": "Độ trễ & ổn định trước vs sau: (1) WS STT flush-to-final p50 = 268.6ms..303.5ms (10 câu liên tiếp pause 300-900ms: 243.6-535.6ms, 10/10 OK, http_fallback_count=0, ws_disabled_for_run=false vs trước đó lỗi race VAD ở 520-700ms gây ws_disabled_for_run=true); (2) TTS TTFA: ấm cache in-memory <15ms (soak p50 14.4ms -> 3.8ms); lần đầu chưa cache ~1.9-3.2s (không dùng streaming 0x7FFFF000 vỡ header nên đánh đổi TTFA lạnh để đạt 48/48 header WAV hợp lệ và browser audio.duration=3.708s chính xác thay vì 22369.58s, đồng thời bù độ trễ chuyển câu Quiz bằng TtsPlayback.prefetch()); (3) Tỷ lệ reject oan CLIPPING trên 1 mẫu peak=0.9959 và xung transient 20ms: giảm từ 100% ('CLIPPING') xuống 0% ('OK' trên cả client & voice_worker.py); lỗi đầu độc noiseFloor ở frame 1 child-passage giảm từ 100% reject xuống 0% ('SPEECH_DETECTED', noiseFloor<=0.01) trong khi tiếng quạt đều >=1000ms vẫn bị chặn ('BACKGROUND_NOISE'); (4) Auto-coaching ở Trang 2 & Trang 3: từ 0% (chết hoàn toàn do stale closure Trang 1 trong ensureAutomationRuntime) lên 100% ổn định (verified tự động trên cả Trang 2 và Trang 3)."
+    },
+    "Q3_8voices_3regions_quiz_errors_and_wav_duration": {
+      "question": "Trên cả 8 giọng 3 miền với đúng chuỗi Quiz thật, tỷ lệ ảo giác đuôi câu, lắp chữ, nuốt nhãn A/B/C và audio.duration của header WAV đã về 0 lỗi chưa?",
+      "answer": "Trung thực từng chỉ số trên 48 ca live (8 giọng x 6 chuỗi Quiz, file after_v2_8voices_quiz_live.json): (1) Header WAV & audio.duration: ĐÃ VỀ 0 LỖI (48/48 header RIFF/data hợp lệ, 0 ca 0x7FFFF000 vs 40/48 lỗi trước khi sửa; Chromium HTMLAudioElement.duration=3.708s khớp tuyệt đối); (2) Lắp chữ 'b quy quyển sách': ĐÃ VỀ 0 LỖI (6/8 -> 0/8 giọng); (3) Đọc dấu '…' trong hint_wrong: 8/8 giọng đọc rõ 'chỗ trống' (0/8 -> 8/8); (4) Nuốt nhãn 'Đáp án C: Quả táo.' ('cỏ táo'): CHƯA VỀ 0 — sau khi sửa prefix sang _CHOICE_LETTER_SPOKEN ('Đáp án xê.') đã giảm từ 5/8 xuống còn 2/8 giọng Nam (local_south_thuc_doan, local_south_my_duyen), cả 2 đều bị self-check bắt và gắn X-TTS-Quality-Cached=0 (không lưu cache hỏng); (5) Ảo giác thêm chữ đuôi trên từ ngắn 'Chiếc ô': CHƯA VỀ 0 — sau khi mở rộng prosody retry đã giảm từ 2/8 xuống còn 1/8 giọng (local_north_truc_ly ra 'chiếc ô và'), bị self-check bắt và không lưu cache (X-TTS-Quality-Cached=0). Ngoài ra 2 giọng miền Trung (ngoc_tran, quang_son) khi đọc từ đơn 'Chiếc ô' không còn méo nặng như int8 (đã chuyển fp32), nhưng Sherpa STT miền Bắc vẫn đôi lúc phiên âm lệch phương ngữ ('chị ô'/'chị cua')."
+    },
+    "Q4_grade1_vs_grade3_adaptive_paceMs": {
+      "question": "Có sự khác biệt đo được nào cho trẻ lớp 1 (đọc chậm/đánh vần) vs lớp 3 (đọc nhanh/ngắt nghỉ dấu câu) sau khi mở paceMs thích ứng?",
+      "answer": "CÓ, đo được rõ rệt trong deep-audit-p0-p1-regressions.test.tsx (trước khi sửa bị khóa cứng 9000ms/9000ms nên lớp 1 và lớp 3 đều chờ y hệt 9000ms): sau khi mở lại paceMs thích ứng (hesitationMinMs=4000, hesitationMaxMs=9000, initialPaceMs=3600, vẫn giữ selfCorrectWindowMs=1500ms cho từ sai), trẻ lớp 3 đọc nhanh (~550ms/từ) được hỗ trợ khi ngập ngừng sau <=4500ms (fastWake <= 4500ms), còn trẻ lớp 1 đọc chậm/đánh vần (~3500ms/từ + dấu câu ngắt nghỉ) được kiên nhẫn chờ >10,000ms (slowWake > 2x fastWake) mà không bị cô ngắt lời sớm."
+    },
+    "Q5_unverifiable_risks_and_field_validation_plan": {
+      "question": "Còn rủi ro hay hạng mục nào chưa thể kiểm chứng trong môi trường hiện tại (ví dụ: giọng trẻ em thật 3 miền, tai nghe Bluetooth thực tế, máy Android RAM thấp) và kế hoạch nghiệm thu thực địa là gì?",
+      "answer": "Chưa thể kiểm chứng trong môi trường lab hiện tại: (1) Giọng trẻ em thật lớp 1-3 (6-9 tuổi) cả 3 miền Bắc/Trung/Nam trong phòng gia đình ồn 45-60 dB (TV/anh chị em nói chuyện); (2) Vòng lặp loa -> micro thực tế ở mức âm lượng 75% không tai nghe cho EchoGuard & hộp thoại retryPrompt Có/Không; (3) Sự kiện rút tai nghe Bluetooth thật (ACTION_AUDIO_BECOMING_NOISY) và cuộc gọi đến thật (AudioFocus loss) trên phần cứng Android; (4) Thiết bị Android RAM thấp (2-3 GB) và độ bền pin/nhiệt độ sau 30+ phút; (5) Đánh giá nghe thật bởi người bản xứ cho 2 giọng Trung và 'Đáp án C: Quả táo.' ở 2 giọng Nam. Kế hoạch nghiệm thu thực địa 4 giai đoạn được ghi rõ trong mục remaining_risks_and_real_child_validation_plan."
+    }
+  },
+  "verification_gates": {
+    "frontend_prettier_check": "PASS (exit 0)",
+    "frontend_eslint": "PASS (0 errors, 1 pre-existing warning in unrelated parent-flow2-contribution.test.tsx)",
+    "frontend_tsc_noEmit": "PASS (0 errors)",
+    "frontend_vitest_full": "PASS (180/180 test files, 2675/2675 tests with READING_BENCH_HOLDOUT=1: false_correct=0/false_wrong=0/wrong_class=0)",
+    "backend_unittest_all_reading_voice": "PASS (230/230 tests across 14 reading/voice/tutor/difficult-words test modules)",
+    "android_build_and_tests": "PASS (build-android.ps1 exit 0; :app:testDebugUnitTest 33/33, :app:lintDebug, :app:assembleDebug, apksigner, verify_apk_quality.py)",
+    "browser_e2e_chromium": "PASS (0 console/page/API errors; WAV duration=3.708s; Desktop 509px, Portrait 418px, Landscape v2 156px (2x up from 78px) all detachedVisible=true & reattachedHidden=true; rebuilt .next-staging live active Comprehension Quiz confirmed questionDispatchedBeforePrefetch=true, full Q->A->B->C->askChoice narration prefetchCacheHitVerifiedLive=true (0 duplicate B/C requests), locked voice_id='local_north_truc_ly' & speed=0.9 across all 7 payloads + wrong tap -> redacted story_hint -> locked hint TTS -> barge-in tap PASS; male persona 0 'Cô' leaks; URL pageId sync PASS)",
+    "usb_android_e2e_physical_phone": "PASS on ATSYVB6205006984 Android 16 with freshly installed app-debug.apk (versionCode=1, LAN 192.168.1.2:8443) against rebuilt .next-staging (0 crashes/console/page/API errors, WebView scrollHeight=6050/clientHeight=349 & detach PASS, KEYCODE_HOME viread:android-background delivered before WebView pause; 3 seeded quiz answers reset to 0 remaining)",
+    "soak_20min_live": "PASS (1231.4s, 610 TTS + 610 WS STT turns, 0 errors, 0 invalid WAV headers, RSS 2027.46 -> 2659.71 MB, flat +1.67 MB plateau over final 11+ min)"
+  },
+  "artifacts": {
+    "before_mui_d_backend": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/before_mui_d_backend.json",
+    "before_voice_worker_live": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/before_voice_worker_live.json",
+    "after_voice_worker_live": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/after_voice_worker_live.json",
+    "after_v2_8voices_quiz_live": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/after_v2_8voices_quiz_live.json",
+    "soak_20min_report": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/soak_20min_report.json",
+    "browser_e2e_report": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_e2e_report.json",
+    "browser_v2_e2e_report": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_v2_e2e_report.json",
+    "browser_live_quiz_report": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_live_quiz_report.json",
+    "usb_android_e2e_report": "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/usb_android_e2e_report.json",
+    "screenshots": [
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_desktop_detached.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_portrait_detached.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_landscape_detached.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_landscape_detached_v2.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_live_quiz_hint.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_male_persona.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/browser_difficult_words.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/usb_android_dashboard.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/usb_android_reading_page2.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/usb_android_reading_detached.png",
+      "f:/c1/capstone1/docs/reading/evidence/reading_deep_audit_20261126/usb_android_resumed.png"
+    ]
+  },
+  "remaining_risks_and_real_child_validation_plan": {
+    "explicit_non_claims": [
+      "NO real Grade 1-3 Vietnamese children (ages 6-9 across North/Central/South accents) were recorded or tested during this audit; all live STT/TTS measurements used synthetic VieNeu voices, TTS-to-STT round-trips, and scripted browser/device inputs.",
+      "Real room acoustic echo (speaker at 70-80% volume -> microphone) for EchoGuard and retryPrompt Yes/No wrap-up was NOT measured in a physical reverberant room.",
+      "Physical Bluetooth headset disconnect (ACTION_AUDIO_BECOMING_NOISY) and incoming cellular call AudioFocus loss were implemented, linted, and unit-tested in MainActivity.java, but not triggered with a real Bluetooth headset or live phone call.",
+      "Low-RAM Android devices (2-3 GB RAM) and high-noise household rooms (TV/siblings talking simultaneously) were not measured on physical hardware."
+    ],
+    "known_residual_voice_limitations": [
+      "TTS choice C ('Đáp án C: Quả táo.') still produces Sherpa STT 'đáp án cỏ táo' on 2/8 Southern voices (local_south_thuc_doan, local_south_my_duyen; reduced from 5/8 after fixing _CHOICE_LETTER_SPOKEN); both are caught by self-check with X-TTS-Quality-Cached: 0 (never poisoning disk cache), adding ~6-10s uncached retry latency on those two voices.",
+      "Short word 'Chiếc ô' still triggers trailing hallucination ('chiếc ô và') on 1/8 voice (local_north_truc_ly; reduced from 2/8), caught with X-TTS-Quality-Cached: 0.",
+      "Central voices (ngoc_tran, quang_son) on isolated 2-word 'Chiếc ô' still show cross-dialect Sherpa STT mismatch ('chị ô'/'chị cua') against the Northern-trained Sherpa zipformer model.",
+      "Live voice worker steady-state RSS sits at ~2.66 GB when both int8 and fp32 VieNeu engines are loaded concurrently in hybrid mode."
+    ],
+    "real_child_validation_plan": [
+      "Phase 1 (15 children, Grades 1-3, 5 North / 5 Central / 5 South): record live reading sessions in typical home rooms (45-60 dB ambient) to measure real-child WER, false-correct, false-wrong, and hesitation paceMs convergence.",
+      "Phase 2 (Acoustic Echo & Barge-In): test EchoGuard + retryPrompt Yes/No dialog on loud tablet/phone speakers at 70-80% volume without headphones.",
+      "Phase 3 (Android Hardware Matrix): test APK on a 3 GB RAM Android 11/12 phone with real Bluetooth headset disconnect, incoming phone call AudioFocus loss, and 30-minute continuous reading battery/thermal check.",
+      "Phase 4 (Human Listening Audit): have native Vietnamese listeners across 3 regions rate 'Đáp án xê. Quả táo.' on Southern voices and isolated short words on Central voices to separate real audio defects from Northern-accent Sherpa STT bias."
+    ]
+  }
+}

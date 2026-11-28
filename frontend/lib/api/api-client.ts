@@ -85,6 +85,14 @@ const safeBackendMessages: Record<string, string> = {
   RIGHTS_BOOK_SCOPE_PAGE_FORBIDDEN:
     "Hồ sơ quyền phạm vi sách không được gắn mã trang cụ thể.",
   ...readingManagementMessages,
+  EMAIL_NOT_CONFIGURED:
+    "Máy chủ hiện chưa cấu hình dịch vụ gửi email (Resend hoặc SMTP).",
+  TEST_EMAIL_RATE_LIMITED:
+    "Ba mẹ vừa gửi email thử nghiệm gần đây. Vui lòng đợi 5 phút trước khi thử lại.",
+  PARENT_EMAIL_UNVERIFIED:
+    "Email tài khoản chưa được xác minh nên hệ thống chưa thể gửi thông báo.",
+  PARENT_EMAIL_LOOKUP_FAILED:
+    "Chưa thể kiểm tra địa chỉ email xác minh lúc này. Ba mẹ thử lại sau nhé.",
   INSUFFICIENT_CONTENT:
     "Cuốn sách này chưa có đủ câu đã xác minh cho lượt chơi. Bé có thể chọn sách hoặc độ khó khác nhé.",
   SESSION_NOT_ACTIVE:

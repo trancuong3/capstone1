@@ -22,6 +22,15 @@ export interface SpeechPlayer {
   readonly state: PlaybackState;
   readonly fallbackNotice: string | null;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
+  prefetch?(
+    text: string,
+    options?: {
+      readonly coaching?: boolean;
+      readonly wordSample?: boolean;
+      readonly speedScale?: number;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<void>;
   playPhonicsLesson(
     lesson: SupportedPhonicsLessonPlan,
     options?: PhonicsPlayOptions,
@@ -60,6 +69,16 @@ export function useSpeechPlayer(): SpeechPlayer {
           : Promise.reject(
               new DOMException("Audio player is not ready", "AbortError"),
             ),
+      prefetch: (
+        text: string,
+        options?: {
+          readonly coaching?: boolean;
+          readonly wordSample?: boolean;
+          readonly speedScale?: number;
+          readonly signal?: AbortSignal;
+        },
+      ) =>
+        mounted.current ? player.prefetch(text, options) : Promise.resolve(),
       playPhonicsLesson: (
         lesson: SupportedPhonicsLessonPlan,
         options?: PhonicsPlayOptions,

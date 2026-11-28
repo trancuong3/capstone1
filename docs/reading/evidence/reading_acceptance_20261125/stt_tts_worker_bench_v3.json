@@ -1,0 +1,495 @@
+{
+  "worker_health": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "mode": "ws",
+      "ws_stream_supported": true,
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-hybrid-3.8.5",
+      "precision": "hybrid",
+      "voices_count": 8,
+      "active_voices": [
+        "local_north_truc_ly",
+        "local_north_ngoc_linh",
+        "local_north_thien_minh",
+        "local_central_ngoc_tran",
+        "local_central_quang_son",
+        "local_south_thuc_doan",
+        "local_south_my_duyen",
+        "local_south_thai_son"
+      ],
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  },
+  "real_child_speech_status": "chưa kiểm chứng trên trẻ thật",
+  "stt": {
+    "cold_start_first_clip": {
+      "id": "short_1",
+      "p50_ms": 9.35,
+      "p95_ms": 508.66,
+      "decode_ms": [
+        55.34,
+        55.3,
+        67.44,
+        127.97,
+        155.74,
+        139.8,
+        114.01,
+        107.15,
+        96.61,
+        132.85,
+        179.74,
+        81.64,
+        119.63,
+        128.1,
+        111.21,
+        135.32
+      ]
+    },
+    "technical_regression_3_plus_17": {
+      "label": "reg_3_17",
+      "clips_evaluated": 16,
+      "total_words": 183,
+      "matched_words": 170,
+      "match_rate": 0.929,
+      "unhighlighted_count": 13,
+      "wrong_position_count": 18,
+      "early_highlight_count": 62,
+      "early_samples": [
+        {
+          "clip": "short_1",
+          "idx": 1,
+          "word": "nay",
+          "recv_ms": 596.9,
+          "end_ms": 750.0,
+          "diff_ms": -153.1
+        },
+        {
+          "clip": "short_1",
+          "idx": 6,
+          "word": "lớp",
+          "recv_ms": 1754.7,
+          "end_ms": 1790.0,
+          "diff_ms": -35.3
+        },
+        {
+          "clip": "short_2",
+          "idx": 1,
+          "word": "học",
+          "recv_ms": 516.8,
+          "end_ms": 990.0,
+          "diff_ms": -473.2
+        },
+        {
+          "clip": "short_2",
+          "idx": 3,
+          "word": "đổ",
+          "recv_ms": 1557.5,
+          "end_ms": 1670.0,
+          "diff_ms": -112.5
+        },
+        {
+          "clip": "long_repeat",
+          "idx": 1,
+          "word": "gọi",
+          "recv_ms": 621.5,
+          "end_ms": 630.0,
+          "diff_ms": -8.5
+        },
+        {
+          "clip": "long_repeat",
+          "idx": 2,
+          "word": "an",
+          "recv_ms": 850.4,
+          "end_ms": 1150.0,
+          "diff_ms": -299.6
+        },
+        {
+          "clip": "long_dialogue",
+          "idx": 1,
+          "word": "lại",
+          "recv_ms": 670.9,
+          "end_ms": 1070.0,
+          "diff_ms": -399.1
+        },
+        {
+          "clip": "long_diff_1",
+          "idx": 1,
+          "word": "đọc",
+          "recv_ms": 445.3,
+          "end_ms": 470.0,
+          "diff_ms": -24.7
+        },
+        {
+          "clip": "long_diff_1",
+          "idx": 4,
+          "word": "chữ",
+          "recv_ms": 1472.7,
+          "end_ms": 1590.0,
+          "diff_ms": -117.3
+        },
+        {
+          "clip": "long_diff_1",
+          "idx": 5,
+          "word": "một",
+          "recv_ms": 2175.8,
+          "end_ms": 2790.0,
+          "diff_ms": -614.2
+        }
+      ],
+      "end_of_word_to_highlight_p50_ms": 48.93,
+      "end_of_word_to_highlight_p95_ms": 408.41,
+      "worker_decode_p50_ms": 107.04,
+      "worker_decode_p95_ms": 189.65
+    },
+    "vivos_human_holdout": {
+      "label": "vivos_holdout",
+      "clips_evaluated": 80,
+      "total_words": 745,
+      "matched_words": 740,
+      "match_rate": 0.9933,
+      "unhighlighted_count": 5,
+      "wrong_position_count": 26,
+      "early_highlight_count": 192,
+      "early_samples": [
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R002",
+          "idx": 4,
+          "word": "lại",
+          "recv_ms": 2490.8,
+          "end_ms": 2495.0,
+          "diff_ms": -4.2
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R002",
+          "idx": 6,
+          "word": "những",
+          "recv_ms": 3129.9,
+          "end_ms": 3135.0,
+          "diff_ms": -5.1
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R003",
+          "idx": 4,
+          "word": "hộ",
+          "recv_ms": 2042.5,
+          "end_ms": 2225.0,
+          "diff_ms": -182.5
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R003",
+          "idx": 7,
+          "word": "nghị",
+          "recv_ms": 2771.2,
+          "end_ms": 3000.0,
+          "diff_ms": -228.8
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R003",
+          "idx": 8,
+          "word": "này",
+          "recv_ms": 2931.2,
+          "end_ms": 3145.0,
+          "diff_ms": -213.8
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R028",
+          "idx": 0,
+          "word": "các",
+          "recv_ms": 815.6,
+          "end_ms": 865.0,
+          "diff_ms": -49.4
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R028",
+          "idx": 10,
+          "word": "người",
+          "recv_ms": 3598.7,
+          "end_ms": 3630.0,
+          "diff_ms": -31.3
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R028",
+          "idx": 12,
+          "word": "không",
+          "recv_ms": 3938.7,
+          "end_ms": 4010.0,
+          "diff_ms": -71.3
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R028",
+          "idx": 13,
+          "word": "sợ",
+          "recv_ms": 4275.8,
+          "end_ms": 4365.0,
+          "diff_ms": -89.2
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R043",
+          "idx": 0,
+          "word": "anh",
+          "recv_ms": 599.2,
+          "end_ms": 640.0,
+          "diff_ms": -40.8
+        }
+      ],
+      "end_of_word_to_highlight_p50_ms": 122.38,
+      "end_of_word_to_highlight_p95_ms": 450.16,
+      "worker_decode_p50_ms": 88.42,
+      "worker_decode_p95_ms": 201.67
+    },
+    "synthetic_multi_region": {
+      "label": "synth_multiregion",
+      "clips_evaluated": 12,
+      "total_words": 186,
+      "matched_words": 158,
+      "match_rate": 0.8495,
+      "unhighlighted_count": 28,
+      "wrong_position_count": 27,
+      "early_highlight_count": 59,
+      "early_samples": [
+        {
+          "clip": "synth_mr_00",
+          "idx": 2,
+          "word": "mùa",
+          "recv_ms": 355.6,
+          "end_ms": 670.0,
+          "diff_ms": -314.4
+        },
+        {
+          "clip": "synth_mr_00",
+          "idx": 3,
+          "word": "thu",
+          "recv_ms": 896.7,
+          "end_ms": 940.0,
+          "diff_ms": -43.3
+        },
+        {
+          "clip": "synth_mr_00",
+          "idx": 7,
+          "word": "nhẹ",
+          "recv_ms": 1887.1,
+          "end_ms": 1910.0,
+          "diff_ms": -22.9
+        },
+        {
+          "clip": "synth_mr_00",
+          "idx": 9,
+          "word": "qua",
+          "recv_ms": 2295.2,
+          "end_ms": 2310.0,
+          "diff_ms": -14.8
+        },
+        {
+          "clip": "synth_mr_00",
+          "idx": 12,
+          "word": "sổ",
+          "recv_ms": 2674.6,
+          "end_ms": 2870.0,
+          "diff_ms": -195.4
+        },
+        {
+          "clip": "synth_mr_01",
+          "idx": 2,
+          "word": "gỗ",
+          "recv_ms": 775.7,
+          "end_ms": 830.0,
+          "diff_ms": -54.3
+        },
+        {
+          "clip": "synth_mr_01",
+          "idx": 3,
+          "word": "sạch",
+          "recv_ms": 979.3,
+          "end_ms": 1150.0,
+          "diff_ms": -170.7
+        },
+        {
+          "clip": "synth_mr_01",
+          "idx": 4,
+          "word": "sẽ",
+          "recv_ms": 1231.7,
+          "end_ms": 1340.0,
+          "diff_ms": -108.3
+        },
+        {
+          "clip": "synth_mr_01",
+          "idx": 8,
+          "word": "quyển",
+          "recv_ms": 2550.4,
+          "end_ms": 2630.0,
+          "diff_ms": -79.6
+        },
+        {
+          "clip": "synth_mr_01",
+          "idx": 9,
+          "word": "sách",
+          "recv_ms": 2639.6,
+          "end_ms": 2790.0,
+          "diff_ms": -150.4
+        }
+      ],
+      "end_of_word_to_highlight_p50_ms": 40.82,
+      "end_of_word_to_highlight_p95_ms": 509.74,
+      "worker_decode_p50_ms": 86.73,
+      "worker_decode_p95_ms": 227.54
+    },
+    "concurrent_ocr_stt": {
+      "label": "concurrent_ocr",
+      "clips_evaluated": 15,
+      "total_words": 139,
+      "matched_words": 135,
+      "match_rate": 0.9712,
+      "unhighlighted_count": 4,
+      "wrong_position_count": 6,
+      "early_highlight_count": 22,
+      "early_samples": [
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R002",
+          "idx": 6,
+          "word": "những",
+          "recv_ms": 3125.6,
+          "end_ms": 3135.0,
+          "diff_ms": -9.4
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R028",
+          "idx": 13,
+          "word": "sợ",
+          "recv_ms": 4284.2,
+          "end_ms": 4365.0,
+          "diff_ms": -80.8
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R043",
+          "idx": 7,
+          "word": "lần",
+          "recv_ms": 2789.7,
+          "end_ms": 2880.0,
+          "diff_ms": -90.3
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R044",
+          "idx": 9,
+          "word": "vỡ",
+          "recv_ms": 3550.4,
+          "end_ms": 3615.0,
+          "diff_ms": -64.6
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R044",
+          "idx": 12,
+          "word": "hòa",
+          "recv_ms": 4585.6,
+          "end_ms": 4635.0,
+          "diff_ms": -49.4
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R044",
+          "idx": 13,
+          "word": "bình",
+          "recv_ms": 4585.6,
+          "end_ms": 4745.0,
+          "diff_ms": -159.4
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R057",
+          "idx": 0,
+          "word": "nhưng",
+          "recv_ms": 1095.2,
+          "end_ms": 1115.0,
+          "diff_ms": -19.8
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R058",
+          "idx": 5,
+          "word": "đào",
+          "recv_ms": 1893.0,
+          "end_ms": 2000.0,
+          "diff_ms": -107.0
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R058",
+          "idx": 6,
+          "word": "tạo",
+          "recv_ms": 2051.7,
+          "end_ms": 2310.0,
+          "diff_ms": -258.3
+        },
+        {
+          "clip": "vivos_holdout_VIVOSDEV01_R058",
+          "idx": 10,
+          "word": "biết",
+          "recv_ms": 3141.8,
+          "end_ms": 3305.0,
+          "diff_ms": -163.2
+        }
+      ],
+      "end_of_word_to_highlight_p50_ms": 163.25,
+      "end_of_word_to_highlight_p95_ms": 576.84,
+      "worker_decode_p50_ms": 92.66,
+      "worker_decode_p95_ms": 258.86,
+      "ocr_subprocess_exit": 0,
+      "ocr_subprocess_out": "ocr_runs 11"
+    },
+    "offbook_deviation_preservation": [
+      {
+        "id": "offbook_1",
+        "spoken_ref": "con mèo đen",
+        "book_expected": "chú mèo trắng",
+        "hyp_text": "con mèo đen",
+        "deviation_preserved": true
+      },
+      {
+        "id": "offbook_tone",
+        "spoken_ref": "một",
+        "book_expected": "mốt",
+        "hyp_text": "một",
+        "deviation_preserved": true
+      }
+    ]
+  },
+  "tts": {
+    "uncached_short_prompts_ttfa_ms": [
+      2714.65,
+      985.86,
+      1160.38,
+      950.76,
+      1101.52,
+      1008.65,
+      523.38,
+      479.66
+    ],
+    "uncached_short_prompts_total_ms": [
+      5253.51,
+      3122.25,
+      3741.2,
+      3708.82,
+      3840.39,
+      3607.6,
+      523.93,
+      480.13
+    ],
+    "uncached_ttfa_p50_ms": 997.25,
+    "uncached_ttfa_p95_ms": 2170.66,
+    "matrix_count": 198,
+    "matrix_ttfa_p95_ms": 912.24
+  },
+  "blind_listening_kit": {
+    "ok": true,
+    "clip_count": 8,
+    "missing_clips": [],
+    "empty_clips": []
+  }
+}

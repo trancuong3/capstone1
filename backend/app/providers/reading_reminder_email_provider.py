@@ -19,7 +19,23 @@ class EmailDeliveryNotConfigured(RuntimeError):
 
 
 def email_delivery_is_configured() -> bool:
-    return bool(SMTP_HOST and SMTP_PORT and SMTP_USERNAME and SMTP_APP_PASSWORD and SMTP_FROM_EMAIL)
+    from app.database import config as settings
+
+    has_smtp = bool(
+        SMTP_HOST
+        and SMTP_PORT
+        and SMTP_USERNAME
+        and SMTP_APP_PASSWORD
+        and (SMTP_FROM_EMAIL or settings.EMAIL_FROM_ADDRESS)
+    )
+    has_resend = bool(
+        settings.RESEND_API_KEY and (settings.EMAIL_FROM_ADDRESS or SMTP_FROM_EMAIL)
+    )
+    if settings.EMAIL_PROVIDER == "resend":
+        return has_resend
+    if settings.EMAIL_PROVIDER == "smtp":
+        return has_smtp
+    return has_resend or has_smtp
 
 
 def build_reading_reminder_message(
@@ -31,11 +47,21 @@ def build_reading_reminder_message(
     timezone_name: str,
     occurrence_id: UUID,
 ) -> EmailMessage:
-    if not SMTP_FROM_EMAIL:
-        raise EmailDeliveryNotConfigured()
-    domain = SMTP_FROM_EMAIL.rpartition("@")[2] or "viread.local"
+    from app.database import config as settings
+    from app.providers.parent_email_transport import extract_sender_email_and_domain
+
+    raw_sender = SMTP_FROM_EMAIL or settings.EMAIL_FROM_ADDRESS
+    if not raw_sender:
+        if settings.PARENT_EMAIL_MAIL_SINK_DIR:
+            raw_sender = "viread@localhost"
+        else:
+            raise EmailDeliveryNotConfigured()
+    formatted_from, _clean_email, domain = extract_sender_email_and_domain(
+        raw_sender,
+        default_name=settings.EMAIL_FROM_NAME,
+    )
     message = EmailMessage()
-    message["From"] = SMTP_FROM_EMAIL
+    message["From"] = formatted_from
     message["To"] = recipient
     message["Subject"] = "\u0110\u1ebfn gi\u1edd \u0111\u1ecdc s\u00e1ch c\u00f9ng b\u00e9"
     message["Message-ID"] = f"<reading-reminder-{occurrence_id}@{domain}>"
@@ -58,7 +84,13 @@ def send_reading_reminder_email(
     timezone_name: str,
     occurrence_id: UUID,
 ) -> None:
-    if not email_delivery_is_configured():
+    from app.providers.parent_email_transport import (
+        active_email_provider,
+        send_email_message,
+    )
+
+    provider = active_email_provider()
+    if provider != "mail_sink" and not email_delivery_is_configured():
         raise EmailDeliveryNotConfigured()
     message = build_reading_reminder_message(
         recipient=recipient,
@@ -68,6 +100,9 @@ def send_reading_reminder_email(
         timezone_name=timezone_name,
         occurrence_id=occurrence_id,
     )
+    if provider in {"resend", "mail_sink"}:
+        send_email_message(message)
+        return
     context = ssl.create_default_context()
     if SMTP_PORT == 465:
         with smtplib.SMTP_SSL(

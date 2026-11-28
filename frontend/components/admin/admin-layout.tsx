@@ -47,7 +47,15 @@ export function AdminLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const activeLink = activeNavigationRef.current;
-    if (typeof activeLink?.scrollIntoView !== "function") return;
+    const navContainer = activeLink?.parentElement;
+    if (
+      !activeLink ||
+      !navContainer ||
+      navContainer.scrollWidth <= navContainer.clientWidth ||
+      typeof activeLink.scrollIntoView !== "function"
+    ) {
+      return;
+    }
     activeLink.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [pathname]);
 
@@ -91,7 +99,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             </div>
             <nav
               aria-label="Điều hướng quản trị"
-              className="order-3 flex w-full min-w-0 flex-1 flex-wrap items-center gap-1 py-1 xl:order-none xl:ml-0 xl:flex-nowrap xl:justify-end"
+              className="order-3 flex w-full basis-full min-w-0 flex-wrap items-center gap-1 py-1 xl:order-none xl:ml-0 xl:basis-auto xl:flex-nowrap xl:justify-end"
             >
               {links.map(({ href, label, icon: Icon }) => {
                 const isActive =

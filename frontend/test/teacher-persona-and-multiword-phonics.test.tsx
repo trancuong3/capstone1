@@ -212,5 +212,17 @@ describe("Live STT & TTS Engine Source Indicator (<VoiceEngineBadge />)", () => 
     expect(badge.getAttribute("data-stt-tier")).toBe("browser_default");
     expect(badge.getAttribute("data-tts-tier")).toBe("browser_default");
     expect(badge.textContent).toContain("Trình duyệt mặc định");
+
+    // Compact badge clearly distinguishes Online vs Offline
+    rerender(<VoiceEngineBadge compact />);
+    expect(badge.textContent).toContain("Online (Google/Trình duyệt)");
+
+    recordSttEngineUsage({ provider: "google", fallbackUsed: true });
+    rerender(<VoiceEngineBadge compact />);
+    expect(badge.textContent).toContain("Online (Google API)");
+
+    recordSttEngineUsage({ provider: "local", fallbackUsed: false });
+    rerender(<VoiceEngineBadge compact />);
+    expect(badge.textContent).toContain("STT: Offline");
   });
 });

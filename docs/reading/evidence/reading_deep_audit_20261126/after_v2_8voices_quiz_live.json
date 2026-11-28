@@ -1,0 +1,460 @@
+{
+  "summary": {
+    "total": 48,
+    "valid_headers": 48,
+    "cached_ok": 42,
+    "c_swallow": 2,
+    "b_stutter": 0,
+    "short_extra": 1
+  },
+  "results": {
+    "local_north_truc_ly": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 2197.4,
+        "header_valid": true,
+        "duration_s": 2.87
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chiếc ô ba",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 5722.6,
+        "header_valid": true,
+        "duration_s": 2.19
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2116.7,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đáp án củ quả táo tàu",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 5952.3,
+        "header_valid": true,
+        "duration_s": 2.27
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 3923.3,
+        "header_valid": true,
+        "duration_s": 4.87
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chiếc ô và",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 2704.8,
+        "header_valid": true,
+        "duration_s": 1.03
+      }
+    },
+    "local_north_ngoc_linh": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 2418.1,
+        "header_valid": true,
+        "duration_s": 3.27
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2197.3,
+        "header_valid": true,
+        "duration_s": 2.43
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2043.1,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đáp án c quảng cáo",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2070.6,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 3885.4,
+        "header_valid": true,
+        "duration_s": 5.11
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chiếc ồ",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 956.8,
+        "header_valid": true,
+        "duration_s": 1.03
+      }
+    },
+    "local_north_thien_minh": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 2344.7,
+        "header_valid": true,
+        "duration_s": 3.11
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1927.1,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1847.3,
+        "header_valid": true,
+        "duration_s": 2.11
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "áp án c quả táo",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 6310.7,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 3646.0,
+        "header_valid": true,
+        "duration_s": 4.95
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 816.0,
+        "header_valid": true,
+        "duration_s": 1.03
+      }
+    },
+    "local_central_ngoc_tran": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 3259.3,
+        "header_valid": true,
+        "duration_s": 3.67
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chỉ cố",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 3957.1,
+        "header_valid": true,
+        "duration_s": 2.59
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đà bạn b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 6538.8,
+        "header_valid": true,
+        "duration_s": 2.59
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đạt án c qua tạo",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2341.8,
+        "header_valid": true,
+        "duration_s": 2.75
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 5897.0,
+        "header_valid": true,
+        "duration_s": 5.91
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chị ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1354.3,
+        "header_valid": true,
+        "duration_s": 1.35
+      }
+    },
+    "local_central_quang_son": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 3517.6,
+        "header_valid": true,
+        "duration_s": 3.83
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đạp bản á chị cúc",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 6480.9,
+        "header_valid": true,
+        "duration_s": 2.75
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 6901.0,
+        "header_valid": true,
+        "duration_s": 2.83
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đã tàng si quả táo",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 7140.9,
+        "header_valid": true,
+        "duration_s": 2.67
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bẻ cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 6934.1,
+        "header_valid": true,
+        "duration_s": 6.79
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chị cua",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1133.6,
+        "header_valid": true,
+        "duration_s": 1.19
+      }
+    },
+    "local_south_thuc_doan": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 2580.8,
+        "header_valid": true,
+        "duration_s": 3.35
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2250.0,
+        "header_valid": true,
+        "duration_s": 2.59
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 4042.7,
+        "header_valid": true,
+        "duration_s": 2.19
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đáp án cỏ táo",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 6367.4,
+        "header_valid": true,
+        "duration_s": 2.35
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 4793.0,
+        "header_valid": true,
+        "duration_s": 5.91
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1069.6,
+        "header_valid": true,
+        "duration_s": 1.03
+      }
+    },
+    "local_south_my_duyen": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 3458.8,
+        "header_valid": true,
+        "duration_s": 3.91
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 3592.5,
+        "header_valid": true,
+        "duration_s": 3.39
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 2685.9,
+        "header_valid": true,
+        "duration_s": 2.59
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "đáp án cỏ táo",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 10492.8,
+        "header_valid": true,
+        "duration_s": 2.83
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 5171.9,
+        "header_valid": true,
+        "duration_s": 7.11
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "chiếc ô",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1033.1,
+        "header_valid": true,
+        "duration_s": 1.27
+      }
+    },
+    "local_south_thai_son": {
+      "q_prompt": {
+        "tts_text": "Trong câu chuyện, bé mang theo đồ vật gì khi trời mưa?",
+        "stt_text": "trong câu chuyện bé mang theo đồ vật gì khi trời mưa",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 2248.2,
+        "header_valid": true,
+        "duration_s": 3.43
+      },
+      "choice_a": {
+        "tts_text": "Đáp án A: Chiếc ô.",
+        "stt_text": "đáp án a tiết ồ",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1597.8,
+        "header_valid": true,
+        "duration_s": 2.03
+      },
+      "choice_b": {
+        "tts_text": "Đáp án B: Quyển sách.",
+        "stt_text": "đáp án b quyển sách",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 1583.0,
+        "header_valid": true,
+        "duration_s": 2.11
+      },
+      "choice_c": {
+        "tts_text": "Đáp án C: Quả táo.",
+        "stt_text": "áp án cất quả táo",
+        "precision": "fp32",
+        "quality_cached": "0",
+        "total_ms": 5000.6,
+        "header_valid": true,
+        "duration_s": 2.11
+      },
+      "hint_wrong": {
+        "tts_text": "Con nhớ lại chi tiết trong bài đọc: “Bé cầm … màu đỏ đi học.” rồi chọn lại nhé!",
+        "stt_text": "con nhớ lại chi tiết trong bài đọc bé cầm chỗ trống màu đỏ đi học rồi chọn lại nhé",
+        "precision": "int8",
+        "quality_cached": "1",
+        "total_ms": 4268.5,
+        "header_valid": true,
+        "duration_s": 5.67
+      },
+      "short_word": {
+        "tts_text": "Chiếc ô",
+        "stt_text": "tiếc ồ",
+        "precision": "fp32",
+        "quality_cached": "1",
+        "total_ms": 840.1,
+        "header_valid": true,
+        "duration_s": 0.95
+      }
+    }
+  }
+}

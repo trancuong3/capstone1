@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import requests
+
 from .colab_worker import ColabWorker, verify_worker_source_lock
 from .contracts import sha256_file
 
@@ -83,6 +85,34 @@ class ColabWorkerTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH"):
             verify_worker_source_lock(config)
+
+    def test_process_job_fails_fast_on_source_lock_before_downloading_dataset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "x" * 48, temp_dir)
+            try:
+                job = {
+                    "id": "d8cc3c25-5c78-4118-abf4-8aa65b718704",
+                    "profile": "FLOW2_ADMIN_VERIFIED",
+                    "manifest_sha256": "a" * 64,
+                    "config_sha256": "b" * 64,
+                    "metadata": {
+                        "training_config": {
+                            "trainer_sha256": "0" * 64,
+                            "requirements_sha256": "0" * 64,
+                            "colab_requirements_sha256": "0" * 64,
+                        }
+                    },
+                }
+                with patch.object(worker, "assert_runtime_capacity", return_value={"device": "T4"}):
+                    with patch.object(worker, "heartbeat_loop", return_value=None):
+                        with patch.object(worker, "dataset", side_effect=AssertionError("dataset() must not run on lock mismatch")):
+                            with self.assertRaisesRegex(
+                                ValueError,
+                                r"WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH: commit=.*trainer_sha256\(",
+                            ):
+                                worker.process_job(job)
+            finally:
+                worker.session.close()
 
     def test_worker_requires_https_for_remote_backend_and_long_token(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
@@ -180,7 +210,10 @@ class ColabWorkerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "sample.png"
-            with patch("ai.vietocr_v2.colab_worker.requests.get", return_value=FakeResponse()):
+            with (
+                patch("ai.vietocr_v2.colab_worker.requests.get", return_value=FakeResponse()),
+                patch("ai.vietocr_v2.colab_worker.time.sleep"),
+            ):
                 with self.assertRaisesRegex(ValueError, "HASH_MISMATCH"):
                     ColabWorker.download("https://storage.example/signed", target, "0" * 64)
             self.assertFalse(target.exists())
@@ -217,6 +250,425 @@ class ColabWorkerTests(unittest.TestCase):
         benchmark.assert_called_once()
         trainer.assert_not_called()
         worker.session.close()
+
+    def test_upload_candidate_sets_job_run_id_immediately_and_sync_throttles_every_500_steps(self):
+        import json as _json
+        import re as _re
+        from ai.vietocr_v2.train import _label_for_locked_vocabulary, ORIGINAL_VOCAB_SHA256
+
+        # Cf invisible format chars stripped cleanly against locked vocab
+        cleaned = _label_for_locked_vocabulary("Xin\u200b “chào”", "Xin chào\"'")
+        self.assertEqual(cleaned, "Xin \"chào\"")
+
+        # COLAB_INSUFFICIENT_RAM matches backend error_code regex ^[A-Z0-9_]+$
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "x" * 48, temp_dir)
+            fake_torch = types.SimpleNamespace(
+                __version__="2.5.1+cu121",
+                version=types.SimpleNamespace(cuda="12.1"),
+                cuda=types.SimpleNamespace(
+                    is_available=lambda: True,
+                    mem_get_info=lambda _idx: (12 * 1024**3, 15 * 1024**3),
+                    get_device_name=lambda _idx: "Tesla T4",
+                ),
+            )
+            with (
+                patch.dict(sys.modules, {"torch": fake_torch}),
+                patch.object(ColabWorker, "available_ram_bytes", return_value=2 * 1024**3),
+            ):
+                with self.assertRaises(RuntimeError) as ram_err:
+                    ColabWorker.assert_runtime_capacity(Path(temp_dir))
+            self.assertRegex(str(ram_err.exception), r"^[A-Z0-9_]+$")
+
+            run_dir = Path(temp_dir) / "run"
+            run_dir.mkdir()
+            cand_file = run_dir / "candidate.pth"
+            cand_file.write_bytes(b"ckpt-bytes")
+            cand_sha = hashlib.sha256(b"ckpt-bytes").hexdigest()
+            candidate = {
+                "candidate_path": str(cand_file),
+                "checkpoint_sha256": cand_sha,
+                "parent_checkpoint_sha256": "a" * 64,
+                "manifest_sha256": "b" * 64,
+                "config_sha256": "c" * 64,
+                "architecture_sha256": "d" * 64,
+                "vocabulary_sha256": ORIGINAL_VOCAB_SHA256,
+            }
+            job = {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "dataset_version_id": "22222222-2222-4222-8222-222222222222",
+            }
+            created_run_id = "33333333-3333-4333-8333-333333333333"
+
+            def fake_call(method, path, **kwargs):
+                if path.endswith("/runs"):
+                    return {"run_id": created_run_id, "status": "CANDIDATE", "checkpoint_sha256": cand_sha}
+                raise AssertionError(path)
+
+            with patch.object(worker, "call", side_effect=fake_call):
+                rid, rstatus, _ = worker.upload_candidate(job, candidate, run_dir)
+            self.assertEqual(rid, created_run_id)
+            self.assertEqual(job["run_id"], created_run_id)
+            self.assertEqual(rstatus, "CANDIDATE")
+            worker.session.close()
+
+    def test_fetch_artifact_retries_on_http_503_and_truncated_200(self):
+        payload = b"valid-vietnamese-line-png-bytes"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        def _make_resp(status_code: int, chunks: list[bytes], *, content_length: int | None = None):
+            resp = Mock()
+            resp.status_code = status_code
+            resp.headers = {"Content-Length": str(content_length)} if content_length is not None else {}
+            if status_code >= 400:
+                http_err = requests.HTTPError(f"HTTP {status_code}")
+                http_err.response = resp
+                resp.raise_for_status.side_effect = http_err
+            else:
+                resp.raise_for_status.return_value = None
+            resp.iter_content.return_value = iter(chunks)
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda s, *args: None
+            return resp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_max_attempts = 5
+            worker.artifact_fetch_retry_base_seconds = 0.01
+            destination = Path(temp_dir) / "sample.png"
+            responses = [
+                _make_resp(503, []),
+                _make_resp(200, []),
+                _make_resp(200, [b"abc"], content_length=len(payload)),
+                _make_resp(200, [payload], content_length=len(payload)),
+            ]
+            with (
+                patch.object(worker.session, "get", side_effect=responses) as mock_get,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as mock_sleep,
+            ):
+                worker._fetch_artifact(
+                    "/books/admin/viread-training/worker/jobs/j/artifact-stream?worker_id=w&token=tok",
+                    destination,
+                    expected_sha,
+                )
+            self.assertEqual(mock_get.call_count, 4)
+            self.assertEqual(mock_sleep.call_count, 3)
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertFalse(destination.with_suffix(".png.download").exists())
+            worker.session.close()
+
+    def test_fetch_artifact_fails_fast_on_http_403_and_exhausts_corrupt_sha(self):
+        def _make_resp(status_code: int, body: bytes):
+            resp = Mock()
+            resp.status_code = status_code
+            resp.headers = {"Content-Length": str(len(body))}
+            if status_code >= 400:
+                http_err = requests.HTTPError(f"HTTP {status_code}")
+                http_err.response = resp
+                resp.raise_for_status.side_effect = http_err
+            else:
+                resp.raise_for_status.return_value = None
+            resp.iter_content.return_value = iter([body] if body else [])
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda s, *args: None
+            return resp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_max_attempts = 3
+            worker.artifact_fetch_retry_base_seconds = 0.01
+
+            with (
+                patch.object(worker.session, "get", return_value=_make_resp(403, b"forbidden")) as get_403,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as sleep_403,
+            ):
+                with self.assertRaises(requests.HTTPError):
+                    worker._fetch_artifact("/books/admin/viread-training/worker/jobs/j/artifact-stream", Path(temp_dir) / "a.png", "a" * 64)
+            self.assertEqual(get_403.call_count, 1)
+            sleep_403.assert_not_called()
+
+            with (
+                patch.object(worker.session, "get", side_effect=lambda *a, **kw: _make_resp(200, b"corrupt")) as get_bad,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as sleep_bad,
+            ):
+                with self.assertRaises(ValueError) as sha_err:
+                    worker._fetch_artifact("/books/admin/viread-training/worker/jobs/j/artifact-stream", Path(temp_dir) / "b.png", "a" * 64)
+            self.assertEqual(str(sha_err.exception), "DOWNLOADED_OBJECT_HASH_MISMATCH")
+            self.assertEqual(get_bad.call_count, 3)
+            self.assertEqual(sleep_bad.call_count, 2)
+            worker.session.close()
+
+    def test_materialize_dataset_refreshes_expired_urls_on_403_and_preserves_order(self):
+        import threading as _threading
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_download_workers = 4
+            run_dir = Path(temp_dir) / "run"
+            run_dir.mkdir()
+
+            receipt_bytes = b'{"version_sha256":"' + (b"r" * 44) + b'"}'
+            receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
+            dataset = {
+                "version_sha256": receipt_sha,
+                "manifest_url": "/books/admin/viread-training/worker/jobs/j/artifact-stream?token=receipt",
+            }
+            payloads = {}
+            initial_items = []
+            fresh_items = []
+            for idx in range(1, 5):
+                sid = f"s{idx}"
+                raw = f"image-payload-{idx}".encode("utf-8")
+                sha = hashlib.sha256(raw).hexdigest()
+                payloads[sid] = raw
+                base_item = {
+                    "sample_id": sid,
+                    "group_id": f"g{(idx - 1) // 2 + 1}",
+                    "label": f"Nhãn {idx}",
+                    "source_flow": "FLOW1_VERIFIED",
+                    "split": "train",
+                    "image_sha256": sha,
+                }
+                initial_items.append({**base_item, "image_url": f"/books/admin/viread-training/worker/jobs/j/artifact-stream?token=expired-{sid}"})
+                fresh_items.append({**base_item, "image_url": f"/books/admin/viread-training/worker/jobs/j/artifact-stream?token=fresh-{sid}"})
+
+            fetch_lock = _threading.Lock()
+            dataset_calls = [0]
+
+            def fake_dataset(job_id_arg, *, locked_test=False):
+                with fetch_lock:
+                    dataset_calls[0] += 1
+                return dataset, fresh_items
+
+            def fake_fetch(url, destination, expected_sha256=None, *, local_drive_candidates=None):
+                if url == dataset["manifest_url"]:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(receipt_bytes)
+                    return
+                if "token=expired-" in url:
+                    resp = Mock()
+                    resp.status_code = 403
+                    err = requests.HTTPError("403 Client Error: Forbidden")
+                    err.response = resp
+                    raise err
+                sid = url.split("token=fresh-", 1)[1]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(payloads[sid])
+
+            with (
+                patch.object(worker, "dataset", side_effect=fake_dataset),
+                patch.object(worker, "_fetch_artifact", side_effect=fake_fetch),
+            ):
+                manifest_path, out_receipt, _ = worker.materialize_dataset("j-1", dataset, initial_items, run_dir)
+
+            self.assertEqual(dataset_calls[0], 1)
+            self.assertEqual(out_receipt.read_bytes(), receipt_bytes)
+            written_lines = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["annotation_id"] for row in written_lines], ["s1", "s2", "s3", "s4"])
+            for item in initial_items:
+                img_file = run_dir / "training-images" / item["image_sha256"]
+                self.assertTrue(img_file.is_file())
+                self.assertEqual(hashlib.sha256(img_file.read_bytes()).hexdigest(), item["image_sha256"])
+            worker.session.close()
+
+    def test_call_retries_transient_502_rewinds_file_streams_and_fails_fast_on_403(self):
+        import io
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.api_call_max_attempts = 4
+            worker.api_call_retry_base_seconds = 0.01
+
+            stream_bytes = b"checkpoint-shard-bytes-123456"
+            bio = io.BytesIO(stream_bytes)
+            observed_reads: list[bytes] = []
+
+            def _make_resp(status_code: int, json_body: bytes = b"{}"):
+                resp = Mock()
+                resp.status_code = status_code
+                resp.content = json_body
+                if json_body.strip().startswith(b"{"):
+                    resp.json.return_value = json.loads(json_body.decode("utf-8"))
+                else:
+                    resp.json.side_effect = ValueError("not json")
+                if status_code >= 400:
+                    err = requests.HTTPError(f"HTTP {status_code}")
+                    err.response = resp
+                    resp.raise_for_status.side_effect = err
+                else:
+                    resp.raise_for_status.return_value = None
+                return resp
+
+            attempt_counter = [0]
+
+            def fake_request(method, url, **kwargs):
+                attempt_counter[0] += 1
+                files = kwargs.get("files") or {}
+                observed_reads.append(files["file"][1].read())
+                if attempt_counter[0] == 1:
+                    return _make_resp(502, b"")
+                if attempt_counter[0] == 2:
+                    raise requests.ConnectionError("Render restarting")
+                return _make_resp(200, b'{"ok": true}')
+
+            sleep_target = f"{__package__}.colab_worker.time.sleep"
+            with (
+                patch.object(worker.session, "request", side_effect=fake_request),
+                patch(sleep_target) as mock_sleep,
+            ):
+                res = worker.call(
+                    "POST",
+                    "/books/admin/viread-training/worker/jobs/j/runs/r/chunks",
+                    files={"file": ("part.bin", bio, "application/octet-stream")},
+                )
+            self.assertEqual(res, {"ok": True})
+            self.assertEqual(observed_reads, [stream_bytes, stream_bytes, stream_bytes])
+            self.assertEqual(mock_sleep.call_count, 2)
+
+            with (
+                patch.object(worker.session, "request", return_value=_make_resp(403, b"forbidden")) as req_403,
+                patch(sleep_target) as sleep_403,
+            ):
+                with self.assertRaises(requests.HTTPError):
+                    worker.call("POST", "/books/admin/viread-training/worker/jobs/j/finish", json={})
+            self.assertEqual(req_403.call_count, 1)
+            sleep_403.assert_not_called()
+            worker.session.close()
+
+    def test_mid_training_remote_resume_sync_failure_does_not_abort_training(self):
+        from .colab_state_store import RemoteBackendJobStateStore
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, use_remote_resume_store=True)
+            training_dir = Path(__file__).parent
+            config = {
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 5000,
+                "batch_size": 8,
+                "freeze_epochs": 5,
+                "optimizer": "AdamW",
+                "scheduler": "CosineAnnealingLR",
+                "preprocessing": "opencv-line-v1",
+                "fp16": True,
+                "seed": 20261113,
+                "trainer_sha256": sha256_file(training_dir / "train.py"),
+                "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+                "colab_requirements_sha256": sha256_file(training_dir / "requirements-colab.txt"),
+            }
+            from .contracts import canonical_sha256
+
+            config_sha = canonical_sha256(config)
+            job = {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "dataset_version_id": "22222222-2222-4222-8222-222222222222",
+                "manifest_sha256": "a" * 64,
+                "parent_checkpoint_sha256": "b" * 64,
+                "config_sha256": config_sha,
+                "metadata": {"training_config": config},
+            }
+            fake_cand = Path(temp_dir) / "produced.pth"
+            fake_cand.write_bytes(b"candidate-weights")
+            cand_sha = sha256_file(fake_cand)
+            cand_payload = {
+                "candidate_path": str(fake_cand),
+                "checkpoint_sha256": cand_sha,
+                "parent_checkpoint_sha256": "b" * 64,
+                "manifest_sha256": "a" * 64,
+                "config_sha256": config_sha,
+                "architecture_sha256": "c" * 64,
+                "vocabulary_sha256": "d" * 64,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 5000,
+            }
+
+            def fake_run_training(**kwargs):
+                cb = kwargs["progress_callback"]
+                cb(500, 5000)
+                cb(2500, 5000)
+                cb(5000, 5000)
+                return dict(cand_payload)
+
+            upload_calls = []
+
+            def fake_upload(j, cand, rdir):
+                upload_calls.append(cand["checkpoint_sha256"])
+                return "33333333-3333-4333-8333-333333333333", "CANDIDATE", Path(cand["candidate_path"])
+
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", side_effect=requests.HTTPError("502 Bad Gateway")),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
+                patch.object(worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                patch.object(worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                patch.object(worker, "upload_candidate", side_effect=fake_upload),
+                patch.object(worker, "call", return_value={}),
+                patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=fake_run_training)}),
+            ):
+                worker.process_job(job)
+
+            self.assertEqual(upload_calls, [cand_sha])
+            worker.session.close()
+
+    def test_colab_worker_notebook_requires_only_worker_token_with_default_api_base(self):
+        nb_path = Path(__file__).with_name("viread_vietocr_v2_colab_worker.ipynb")
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(nb.get("cells", [])), 2)
+        code_src = "".join(nb["cells"][1].get("source", []))
+        compile(code_src, str(nb_path), "exec")
+        self.assertIn('DEFAULT_API_BASE = "https://capstone1-ssd8.onrender.com"', code_src)
+        self.assertIn('"VIREAD_TRAINING_WORKER_TOKEN"', code_src)
+        self.assertIn('"IREAD_TRAINING_WORKER_TOKEN"', code_src)
+        self.assertIn("getpass(", code_src)
+        self.assertIn("run_next_job_once(", code_src)
+
+    def test_fetch_artifact_retries_cloudflare_http_520_to_530(self):
+        payload = b"recovered-image-after-520"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+        attempts = [0]
+
+        class FakeStreamResponse:
+            def __init__(self, status_code: int, body: bytes):
+                self.status_code = status_code
+                self._body = body
+                self.headers = {"Content-Length": str(len(body))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    err = requests.HTTPError(f"{self.status_code} Server Error")
+                    err.response = self
+                    raise err
+
+            def iter_content(self, _chunk_size):
+                yield self._body
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_retry_base_seconds = 0.0
+            dest = Path(temp_dir) / "img.png"
+
+            def fake_get(_url, **_kwargs):
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    return FakeStreamResponse(520, b"")
+                if attempts[0] == 2:
+                    return FakeStreamResponse(524, b"")
+                return FakeStreamResponse(200, payload)
+
+            with patch.object(worker.session, "get", side_effect=fake_get):
+                worker._fetch_artifact("/books/admin/viread-training/worker/jobs/1/artifact-stream", dest, expected_sha)
+            self.assertEqual(attempts[0], 3)
+            self.assertEqual(dest.read_bytes(), payload)
+            worker.session.close()
 
 
 if __name__ == "__main__":

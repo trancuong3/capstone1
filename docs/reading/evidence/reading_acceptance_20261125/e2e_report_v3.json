@@ -1,0 +1,96 @@
+{
+  "e2e": {
+    "login_ok": true,
+    "book_opened": true,
+    "mic_permission_ok": true,
+    "page1_loaded": true,
+    "page2_long_loaded": true,
+    "viewports": {
+      "desktop": {
+        "docOverflowPx": 0,
+        "scrollerScrollHeight": 3728,
+        "scrollerClientHeight": 609,
+        "controlsVisible": true
+      },
+      "portrait": {
+        "docOverflowPx": 0,
+        "scrollerScrollHeight": 5842,
+        "scrollerClientHeight": 418,
+        "controlsVisible": true
+      },
+      "landscape": {
+        "docOverflowPx": 0,
+        "scrollerScrollHeight": 3965,
+        "scrollerClientHeight": 3965,
+        "controlsVisible": true
+      }
+    },
+    "manual_scroll_return_button_ok": true,
+    "help_and_practice_ok": true,
+    "page3_image_overlay_ok": true,
+    "dom_paint_latency_ms": [
+      11.3,
+      14.3,
+      13.4,
+      13.1,
+      14.5,
+      14.1,
+      14.2,
+      14.9,
+      13.2,
+      13.9
+    ],
+    "dom_paint_p50_ms": 13.9,
+    "dom_paint_p95_ms": 14.9,
+    "quiz_ok": true,
+    "quiz_question_ids": [
+      "Câu 1/7",
+      "Câu 2/7",
+      "Câu 3/7",
+      "Câu 4/7",
+      "Câu 5/7",
+      "Câu 6/7",
+      "Câu 7/7"
+    ],
+    "report_reopened_ok": true,
+    "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+    "live_tracks_after_exit": 0,
+    "console_errors": [],
+    "page_errors": [],
+    "pause_while_teacher_speaking_ok": true,
+    "page3_meta": {
+      "renderMode": "image-overlay",
+      "imageStatus": "loaded",
+      "wordButtons": 22
+    },
+    "quiz_expected_total": 7,
+    "completion_visible": true
+  },
+  "voiceQuiz": {
+    "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+    "expected_total": 7,
+    "a_particle_ignored_ok": true,
+    "negation_ignored_ok": true,
+    "provisional_highlight_ok": true,
+    "voice_modes_verified": [
+      "letter",
+      "content",
+      "letter+content"
+    ],
+    "voice_submitted_count": 7,
+    "completion_visible": true,
+    "live_tracks_after_exit": 0,
+    "console_errors": [],
+    "page_errors": [],
+    "voice_quiz_ok": true
+  },
+  "micResilience": {
+    "denied_detected": true,
+    "regranted_ok": true
+  },
+  "offlineSaveResilience": {
+    "offline_blocked_cleanly": true,
+    "recovered_online_ok": true,
+    "page_errors": []
+  }
+}

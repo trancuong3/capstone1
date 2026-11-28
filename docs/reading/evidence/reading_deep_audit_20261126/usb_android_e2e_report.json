@@ -1,0 +1,56 @@
+{
+  "started_at": "2026-11-25T21:32:20.707Z",
+  "device": {
+    "serial": "ATSYVB6205006984",
+    "model": "MTN-NX1",
+    "android_release": "16",
+    "sdk": "36",
+    "wm_size": "Physical size: 1200x2640"
+  },
+  "console_errors": [],
+  "page_errors": [],
+  "api_errors": [],
+  "screenshots": [
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\usb_android_dashboard.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\usb_android_reading_page2.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\usb_android_reading_detached.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\usb_android_resumed.png"
+  ],
+  "checks": {
+    "webview_cdp_connected": {
+      "pass": true,
+      "socketName": "webview_devtools_remote_10443"
+    },
+    "lan_https_loaded": {
+      "pass": true,
+      "url": "https://192.168.1.2:8443/login"
+    },
+    "login": {
+      "pass": true,
+      "url": "https://192.168.1.2:8443/dashboard"
+    },
+    "android_scroll_and_detach": {
+      "found": true,
+      "scrollHeight": 6050,
+      "clientHeight": 349,
+      "isScrollable": true,
+      "detachedVisible": true
+    },
+    "android_background_event_on_home": {
+      "pass": true,
+      "eventsObserved": 1
+    },
+    "logcat_zero_crashes": {
+      "pass": true,
+      "fatalLines": []
+    }
+  },
+  "finished_at": "2026-11-25T21:32:48.907Z",
+  "summary": {
+    "console_error_count": 0,
+    "page_error_count": 0,
+    "api_error_count": 0,
+    "crashes": 0,
+    "android_bg_event_pass": true
+  }
+}

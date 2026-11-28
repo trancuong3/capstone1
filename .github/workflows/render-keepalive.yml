@@ -25,3 +25,17 @@ jobs:
           curl -fsS --retry 2 --retry-delay 5 --max-time 45 \
             "https://capstone1-ssd8.onrender.com/health" > /dev/null
           echo "Render backend is warm and healthy."
+
+      - name: Trigger parent email automation dispatch (if secret configured)
+        env:
+          PARENT_EMAIL_CRON_SECRET: ${{ secrets.PARENT_EMAIL_CRON_SECRET }}
+        run: |
+          if [ -z "$PARENT_EMAIL_CRON_SECRET" ]; then
+            echo "PARENT_EMAIL_CRON_SECRET not set in GitHub Secrets; skipping backup email dispatch."
+            exit 0
+          fi
+          curl -fsS --retry 1 --retry-delay 5 --max-time 45 \
+            -X POST \
+            -H "X-Cron-Secret: ${PARENT_EMAIL_CRON_SECRET}" \
+            "https://capstone1-ssd8.onrender.com/parent-notifications/cron/dispatch?scope=all" > /dev/null
+          echo "Parent email automation dispatch completed."

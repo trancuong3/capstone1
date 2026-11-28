@@ -486,6 +486,271 @@ class ParentPrivateBookAccessAndIsolationTests(unittest.IsolatedAsyncioTestCase)
         async with self.fixture.client(self.app, None) as anon:
             self.assertNotIn(book_id, [b["Id"] for b in (await anon.get("/books/")).json()])
 
+    async def test_list_my_private_books_paged_ordering_boundaries_search_and_isolation(self) -> None:
+        # 1. Empty state (0 books) + anonymous blocked
+        async with self.fixture.client(self.app, None) as anon:
+            self.assertEqual((await anon.get("/books/my-books/paged")).status_code, 401)
+        async with self.fixture.client(self.app, "token-admin-1") as admin:
+            self.assertEqual((await admin.get("/books/my-books/paged")).status_code, 403)
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            empty_res = await client_a.get("/books/my-books/paged")
+            self.assertEqual(empty_res.status_code, 200, empty_res.text)
+            self.assertIn("no-store", empty_res.headers.get("cache-control", "").lower())
+            self.assertEqual(
+                empty_res.json(),
+                {"items": [], "total": 0, "limit": 9, "offset": 0},
+            )
+
+        # 2. Seed 25 books for Parent A (some with IDENTICAL CreatedAt + duplicate titles) and 2 for Parent B
+        conn = psycopg2.connect(self.fixture.sync_url)
+        try:
+            with conn.cursor() as cur:
+                # 1 book check first
+                first_id = str(uuid4())
+                cur.execute(
+                    """
+                    INSERT INTO public.books (id, name, title, author, mingrade, maxgrade, lifecyclestatus, visibility_scope, owner_parent_id, moderation_status, createdat)
+                    VALUES (%s, %s, %s, %s, 1, 3, 'ACTIVE', 'PARENT_PRIVATE', %s, 'ACTIVE', '2026-11-01T00:00:00Z')
+                    """,
+                    (first_id, "Sách Duy Nhất", "Sách Duy Nhất", "Mẹ An", str(PARENT_A)),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            one_res = await client_a.get("/books/my-books/paged", params={"limit": 9, "offset": 0})
+            self.assertEqual(one_res.status_code, 200)
+            self.assertEqual(one_res.json()["total"], 1)
+            self.assertEqual([b["id"] for b in one_res.json()["items"]], [first_id])
+
+        # Seed remaining 24 books for Parent A (total = 25), including 10 with identical timestamp & duplicate title
+        same_ts_ids = [
+            f"aa000000-0000-4000-8000-{idx:012d}" for idx in range(1, 11)
+        ]
+        conn = psycopg2.connect(self.fixture.sync_url)
+        try:
+            with conn.cursor() as cur:
+                for idx in range(2, 16):
+                    cur.execute(
+                        """
+                        INSERT INTO public.books (id, name, title, author, mingrade, maxgrade, lifecyclestatus, visibility_scope, owner_parent_id, moderation_status, createdat)
+                        VALUES (%s, %s, %s, %s, 1, 3, 'ACTIVE', 'PARENT_PRIVATE', %s, 'ACTIVE', %s)
+                        """,
+                        (
+                            str(uuid4()),
+                            f"Truyện An #{idx:02d}",
+                            f"Truyện An #{idx:02d}",
+                            "Gia đình An",
+                            str(PARENT_A),
+                            f"2026-11-02T00:{idx:02d}:00Z",
+                        ),
+                    )
+                for bid in same_ts_ids:
+                    cur.execute(
+                        """
+                        INSERT INTO public.books (id, name, title, author, mingrade, maxgrade, lifecyclestatus, visibility_scope, owner_parent_id, moderation_status, createdat)
+                        VALUES (%s, 'Truyện Trùng Tên', 'Truyện Trùng Tên', 'Tác giả đặc biệt', 1, 3, 'ACTIVE', 'PARENT_PRIVATE', %s, 'ACTIVE', '2026-11-10T12:00:00Z')
+                        """,
+                        (bid, str(PARENT_A)),
+                    )
+                # Parent B books + retired Parent A book must NOT leak into A's count or items
+                cur.execute(
+                    """
+                    INSERT INTO public.books (id, name, title, author, mingrade, maxgrade, lifecyclestatus, visibility_scope, owner_parent_id, moderation_status, createdat)
+                    VALUES (%s, 'Sách Đã Xóa A', 'Sách Đã Xóa A', 'Mẹ An', 1, 3, 'RETIRED', 'PARENT_PRIVATE', %s, 'ACTIVE', '2026-11-12T00:00:00Z')
+                    """,
+                    (str(uuid4()), str(PARENT_A)),
+                )
+                for b_idx in range(2):
+                    cur.execute(
+                        """
+                        INSERT INTO public.books (id, name, title, author, mingrade, maxgrade, lifecyclestatus, visibility_scope, owner_parent_id, moderation_status, createdat)
+                        VALUES (%s, %s, %s, 'Mẹ Bình', 1, 3, 'ACTIVE', 'PARENT_PRIVATE', %s, 'ACTIVE', '2026-11-11T00:00:00Z')
+                        """,
+                        (str(uuid4()), f"Sách Nhà Bình {b_idx}", f"Sách Nhà Bình {b_idx}", str(PARENT_B)),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            # Traverse all pages (limit=9 -> pages of 9, 9, 7 = 25) with zero duplicates or omissions
+            seen_ids: list[str] = []
+            for offset, expected_len in ((0, 9), (9, 9), (18, 7), (27, 0)):
+                res = await client_a.get("/books/my-books/paged", params={"limit": 9, "offset": offset})
+                self.assertEqual(res.status_code, 200, res.text)
+                payload = res.json()
+                self.assertEqual(payload["total"], 25)
+                self.assertEqual(payload["limit"], 9)
+                self.assertEqual(payload["offset"], offset)
+                self.assertEqual(len(payload["items"]), expected_len)
+                seen_ids.extend(item["id"] for item in payload["items"])
+
+            self.assertEqual(len(seen_ids), 25)
+            self.assertEqual(len(set(seen_ids)), 25)
+
+            # First 10 items are the identical-timestamp rows strictly ordered by Id DESC
+            self.assertEqual(seen_ids[:10], list(reversed(same_ts_ids)))
+            # Last item on last page is the oldest book
+            self.assertEqual(seen_ids[-1], first_id)
+
+            # Legacy GET /books/my-books remains 100% backwards-compatible (returns raw list in same order)
+            legacy_res = await client_a.get("/books/my-books")
+            self.assertEqual(legacy_res.status_code, 200)
+            self.assertIsInstance(legacy_res.json(), list)
+            self.assertEqual([b["id"] for b in legacy_res.json()], seen_ids)
+
+            # Search filter applies to BOTH items and total
+            search_res = await client_a.get(
+                "/books/my-books/paged",
+                params={"search": "Trùng Tên", "limit": 9, "offset": 0},
+            )
+            self.assertEqual(search_res.status_code, 200)
+            self.assertEqual(search_res.json()["total"], 10)
+            self.assertEqual(len(search_res.json()["items"]), 9)
+
+            search_page2 = await client_a.get(
+                "/books/my-books/paged",
+                params={"search": "Trùng Tên", "limit": 9, "offset": 9},
+            )
+            self.assertEqual(search_page2.status_code, 200)
+            self.assertEqual(search_page2.json()["total"], 10)
+            self.assertEqual(len(search_page2.json()["items"]), 1)
+
+        # Cross-family isolation: Parent B only sees Parent B's 2 books
+        async with self.fixture.client(self.app, "token-parent-b") as client_b:
+            b_res = await client_b.get("/books/my-books/paged", params={"limit": 9, "offset": 0})
+            self.assertEqual(b_res.status_code, 200)
+            self.assertEqual(b_res.json()["total"], 2)
+            self.assertEqual(len(b_res.json()["items"]), 2)
+            for item in b_res.json()["items"]:
+                self.assertNotIn(item["id"], seen_ids)
+
+
+class ParentPrivateBookPagedContractTests(unittest.IsolatedAsyncioTestCase):
+    """DB-independent contract, route-precedence, auth, and SQL-clause tests for /books/my-books/paged."""
+
+    async def test_paged_route_precedence_auth_headers_and_boundaries(self) -> None:
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        import httpx
+        from fastapi import FastAPI
+        from sqlalchemy.dialects import postgresql
+
+        from app.api.deps import get_current_parent_id, get_db
+        from app.api.routes.parent_private_book import router as ppb_router
+        from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
+        from app.schemas.parent_private_book import ParentPrivateBookPageRead, ParentPrivateBookSummaryRead
+
+        # 1. Verify /my-books/paged is registered BEFORE /my-books/{book_id}
+        get_paths = [
+            route.path
+            for route in ppb_router.routes
+            if "GET" in getattr(route, "methods", set())
+        ]
+        self.assertIn("/my-books/paged", get_paths)
+        self.assertIn("/my-books/{book_id}", get_paths)
+        self.assertLess(get_paths.index("/my-books/paged"), get_paths.index("/my-books/{book_id}"))
+
+        # 2. Verify repository SQL compiles with family scoping + deterministic CreatedAt DESC, Id DESC tie-breaker
+        captured_stmts: list = []
+
+        class _FakeResult:
+            def scalars(self):
+                return SimpleNamespace(all=lambda: [])
+
+        class _FakeSession:
+            async def scalar(self, stmt):
+                captured_stmts.append(stmt)
+                return 25
+
+            async def execute(self, stmt):
+                captured_stmts.append(stmt)
+                return _FakeResult()
+
+        repo = ParentPrivateBookRepository(_FakeSession())  # type: ignore[arg-type]
+        items, total = await repo.list_owned_private_books_paged(
+            PARENT_A, ready_only=False, search="Mèo", limit=9, offset=9
+        )
+        self.assertEqual(total, 25)
+        self.assertEqual(items, [])
+        self.assertEqual(len(captured_stmts), 2)
+        count_sql = str(captured_stmts[0].compile(dialect=postgresql.dialect()))
+        page_sql = str(captured_stmts[1].compile(dialect=postgresql.dialect()))
+        for sql in (count_sql, page_sql):
+            self.assertIn("visibility_scope", sql)
+            self.assertIn("owner_parent_id", sql)
+            self.assertIn("lifecyclestatus", sql)
+            self.assertIn("ILIKE", sql)
+        self.assertIn("ORDER BY books.createdat DESC, books.id DESC", page_sql)
+        self.assertIn("LIMIT", page_sql)
+        self.assertIn("OFFSET", page_sql)
+
+        # 3. Verify HTTP route returns typed envelope + private no-store headers + validates limit/offset
+        app = FastAPI()
+        app.include_router(ppb_router, prefix="/books")
+        app.dependency_overrides[get_current_parent_id] = lambda: PARENT_A
+
+        async def _fake_db():
+            yield SimpleNamespace()
+
+        app.dependency_overrides[get_db] = _fake_db
+        sample_summary = ParentPrivateBookSummaryRead(
+            id=UUID("aa000000-0000-4000-8000-000000000001"),
+            title="Sách Riêng 1",
+            author="Mẹ An",
+            min_grade=1,
+            max_grade=3,
+            lifecycle_status="ACTIVE",
+            moderation_status="ACTIVE",
+            created_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+        )
+
+        async def _fake_list_books_paged(
+            _self,
+            actor_id,
+            *,
+            ready_only=False,
+            search=None,
+            limit=9,
+            offset=0,
+        ):
+            self.assertEqual(actor_id, PARENT_A)
+            self.assertFalse(ready_only)
+            self.assertEqual(search, "An")
+            return ParentPrivateBookPageRead(
+                items=[sample_summary],
+                total=10,
+                limit=limit,
+                offset=offset,
+            )
+
+        with patch(
+            "app.services.parent_private_book_service.ParentPrivateBookService.list_books_paged",
+            new=_fake_list_books_paged,
+        ):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                res = await client.get(
+                    "/books/my-books/paged",
+                    params={"limit": 9, "offset": 9, "search": "An"},
+                )
+                self.assertEqual(res.status_code, 200, res.text)
+                self.assertIn("no-store", res.headers.get("cache-control", "").lower())
+                self.assertEqual(res.json()["total"], 10)
+                self.assertEqual(res.json()["limit"], 9)
+                self.assertEqual(res.json()["offset"], 9)
+                self.assertEqual(len(res.json()["items"]), 1)
+
+                # Invalid bounds rejected with 422
+                self.assertEqual((await client.get("/books/my-books/paged", params={"limit": 0})).status_code, 422)
+                self.assertEqual((await client.get("/books/my-books/paged", params={"limit": 51})).status_code, 422)
+                self.assertEqual((await client.get("/books/my-books/paged", params={"offset": -1})).status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

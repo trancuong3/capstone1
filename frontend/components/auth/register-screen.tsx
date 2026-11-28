@@ -17,7 +17,7 @@ interface RegisterScreenProps {
 
 function RegisterLoadingState() {
   return (
-    <AuthShell>
+    <AuthShell activeRoute="register">
       <Card
         aria-busy="true"
         aria-label="Đang tải nội dung đăng ký"
@@ -48,7 +48,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
 
   if (requiresEmailConfirmation) {
     return (
-      <AuthShell>
+      <AuthShell activeRoute="register">
         <Card className="border border-border" tone="success">
           <div>
             <h1 className="text-heading font-extrabold text-success-ink">
@@ -73,7 +73,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
   }
 
   return (
-    <AuthShell>
+    <AuthShell activeRoute="register">
       <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">

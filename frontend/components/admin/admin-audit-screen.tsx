@@ -18,6 +18,7 @@ export function AdminAuditScreen() {
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
   const [error, setError] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const appendRequestRef = useRef(false);
   const requestIdRef = useRef(0);
@@ -27,12 +28,17 @@ export function AdminAuditScreen() {
       appendRequestRef.current = append;
       setLoadingMore(append);
       const requestId = ++requestIdRef.current;
-      setError(false);
-      if (!append) setItems(null);
+      if (append) {
+        setLoadMoreError(false);
+      } else {
+        setError(false);
+        setLoadMoreError(false);
+        setItems(null);
+      }
       try {
         const page = await audit.list({
-          action: action || undefined,
-          resource_type: resource || undefined,
+          action: action.trim() || undefined,
+          resource_type: resource.trim() || undefined,
           cursor: nextCursor,
           limit: 10,
         });
@@ -52,8 +58,12 @@ export function AdminAuditScreen() {
         setCursor(page.next_cursor);
       } catch {
         if (requestId !== requestIdRef.current) return;
-        setError(true);
-        if (!append) setItems([]);
+        if (append) {
+          setLoadMoreError(true);
+        } else {
+          setError(true);
+          setItems([]);
+        }
       } finally {
         if (requestId === requestIdRef.current) {
           appendRequestRef.current = false;
@@ -64,12 +74,13 @@ export function AdminAuditScreen() {
     [action, audit, resource],
   );
   useEffect(() => {
-    const timeout = globalThis.setTimeout(() => void load(), 0);
+    const delay = action || resource ? 300 : 0;
+    const timeout = globalThis.setTimeout(() => void load(), delay);
     return () => {
       globalThis.clearTimeout(timeout);
       requestIdRef.current += 1;
     };
-  }, [load]);
+  }, [action, load, resource]);
   return (
     <>
       <AdminPageHeader
@@ -142,17 +153,52 @@ export function AdminAuditScreen() {
                   <h3 className="text-xl font-extrabold text-ink">
                     Metadata an toàn
                   </h3>
-                  <p className="mt-2 break-all text-label text-muted">
-                    {JSON.stringify(item.metadata)}
-                  </p>
+                  {(() => {
+                    const serialized = JSON.stringify(item.metadata);
+                    if (serialized.length <= 240) {
+                      return (
+                        <p className="mt-2 break-all text-label text-muted">
+                          {serialized}
+                        </p>
+                      );
+                    }
+                    return (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-sm font-bold text-primary hover:underline">
+                          Xem chi tiết metadata ({serialized.length} ký tự)
+                        </summary>
+                        <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-control bg-white p-3 text-xs text-muted">
+                          {JSON.stringify(item.metadata, null, 2)}
+                        </pre>
+                      </details>
+                    );
+                  })()}
                 </section>
               </Card>
             ))}
           </div>
+          {loadMoreError ? (
+            <div className="mt-4">
+              <StatusMessage tone="error">
+                Không thể tải thêm nhật ký. Các bản ghi trước đó vẫn được giữ
+                nguyên.{" "}
+                <Button
+                  className="sm:w-auto"
+                  disabled={loadingMore}
+                  onClick={() => void load(cursor ?? undefined, true)}
+                  type="button"
+                  variant="secondary"
+                >
+                  Thử tải thêm lại
+                </Button>
+              </StatusMessage>
+            </div>
+          ) : null}
           {cursor ? (
             <Button
               className="mt-6 sm:w-auto"
               disabled={loadingMore}
+              fullWidth={false}
               isLoading={loadingMore}
               onClick={() => void load(cursor, true)}
               variant="secondary"

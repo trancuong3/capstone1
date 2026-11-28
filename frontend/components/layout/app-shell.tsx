@@ -122,7 +122,15 @@ export function AppShell({ children }: AppShellProps) {
 
   useEffect(() => {
     const activeLink = activeNavigationRef.current;
-    if (typeof activeLink?.scrollIntoView !== "function") return;
+    const navContainer = activeLink?.parentElement;
+    if (
+      !activeLink ||
+      !navContainer ||
+      navContainer.scrollWidth <= navContainer.clientWidth ||
+      typeof activeLink.scrollIntoView !== "function"
+    ) {
+      return;
+    }
     activeLink.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [pathname]);
 

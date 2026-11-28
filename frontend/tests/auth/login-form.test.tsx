@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "@/components/auth/login-form";
+import { LoginScreen } from "@/components/auth/login-screen";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import {
   authSessionFixture,
@@ -43,14 +44,77 @@ describe("LoginForm", () => {
     const service = createAuthServiceFixture();
     renderLoginForm("default", service);
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-    expect(
-      await screen.findByText("Mật khẩu cần có ít nhất 8 ký tự."),
-    ).toBeInTheDocument();
+    const emailError = await screen.findByText("Ba mẹ vui lòng nhập email.");
+    const passwordError = await screen.findByText(
+      "Ba mẹ vui lòng nhập mật khẩu.",
+    );
+    expect(emailError).toHaveAttribute("aria-live", "polite");
+    expect(passwordError).toHaveAttribute("aria-live", "polite");
     expect(screen.getByLabelText("Mật khẩu")).toHaveAttribute(
       "aria-invalid",
       "true",
     );
     expect(service.signIn).not.toHaveBeenCalled();
+  });
+
+  it("rejects whitespace-only 8-space password and distinguishes short passwords", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+    renderLoginForm("default", service);
+    await user.type(
+      screen.getByLabelText("Email của ba mẹ"),
+      "minhanh@example.com",
+    );
+    await user.type(screen.getByLabelText("Mật khẩu"), "        ");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    expect(
+      await screen.findByText("Ba mẹ vui lòng nhập mật khẩu."),
+    ).toBeInTheDocument();
+    expect(service.signIn).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText("Mật khẩu"));
+    await user.type(screen.getByLabelText("Mật khẩu"), "abc1234");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    expect(
+      await screen.findByText("Mật khẩu cần có ít nhất 8 ký tự."),
+    ).toBeInTheDocument();
+    expect(service.signIn).not.toHaveBeenCalled();
+  });
+
+  it("toggles password visibility and renders clear placeholders and accessible login chrome", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+    render(withAuthFixture(<LoginScreen scenario="default" />, service));
+
+    const emailInput = screen.getByLabelText("Email của ba mẹ");
+    const passwordInput = screen.getByLabelText("Mật khẩu");
+    expect(emailInput).toHaveAttribute("placeholder", "vidu@email.com");
+    expect(passwordInput).toHaveAttribute("placeholder", "Nhập mật khẩu");
+    expect(passwordInput).toHaveAttribute("type", "password");
+
+    const toggleBtn = screen.getByRole("button", { name: "Hiện mật khẩu" });
+    expect(toggleBtn).toHaveAttribute("aria-pressed", "false");
+    await user.click(toggleBtn);
+    expect(passwordInput).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: "Ẩn mật khẩu" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // Header/Footer accessibility checks
+    expect(
+      screen.getByRole("link", { name: "ViRead - Đăng nhập" }),
+    ).toHaveAttribute("href", "/login");
+    expect(
+      screen.getByRole("link", { name: "ViRead - Về trang đăng nhập" }),
+    ).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Đăng nhập" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    const signupLink = screen.getByRole("link", { name: /Chưa có tài khoản/ });
+    expect(signupLink.className).not.toContain("w-full");
   });
 
   it("navigates to the dashboard after a successful service response", async () => {

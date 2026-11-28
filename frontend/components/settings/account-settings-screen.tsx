@@ -10,6 +10,7 @@ import { Card } from "@/components/common/card";
 import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ParentEmailPreferencesCard } from "@/components/settings/parent-email-preferences-card";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import { createProfileService } from "@/lib/api/profile-service";
@@ -427,6 +428,10 @@ export function AccountSettingsScreen() {
           Mở hồ sơ phụ huynh
         </Link>
       </Card>
+
+      {profile.role !== "admin" ? (
+        <ParentEmailPreferencesCard emailVerified={profile.email_verified} />
+      ) : null}
 
       <Card>
         <div className="flex items-center gap-3">

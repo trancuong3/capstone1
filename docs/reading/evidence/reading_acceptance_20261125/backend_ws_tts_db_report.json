@@ -1,0 +1,307 @@
+{
+  "proxied_ws_stt": {
+    "ws_url": "wss://192.168.1.2:8443/_viread_api/voice/stt-stream",
+    "clips": 15,
+    "total_words": 139,
+    "matched_words": 138,
+    "match_rate": 0.9928,
+    "p50_ms": 54.94,
+    "p95_ms": 282.34,
+    "decode_p50_ms": 74.51,
+    "decode_p95_ms": 141.04
+  },
+  "warm_isolated_tts": {
+    "prompt_count": 10,
+    "uncached_ttfa_ms": [
+      400.47,
+      545.63,
+      279.3,
+      356.42,
+      355.07,
+      333.19,
+      312.51,
+      283.87,
+      340.01,
+      338.65
+    ],
+    "uncached_ttfa_p50_ms": 338.65,
+    "uncached_ttfa_p95_ms": 545.63
+  },
+  "db_and_two_sessions": {
+    "latest_e2e_sessions": [
+      {
+        "id": "51d01150-77be-4a63-880a-5ef19ac80c51",
+        "state": "COMPLETED",
+        "started_at": "2026-11-25 08:26:02.875018+00:00",
+        "ended_at": "2026-11-25 08:26:07.070929+00:00"
+      },
+      {
+        "id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "state": "COMPLETED",
+        "started_at": "2026-11-25 08:20:23.229120+00:00",
+        "ended_at": "2026-11-25 08:20:30.039107+00:00"
+      },
+      {
+        "id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "state": "COMPLETED",
+        "started_at": "2026-11-25 08:19:30.828643+00:00",
+        "ended_at": "2026-11-25 08:19:41.411450+00:00"
+      },
+      {
+        "id": "d79a01c1-cac5-475c-a3a7-19fc47fa555a",
+        "state": "COMPLETED",
+        "started_at": "2026-11-25 08:17:52.106390+00:00",
+        "ended_at": "2026-11-25 08:18:02.989421+00:00"
+      },
+      {
+        "id": "b6507bdf-9ea5-4d7a-b1f2-3bc3fd0a52a5",
+        "state": "COMPLETED",
+        "started_at": "2026-11-25 08:17:00.740627+00:00",
+        "ended_at": "2026-11-25 08:17:02.579625+00:00"
+      }
+    ],
+    "latest_e2e_quiz_attempts_db": [
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "a9e79c27-e4e3-42f3-bf41-612c2df260d7",
+        "prompt": "Bé Mi đã dùng gì để che mưa cho bạn An?",
+        "selected_answer": "Chiếc ô nhỏ màu xanh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "aceb48f9-557f-4e91-8cc8-2e79621022cd",
+        "prompt": "Điền từ còn thiếu vào câu sau: Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp ____.",
+        "selected_answer": "Bốn",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "aceb48f9-557f-4e91-8cc8-2e79621022cd",
+        "prompt": "Điền từ còn thiếu vào câu sau: Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp ____.",
+        "selected_answer": "Một",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "74ca34e5-5897-4d93-812a-4de164a3695c",
+        "prompt": "Nhân vật nào trong truyện đọc thêm đã nhắc nhở Thỏ em?",
+        "selected_answer": "Thỏ anh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "7fbd9380-62f6-4e15-a7fb-dc0c087110b3",
+        "prompt": "Từ nào sau đây chỉ hành động của ông nội khi ngồi bên hiên nhà?",
+        "selected_answer": "Uống trà nóng",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "059854d2-e01d-4257-8e3a-c727522cd67a",
+        "prompt": "Lan và An rủ nhau ra khu vực nào để tưới nước cho khóm cúc?",
+        "selected_answer": "Sân chơi chung",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "059854d2-e01d-4257-8e3a-c727522cd67a",
+        "prompt": "Lan và An rủ nhau ra khu vực nào để tưới nước cho khóm cúc?",
+        "selected_answer": "Phía trước cổng trường",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "059854d2-e01d-4257-8e3a-c727522cd67a",
+        "prompt": "Lan và An rủ nhau ra khu vực nào để tưới nước cho khóm cúc?",
+        "selected_answer": "Vườn hoa phía sau lớp",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "54a60373-38f2-40fc-8982-1d39142c605c",
+        "prompt": "Trước khi đi ngủ, bé Mi đã làm gì để ngày mai đến lớp đúng giờ?",
+        "selected_answer": "Đặt đồng hồ báo thức sớm",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "d4b4fd71-c11e-4858-bfc5-716fe99344f0",
+        "prompt": "Theo ông nội, đọc đúng điều gì sẽ giúp người nghe hiểu trọn ý nghĩa câu văn?",
+        "selected_answer": "Dấu chấm",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "663456dd-d3b8-4b52-8f20-4060437f2d5f",
+        "question_id": "d4b4fd71-c11e-4858-bfc5-716fe99344f0",
+        "prompt": "Theo ông nội, đọc đúng điều gì sẽ giúp người nghe hiểu trọn ý nghĩa câu văn?",
+        "selected_answer": "Dấu thanh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "9eab942c-838d-416f-8c65-dc1814bf9380",
+        "prompt": "Buổi sáng mùa thu, nắng chiếu qua đâu ở lớp học?",
+        "selected_answer": "Khung cửa sổ",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "674244f0-ed5f-4d6a-be4d-aa1737f80c45",
+        "prompt": "Mi mang theo vật gì khi tan học trời mưa?",
+        "selected_answer": "Chiếc mũ vải",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "674244f0-ed5f-4d6a-be4d-aa1737f80c45",
+        "prompt": "Mi mang theo vật gì khi tan học trời mưa?",
+        "selected_answer": "Chiếc ô nhỏ màu xanh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "57927351-95ec-44cb-91ed-62887791c335",
+        "prompt": "Trong bài đọc, chú thỏ nói: Dừng lại! Đừng ____ quá!",
+        "selected_answer": "chạy nhanh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "3144b6d8-d7ed-496b-ad30-4b6378d806e3",
+        "prompt": "Ai là người ngồi bên hiên nhà uống trà nóng và lắng nghe Mi kể chuyện?",
+        "selected_answer": "Bạn An",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "3144b6d8-d7ed-496b-ad30-4b6378d806e3",
+        "prompt": "Ai là người ngồi bên hiên nhà uống trà nóng và lắng nghe Mi kể chuyện?",
+        "selected_answer": "Ông nội",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "98e044fc-0643-44db-b721-154e1f3a85f3",
+        "prompt": "Theo ông nội, đọc đúng cái gì giúp người nghe hiểu trọn ý nghĩa?",
+        "selected_answer": "Âm thanh to",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "98e044fc-0643-44db-b721-154e1f3a85f3",
+        "prompt": "Theo ông nội, đọc đúng cái gì giúp người nghe hiểu trọn ý nghĩa?",
+        "selected_answer": "Tốc độ nhanh",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "98e044fc-0643-44db-b721-154e1f3a85f3",
+        "prompt": "Theo ông nội, đọc đúng cái gì giúp người nghe hiểu trọn ý nghĩa?",
+        "selected_answer": "Quyển sách",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "98e044fc-0643-44db-b721-154e1f3a85f3",
+        "prompt": "Theo ông nội, đọc đúng cái gì giúp người nghe hiểu trọn ý nghĩa?",
+        "selected_answer": "Dấu thanh",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "33b01877-4c67-453c-9f35-77233583a7a7",
+        "prompt": "Ngày hôm sau, Lan và An rủ nhau ra đâu để tưới nước cho khóm cúc?",
+        "selected_answer": "Cổng trường",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "33b01877-4c67-453c-9f35-77233583a7a7",
+        "prompt": "Ngày hôm sau, Lan và An rủ nhau ra đâu để tưới nước cho khóm cúc?",
+        "selected_answer": "Hiên nhà",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "33b01877-4c67-453c-9f35-77233583a7a7",
+        "prompt": "Ngày hôm sau, Lan và An rủ nhau ra đâu để tưới nước cho khóm cúc?",
+        "selected_answer": "Vườn hoa phía sau lớp",
+        "is_correct": true,
+        "score": 1.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "49014390-db5a-45b6-be83-14072f895e28",
+        "prompt": "Trước khi đi ngủ, Mi đặt vật gì để ngày mai đến lớp đúng giờ?",
+        "selected_answer": "Chiếc ô nhỏ màu xanh",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "49014390-db5a-45b6-be83-14072f895e28",
+        "prompt": "Trước khi đi ngủ, Mi đặt vật gì để ngày mai đến lớp đúng giờ?",
+        "selected_answer": "Quyển sách Tiếng Việt",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "49014390-db5a-45b6-be83-14072f895e28",
+        "prompt": "Trước khi đi ngủ, Mi đặt vật gì để ngày mai đến lớp đúng giờ?",
+        "selected_answer": "Cặp sách ngay ngắn",
+        "is_correct": false,
+        "score": 0.0
+      },
+      {
+        "session_id": "2aaf8cae-6ea8-439f-921b-b30bc41e50c5",
+        "question_id": "49014390-db5a-45b6-be83-14072f895e28",
+        "prompt": "Trước khi đi ngủ, Mi đặt vật gì để ngày mai đến lớp đúng giờ?",
+        "selected_answer": "Đồng hồ báo thức sớm",
+        "is_correct": true,
+        "score": 1.0
+      }
+    ],
+    "two_session_s1_id": "6426f1ae-939e-40eb-86fd-be97d437078f",
+    "two_session_s2_id": "2a4b1673-8964-459e-b584-3db550b2cbd2",
+    "difficult_words_after_s1_count": 14,
+    "difficult_words_in_s2_count": 14,
+    "difficult_words_sample": [
+      "Mi",
+      "ô",
+      "An.",
+      "bạn",
+      "che",
+      "cho",
+      "học,",
+      "lớp.",
+      "mang",
+      "mưa."
+    ],
+    "persisted_across_sessions": true
+  }
+}

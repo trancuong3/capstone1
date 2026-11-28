@@ -22,14 +22,12 @@
  * full Vietnamese vowel marks, đ, and all 6 tones).
  */
 
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
-import {
-  adaptTextToTeacherPersona,
-  type VoiceGender,
-} from "@/lib/reading/voice-persona";
+import type { VoiceGender } from "@/lib/reading/voice-persona";
 
 export type VietnameseTone = "ngang" | "sac" | "huyen" | "hoi" | "nga" | "nang";
 
@@ -723,19 +721,21 @@ export function isPhonicsCueForWindow(
 
 export function generateSpokenPhonicsGuide(
   word: string,
-  gender: VoiceGender = "female",
+  gender?: VoiceGender,
 ): string {
-  return adaptTextToTeacherPersona(
-    generateFemaleSpokenPhonicsGuide(word),
-    gender,
-  );
+  const effectiveGender = gender ?? getEffectiveTeacherPersona().gender;
+  const pronoun = effectiveGender === "male" ? "thầy" : "cô";
+  return generatePronounSpokenPhonicsGuide(word, pronoun);
 }
 
-function generateFemaleSpokenPhonicsGuide(word: string): string {
+function generatePronounSpokenPhonicsGuide(
+  word: string,
+  pronoun: "cô" | "thầy",
+): string {
   const parts = decomposeVietnameseSyllable(word);
   const displayWord = normalizeVietnameseWord(word) || word.trim();
   if (!parts) {
-    return `Con nghe cô đọc chậm chữ “${displayWord}” rồi đọc cùng cô nhé!`;
+    return `Con nghe ${pronoun} đọc chậm chữ “${displayWord}” rồi đọc cùng ${pronoun} nhé!`;
   }
 
   const { normalized, onset, rhyme, untonedSyllable, tone } = parts;
@@ -762,27 +762,27 @@ function generateFemaleSpokenPhonicsGuide(word: string): string {
         tone !== "ngang" && !(isCheckedCoda && tone === "sac")
           ? `... ${toneSpoken}... ${normalized}`
           : "";
-      return `Mình đánh vần chậm cùng cô nhé: ${rhymeStep}${blendTail}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+      return `Mình đánh vần chậm cùng ${pronoun} nhé: ${rhymeStep}${blendTail}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${pronoun} nào!`;
     }
 
     const blendParts = [onsetSpoken, spokenRhyme, preToneSyllable];
     if (tone !== "ngang") {
       blendParts.push(toneSpoken, normalized);
     }
-    return `Mình ghép vần cùng cô nha: ${rhymeStep}, ${blendParts.join("... ")}! Đọc trơn là: ${normalized}. Con thử đọc lại chữ “${normalized}” nhé!`;
+    return `Mình ghép vần cùng ${pronoun} nha: ${rhymeStep}, ${blendParts.join("... ")}! Đọc trơn là: ${normalized}. Con thử đọc lại chữ “${normalized}” nhé!`;
   }
 
-  // Case 2: Simple 1-vowel rhyme with onset (e.g. "tê", "cá", "nhỏ", "mẹ")
+  // Case 2: Simple 1-vowel rhyme with onset (e.g. "tê", "cá", "nhỏ", "mẹ", "cô", "cổ")
   if (onset) {
     if (tone === "ngang") {
-      return `Mình đánh vần chậm cùng cô nhé: ${onsetSpoken}... ${spokenRhyme}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+      return `Mình đánh vần chậm cùng ${pronoun} nhé: ${onsetSpoken}... ${spokenRhyme}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${pronoun} nào!`;
     }
-    return `Con nghe cô đánh vần nhé: ${onsetSpoken}... ${spokenRhyme}... ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Đến lượt con giỏi lắm nào!`;
+    return `Con nghe ${pronoun} đánh vần nhé: ${onsetSpoken}... ${spokenRhyme}... ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Đến lượt con giỏi lắm nào!`;
   }
 
   // Case 3: Single-vowel syllable without onset (e.g. "ở", "ý", "ô")
   if (tone !== "ngang") {
-    return `Mình đánh vần chậm cùng cô nhé: ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng cô nào!`;
+    return `Mình đánh vần chậm cùng ${pronoun} nhé: ${untonedSyllable}... ${toneSpoken}... ${normalized}! Đọc trơn là: ${normalized}. Giờ con đọc thử cùng ${pronoun} nào!`;
   }
-  return `Mình đọc chậm cùng cô nhé: ${normalized}! Giờ con đọc thử cùng cô nào!`;
+  return `Mình đọc chậm cùng ${pronoun} nhé: ${normalized}! Giờ con đọc thử cùng ${pronoun} nào!`;
 }

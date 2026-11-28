@@ -32,7 +32,11 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 py-6 sm:px-8 xl:px-16">
         <ViReadLogo
           ariaLabel={
-            isParent ? "ViRead - về tổng quan" : "ViRead - về trang chủ"
+            isParent
+              ? "ViRead - Về tổng quan"
+              : isAdmin
+                ? "ViRead - Về quản trị"
+                : "ViRead - Về trang đăng nhập"
           }
           href={isParent ? "/dashboard" : isAdmin ? "/admin/parents" : "/login"}
         />

@@ -29,6 +29,26 @@ def initial_snapshot(summary):
     return snapshot
 
 
+def _is_assisted_retry(event, assisted_at_by_key: dict) -> bool:
+    key = (str(event.PageId), str(event.PageRevisionId), str(event.WordId))
+    metadata = event.Metadata if isinstance(event.Metadata, dict) else {}
+    if (
+        bool(metadata.get("assisted"))
+        or bool(metadata.get("helped"))
+        or bool(metadata.get("after_spelling"))
+        or metadata.get("mastery") in {"CORRECT_AFTER_SPELLING", "ASSISTED"}
+        or metadata.get("resolution_status") in {"CORRECT_AFTER_SPELLING", "ASSISTED"}
+    ):
+        return True
+    if key not in assisted_at_by_key:
+        return False
+    helped_at = assisted_at_by_key[key]
+    retry_at = getattr(event, "CreatedAt", None)
+    if helped_at is not None and retry_at is not None:
+        return helped_at <= retry_at
+    return True
+
+
 def aggregate_assessment(session_id, reports, events) -> dict:
     words = {}
     transcripts = []
@@ -56,7 +76,20 @@ def aggregate_assessment(session_id, reports, events) -> dict:
     errors = {key for key, word in words.items()
               if word["status"] in {"MISPRONUNCIATION", "OMISSION"}}
     uncertain = {key for key, word in words.items() if word["status"] == "UNCERTAIN"}
+    assisted_at_by_key = {}
+    for event in events:
+        if event.SessionId != session_id or event.Type != "READ_EXAMPLE" or event.WordId is None:
+            continue
+        key = (str(event.PageId), str(event.PageRevisionId), str(event.WordId))
+        event_at = getattr(event, "CreatedAt", None)
+        if key not in assisted_at_by_key or (
+            event_at is not None
+            and (assisted_at_by_key[key] is None or event_at < assisted_at_by_key[key])
+        ):
+            assisted_at_by_key[key] = event_at
+
     corrected = set()
+    assisted_keys = set()
     failed_attempts = defaultdict(set)
     evaluated_attempts = set()
     for event in events:
@@ -78,13 +111,17 @@ def aggregate_assessment(session_id, reports, events) -> dict:
             continue
         evaluated_attempts.add(attempt_key)
         if event.Status == "CONFIRMED":
-            corrected.add(key)
+            if _is_assisted_retry(event, assisted_at_by_key):
+                assisted_keys.add(key)
+            else:
+                corrected.add(key)
         else:
             failed_attempts[key].add(attempt)
 
     correct_words = [word["text"] for word in words.values() if word["status"] == "CORRECT"]
     incorrect_words = [word["text"] for word in words.values() if word["status"] == "MISPRONUNCIATION"]
     omitted_words = [word["text"] for word in words.values() if word["status"] == "OMISSION"]
+    assisted_words = [word["text"] for key, word in words.items() if key in assisted_keys]
     assessed = len(correct_words) + len(errors)
     return {
         "assessment": ReadingAssessmentMetrics(
@@ -95,7 +132,8 @@ def aggregate_assessment(session_id, reports, events) -> dict:
             recognition_uncertain=len(uncertain),
         ),
         "correct_words": correct_words, "mispronounced_words": incorrect_words,
-        "skipped_words": omitted_words, "transcripts": transcripts,
+        "skipped_words": omitted_words, "assisted_words": assisted_words,
+        "transcripts": transcripts,
         "spoken_words": [word for transcript in transcripts for word in transcript.split()],
         "practiced_words": assessed,
         "score": int(len(correct_words) / assessed * 100 + 0.5) if assessed else None,

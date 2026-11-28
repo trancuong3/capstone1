@@ -47,9 +47,60 @@ test.describe("Group 1 authentication UI", () => {
     await page.goto("/login?state=default");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 
+    const emailErr = page.getByText("Ba mẹ vui lòng nhập email.");
+    const passErr = page.getByText("Ba mẹ vui lòng nhập mật khẩu.");
+    await expect(emailErr).toBeVisible();
+    await expect(passErr).toBeVisible();
+    await expect(emailErr).toHaveAttribute("aria-live", "polite");
+    await expect(passErr).toHaveAttribute("aria-live", "polite");
+
+    // 8-space whitespace-only password must be rejected
+    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
+    const passwordInput = page.getByLabel("Mật khẩu", { exact: true });
+    await passwordInput.fill("        ");
+    await page.getByRole("button", { name: "Đăng nhập" }).click();
+    await expect(passErr).toBeVisible();
+
+    // Placeholders, show/hide password toggle, touch targets >= 44px, and a11y chrome
+    await expect(page.getByLabel("Email của ba mẹ")).toHaveAttribute(
+      "placeholder",
+      "vidu@email.com",
+    );
+    await expect(passwordInput).toHaveAttribute("placeholder", "Nhập mật khẩu");
+    await expect(passwordInput).toHaveAttribute("type", "password");
+
+    const toggle = page.getByRole("button", { name: "Hiện mật khẩu" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const toggleBox = await toggle.boundingBox();
+    expect(toggleBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(toggleBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    await toggle.click();
+    await expect(passwordInput).toHaveAttribute("type", "text");
     await expect(
-      page.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
-    ).toBeVisible();
+      page.getByRole("button", { name: "Ẩn mật khẩu" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    const forgotLink = page.getByRole("link", { name: "Quên mật khẩu?" });
+    const forgotBox = await forgotLink.boundingBox();
+    expect(forgotBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+    const signupLink = page.locator("a.account-signup");
+    const signupBox = await signupLink.boundingBox();
+    const formBox = await page.locator("form").boundingBox();
+    expect(signupBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(signupBox?.width ?? 9999).toBeLessThan((formBox?.width ?? 0) - 20);
+
+    await expect(
+      page
+        .getByRole("navigation", { name: "Tài khoản ViRead" })
+        .getByRole("link", { name: "Đăng nhập" }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("link", { name: "ViRead - Đăng nhập" }),
+    ).toHaveAttribute("href", "/login");
+    await expect(
+      page.getByRole("link", { name: "ViRead - Về trang đăng nhập" }),
+    ).toHaveAttribute("href", "/login");
   });
 
   test("login links to parent registration", async ({ page }) => {
@@ -139,7 +190,7 @@ test.describe("Group 1 authentication UI", () => {
       .click();
     await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
-    await page.getByLabel("Mật khẩu").fill("matkhaumoi123");
+    await page.getByLabel("Mật khẩu", { exact: true }).fill("matkhaumoi123");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/);

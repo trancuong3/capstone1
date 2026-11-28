@@ -56,7 +56,18 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Push-Location $root
 try {
     Write-Host "[2/3] Running Gradle unit tests, lint, and assembleDebug..."
-    & $gradleCmd --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+    $gradleArgs = @(
+        "--no-daemon",
+        "-PvireadUrl=$FrontendUrl"
+    )
+    if ($env:VIREAD_LAN_MODE -eq "1") {
+        $gradleArgs += "-PvireadLanMode=1"
+        if ($env:VIREAD_LAN_CA_CERT) {
+            $gradleArgs += "-PvireadLanCaCert=$($env:VIREAD_LAN_CA_CERT)"
+        }
+    }
+    $gradleArgs += @(":app:testDebugUnitTest", ":app:lintDebug", ":app:assembleDebug")
+    & $gradleCmd @gradleArgs
     if ($LASTEXITCODE -ne 0) { throw "Gradle build failed (exit $LASTEXITCODE)" }
 
     $apkPath = Join-Path $root "app\build\outputs\apk\debug\app-debug.apk"

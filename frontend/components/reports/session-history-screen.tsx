@@ -63,7 +63,7 @@ export function SessionHistoryScreen({
           : children[0];
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
-          limit: 2,
+          limit: 10,
         });
         const items = await Promise.all(
           history.sessions.map(async (session) => {
@@ -224,7 +224,7 @@ export function SessionHistoryScreen({
       )}
       <nav
         aria-label="Phân trang lịch sử"
-        className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"
+        className="flex flex-col-reverse items-center gap-3 sm:flex-row sm:justify-between"
       >
         {currentPage > 1 ? (
           <ButtonLink
@@ -237,6 +237,14 @@ export function SessionHistoryScreen({
         ) : (
           <span />
         )}
+        {currentPage > 1 || nextPage !== null ? (
+          <span
+            aria-current="page"
+            className="text-sm font-bold text-muted tabular-nums"
+          >
+            Trang {currentPage}
+          </span>
+        ) : null}
         {nextPage !== null ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"

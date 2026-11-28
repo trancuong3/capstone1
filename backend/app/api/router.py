@@ -5,6 +5,7 @@ from app.api.routes import (
     book,
     book_content_quality,
     comprehension,
+    parent_notifications,
     parent_private_book,
     profile,
     reading,
@@ -40,6 +41,11 @@ api_router.include_router(
     reading_presence.router,
     prefix="/reading-presence",
     tags=["Reading Presence"],
+)
+api_router.include_router(
+    parent_notifications.router,
+    prefix="/parent-notifications",
+    tags=["Parent Notifications"],
 )
 api_router.include_router(
     sentence_shooter.router,

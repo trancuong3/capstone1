@@ -8,6 +8,7 @@ from .system import ProgressReport, ConsentRecord, AuditLog
 from .reading_management import ReadingGoal, ReadingPlan, ChildBookCollection, ReadingReminder, ReadingReminderOccurrence
 from app.models.reading_comparison_report import ReadingComparisonReport
 from .reading_presence import ReadingPresenceAlert, ReadingPresenceSetting
+from .parent_email_notification import ParentEmailDelivery, ParentEmailPreference
 
 from app.models.book_content_quality import (
     BookContentReport,

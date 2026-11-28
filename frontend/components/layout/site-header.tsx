@@ -3,12 +3,17 @@ import { cn } from "@/lib/utils/cn";
 import { ButtonLink } from "@/components/common/button";
 
 interface SiteHeaderProps {
+  readonly activeRoute?: "login" | "register";
   readonly className?: string;
   readonly variant?: "auth" | "admin-login";
 }
 
 /** Public branding only. Parent/Admin navigation stays in its existing layout. */
-export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
+export function SiteHeader({
+  activeRoute,
+  className,
+  variant = "auth",
+}: SiteHeaderProps) {
   const isAdminLogin = variant === "admin-login";
 
   return (
@@ -23,8 +28,8 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
           <ViReadLogo
             ariaLabel={
               isAdminLogin
-                ? "ViRead - đăng nhập quản trị"
-                : "ViRead - đăng nhập"
+                ? "ViRead - Đăng nhập quản trị"
+                : "ViRead - Đăng nhập"
             }
             href={isAdminLogin ? "/admin/login" : "/login"}
             size="md"
@@ -44,6 +49,7 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto"
           >
             <ButtonLink
+              aria-current={activeRoute === "login" ? "page" : undefined}
               href="/login"
               size="compact"
               variant="quiet"
@@ -52,6 +58,7 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
               Đăng nhập
             </ButtonLink>
             <ButtonLink
+              aria-current={activeRoute === "register" ? "page" : undefined}
               href="/register"
               size="compact"
               className="whitespace-nowrap sm:min-w-32"

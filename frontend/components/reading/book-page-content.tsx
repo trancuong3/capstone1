@@ -1,13 +1,24 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { ArrowDown } from "lucide-react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type RefObject,
+} from "react";
 import {
   computeUniversalPageWordLayout,
   type WordLayoutEntry,
 } from "@/lib/reading/ocr-text-reflow";
+import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
+  getWordHighlightTier,
+  getWordPresentationLabel,
   wordPresentationClasses,
-  wordPresentationLabels,
   type PageWordEvidence,
   type WordPresentationState,
   wordStateForPage,
@@ -22,6 +33,10 @@ interface BookPageContentProps extends PageWordEvidence {
   readOnly?: boolean;
   /** Optional instrumentation hook for render-count benchmarks. */
   onWordTokenRender?: (wordId: string) => void;
+  /** Optional parent scroll container ref when hosted inside BookPageViewer. */
+  scrollContainerRef?: RefObject<HTMLElement | null>;
+  /** Optional word node registrar when parent manages container auto-scroll. */
+  registerWordNode?: (wordId: string, node: HTMLElement | null) => void;
 }
 
 interface WordTokenProps {
@@ -80,7 +95,7 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "mr-1.5 inline-block scroll-mt-24 scroll-mb-40 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+          "mr-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
@@ -97,6 +112,7 @@ const MemoWordToken = memo(function WordToken({
         data-page-revision-id={pageRevisionId}
         data-word-id={word.word_id}
         data-reading-state={presentationState}
+        data-reading-tier={getWordHighlightTier(presentationState, isCurrent)}
         aria-current={isCurrent ? "true" : undefined}
         aria-label={readOnly ? undefined : word.text}
         aria-describedby={
@@ -119,8 +135,14 @@ const MemoWordToken = memo(function WordToken({
         {word.text}
         {!readOnly ? (
           <span hidden id={`text-word-state-${pageRevisionId}-${word.word_id}`}>
-            {wordPresentationLabels[presentationState]}
+            {getWordPresentationLabel(presentationState)}
           </span>
+        ) : null}
+        {presentationState === "preview-correct" ? (
+          <span
+            aria-hidden="true"
+            className="ml-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
+          />
         ) : null}
         {presentationState === "self-corrected" ? (
           <span aria-hidden="true" className="ml-1 text-sm">
@@ -155,23 +177,25 @@ export function BookPageContent(props: BookPageContentProps) {
     previewSnapshot,
     readOnly = false,
     onWordTokenRender,
+    scrollContainerRef,
+    registerWordNode,
   } = props;
   const stateFor = wordStateForPage(props);
   const hasWords = page.words.length > 0;
+  const panelRef = useRef<HTMLDivElement>(null);
   const wordNodesRef = useRef(new Map<string, HTMLSpanElement>());
   const onWordClickRef = useRef(onWordClick);
+  const registerWordNodeRef = useRef(registerWordNode);
   useEffect(() => {
     onWordClickRef.current = onWordClick;
+    registerWordNodeRef.current = registerWordNode;
   });
-
-  const handleSelectWord = useCallback((word: ReadingPageWordDTO) => {
-    onWordClickRef.current?.(word);
-  }, []);
 
   const registerNode = useCallback(
     (wordId: string, node: HTMLSpanElement | null) => {
       if (node) wordNodesRef.current.set(wordId, node);
       else wordNodesRef.current.delete(wordId);
+      registerWordNodeRef.current?.(wordId, node);
     },
     [],
   );
@@ -183,23 +207,45 @@ export function BookPageContent(props: BookPageContentProps) {
     ? previewSnapshot.currentWordId
     : currentWordId;
 
-  useEffect(() => {
-    if (!activeWordId) return;
-    const active = wordNodesRef.current.get(activeWordId);
-    active?.scrollIntoView?.({
-      block: "nearest",
-      inline: "nearest",
-      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-        ? "instant"
-        : "smooth",
-    });
-  }, [activeWordId, page.page_revision_id]);
+  const isManagedByParent = Boolean(registerWordNode);
+  const effectiveScrollRef = scrollContainerRef ?? panelRef;
+
+  const getActiveWordNode = useCallback(
+    () =>
+      activeWordId ? (wordNodesRef.current.get(activeWordId) ?? null) : null,
+    [activeWordId],
+  );
+
+  const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
+    containerRef: effectiveScrollRef,
+    getActiveElement: getActiveWordNode,
+    activeWordId,
+    pageKey: `${page.page_id}:${page.page_revision_id}`,
+    enabled: !isManagedByParent && !readOnly,
+  });
+
+  const handleSelectWord = useCallback(
+    (word: ReadingPageWordDTO) => {
+      if (!isManagedByParent) {
+        resumeAutoFollow();
+      }
+      onWordClickRef.current?.(word);
+    },
+    [isManagedByParent, resumeAutoFollow],
+  );
 
   return (
     <div
+      ref={panelRef}
       data-reading-panel="text"
       data-reflow-mode={reflow.mode}
-      className="mt-4 min-h-0 flex-1 py-3 sm:mt-6 sm:py-2"
+      data-reading-scroll-container={
+        !isManagedByParent && !scrollContainerRef ? "true" : undefined
+      }
+      data-auto-follow={
+        !isManagedByParent ? (isDetached ? "paused" : "active") : undefined
+      }
+      className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
         <p className="max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
@@ -229,6 +275,19 @@ export function BookPageContent(props: BookPageContentProps) {
           Đang tải nội dung văn bản của trang…
         </p>
       )}
+      {!isManagedByParent && isDetached && activeWordId ? (
+        <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end overflow-visible">
+          <button
+            type="button"
+            data-testid="resume-auto-follow-btn"
+            onClick={resumeAutoFollow}
+            className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
+            Về từ đang đọc
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

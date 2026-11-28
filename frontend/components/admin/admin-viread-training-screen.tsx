@@ -11,6 +11,8 @@ import {
 } from "@/components/admin/admin-viread-flow1-replacement";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
@@ -35,6 +37,16 @@ export function AdminVireadTrainingScreen() {
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const [jobsPage, setJobsPage] = useState(1);
+  const [runsPage, setRunsPage] = useState(1);
+  const TRAINING_LIST_PAGE_SIZE = 5;
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    kind: "delete" | "closeMismatched" | "closeUnbenchmarked";
+    jobId: string;
+    title: string;
+    description: string;
+    confirmLabel: string;
+  } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [reason, setReason] = useState(
     "Đã rà soát báo cáo Locked Test và chấp thuận bản VietOCR V2.",
@@ -175,13 +187,6 @@ export function AdminVireadTrainingScreen() {
 
   async function deleteJob(jobId: string) {
     if (!vireadTraining || busy || deletingJobId) return;
-    if (
-      !globalThis.confirm(
-        "Xóa job cũ này? Dataset, run và checkpoint vẫn được giữ nguyên.",
-      )
-    ) {
-      return;
-    }
     setDeletingJobId(jobId);
     setBusy(true);
     setMessage(null);
@@ -230,10 +235,6 @@ export function AdminVireadTrainingScreen() {
 
   async function closeMismatchedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
-    const confirmed = globalThis.confirm(
-      "Đóng job candidate bị lệch fingerprint cấu hình? Run và checkpoint sẽ được giữ để kiểm toán; candidate không được benchmark hay kích hoạt.",
-    );
-    if (!confirmed) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -253,10 +254,6 @@ export function AdminVireadTrainingScreen() {
 
   async function closeUnbenchmarkedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
-    const confirmed = globalThis.confirm(
-      "Đóng candidate chưa benchmark? Checkpoint và run được giữ để kiểm toán; model đang dùng không đổi. Job thay thế chỉ được xếp sau khi Locked Test đủ mẫu VERIFIED độc lập.",
-    );
-    if (!confirmed) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -271,6 +268,19 @@ export function AdminVireadTrainingScreen() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runPendingConfirm() {
+    if (!pendingConfirm) return;
+    const action = pendingConfirm;
+    setPendingConfirm(null);
+    if (action.kind === "delete") {
+      await deleteJob(action.jobId);
+    } else if (action.kind === "closeMismatched") {
+      await closeMismatchedCandidate(action.jobId);
+    } else {
+      await closeUnbenchmarkedCandidate(action.jobId);
     }
   }
 
@@ -647,297 +657,353 @@ export function AdminVireadTrainingScreen() {
               </div>
             ) : null}
             <div className="mt-4 space-y-3">
-              {data.jobs.map((job) => {
-                const stage = job.progress.stage;
-                const waitingReason = job.metadata.waiting_reason;
-                const localUnavailable = job.metadata.local_unavailable;
-                const workerStatusValue = job.metadata.colab_worker_status;
-                const workerStatus =
-                  typeof workerStatusValue === "object" &&
-                  workerStatusValue !== null &&
-                  !Array.isArray(workerStatusValue)
-                    ? (workerStatusValue as Record<string, unknown>)
-                    : null;
-                return (
-                  <article
-                    className="rounded-control border border-border p-4"
-                    key={job.job_id}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-extrabold">
-                        {job.metadata.operation === "BENCHMARK_ONLY"
-                          ? `${String(job.metadata.evaluation_type ?? "Evaluation")} benchmark-only · ${job.status}`
-                          : `${trainingProfileName(job.profile)} · ${job.status}`}
-                      </h3>
-                      <span className="text-sm text-muted">
-                        {job.target} · lần thử {job.attempts}
-                      </span>
-                    </div>
-                    {[
-                      "QUEUED",
-                      "LOCAL_RUNNING",
-                      "FALLBACK_QUEUED_COLAB",
-                      "COLAB_RUNNING",
-                      "WAITING_FOR_DATA",
-                      "WAITING_FOR_COLAB_WORKER",
-                      "COLAB_SUBMITTING",
-                      "COLAB_SUBMITTED",
-                      "COLAB_EXECUTING",
-                    ].includes(job.status) ? null : (
-                      <Button
-                        className="mt-3 h-11 w-auto"
-                        disabled={busy}
-                        onClick={() => void deleteJob(job.job_id)}
-                        variant="destructive"
-                      >
-                        <Trash2 aria-hidden className="size-4" />
-                        {deletingJobId === job.job_id
-                          ? "Đang xóa…"
-                          : "Xóa job cũ"}
-                      </Button>
-                    )}
-                    <p className="mt-2 break-all font-mono text-xs text-muted">
-                      Job {job.job_id} · manifest {hash(job.manifest_sha256)}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      Giai đoạn:{" "}
-                      {typeof stage === "string" ? stage : "đang chờ"}
-                      {typeof job.progress.completed_steps === "number" &&
-                      typeof job.progress.total_steps === "number"
-                        ? ` · ${job.progress.completed_steps}/${job.progress.total_steps} bước`
-                        : ""}
-                    </p>
-                    {job.status === "WAITING_FOR_COLAB_WORKER" ||
-                    job.status === "FALLBACK_QUEUED_COLAB" ? (
-                      <p className="mt-1 text-sm text-muted">
-                        {workerStatus?.status === "READY"
-                          ? `Colab worker báo READY lần gần nhất${typeof workerStatus.reported_at === "string" ? ` lúc ${new Date(workerStatus.reported_at).toLocaleString("vi-VN")}` : ""}.`
-                          : workerStatus?.status === "WAITING_FOR_GPU"
-                            ? `Colab worker đang chờ GPU phù hợp (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu GPU/CUDA/VRAM"}). Job vẫn được giữ trong hàng đợi.`
-                            : workerStatus?.status === "WAITING_FOR_RESOURCES"
-                              ? `Colab worker đang chờ đủ RAM hoặc dung lượng đĩa (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu tài nguyên"}). Job vẫn được giữ trong hàng đợi.`
-                              : "Chưa có Colab worker sẵn sàng. Khi worker đã cấu hình và kết nối, job sẽ tự được nhận."}
-                      </p>
-                    ) : null}
-                    {job.status === "COLAB_SUBMITTED" ||
-                    job.status === "COLAB_EXECUTING" ? (
-                      <p className="mt-1 text-sm text-muted">
-                        {job.status === "COLAB_SUBMITTED"
-                          ? "Colab Enterprise đã nhận execution; chờ runtime GPU bắt đầu."
-                          : "Colab Enterprise đang chạy notebook cho job này."}
-                      </p>
-                    ) : null}
-                    {job.status === "BLOCKED_CONFIGURATION" ? (
-                      <p className="mt-1 text-sm text-danger">
-                        Job chưa được gửi lên Google Cloud. Mã cấu hình:{" "}
-                        {job.last_error_code ?? "chưa cấu hình"}. Hãy hoàn tất
-                        checklist trong docs/viread-colab-enterprise-setup.md
-                        rồi thử lại.
-                      </p>
-                    ) : null}
-                    {job.colab_execution_resource_name ? (
-                      <p className="mt-1 break-all font-mono text-xs text-muted">
-                        Execution {job.colab_execution_resource_name}
-                      </p>
-                    ) : null}
-                    {job.status === "QUALITY_GATE_REJECTED" ? (
-                      <p className="mt-1 text-sm text-muted">
-                        Candidate không đạt quality gate và chưa được kích hoạt.
-                      </p>
-                    ) : null}
-                    {job.target === "COLAB" &&
-                    typeof localUnavailable === "string" ? (
-                      <p className="mt-1 text-sm text-muted">
-                        Máy local chuyển job sang Colab vì: {localUnavailable}.
-                      </p>
-                    ) : null}
-                    {typeof waitingReason === "string" ? (
-                      <p className="mt-1 text-sm text-muted">
-                        Đang chờ dữ liệu: cần cả Train và Validation.
-                      </p>
-                    ) : null}
-                    {job.last_error_code ? (
-                      <p className="mt-1 text-sm text-danger">
-                        Mã lỗi: {job.last_error_code}
-                      </p>
-                    ) : null}
-                    {(job.status === "FAILED" ||
-                      (job.status === "BLOCKED" &&
-                        job.run_status === "TRAINING" &&
-                        job.last_error_code ===
-                          "COLAB_RETRY_REQUIRES_RUN_RECOVERY")) &&
-                    job.target === "COLAB" &&
-                    job.attempts < 3 &&
-                    (!job.run_id ||
-                      (job.run_status === "TRAINING" &&
-                        (job.last_error_code === "HTTPERROR" ||
-                          job.last_error_code ===
-                            "COLAB_RETRY_REQUIRES_RUN_RECOVERY"))) &&
-                    !job.colab_execution_id &&
-                    !job.colab_execution_resource_name &&
-                    !job.colab_operation_name ? (
-                      <div className="mt-3">
-                        <Button
-                          disabled={busy}
-                          onClick={() => void retry(job.job_id)}
-                          variant="secondary"
-                        >
-                          Thử lại job này
-                        </Button>
-                        <p className="mt-1 text-xs text-muted">
-                          Thử lại trước khi train hoặc tiếp tục tải checkpoint
-                          bị gián đoạn; giữ nguyên dataset và lineage. Locked
-                          Test không bắt buộc để train.
-                        </p>
+              {data.jobs
+                .slice(
+                  (Math.min(
+                    jobsPage,
+                    Math.max(
+                      1,
+                      Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
+                    ),
+                  ) -
+                    1) *
+                    TRAINING_LIST_PAGE_SIZE,
+                  Math.min(
+                    jobsPage,
+                    Math.max(
+                      1,
+                      Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
+                    ),
+                  ) * TRAINING_LIST_PAGE_SIZE,
+                )
+                .map((job) => {
+                  const stage = job.progress.stage;
+                  const waitingReason = job.metadata.waiting_reason;
+                  const localUnavailable = job.metadata.local_unavailable;
+                  const workerStatusValue = job.metadata.colab_worker_status;
+                  const workerStatus =
+                    typeof workerStatusValue === "object" &&
+                    workerStatusValue !== null &&
+                    !Array.isArray(workerStatusValue)
+                      ? (workerStatusValue as Record<string, unknown>)
+                      : null;
+                  return (
+                    <article
+                      className="rounded-control border border-border p-4"
+                      key={job.job_id}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-extrabold">
+                          {job.metadata.operation === "BENCHMARK_ONLY"
+                            ? `${String(job.metadata.evaluation_type ?? "Evaluation")} benchmark-only · ${job.status}`
+                            : `${trainingProfileName(job.profile)} · ${job.status}`}
+                        </h3>
+                        <span className="text-sm text-muted">
+                          {job.target} · lần thử {job.attempts}
+                        </span>
                       </div>
-                    ) : null}
-                    {job.status === "BLOCKED" &&
-                    job.run_status === "CANDIDATE" &&
-                    job.target === "COLAB" &&
-                    job.run_config_sha256 === job.config_sha256 &&
-                    Boolean(job.locked_test_version_id) &&
-                    Boolean(job.locked_test_manifest_sha256) &&
-                    job.attempts < 3 &&
-                    !job.colab_execution_id &&
-                    !job.colab_execution_resource_name &&
-                    !job.colab_operation_name &&
-                    [
-                      "HTTPERROR",
-                      "COLAB_FAILURE_REQUIRES_RUN_RECOVERY",
-                    ].includes(job.last_error_code ?? "") ? (
-                      <div className="mt-3">
+                      {[
+                        "QUEUED",
+                        "LOCAL_RUNNING",
+                        "FALLBACK_QUEUED_COLAB",
+                        "COLAB_RUNNING",
+                        "WAITING_FOR_DATA",
+                        "WAITING_FOR_COLAB_WORKER",
+                        "COLAB_SUBMITTING",
+                        "COLAB_SUBMITTED",
+                        "COLAB_EXECUTING",
+                      ].includes(job.status) ? null : (
                         <Button
-                          disabled={busy}
-                          onClick={() => void retry(job.job_id)}
-                          variant="secondary"
-                        >
-                          Tiếp tục kiểm thử candidate
-                        </Button>
-                        <p className="mt-1 text-xs text-muted">
-                          Checkpoint đã có; dùng lại cùng Google Drive Colab để
-                          tiếp tục Locked Test và benchmark. Nếu tệp candidate
-                          chưa được lưu trên Drive, worker sẽ dừng an toàn.
-                        </p>
-                      </div>
-                    ) : null}
-                    {job.status === "CANDIDATE" &&
-                    job.run_status === "CANDIDATE" &&
-                    job.candidate_has_benchmark === false &&
-                    job.run_config_sha256 === job.config_sha256 &&
-                    job.worker_id === null ? (
-                      <div className="mt-3">
-                        <Button
+                          className="mt-3 h-11 w-auto"
                           disabled={busy}
                           onClick={() =>
-                            void closeUnbenchmarkedCandidate(job.job_id)
+                            setPendingConfirm({
+                              kind: "delete",
+                              jobId: job.job_id,
+                              title: "Xóa job cũ?",
+                              description:
+                                "Xóa job cũ này? Dataset, run và checkpoint vẫn được giữ nguyên.",
+                              confirmLabel: "Xóa job cũ",
+                            })
                           }
-                          variant="secondary"
+                          variant="destructive"
                         >
-                          Đóng candidate, chờ job thay thế
+                          <Trash2 aria-hidden className="size-4" />
+                          {deletingJobId === job.job_id
+                            ? "Đang xóa…"
+                            : "Xóa job cũ"}
                         </Button>
-                        <p className="mt-1 text-xs text-muted">
-                          Chỉ đóng candidate đã dừng và chưa benchmark.
-                          Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo
-                          khi Locked Test đạt tối thiểu{" "}
-                          {data.locked_test?.minimum_samples ?? 200} cặp và{" "}
-                          {data.locked_test?.minimum_groups ?? 30} trang độc
-                          lập.
+                      )}
+                      <p className="mt-2 break-all font-mono text-xs text-muted">
+                        Job {job.job_id} · manifest {hash(job.manifest_sha256)}
+                      </p>
+                      <p className="mt-1 text-sm">
+                        Giai đoạn:{" "}
+                        {typeof stage === "string" ? stage : "đang chờ"}
+                        {typeof job.progress.completed_steps === "number" &&
+                        typeof job.progress.total_steps === "number"
+                          ? ` · ${job.progress.completed_steps}/${job.progress.total_steps} bước`
+                          : ""}
+                      </p>
+                      {job.status === "WAITING_FOR_COLAB_WORKER" ||
+                      job.status === "FALLBACK_QUEUED_COLAB" ? (
+                        <p className="mt-1 text-sm text-muted">
+                          {workerStatus?.status === "READY"
+                            ? `Colab worker báo READY lần gần nhất${typeof workerStatus.reported_at === "string" ? ` lúc ${new Date(workerStatus.reported_at).toLocaleString("vi-VN")}` : ""}.`
+                            : workerStatus?.status === "WAITING_FOR_GPU"
+                              ? `Colab worker đang chờ GPU phù hợp (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu GPU/CUDA/VRAM"}). Job vẫn được giữ trong hàng đợi.`
+                              : workerStatus?.status === "WAITING_FOR_RESOURCES"
+                                ? `Colab worker đang chờ đủ RAM hoặc dung lượng đĩa (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu tài nguyên"}). Job vẫn được giữ trong hàng đợi.`
+                                : "Chưa có Colab worker sẵn sàng. Khi worker đã cấu hình và kết nối, job sẽ tự được nhận."}
                         </p>
-                      </div>
-                    ) : null}
-                    {job.status === "BLOCKED" &&
-                    job.run_status === "CANDIDATE" &&
-                    job.run_config_sha256 &&
-                    job.run_config_sha256 !== job.config_sha256 ? (
-                      <div className="mt-3">
-                        <Button
-                          disabled={busy}
-                          onClick={() =>
-                            void closeMismatchedCandidate(job.job_id)
-                          }
-                          variant="secondary"
-                        >
-                          Đóng candidate lệch cấu hình
-                        </Button>
-                        <p className="mt-1 text-xs text-muted">
-                          Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để
-                          cho phép tạo job mới. Candidate này không được
-                          benchmark hoặc kích hoạt.
+                      ) : null}
+                      {job.status === "COLAB_SUBMITTED" ||
+                      job.status === "COLAB_EXECUTING" ? (
+                        <p className="mt-1 text-sm text-muted">
+                          {job.status === "COLAB_SUBMITTED"
+                            ? "Colab Enterprise đã nhận execution; chờ runtime GPU bắt đầu."
+                            : "Colab Enterprise đang chạy notebook cho job này."}
                         </p>
-                      </div>
-                    ) : null}
-                    {job.run_id ? (
-                      <>
+                      ) : null}
+                      {job.status === "BLOCKED_CONFIGURATION" ? (
+                        <p className="mt-1 text-sm text-danger">
+                          Job chưa được gửi lên Google Cloud. Mã cấu hình:{" "}
+                          {job.last_error_code ?? "chưa cấu hình"}. Hãy hoàn tất
+                          checklist trong docs/viread-colab-enterprise-setup.md
+                          rồi thử lại.
+                        </p>
+                      ) : null}
+                      {job.colab_execution_resource_name ? (
                         <p className="mt-1 break-all font-mono text-xs text-muted">
-                          Run {job.run_id}
+                          Execution {job.colab_execution_resource_name}
                         </p>
-                        {job.run_status === "CANDIDATE" ||
-                        job.run_status === "BENCHMARKED" ? (
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <section className="rounded-control border border-border p-3">
-                              <h4 className="font-bold">Pilot Evaluation</h4>
-                              <p className="mt-1 text-xs text-muted">
-                                Tối đa 40 holdout VERIFIED, ít nhất 5 nhóm. Chỉ
-                                xem CER/WER và khoảng tin cậy; không thể
-                                promotion.
-                              </p>
-                              <Button
-                                className="mt-2 h-11 w-auto"
-                                disabled={busy}
-                                onClick={() =>
-                                  void evaluateCandidate(job.job_id, "PILOT")
-                                }
-                                variant="secondary"
-                              >
-                                Chạy Pilot trên candidate đã lưu
-                              </Button>
-                            </section>
-                            <section className="rounded-control border border-border p-3">
-                              <h4 className="font-bold">
-                                Production Evaluation
-                              </h4>
-                              <p className="mt-1 text-xs text-muted">
-                                Dùng cohort độc lập, tối thiểu 200 mẫu và 30
-                                nhóm; so CER/WER với Original, parent và active.
-                              </p>
-                              <Button
-                                className="mt-2 h-11 w-auto"
-                                disabled={
-                                  busy || data.locked_test?.status !== "READY"
-                                }
-                                onClick={() =>
-                                  void evaluateCandidate(
-                                    job.job_id,
-                                    "PRODUCTION",
-                                  )
-                                }
-                              >
-                                Chạy Production Locked Test
-                              </Button>
-                            </section>
-                          </div>
-                        ) : null}
-                        {typeof job.metadata.evaluation_status === "string" ? (
-                          <p className="mt-2 text-sm text-muted">
-                            Đánh giá{" "}
-                            {String(job.metadata.evaluation_type ?? "")} ·{" "}
-                            {String(job.metadata.evaluation_status)}
-                            {typeof job.metadata.evaluation_gate_status ===
-                            "string"
-                              ? ` · ${String(job.metadata.evaluation_gate_status)}`
-                              : ""}
+                      ) : null}
+                      {job.status === "QUALITY_GATE_REJECTED" ? (
+                        <p className="mt-1 text-sm text-muted">
+                          Candidate không đạt quality gate và chưa được kích
+                          hoạt.
+                        </p>
+                      ) : null}
+                      {job.target === "COLAB" &&
+                      typeof localUnavailable === "string" ? (
+                        <p className="mt-1 text-sm text-muted">
+                          Máy local chuyển job sang Colab vì: {localUnavailable}
+                          .
+                        </p>
+                      ) : null}
+                      {typeof waitingReason === "string" ? (
+                        <p className="mt-1 text-sm text-muted">
+                          Đang chờ dữ liệu: cần cả Train và Validation.
+                        </p>
+                      ) : null}
+                      {job.last_error_code ? (
+                        <p className="mt-1 text-sm text-danger">
+                          Mã lỗi: {job.last_error_code}
+                        </p>
+                      ) : null}
+                      {(job.status === "FAILED" ||
+                        (job.status === "BLOCKED" &&
+                          job.run_status === "TRAINING" &&
+                          job.last_error_code ===
+                            "COLAB_RETRY_REQUIRES_RUN_RECOVERY")) &&
+                      job.target === "COLAB" &&
+                      job.attempts < 3 &&
+                      (!job.run_id ||
+                        (job.run_status === "TRAINING" &&
+                          (job.last_error_code === "HTTPERROR" ||
+                            job.last_error_code ===
+                              "COLAB_RETRY_REQUIRES_RUN_RECOVERY"))) &&
+                      !job.colab_execution_id &&
+                      !job.colab_execution_resource_name &&
+                      !job.colab_operation_name ? (
+                        <div className="mt-3">
+                          <Button
+                            disabled={busy}
+                            onClick={() => void retry(job.job_id)}
+                            variant="secondary"
+                          >
+                            Thử lại job này
+                          </Button>
+                          <p className="mt-1 text-xs text-muted">
+                            Thử lại trước khi train hoặc tiếp tục tải checkpoint
+                            bị gián đoạn; giữ nguyên dataset và lineage. Locked
+                            Test không bắt buộc để train.
                           </p>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </article>
-                );
-              })}
+                        </div>
+                      ) : null}
+                      {job.status === "BLOCKED" &&
+                      job.run_status === "CANDIDATE" &&
+                      job.target === "COLAB" &&
+                      job.run_config_sha256 === job.config_sha256 &&
+                      Boolean(job.locked_test_version_id) &&
+                      Boolean(job.locked_test_manifest_sha256) &&
+                      job.attempts < 3 &&
+                      !job.colab_execution_id &&
+                      !job.colab_execution_resource_name &&
+                      !job.colab_operation_name &&
+                      [
+                        "HTTPERROR",
+                        "COLAB_FAILURE_REQUIRES_RUN_RECOVERY",
+                      ].includes(job.last_error_code ?? "") ? (
+                        <div className="mt-3">
+                          <Button
+                            disabled={busy}
+                            onClick={() => void retry(job.job_id)}
+                            variant="secondary"
+                          >
+                            Tiếp tục kiểm thử candidate
+                          </Button>
+                          <p className="mt-1 text-xs text-muted">
+                            Checkpoint đã có; dùng lại cùng Google Drive Colab
+                            để tiếp tục Locked Test và benchmark. Nếu tệp
+                            candidate chưa được lưu trên Drive, worker sẽ dừng
+                            an toàn.
+                          </p>
+                        </div>
+                      ) : null}
+                      {job.status === "CANDIDATE" &&
+                      job.run_status === "CANDIDATE" &&
+                      job.candidate_has_benchmark === false &&
+                      job.run_config_sha256 === job.config_sha256 &&
+                      job.worker_id === null ? (
+                        <div className="mt-3">
+                          <Button
+                            disabled={busy}
+                            onClick={() =>
+                              setPendingConfirm({
+                                kind: "closeUnbenchmarked",
+                                jobId: job.job_id,
+                                title: "Đóng candidate chưa benchmark?",
+                                description:
+                                  "Đóng candidate chưa benchmark? Checkpoint và run được giữ để kiểm toán; model đang dùng không đổi. Job thay thế chỉ được xếp sau khi Locked Test đủ mẫu VERIFIED độc lập.",
+                                confirmLabel: "Đóng candidate",
+                              })
+                            }
+                            variant="secondary"
+                          >
+                            Đóng candidate, chờ job thay thế
+                          </Button>
+                          <p className="mt-1 text-xs text-muted">
+                            Chỉ đóng candidate đã dừng và chưa benchmark.
+                            Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo
+                            khi Locked Test đạt tối thiểu{" "}
+                            {data.locked_test?.minimum_samples ?? 200} cặp và{" "}
+                            {data.locked_test?.minimum_groups ?? 30} trang độc
+                            lập.
+                          </p>
+                        </div>
+                      ) : null}
+                      {job.status === "BLOCKED" &&
+                      job.run_status === "CANDIDATE" &&
+                      job.run_config_sha256 &&
+                      job.run_config_sha256 !== job.config_sha256 ? (
+                        <div className="mt-3">
+                          <Button
+                            disabled={busy}
+                            onClick={() =>
+                              setPendingConfirm({
+                                kind: "closeMismatched",
+                                jobId: job.job_id,
+                                title: "Đóng candidate lệch cấu hình?",
+                                description:
+                                  "Đóng job candidate bị lệch fingerprint cấu hình? Run và checkpoint sẽ được giữ để kiểm toán; candidate không được benchmark hay kích hoạt.",
+                                confirmLabel: "Đóng candidate",
+                              })
+                            }
+                            variant="secondary"
+                          >
+                            Đóng candidate lệch cấu hình
+                          </Button>
+                          <p className="mt-1 text-xs text-muted">
+                            Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để
+                            cho phép tạo job mới. Candidate này không được
+                            benchmark hoặc kích hoạt.
+                          </p>
+                        </div>
+                      ) : null}
+                      {job.run_id ? (
+                        <>
+                          <p className="mt-1 break-all font-mono text-xs text-muted">
+                            Run {job.run_id}
+                          </p>
+                          {job.run_status === "CANDIDATE" ||
+                          job.run_status === "BENCHMARKED" ? (
+                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                              <section className="rounded-control border border-border p-3">
+                                <h4 className="font-bold">Pilot Evaluation</h4>
+                                <p className="mt-1 text-xs text-muted">
+                                  Tối đa 40 holdout VERIFIED, ít nhất 5 nhóm.
+                                  Chỉ xem CER/WER và khoảng tin cậy; không thể
+                                  promotion.
+                                </p>
+                                <Button
+                                  className="mt-2 h-11 w-auto"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void evaluateCandidate(job.job_id, "PILOT")
+                                  }
+                                  variant="secondary"
+                                >
+                                  Chạy Pilot trên candidate đã lưu
+                                </Button>
+                              </section>
+                              <section className="rounded-control border border-border p-3">
+                                <h4 className="font-bold">
+                                  Production Evaluation
+                                </h4>
+                                <p className="mt-1 text-xs text-muted">
+                                  Dùng cohort độc lập, tối thiểu 200 mẫu và 30
+                                  nhóm; so CER/WER với Original, parent và
+                                  active.
+                                </p>
+                                <Button
+                                  className="mt-2 h-11 w-auto"
+                                  disabled={
+                                    busy || data.locked_test?.status !== "READY"
+                                  }
+                                  onClick={() =>
+                                    void evaluateCandidate(
+                                      job.job_id,
+                                      "PRODUCTION",
+                                    )
+                                  }
+                                >
+                                  Chạy Production Locked Test
+                                </Button>
+                              </section>
+                            </div>
+                          ) : null}
+                          {typeof job.metadata.evaluation_status ===
+                          "string" ? (
+                            <p className="mt-2 text-sm text-muted">
+                              Đánh giá{" "}
+                              {String(job.metadata.evaluation_type ?? "")} ·{" "}
+                              {String(job.metadata.evaluation_status)}
+                              {typeof job.metadata.evaluation_gate_status ===
+                              "string"
+                                ? ` · ${String(job.metadata.evaluation_gate_status)}`
+                                : ""}
+                            </p>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </article>
+                  );
+                })}
               {data.jobs.length === 0 ? (
                 <p className="text-sm text-muted">
                   Chưa có dataset nào đủ điều kiện tạo job.
                 </p>
               ) : null}
+              <PaginationBar
+                ariaLabel="Phân trang hàng đợi huấn luyện"
+                compact
+                itemLabel="job"
+                onPageChange={setJobsPage}
+                page={jobsPage}
+                pageSize={TRAINING_LIST_PAGE_SIZE}
+                total={data.jobs.length}
+              />
             </div>
           </Card>
 
@@ -950,75 +1016,103 @@ export function AdminVireadTrainingScreen() {
               xét duyệt.
             </p>
             <div className="mt-4 space-y-3">
-              {data.runs.map((run) => {
-                const runBenchmarks = data.benchmarks.filter(
-                  (item) => item.run_id === run.run_id,
-                );
-                const benchmark =
-                  runBenchmarks.find(
-                    (item) =>
-                      item.gate_status === "V2_WIN" &&
-                      (item.evaluation_type ?? "PRODUCTION") === "PRODUCTION",
-                  ) ?? runBenchmarks[0];
-                return (
-                  <article
-                    className="rounded-control border border-border p-4"
-                    key={run.run_id}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-extrabold">
-                        {trainingProfileName(run.profile)} · {run.status}
-                      </h3>
-                      <span className="text-sm text-muted">
-                        Bước {run.step.toLocaleString("vi-VN")}
-                      </span>
-                    </div>
-                    <p className="mt-2 break-all font-mono text-xs text-muted">
-                      Run {run.run_id}
-                    </p>
-                    <p className="mt-1 break-all font-mono text-xs text-muted">
-                      Checkpoint{" "}
-                      {run.checkpoint_sha256
-                        ? hash(run.checkpoint_sha256)
-                        : "chưa hoàn tất"}
-                    </p>
-                    <p className="mt-2 text-sm">
-                      Benchmark:{" "}
-                      {benchmark
-                        ? `${benchmark.gate_status} · ${benchmark.sample_count} cặp / ${benchmark.group_count} nhóm`
-                        : "chưa có"}
-                    </p>
-                    {benchmark?.gate_status === "V2_WIN" &&
-                    (benchmark.evaluation_type ?? "PRODUCTION") ===
-                      "PRODUCTION" ? (
-                      <Button
-                        className="mt-3 h-12 w-auto"
-                        disabled={
-                          busy ||
-                          reason.trim().length < 8 ||
-                          !run.checkpoint_sha256 ||
-                          data.active_model?.checkpoint_sha256 ===
-                            run.checkpoint_sha256 ||
-                          data.active_model?.checkpoint_sha256 !==
-                            run.parent_checkpoint_sha256
-                        }
-                        onClick={() =>
-                          void decide({
-                            action: "APPROVE",
-                            run_id: run.run_id,
-                            benchmark_id: benchmark.benchmark_id,
-                          })
-                        }
-                      >
-                        Phê duyệt model
-                      </Button>
-                    ) : null}
-                  </article>
-                );
-              })}
+              {data.runs
+                .slice(
+                  (Math.min(
+                    runsPage,
+                    Math.max(
+                      1,
+                      Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
+                    ),
+                  ) -
+                    1) *
+                    TRAINING_LIST_PAGE_SIZE,
+                  Math.min(
+                    runsPage,
+                    Math.max(
+                      1,
+                      Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
+                    ),
+                  ) * TRAINING_LIST_PAGE_SIZE,
+                )
+                .map((run) => {
+                  const runBenchmarks = data.benchmarks.filter(
+                    (item) => item.run_id === run.run_id,
+                  );
+                  const benchmark =
+                    runBenchmarks.find(
+                      (item) =>
+                        item.gate_status === "V2_WIN" &&
+                        (item.evaluation_type ?? "PRODUCTION") === "PRODUCTION",
+                    ) ?? runBenchmarks[0];
+                  return (
+                    <article
+                      className="rounded-control border border-border p-4"
+                      key={run.run_id}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-extrabold">
+                          {trainingProfileName(run.profile)} · {run.status}
+                        </h3>
+                        <span className="text-sm text-muted">
+                          Bước {run.step.toLocaleString("vi-VN")}
+                        </span>
+                      </div>
+                      <p className="mt-2 break-all font-mono text-xs text-muted">
+                        Run {run.run_id}
+                      </p>
+                      <p className="mt-1 break-all font-mono text-xs text-muted">
+                        Checkpoint{" "}
+                        {run.checkpoint_sha256
+                          ? hash(run.checkpoint_sha256)
+                          : "chưa hoàn tất"}
+                      </p>
+                      <p className="mt-2 text-sm">
+                        Benchmark:{" "}
+                        {benchmark
+                          ? `${benchmark.gate_status} · ${benchmark.sample_count} cặp / ${benchmark.group_count} nhóm`
+                          : "chưa có"}
+                      </p>
+                      {benchmark?.gate_status === "V2_WIN" &&
+                      (benchmark.evaluation_type ?? "PRODUCTION") ===
+                        "PRODUCTION" ? (
+                        <Button
+                          className="mt-3 h-12 w-auto"
+                          disabled={
+                            busy ||
+                            reason.trim().length < 8 ||
+                            !run.checkpoint_sha256 ||
+                            data.active_model?.checkpoint_sha256 ===
+                              run.checkpoint_sha256 ||
+                            data.active_model?.checkpoint_sha256 !==
+                              run.parent_checkpoint_sha256
+                          }
+                          onClick={() =>
+                            void decide({
+                              action: "APPROVE",
+                              run_id: run.run_id,
+                              benchmark_id: benchmark.benchmark_id,
+                            })
+                          }
+                        >
+                          Phê duyệt model
+                        </Button>
+                      ) : null}
+                    </article>
+                  );
+                })}
               {data.runs.length === 0 ? (
                 <p className="text-muted">Chưa có lần huấn luyện nào.</p>
               ) : null}
+              <PaginationBar
+                ariaLabel="Phân trang kết quả huấn luyện"
+                compact
+                itemLabel="lần huấn luyện"
+                onPageChange={setRunsPage}
+                page={runsPage}
+                pageSize={TRAINING_LIST_PAGE_SIZE}
+                total={data.runs.length}
+              />
             </div>
           </Card>
 
@@ -1057,6 +1151,45 @@ export function AdminVireadTrainingScreen() {
           </Card>
         </>
       ) : null}
+      <Modal
+        closeOnBackdropClick={!busy}
+        closeOnEscape={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={busy}
+              fullWidth={false}
+              onClick={() => setPendingConfirm(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={busy}
+              fullWidth={false}
+              isLoading={busy}
+              onClick={() => void runPendingConfirm()}
+              type="button"
+              variant={
+                pendingConfirm?.kind === "delete" ? "destructive" : "primary"
+              }
+            >
+              {pendingConfirm?.confirmLabel ?? "Xác nhận"}
+            </Button>
+          </div>
+        }
+        isOpen={pendingConfirm !== null}
+        onClose={() => {
+          if (!busy) setPendingConfirm(null);
+        }}
+        role="alertdialog"
+        showCloseButton={!busy}
+        title={pendingConfirm?.title ?? "Xác nhận thao tác"}
+        tone="paper"
+      >
+        <p className="text-body text-ink">{pendingConfirm?.description}</p>
+      </Modal>
     </>
   );
 }

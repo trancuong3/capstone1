@@ -32,6 +32,26 @@ _KNOWN_ACRONYMS = {"LEC", "LAB", "PDF", "AI", "TTS", "STT", "OCR", "API", "LAN",
 _YEAR_RANGE_RE = re.compile(r"\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2})\b")
 _CODE_HYPHEN_RE = re.compile(r"\b([A-Z]{2,5})-(\d{1,5})\b")
 _WORD_TOKEN_RE = re.compile(r"[A-Za-zÀ-ỹĐđ]+")
+_QUIZ_CHOICE_LABEL_RE = re.compile(
+    r"\b(Đáp án|đáp án|Câu|câu|Phương án|phương án)\s+([ABCD])\s*[:.\-–—]\s*",
+    re.UNICODE,
+)
+_LEADING_CHOICE_LABEL_RE = re.compile(r"^([ABCD])\s*[:.\-–—]\s*", re.UNICODE)
+_MID_ELLIPSIS_RE = re.compile(
+    r'(?:(?<=\s)|(?<=["“\'‘\(]))(?:…|\.{3})(?=\s|["”\'’\),.!?]|$)',
+    re.UNICODE,
+)
+_CHOICE_LETTER_SPOKEN: dict[str, str] = {
+    "A": "a",
+    "B": "bê",
+    "C": "xê",
+    "D": "đê",
+}
+_PHONICS_SINGLE_CHAR_FIX: dict[str, str] = {
+    "ă": "á",
+    "â": "ớ",
+    "đ": "đờ",
+}
 
 
 def is_likely_vietnamese_syllable(word: str) -> bool:
@@ -91,12 +111,17 @@ def normalize_vietnamese_tts_text(
     text: str,
     *,
     expand_ranges_and_codes: bool = True,
+    for_phonics_step: bool = False,
 ) -> str:
     """Normalize Vietnamese text for clear, full-tone TTS synthesis (VieNeu & Google).
 
     - Enforces Unicode NFC to preserve all 6 Vietnamese tones.
+    - Expands Quiz choice labels ("Đáp án C: Quả táo." -> "Đáp án xê, Quả táo.")
+      and redacted hint ellipses ("…" -> ", chỗ trống, ") to match the local worker.
     - Converts ALL-CAPS Vietnamese words (TRƯỜNG, TOÁN, PHAN, NHI, BẬC...) to natural
       lowercase/sentence-case so neither Google TTS nor VieNeu misreads them as acronyms.
+    - Handles single-character phonics sounds ("ă" -> "á", "â" -> "ớ", "đ" -> "đờ")
+      when `for_phonics_step=True`.
     - Optionally normalizes year ranges (2024-2025 -> 2024 đến 2025) and course codes
       (MTH-341 -> mờ tê hát 341).
     """
@@ -106,6 +131,20 @@ def normalize_vietnamese_tts_text(
 
     # Normalize whitespace and stray OCR spacing around punctuation
     cleaned = re.sub(r"\s+", " ", cleaned)
+
+    if not for_phonics_step:
+        cleaned = _QUIZ_CHOICE_LABEL_RE.sub(
+            lambda m: f"{m.group(1)} {_CHOICE_LETTER_SPOKEN.get(m.group(2), m.group(2).lower())}, ",
+            cleaned,
+        )
+        cleaned = _LEADING_CHOICE_LABEL_RE.sub(
+            lambda m: f"{_CHOICE_LETTER_SPOKEN.get(m.group(1), m.group(1).lower())}, ",
+            cleaned,
+        )
+        cleaned = _MID_ELLIPSIS_RE.sub(", chỗ trống, ", cleaned)
+        cleaned = re.sub(r"\s+,", ",", cleaned)
+        cleaned = re.sub(r",\s*,+", ",", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     if expand_ranges_and_codes:
         cleaned = _YEAR_RANGE_RE.sub(r"\1 đến \2", cleaned)
@@ -124,4 +163,7 @@ def normalize_vietnamese_tts_text(
     out_parts.append(cleaned[last_end:])
 
     result = "".join(out_parts)
-    return unicodedata.normalize("NFC", re.sub(r"\s+", " ", result).strip())
+    normalized = unicodedata.normalize("NFC", re.sub(r"\s+", " ", result).strip())
+    if for_phonics_step and normalized.lower() in _PHONICS_SINGLE_CHAR_FIX:
+        return _PHONICS_SINGLE_CHAR_FIX[normalized.lower()]
+    return normalized

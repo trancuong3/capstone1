@@ -52,6 +52,7 @@ const answerSchema = z.object({
   is_correct: z.boolean(),
   score: z.number(),
   feedback_code: z.enum(["CORRECT", "TRY_AGAIN"]),
+  story_hint: z.string().nullable().optional(),
 });
 
 function sessionPath(sessionId: string): string {
@@ -114,6 +115,7 @@ export function createComprehensionService(): ComprehensionService {
         is_correct: result.is_correct,
         score: result.score,
         feedback_code: result.feedback_code,
+        story_hint: result.story_hint ?? null,
       };
     },
   };

@@ -13,8 +13,13 @@ import {
 
 import { ReadingReport } from "@/components/reading/ReadingReport";
 import { Button } from "@/components/common/button";
+import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
+import { StatusMessage } from "@/components/common/status-message";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
+
+const REPORTS_PER_PAGE = 5;
 
 export default function ReadingReportPage() {
   const params = useParams<{ sessionId: string }>();
@@ -23,27 +28,36 @@ export default function ReadingReportPage() {
   const [reports, setReports] = useState<SavedReadingReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reportPage, setReportPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
   const [assessment, setAssessment] =
     useState<ReadingAssessmentMetricsDTO | null>(null);
 
-  async function handleDeleteReport(reportId: string) {
-    const confirmed = window.confirm(
-      "Bạn có chắc chắn muốn xóa báo cáo này không?",
-    );
-
-    if (!confirmed) return;
+  async function confirmDeleteReport() {
+    if (!pendingDeleteId || deletingId) return;
+    const targetId = pendingDeleteId;
+    setDeletingId(targetId);
+    setDeleteError(null);
 
     try {
-      await deleteReadingReport(reportId);
-
-      setReports((prev) =>
-        prev.filter((report) => report.report_id !== reportId),
-      );
+      await deleteReadingReport(targetId);
+      setReports((prev) => {
+        const next = prev.filter((report) => report.report_id !== targetId);
+        const maxPage = Math.max(1, Math.ceil(next.length / REPORTS_PER_PAGE));
+        setReportPage((current) => Math.min(current, maxPage));
+        return next;
+      });
+      setPendingDeleteId(null);
     } catch (err) {
-      window.alert(
+      setDeleteError(
         err instanceof Error ? err.message : "Không thể xóa báo cáo.",
       );
+      setPendingDeleteId(null);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -139,6 +153,9 @@ export default function ReadingReportPage() {
     );
   }
 
+  const startIdx = (reportPage - 1) * REPORTS_PER_PAGE;
+  const visibleReports = reports.slice(startIdx, startIdx + REPORTS_PER_PAGE);
+
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
@@ -148,29 +165,42 @@ export default function ReadingReportPage() {
         </p>
       </div>
 
+      {deleteError ? (
+        <StatusMessage title="Không thể xóa báo cáo" tone="error">
+          {deleteError}
+        </StatusMessage>
+      ) : null}
+
       <ReadingAssessmentSummary assessment={assessment} />
-      {reports.map((report, index) => (
+      {visibleReports.map((report, index) => (
         <section key={report.report_id} className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">
               {report.summary.assessment_version === 1
                 ? "Đánh giá lượt đầu đã lưu"
-                : `Đối chiếu đã lưu ${reports.length - index}`}
+                : `Đối chiếu đã lưu ${reports.length - (startIdx + index)}`}
             </h2>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <p className="text-sm text-muted">
                 {new Date(report.created_at).toLocaleString("vi-VN")}
               </p>
 
               {report.summary.assessment_version !== 1 ? (
-                <button
+                <Button
+                  className="min-h-11 px-3 py-2 text-sm"
+                  disabled={deletingId !== null}
+                  fullWidth={false}
+                  isLoading={deletingId === report.report_id}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setPendingDeleteId(report.report_id);
+                  }}
                   type="button"
-                  onClick={() => handleDeleteReport(report.report_id)}
-                  className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-danger transition hover:bg-red-50"
+                  variant="destructive"
                 >
                   Xóa báo cáo
-                </button>
+                </Button>
               ) : (
                 <span className="text-sm text-muted">
                   Kết quả lượt đầu được giữ nguyên
@@ -182,6 +212,56 @@ export default function ReadingReportPage() {
           <ReadingReport result={report} sessionId={sessionId} />
         </section>
       ))}
+
+      <PaginationBar
+        ariaLabel="Phân trang báo cáo phiên đọc"
+        itemLabel="báo cáo"
+        onPageChange={setReportPage}
+        page={reportPage}
+        pageSize={REPORTS_PER_PAGE}
+        total={reports.length}
+      />
+
+      <Modal
+        closeOnBackdropClick={deletingId === null}
+        closeOnEscape={deletingId === null}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={deletingId !== null}
+              fullWidth={false}
+              onClick={() => setPendingDeleteId(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={deletingId !== null}
+              fullWidth={false}
+              isLoading={deletingId !== null}
+              onClick={() => void confirmDeleteReport()}
+              type="button"
+              variant="destructive"
+            >
+              Xác nhận xóa
+            </Button>
+          </div>
+        }
+        isOpen={pendingDeleteId !== null}
+        onClose={() => {
+          if (deletingId === null) setPendingDeleteId(null);
+        }}
+        role="alertdialog"
+        showCloseButton={deletingId === null}
+        title="Xóa báo cáo đọc?"
+        tone="paper"
+      >
+        <p className="text-body text-ink">
+          Bạn có chắc chắn muốn xóa báo cáo đối chiếu này không? Kết quả đánh
+          giá lượt đầu vẫn được giữ nguyên.
+        </p>
+      </Modal>
     </main>
   );
 }

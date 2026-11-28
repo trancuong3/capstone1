@@ -17,9 +17,14 @@ from app.api.routes.reading import HistoryService
 from app.models import ReadingEvent
 from app.models.difficult_word_practice import DifficultWordPracticeAttempt
 from app.providers.elevenlabs_voice_provider import (
-    ElevenLabsVoiceProvider,
     Transcription,
     VoiceProviderError,
+)
+from app.providers.local_voice_provider import LocalTranscription
+from app.services.voice_orchestrator import (
+    VoiceOrchestrator,
+    VoicePolicyContext,
+    get_voice_orchestrator,
 )
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.schemas.difficult_words import (
@@ -56,6 +61,19 @@ UNUSABLE_AUDIO_QUALITY_STATUSES = {
 }
 
 _PUNCTUATION_STRIP_RE = re.compile(r"^[\W_]+|[\W_]+$", re.UNICODE)
+_DISPLAY_EDGE_PUNCT_RE = re.compile(
+    r'^[\s.,!?;:…“”"\'\‘\’\(\)\[\]\{\}«»—–\-]+|[\s.,!?;:…“”"\'\‘\’\(\)\[\]\{\}«»—–\-]+$',
+    re.UNICODE,
+)
+
+
+def clean_difficult_word_display_text(value: Any) -> str:
+    """Strip leading/trailing punctuation from display_text while preserving NFC Vietnamese tones and đ."""
+    if not isinstance(value, str):
+        return ""
+    nfc = unicodedata.normalize("NFC", value).strip()
+    stripped = _DISPLAY_EDGE_PUNCT_RE.sub("", nfc).strip()
+    return re.sub(r"\s+", " ", stripped)
 _NON_SPEECH_TAG_RE = re.compile(
     r"\[[^\]]*\]|\((?:tiếng|âm\s*thanh|nhạc|ồn|cười|ho|thở|applause|laughter|music|noise)[^)]*\)",
     re.UNICODE | re.IGNORECASE,
@@ -193,7 +211,7 @@ def classify_practice_transcript(
 
 
 def has_usable_practice_transcript(
-    transcription: Transcription,
+    transcription: Transcription | LocalTranscription,
 ) -> bool:
     """Conservative transcript gate matching frontend recognition-evidence rules."""
     if not tokenize_vietnamese_practice_text(transcription.text):
@@ -214,7 +232,9 @@ def has_usable_practice_transcript(
     return True
 
 
-def has_high_confidence_keyterm_result(transcription: Transcription) -> bool:
+def has_high_confidence_keyterm_result(
+    transcription: Transcription | LocalTranscription,
+) -> bool:
     words = [w for w in transcription.words or [] if w.get("type") in (None, "word")]
     if not words or not any(word.get("logprob") is not None for word in words):
         return False
@@ -449,7 +469,7 @@ class _WordAccumulator:
         page_number: int | None = None,
         context_phrase: str | None = None,
     ) -> None:
-        cleaned = unicodedata.normalize("NFC", display_text).strip()
+        cleaned = clean_difficult_word_display_text(display_text)
         if cleaned:
             self.display_counter[cleaned] += 1
         seen_utc = _ensure_utc(seen_at)
@@ -486,11 +506,12 @@ class _WordAccumulator:
         self,
         progress: DifficultWordProgressSummaryRead,
     ) -> DifficultWordRead:
-        display_text = (
+        raw_display = (
             self.display_counter.most_common(1)[0][0]
             if self.display_counter
             else self.normalized_word
         )
+        display_text = clean_difficult_word_display_text(raw_display) or self.normalized_word
         difficulty_score = round(
             self.mispronunciation_count * 2.0
             + self.omission_count * 2.0
@@ -555,11 +576,13 @@ class DifficultWordsService:
         self,
         repository: DifficultWordsRepository,
         access: HistoryService,
-        voice_provider: ElevenLabsVoiceProvider | None = None,
+        voice_provider: VoiceOrchestrator | Any | None = None,
     ):
         self.repository = repository
         self.access = access
-        self.voice_provider = voice_provider or ElevenLabsVoiceProvider()
+        self.voice_provider = (
+            voice_provider if voice_provider is not None else get_voice_orchestrator()
+        )
 
     def _window_bounds(
         self,
@@ -680,7 +703,7 @@ class DifficultWordsService:
             attempt_no = meta.get("retry_attempt")
             attempt_num = attempt_no if type(attempt_no) is int and attempt_no >= 1 else 1
             raw_display = meta.get("target_word") or ((word_text_by_id or {}).get(event.WordId) if event.WordId else None) or norm
-            display_text = unicodedata.normalize("NFC", str(raw_display)).strip()[:120] or norm
+            display_text = clean_difficult_word_display_text(str(raw_display))[:120] or norm
             raw_recognized = meta.get("recognized_text")
             spoken_transcript = (
                 unicodedata.normalize("NFC", raw_recognized).strip()[:160]
@@ -1259,13 +1282,20 @@ class DifficultWordsService:
         calibrated_confidence: float | None = None
 
         try:
+            first_pass_kwargs: dict[str, Any] = {
+                "audio": audio_bytes,
+                "filename": filename or "practice.webm",
+                "content_type": effective_content_type,
+                "language_code": "vi",
+            }
+            if isinstance(self.voice_provider, VoiceOrchestrator):
+                first_pass_kwargs["policy"] = VoicePolicyContext(
+                    provider_mode="local_only",
+                    allow_google_stt=False,
+                    source="difficult_word_practice",
+                )
             first_pass = await asyncio.wait_for(
-                self.voice_provider.transcribe(
-                    audio=audio_bytes,
-                    filename=filename or "practice.webm",
-                    content_type=effective_content_type,
-                    language_code="vi",
-                ),
+                self.voice_provider.transcribe(**first_pass_kwargs),
                 timeout=7,
             )
             first_text = unicodedata.normalize("NFC", first_pass.text).strip()[:160]
@@ -1319,14 +1349,21 @@ class DifficultWordsService:
             )
             if should_retry_with_keyterm:
                 try:
+                    second_pass_kwargs: dict[str, Any] = {
+                        "audio": audio_bytes,
+                        "filename": filename or "practice.webm",
+                        "content_type": effective_content_type,
+                        "language_code": "vi",
+                        "keyterms": [display_text],
+                    }
+                    if isinstance(self.voice_provider, VoiceOrchestrator):
+                        second_pass_kwargs["policy"] = VoicePolicyContext(
+                            provider_mode="local_only",
+                            allow_google_stt=False,
+                            source="difficult_word_practice_keyterm",
+                        )
                     second_pass = await asyncio.wait_for(
-                        self.voice_provider.transcribe(
-                            audio=audio_bytes,
-                            filename=filename or "practice.webm",
-                            content_type=effective_content_type,
-                            language_code="vi",
-                            keyterms=[display_text],
-                        ),
+                        self.voice_provider.transcribe(**second_pass_kwargs),
                         timeout=3,
                     )
                     second_text = unicodedata.normalize("NFC", second_pass.text).strip()[:160]
@@ -1381,8 +1418,8 @@ class DifficultWordsService:
         normalized_word = normalize_vietnamese_practice_word(payload.normalized_word)
         if not normalized_word:
             raise HTTPException(status_code=422, detail="INVALID_PRACTICE_WORD")
-        display_text = unicodedata.normalize(
-            "NFC", (payload.display_text or payload.normalized_word).strip()
+        display_text = clean_difficult_word_display_text(
+            payload.display_text or payload.normalized_word
         )[:120]
         if not display_text:
             display_text = normalized_word
@@ -1611,9 +1648,10 @@ class DifficultWordsService:
         norm = normalize_vietnamese_practice_word(normalized_word)
         if not norm:
             raise HTTPException(status_code=422, detail="INVALID_PRACTICE_WORD")
-        clean_display = unicodedata.normalize(
-            "NFC", (display_text or normalized_word).strip()
-        )[:120] or norm
+        clean_display = (
+            clean_difficult_word_display_text(display_text or normalized_word)[:120]
+            or norm
+        )
 
         await self.repository.lock_practice_request(child_id, request_id)
         storage_ready = await self.repository.is_practice_storage_ready()
@@ -1849,7 +1887,10 @@ class DifficultWordsService:
                 DifficultWordPracticeHistoryItemRead(
                     attempt_id=row.Id,
                     normalized_word=row.NormalizedWord,
-                    display_text=row.DisplayText,
+                    display_text=(
+                        clean_difficult_word_display_text(row.DisplayText)
+                        or row.NormalizedWord
+                    ),
                     attempt_number=row.AttemptNumber,
                     state=row.State,
                     assessment_status=row.AssessmentStatus,

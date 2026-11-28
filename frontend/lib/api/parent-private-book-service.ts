@@ -13,6 +13,7 @@ import {
   parentOcrContributionStateSchema,
   parentPageSubmissionSchema,
   parentPrivateBookDetailSchema,
+  parentPrivateBookPageSchema,
   parentPrivateBookSummarySchema,
   parentSubmitPagesResponseSchema,
   type AdminFlow2CandidateDecisionResponseDTO,
@@ -30,6 +31,7 @@ import {
   type ParentOcrContributionStateDTO,
   type ParentPageSubmissionDTO,
   type ParentPrivateBookDetailDTO,
+  type ParentPrivateBookPageDTO,
   type ParentPrivateBookSummaryDTO,
   type ParentSubmitPagesResponseDTO,
   type SourceUsageType,
@@ -92,9 +94,26 @@ export interface AddPrivatePageInput {
   readonly accept_spelling?: boolean;
 }
 
+export interface ParentPrivateBookListPageQuery {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly readyOnly?: boolean;
+  readonly search?: string;
+}
+
 export interface ParentPrivateBookService {
-  list(readyOnly?: boolean): Promise<ParentPrivateBookSummaryDTO[]>;
-  get(bookId: string): Promise<ParentPrivateBookDetailDTO>;
+  list(
+    readyOnly?: boolean,
+    signal?: AbortSignal,
+  ): Promise<ParentPrivateBookSummaryDTO[]>;
+  listPage(
+    query?: ParentPrivateBookListPageQuery,
+    signal?: AbortSignal,
+  ): Promise<ParentPrivateBookPageDTO>;
+  get(
+    bookId: string,
+    signal?: AbortSignal,
+  ): Promise<ParentPrivateBookDetailDTO>;
   create(
     input: CreateParentPrivateBookInput,
   ): Promise<ParentPrivateBookSummaryDTO>;
@@ -188,15 +207,28 @@ const suspendResponseSchema = z.object({
 
 export function createParentPrivateBookService(): ParentPrivateBookService {
   return {
-    list: (readyOnly = false) =>
+    list: (readyOnly = false, signal) =>
       requestApi(
         `/books/my-books${apiQuery({ ready_only: readyOnly ? "true" : undefined })}`,
         z.array(parentPrivateBookSummarySchema),
+        signal,
       ),
-    get: (bookId) =>
+    listPage: (query, signal) =>
+      requestApi(
+        `/books/my-books/paged${apiQuery({
+          limit: query?.limit,
+          offset: query?.offset,
+          ready_only: query?.readyOnly ? "true" : undefined,
+          search: query?.search?.trim() || undefined,
+        })}`,
+        parentPrivateBookPageSchema,
+        signal,
+      ),
+    get: (bookId, signal) =>
       requestApi(
         `/books/my-books/${encodeURIComponent(bookId)}`,
         parentPrivateBookDetailSchema,
+        signal,
       ),
     create: (input) =>
       requestApi("/books/my-books", parentPrivateBookSummarySchema, undefined, {

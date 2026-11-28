@@ -42,6 +42,33 @@ const ASSISTANT_BLEED_PHRASES = [
   "nghe thầy đánh vần",
   "đọc trơn là",
   "đến lượt con giỏi lắm",
+  "con nghe từ này nhé",
+  "cô đọc mẫu cho con nhé",
+  "thầy đọc mẫu cho con nhé",
+  "đến lượt con đọc nhé",
+  "con nghe cô đọc",
+  "con nghe thầy đọc",
+  "con có muốn cùng cô",
+  "con có muốn cùng thầy",
+  "đọc lại vài từ khó",
+  "vài từ khó không",
+  "cùng cô đọc lại",
+  "cùng thầy đọc lại",
+  "đọc lại cả câu",
+  "con đọc lại cả câu",
+  "nghe cô đọc mẫu",
+  "nghe thầy đọc mẫu",
+] as const;
+
+const YES_NO_SPEAKER_QUESTION_BLEED_PHRASES = [
+  "con có muốn cùng cô",
+  "con có muốn cùng thầy",
+  "đọc lại vài từ khó",
+  "vài từ khó không",
+  "cùng cô đọc lại",
+  "cùng thầy đọc lại",
+  "bé có muốn đọc lại",
+  "con có muốn luyện lại",
 ] as const;
 
 const YES_INTENT_TOKENS = new Set([
@@ -65,6 +92,26 @@ const NO_INTENT_TOKENS = new Set([
   "chưa",
 ]);
 
+const NO_OVERRIDE_PHRASES = [
+  "không đồng ý",
+  "không cần đọc lại",
+  "không cần",
+  "chưa muốn đọc lại",
+  "chưa muốn",
+  "không muốn",
+  "không đọc",
+  "chưa đọc",
+  "không đâu",
+  "không ạ",
+  "dạ không",
+  "con không",
+  "bé không",
+  "em không",
+  "bỏ qua",
+  "để sau",
+  "thôi",
+] as const;
+
 /**
  * Classifies a child's spoken Yes/No answer to the post-reading wrap-up prompt
  * ("Con có muốn cùng cô/thầy đọc lại vài từ khó không?").
@@ -75,15 +122,32 @@ export function classifyYesNoVoiceIntent(
   const tokens = tokenizeVietnameseText(stripNonSpeechAnnotations(transcript));
   if (!tokens.length) return "unknown";
   const joined = tokens.join(" ");
+
+  // 1. Reject speaker echo of the assistant's own prompt question.
   if (
-    joined.includes("không muốn") ||
-    joined.includes("không đọc") ||
-    joined.includes("bỏ qua") ||
-    joined.includes("để sau") ||
-    joined.includes("thôi")
+    YES_NO_SPEAKER_QUESTION_BLEED_PHRASES.some((phrase) =>
+      joined.includes(phrase),
+    ) ||
+    (joined.includes("có muốn") && tokens[tokens.length - 1] === "không")
+  ) {
+    return "unknown";
+  }
+
+  // 2. Always evaluate explicit refusals BEFORE positive phrases so negations
+  //    like "không đồng ý", "không cần đọc lại", "con chưa muốn đọc lại" never return "yes".
+  if (NO_OVERRIDE_PHRASES.some((phrase) => joined.includes(phrase))) {
+    return "no";
+  }
+
+  // Also reject any negated positive token ("không/chưa/đừng" directly preceding a positive intent)
+  if (
+    /(?:^|\s)(?:không|chưa|chẳng|đừng|khỏi)\s+(?:có|muốn|cần|đồng|được|đọc)(?:\s|$)/u.test(
+      joined,
+    )
   ) {
     return "no";
   }
+
   if (
     joined.includes("dạ có") ||
     joined.includes("con có") ||

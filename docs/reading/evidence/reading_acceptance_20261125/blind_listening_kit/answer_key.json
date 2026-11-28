@@ -1,0 +1,42 @@
+[
+  {
+    "clip": "clip_01.wav",
+    "expected_text": "nghiêng đầu (Thầy Thiện Minh)",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_02.wav",
+    "expected_text": "nghĩ",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_03.wav",
+    "expected_text": "Mi che ô cho bạn An. (Thầy Thiện Minh)",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_04.wav",
+    "expected_text": "một",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_05.wav",
+    "expected_text": "nghỉ",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_06.wav",
+    "expected_text": "bạn",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_07.wav",
+    "expected_text": "bàn",
+    "precision": "fp32"
+  },
+  {
+    "clip": "clip_08.wav",
+    "expected_text": "mốt",
+    "precision": "fp32"
+  }
+]
