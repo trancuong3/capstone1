@@ -116,7 +116,9 @@ export function FamilyReadingDesk({
       className={`family-reading-desk order-2 md:order-1${
         isPassportTab ? " family-reading-desk--passport" : ""
       }`}
-      aria-label={isPassportTab ? tParent("passport.passportTabLabel") : undefined}
+      aria-label={
+        isPassportTab ? tParent("passport.passportTabLabel") : undefined
+      }
       aria-labelledby={isPassportTab ? undefined : "desk-title"}
     >
       <div className="desk-copy">
