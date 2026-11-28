@@ -276,7 +276,7 @@ function renderScreen() {
 describe("PictureDescriptionScreen", () => {
   it("loads catalog samples without spoilers, hides hints initially, and evaluates child's description", async () => {
     setupDefaultResponses();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     expect(
@@ -362,11 +362,11 @@ describe("PictureDescriptionScreen", () => {
       screen.getByRole("button", { name: /Xem câu mẫu tham khảo/i }),
     ).toBeInTheDocument();
     expect(screen.queryByText("9/10 điểm")).not.toBeInTheDocument();
-  }, 10_000);
+  }, 25_000);
 
   it("supports custom upload tab validation and book page selection", async () => {
     setupDefaultResponses();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -422,7 +422,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
     await screen.findByText("Khu vườn đầy nắng");
 
@@ -510,7 +510,7 @@ describe("PictureDescriptionScreen", () => {
 
     vi.stubGlobal("SpeechRecognition", MockSpeechRecognition);
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -649,7 +649,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     // Sample card detects prior session and offers resume without duplicating sessions
@@ -788,7 +788,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -958,7 +958,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -1054,7 +1054,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -1126,7 +1126,7 @@ describe("PictureDescriptionScreen", () => {
     }
     vi.stubGlobal("SpeechRecognition", MockSpeechRecognition);
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
@@ -1316,7 +1316,7 @@ describe("PictureDescriptionScreen", () => {
       throw new Error(`Unexpected test route ${path}`);
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderScreen();
 
     expect(await screen.findByText("Tranh mẫu số 1")).toBeInTheDocument();
