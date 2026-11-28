@@ -255,5 +255,126 @@ class LanAcceptanceModeTests(unittest.TestCase):
             self.assertEqual(main(), 1)
 
 
+class BackendMobileCorsPreflightTests(unittest.TestCase):
+    origin = "https://viread.example.com"
+    backend = "https://api.viread.example.com"
+
+    def setUp(self):
+        self.routes = {
+            ("GET", self.origin + "/"): Response(307, headers={"Location": "/login"}),
+            ("GET", self.origin + "/login"): Response(
+                200, HTML, headers={"Content-Type": "text/html; charset=utf-8"}
+            ),
+            ("GET", self.backend + "/health"): Response(
+                200, VALID_HEALTH_JSON, headers={"Content-Type": "application/json"}
+            ),
+            ("OPTIONS", self.backend + "/profiles/children"): Response(
+                200,
+                "",
+                headers={
+                    "Access-Control-Allow-Origin": self.origin,
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                    "Access-Control-Allow-Credentials": "true",
+                },
+            ),
+            ("GET", self.backend + "/profiles/children"): Response(
+                401,
+                '{"detail":"Not authenticated"}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": self.origin,
+                },
+            ),
+        }
+        self.requests = []
+
+        outer = self
+
+        class MethodAwareOpener:
+            def open(self, request, timeout):
+                if timeout != 18:
+                    raise AssertionError("Timeout must be bounded")
+                method = request.get_method()
+                headers = {k.lower(): v for k, v in request.header_items()}
+                outer.requests.append((method, request.full_url, headers))
+                item = outer.routes[(method, request.full_url)]
+                if isinstance(item, BaseException):
+                    raise item
+                return item
+
+        self.opener = MethodAwareOpener()
+
+    def test_valid_backend_url_verifies_health_cors_options_and_401_json(self):
+        verify_frontend(self.origin, self.opener, backend_url=self.backend + "/")
+        self.assertEqual(
+            [(m, u) for m, u, _ in self.requests],
+            [
+                ("GET", self.origin + "/"),
+                ("GET", self.origin + "/login"),
+                ("GET", self.backend + "/health"),
+                ("OPTIONS", self.backend + "/profiles/children"),
+                ("GET", self.backend + "/profiles/children"),
+            ],
+        )
+        options_headers = self.requests[3][2]
+        self.assertEqual(options_headers["origin"], self.origin)
+        self.assertIn("authorization", options_headers["access-control-request-headers"].lower())
+
+    def test_rejects_wildcard_or_mismatched_cors_origin_and_missing_auth_header_allowance(self):
+        for bad_headers, expected_msg in [
+            (
+                {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization",
+                },
+                "Access-Control-Allow-Origin",
+            ),
+            (
+                {
+                    "Access-Control-Allow-Origin": "https://other.example.com",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization",
+                },
+                "Access-Control-Allow-Origin",
+            ),
+            (
+                {
+                    "Access-Control-Allow-Origin": self.origin,
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+                "Authorization",
+            ),
+        ]:
+            with self.subTest(expected_msg=expected_msg):
+                self.routes[("OPTIONS", self.backend + "/profiles/children")] = Response(
+                    200, "", headers=bad_headers
+                )
+                with self.assertRaisesRegex(ValueError, expected_msg):
+                    verify_frontend(self.origin, self.opener, backend_url=self.backend)
+
+    def test_rejects_non_401_or_html_on_unauthenticated_endpoint_and_http_backend(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            verify_frontend(self.origin, self.opener, backend_url="http://api.viread.example.com")
+
+        self.routes[("GET", self.backend + "/profiles/children")] = Response(
+            200, "[]", headers={"Content-Type": "application/json"}
+        )
+        with self.assertRaisesRegex(ValueError, "expected 401"):
+            verify_frontend(self.origin, self.opener, backend_url=self.backend)
+
+        self.routes[("GET", self.backend + "/profiles/children")] = Response(
+            401, "<html>login</html>", headers={"Content-Type": "text/html"}
+        )
+        with self.assertRaisesRegex(ValueError, "application/json"):
+            verify_frontend(self.origin, self.opener, backend_url=self.backend)
+
+    def test_cli_backend_url_flag_rejects_invalid_backend_url(self):
+        with patch.dict(os.environ, {"VIREAD_FRONTEND_URL": self.origin}, clear=True):
+            self.assertEqual(main(["--backend-url", "http://insecure.example.com"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

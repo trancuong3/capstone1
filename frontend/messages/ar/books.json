@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "خادم OCR متوقف مؤقتًا — لا يزال بإمكانكم رفع الصور أو ملفات PDF/DOCX لحفظها في قائمة الانتظار، وسيبدأ التعرف تلقائيًا عند عودة الخادم.",
     "queuedWaitingWorkerBadge": "محفوظ في قائمة انتظار OCR — بانتظار الخادم",
     "queuedWaitingWorkerShort": "محفوظ في قائمة انتظار OCR — تعرف تلقائي عند عودة الخادم",
-    "reasonQueuedOffline": "تم حفظ الصفحة بأمان في قائمة انتظار OCR وسيتم التعرف عليها تلقائيًا فور عودة خادم OCR للعمل."
+    "reasonQueuedOffline": "تم حفظ الصفحة بأمان في قائمة انتظار OCR وسيتم التعرف عليها تلقائيًا فور عودة خادم OCR للعمل.",
+    "toolScopeCloudAi": "تدقيق إملائي وفحص أمان للأطفال عبر خدمة ذكاء اصطناعي سحابية آمنة",
+    "taskCenterLink": "مركز المهام",
+    "changeCoverAction": "تغيير الغلاف",
+    "closeCoverStudio": "إغلاق محرر الغلاف",
+    "uploadPrivacyTransparency": "شفافية الخصوصية: تظهر الكتب الخاصة داخل حساب عائلتك فقط؛ ويخضع نص الصفحات المرفوعة لتدقيق إملائي وفحص أمان للأطفال تلقائيًا (عبر نموذج محلي أو خدمة ذكاء اصطناعي سحابية آمنة حسب إعداد الخادم)، ولا يُستخدم افتراضيًا لتدريب نماذج OCR.",
+    "openPageIllustrationAria": "فتح الرسم التوضيحي للصفحة {page}",
+    "closePageIllustrationAria": "إغلاق الرسم التوضيحي للصفحة {page}",
+    "pageIllustrationAction": "رسم الصفحة",
+    "closePageIllustrationAction": "إغلاق الرسم",
+    "openPageOcrBlocksAria": "عرض كتل نص OCR للصفحة {page}",
+    "closePageOcrBlocksAria": "إغلاق كتل نص OCR للصفحة {page}",
+    "openPageOcrBlocksAction": "كتل نص OCR",
+    "closePageOcrBlocksAction": "إغلاق كتل OCR"
   },
   "ocrContribution": {
     "cardAria": "ساهم بعينات لتحسين OCR ViRead لـ {title}",

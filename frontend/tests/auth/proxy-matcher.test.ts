@@ -18,6 +18,7 @@ describe("auth proxy matcher", () => {
     "/_next/image",
     "/cover.png",
     "/api/cron/parent-emails",
+    "/api/parent-email-relay",
     "/wasm/sherpa/sherpa-onnx-wasm-main-vad-asr.wasm",
     "/workers/sherpa-stt-worker.js",
     "/audio/word-samples/thuc-nang.wav",

@@ -27,9 +27,16 @@ jobs:
       - name: Trigger internal scheduled cron dispatch (all 8 workers)
         env:
           VIREAD_CRON_DISPATCH_TOKEN: ${{ secrets.VIREAD_CRON_DISPATCH_TOKEN }}
+          PARENT_EMAIL_CRON_SECRET: ${{ secrets.PARENT_EMAIL_CRON_SECRET }}
         run: |
           if [ -z "$VIREAD_CRON_DISPATCH_TOKEN" ]; then
-            echo "VIREAD_CRON_DISPATCH_TOKEN not set in GitHub Secrets; skipping internal cron dispatch."
+            if [ -n "$PARENT_EMAIL_CRON_SECRET" ]; then
+              echo "::notice::VIREAD_CRON_DISPATCH_TOKEN not set; falling back to parent email cron dispatch."
+              curl -fsS --max-time 60 -X POST -H "Accept: application/json" -H "X-Cron-Secret: ${PARENT_EMAIL_CRON_SECRET}" "https://capstone1-ssd8.onrender.com/parent-notifications/cron/dispatch?scope=all" > /dev/null
+              echo "Fallback parent email automation dispatch completed."
+              exit 0
+            fi
+            echo "::notice::Neither VIREAD_CRON_DISPATCH_TOKEN nor PARENT_EMAIL_CRON_SECRET is set in GitHub Secrets; skipping cron dispatch."
             exit 0
           fi
           curl -fsS --max-time 75 \
@@ -38,18 +45,3 @@ jobs:
             -H "X-ViRead-Cron-Token: ${VIREAD_CRON_DISPATCH_TOKEN}" \
             "https://capstone1-ssd8.onrender.com/internal/cron/dispatch" > /dev/null
           echo "Internal scheduled cron dispatch completed."
-
-      - name: Trigger parent email automation dispatch (if secret configured)
-        env:
-          PARENT_EMAIL_CRON_SECRET: ${{ secrets.PARENT_EMAIL_CRON_SECRET }}
-        run: |
-          if [ -z "$PARENT_EMAIL_CRON_SECRET" ]; then
-            echo "PARENT_EMAIL_CRON_SECRET not set in GitHub Secrets; skipping backup email dispatch."
-            exit 0
-          fi
-          curl -fsS --max-time 75 \
-            -X POST \
-            -H "Accept: application/json" \
-            -H "X-Cron-Secret: ${PARENT_EMAIL_CRON_SECRET}" \
-            "https://capstone1-ssd8.onrender.com/parent-notifications/cron/dispatch?scope=all" > /dev/null
-          echo "Parent email automation dispatch completed."

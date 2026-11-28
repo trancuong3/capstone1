@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "The OCR server is temporarily offline — You can still upload images or PDF/DOCX files to save them in the queue; recognition will start automatically when the server comes back online.",
     "queuedWaitingWorkerBadge": "Saved in OCR queue — Waiting for OCR server",
     "queuedWaitingWorkerShort": "Saved in OCR queue — Auto-recognizes when server reconnects",
-    "reasonQueuedOffline": "This page is safely saved in the OCR queue and will be recognized automatically once the OCR server comes back online."
+    "reasonQueuedOffline": "This page is safely saved in the OCR queue and will be recognized automatically once the OCR server comes back online.",
+    "toolScopeCloudAi": "spell check & child safety review via secure cloud AI service",
+    "taskCenterLink": "Task Center",
+    "changeCoverAction": "Change cover",
+    "closeCoverStudio": "Close cover editor",
+    "uploadPrivacyTransparency": "Privacy transparency: Private books are visible only within your family account; uploaded page text undergoes automated spelling and child-safety checks (via local models or a secure cloud AI service depending on server configuration) and is excluded from OCR training by default.",
+    "openPageIllustrationAria": "Open illustration for page {page}",
+    "closePageIllustrationAria": "Close illustration for page {page}",
+    "pageIllustrationAction": "Page illustration",
+    "closePageIllustrationAction": "Close illustration",
+    "openPageOcrBlocksAria": "View OCR text blocks for page {page}",
+    "closePageOcrBlocksAria": "Close OCR text blocks for page {page}",
+    "openPageOcrBlocksAction": "OCR text blocks",
+    "closePageOcrBlocksAction": "Close OCR blocks"
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead OCR for {title}",
