@@ -189,6 +189,7 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         self._vpack_cache_lock = threading.Lock()
         self._vpack_cache: OrderedDict[str, dict[str, bytes]] = OrderedDict()
         self._vpack_cache_capacity = 4
+        self._vpack_inflight_locks: dict[str, threading.Lock] = {}
 
     def _get_session(self) -> requests.Session:
         if self._provided_session is not None:
@@ -265,7 +266,11 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
             status_code = response.status_code
             content_type = (response.headers.get("Content-Type") or "").lower()
             try:
-                raw_text = response.text or ""
+                content_obj = getattr(response, "content", None)
+                if isinstance(content_obj, (bytes, bytearray)):
+                    raw_bytes = bytes(content_obj)
+                else:
+                    raw_bytes = str(getattr(response, "text", "") or "").encode("utf-8")
             finally:
                 response.close()
 
@@ -284,8 +289,8 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                     http_status=status_code,
                 )
 
-            if status_code in {401, 403} or "text/html" in content_type or raw_text.lstrip().startswith("<"):
-                lowered = raw_text.lower()
+            if status_code in {401, 403} or "text/html" in content_type or raw_bytes.lstrip().startswith(b"<"):
+                lowered = raw_bytes[:8192].decode("utf-8", errors="replace").lower()
                 if "accounts.google.com" in lowered or "servicelogin" in lowered or "sign in" in lowered:
                     raise DrivePermissionError(
                         "Apps Script Web App requires Google Sign-In; redeploy with 'Who has access: Anyone'",
@@ -300,7 +305,7 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
 
             try:
                 try:
-                    parsed = json.loads(raw_text)
+                    parsed = json.loads(raw_bytes)
                 except ValueError as exc:
                     raise DriveTransientError(
                         "Apps Script Drive bridge returned invalid JSON payload",
@@ -795,29 +800,37 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
             if cached is not None:
                 self._vpack_cache.move_to_end(clean_pack_id)
                 return cached
+            inflight_lock = self._vpack_inflight_locks.setdefault(clean_pack_id, threading.Lock())
 
-        _pack_meta, raw_tar_bytes = self._read_bridge_file_bytes(clean_pack_id)
-        members: dict[str, bytes] = {}
-        try:
-            with tarfile.open(fileobj=io.BytesIO(raw_tar_bytes), mode="r:*") as tf:
-                for tar_member in tf.getmembers():
-                    if not tar_member.isfile():
-                        continue
-                    base_name = tar_member.name.replace("\\", "/").rsplit("/", 1)[-1]
-                    stem = (base_name.split(".", 1)[0] if "." in base_name else base_name).lower()
-                    if not SHA256_HEX_RE.fullmatch(stem):
-                        continue
-                    extracted = tf.extractfile(tar_member)
-                    members[stem] = extracted.read() if extracted is not None else b""
-        except (tarfile.TarError, EOFError, OSError) as exc:
-            raise DriveIntegrityError("Corrupted virtual pack tar archive on Google Drive") from exc
+        with inflight_lock:
+            with self._vpack_cache_lock:
+                cached = self._vpack_cache.get(clean_pack_id)
+                if cached is not None:
+                    self._vpack_cache.move_to_end(clean_pack_id)
+                    return cached
 
-        with self._vpack_cache_lock:
-            self._vpack_cache[clean_pack_id] = members
-            self._vpack_cache.move_to_end(clean_pack_id)
-            while len(self._vpack_cache) > self._vpack_cache_capacity:
-                self._vpack_cache.popitem(last=False)
-        return members
+            _pack_meta, raw_tar_bytes = self._read_bridge_file_bytes(clean_pack_id)
+            members: dict[str, bytes] = {}
+            try:
+                with tarfile.open(fileobj=io.BytesIO(raw_tar_bytes), mode="r:*") as tf:
+                    for tar_member in tf.getmembers():
+                        if not tar_member.isfile():
+                            continue
+                        base_name = tar_member.name.replace("\\", "/").rsplit("/", 1)[-1]
+                        stem = (base_name.split(".", 1)[0] if "." in base_name else base_name).lower()
+                        if not SHA256_HEX_RE.fullmatch(stem):
+                            continue
+                        extracted = tf.extractfile(tar_member)
+                        members[stem] = extracted.read() if extracted is not None else b""
+            except (tarfile.TarError, EOFError, OSError) as exc:
+                raise DriveIntegrityError("Corrupted virtual pack tar archive on Google Drive") from exc
+
+            with self._vpack_cache_lock:
+                self._vpack_cache[clean_pack_id] = members
+                self._vpack_cache.move_to_end(clean_pack_id)
+                while len(self._vpack_cache) > self._vpack_cache_capacity:
+                    self._vpack_cache.popitem(last=False)
+            return members
 
     def _resolve_vpack_member(
         self,

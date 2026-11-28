@@ -37,6 +37,7 @@ from app.services.training_storage import (
     drive_file_id_from_reference,
     flow2_storage_provider_setting,
     is_gdrive_ref,
+    parse_vpack_ref,
     sign_worker_artifact_token,
     validate_logical_path,
 )
@@ -1815,24 +1816,34 @@ class VireadOcrTrainingService:
         await self._release_read_txn()
         semaphore = asyncio.Semaphore(4 if use_drive else 8)
         supabase_quota_lock = asyncio.Lock()
+        grouped_indices: dict[str | None, list[tuple[int, dict[str, Any]]]] = {}
+        for orig_idx, row in enumerate(selected):
+            vpack = parse_vpack_ref(row.get("image_storage_path"))
+            pack_key = vpack[0] if vpack is not None else None
+            grouped_indices.setdefault(pack_key, []).append((orig_idx, row))
+        prepared: list[tuple[DatasetSampleInput, tuple[str, str]] | None] = [None] * len(selected)
         try:
-            prepared = await asyncio.gather(
-                *(
-                    self._prepare_locked_test_row(
-                        row,
-                        router=router,
-                        use_drive=use_drive,
-                        semaphore=semaphore,
-                        supabase_quota_lock=supabase_quota_lock,
+            for group in grouped_indices.values():
+                group_results = await asyncio.gather(
+                    *(
+                        self._prepare_locked_test_row(
+                            row,
+                            router=router,
+                            use_drive=use_drive,
+                            semaphore=semaphore,
+                            supabase_quota_lock=supabase_quota_lock,
+                        )
+                        for _idx, row in group
                     )
-                    for row in selected
                 )
-            )
+                for (orig_idx, _row), res_pair in zip(group, group_results, strict=True):
+                    prepared[orig_idx] = res_pair
         except Exception:
             await self.repo.rollback()
             raise
-        locked_samples = [pair[0] for pair in prepared]
-        preverified_refs = {pair[1] for pair in prepared}
+        prepared_items = [pair for pair in prepared if pair is not None]
+        locked_samples = [pair[0] for pair in prepared_items]
+        preverified_refs = {pair[1] for pair in prepared_items}
 
         await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_locked_test_autocreate'))")
         latest_readiness = await self._locked_test_readiness()
