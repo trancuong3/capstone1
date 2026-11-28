@@ -225,6 +225,104 @@ class WindowTests(unittest.TestCase):
         self.assertIsNotNone(metrics.weekly[-1]["accuracy_pct"])
         self.assertIsNone(metrics.weekly[0]["accuracy_pct"])
 
+    def test_resumed_multi_day_idle_sessions_report_active_duration_not_90_minutes(self):
+        # Mirrors live production sessions left open for days / hours then finished after 1 page read.
+        s1_start = datetime(2026, 10, 22, 15, 44, 37, tzinfo=timezone.utc)
+        s1_report = datetime(2026, 10, 26, 7, 27, 0, tzinfo=timezone.utc)
+        s1_end = datetime(2026, 10, 26, 7, 28, 51, tzinfo=timezone.utc)
+        s1 = SessionRow(uuid4(), BOOK, "COMPLETED", s1_start, s1_end)
+
+        s2_start = datetime(2026, 11, 7, 3, 3, 56, tzinfo=timezone.utc)
+        s2_report = datetime(2026, 11, 7, 9, 47, 23, tzinfo=timezone.utc)
+        s2_end = datetime(2026, 11, 7, 11, 45, 5, tzinfo=timezone.utc)
+        s2 = SessionRow(uuid4(), BOOK, "COMPLETED", s2_start, s2_end)
+
+        r1 = ReportRow(s1.id, s1_report, alignment(correct=33, skipped=3), {"hesitations": [], "repeated_count": 0})
+        r2 = ReportRow(s2.id, s2_report, alignment(correct=21, substituted=4, skipped=1), {"hesitations": [], "repeated_count": 1})
+        retries = [
+            RetryEventRow(s2.id, "FAILED", s2_report + timedelta(seconds=90)),
+            RetryEventRow(s2.id, "CONFIRMED", s2_report + timedelta(seconds=126)),
+            RetryEventRow(s2.id, "FAILED", s2_end - timedelta(seconds=14)),
+        ]
+        metrics = compute_window(**WINDOW, sessions=[s1, s2], reports=[r1, r2], retries=retries, answers=[])
+        # ~2.9m + ~3.3m -> 6 minutes total instead of 180 minutes (90 + 90).
+        self.assertEqual(metrics.reading_minutes, 6)
+        self.assertIsNotNone(metrics.words_per_minute)
+        self.assertGreater(metrics.words_per_minute, 5.0)
+        # Each weekly bucket matches the session's started_at week (never split across weeks).
+        non_empty_weeks = [w for w in metrics.weekly if w["sessions"] > 0]
+        self.assertEqual(len(non_empty_weeks), 2)
+        for wk in non_empty_weeks:
+            self.assertEqual(wk["minutes"], 3)
+            self.assertIsNotNone(wk["accuracy_pct"])
+
+    def test_continuous_25_minute_active_session_is_preserved(self):
+        start = datetime(2026, 11, 5, 10, 0, tzinfo=VIETNAM_TZ)
+        sess = SessionRow(uuid4(), BOOK, "COMPLETED", start, start + timedelta(minutes=25))
+        rep = ReportRow(sess.id, start + timedelta(minutes=8), alignment(correct=30), {})
+        retries = [
+            RetryEventRow(sess.id, "CONFIRMED", start + timedelta(minutes=16)),
+        ]
+        metrics = compute_window(**WINDOW, sessions=[sess], reports=[rep], retries=retries, answers=[])
+        self.assertEqual(metrics.reading_minutes, 25)
+
+    def test_weekly_bucket_keeps_minutes_and_accuracy_together_when_report_crosses_week_boundary(self):
+        # Session starts on last day of week 1 (2026-10-17) and finishes on first day of week 2 (2026-10-18).
+        start = datetime(2026, 10, 17, 22, 0, tzinfo=VIETNAM_TZ)
+        rep_at = datetime(2026, 10, 18, 9, 0, tzinfo=VIETNAM_TZ)
+        end = rep_at + timedelta(minutes=2)
+        sess = SessionRow(uuid4(), BOOK, "COMPLETED", start, end)
+        rep = ReportRow(sess.id, rep_at, alignment(correct=19, substituted=1), {})
+        metrics = compute_window(**WINDOW, sessions=[sess], reports=[rep], retries=[], answers=[])
+        self.assertEqual(metrics.weekly[0]["sessions"], 1)
+        self.assertGreater(metrics.weekly[0]["minutes"], 0)
+        self.assertIsNotNone(metrics.weekly[0]["accuracy_pct"])
+        self.assertIsNone(metrics.weekly[1]["accuracy_pct"])
+
+    def test_uncertain_words_do_not_penalize_coverage_pct(self):
+        sess = session(1, minutes=4)
+        pid, rid = uuid4(), uuid4()
+        initial = [
+            {"word_id": str(i), "word_index": i, "text": f"từ{i}", "status": "CORRECT" if i < 20 else "UNCERTAIN"}
+            for i in range(40)
+        ]
+        rep = ReportRow(
+            session_id=sess.id,
+            created_at=sess.started_at + timedelta(minutes=2),
+            alignment=[],
+            summary={"assessment_version": 1, "initial_assessment": initial},
+            page_id=pid,
+            page_revision_id=rid,
+            transcript="...",
+        )
+        metrics = compute_window(**WINDOW, sessions=[sess], reports=[rep], retries=[], answers=[])
+        self.assertEqual(metrics.words_read, 20)
+        self.assertEqual(metrics.coverage_pct, 100.0)
+
+    def test_profile_latest_session_marks_stale_open_session_not_resumable(self):
+        from types import SimpleNamespace
+        from app.services.profile_service import ProfileService
+
+        now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+        fresh = SimpleNamespace(
+            Id=uuid4(), ChildId=CHILD_ID, BookId=BOOK, State="IN_PROGRESS",
+            StartedAt=now - timedelta(hours=2), EndedAt=None,
+        )
+        stale = SimpleNamespace(
+            Id=uuid4(), ChildId=CHILD_ID, BookId=BOOK, State="IN_PROGRESS",
+            StartedAt=now - timedelta(hours=36), EndedAt=None,
+        )
+        long_finished = SimpleNamespace(
+            Id=uuid4(), ChildId=CHILD_ID, BookId=BOOK, State="COMPLETED",
+            StartedAt=now - timedelta(days=3), EndedAt=now,
+        )
+        self.assertTrue(ProfileService._serialize_latest_session(fresh, "Sách", now=now)["resumable"])
+        self.assertFalse(ProfileService._serialize_latest_session(stale, "Sách", now=now)["resumable"])
+        self.assertEqual(
+            ProfileService._serialize_latest_session(long_finished, "Sách", now=now)["duration_ms"],
+            90 * 60 * 1000,
+        )
+
 
 def window_with(accuracy_words=(30, 0, 0), hesitations=0, repeated=0, days_active=10, answers=None):
     sessions = [session(offset) for offset in range(days_active)]

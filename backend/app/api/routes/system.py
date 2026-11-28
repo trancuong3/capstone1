@@ -311,6 +311,28 @@ class LegacyReportService:
     def __init__(self, repository: LegacyReportRepository):
         self.repository = repository
 
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _bounded_session_duration_ms(
+        cls, started_at: datetime | None, ended_at: datetime | None
+    ) -> int:
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
+        if started_at is None or ended_at is None:
+            return 0
+        start_utc = cls._as_utc(started_at)
+        end_utc = cls._as_utc(ended_at)
+        if end_utc <= start_utc:
+            return 0
+        max_session_ms = MAX_SESSION_MINUTES * 60 * 1000
+        raw_ms = (end_utc - start_utc) // timedelta(milliseconds=1)
+        return min(raw_ms, max_session_ms)
+
     async def create(self, report_in: ProgressReportCreate, actor_id: UUID) -> ProgressReport:
         # Keep the old JSON request shape but reject claimed scores and metrics.
         if report_in.Summary:
@@ -336,22 +358,30 @@ class LegacyReportService:
         sessions = await self.repository.completed_sessions(
             actor_id, report_in.ChildId, begin, finish, datetime.now(timezone.utc)
         )
-        if not sessions:
+        valid_durations: list[int] = []
+        for started_at, ended_at in sessions:
+            if started_at is None or ended_at is None:
+                continue
+            start_utc = self._as_utc(started_at)
+            end_utc = self._as_utc(ended_at)
+            if end_utc < start_utc:
+                continue
+            valid_durations.append(
+                self._bounded_session_duration_ms(start_utc, end_utc)
+            )
+        if not valid_durations:
             # An empty snapshot would be indistinguishable from unsupported
             # evidence in old reports; do not invent a successful period.
             raise HTTPException(status_code=409, detail="No completed reading sessions in period")
 
-        duration_ms = sum(
-            max(0, int((ended_at - started_at).total_seconds() * 1000))
-            for started_at, ended_at in sessions
-        )
+        duration_ms = sum(valid_durations)
         snapshot = ProgressReport(
             ChildId=report_in.ChildId,
             PeriodStart=start,
             PeriodEnd=end,
             Summary={
                 "source": "server_completed_sessions_v1",
-                "completed_sessions": len(sessions),
+                "completed_sessions": len(valid_durations),
                 "reading_duration_ms": duration_ms,
             },
         )

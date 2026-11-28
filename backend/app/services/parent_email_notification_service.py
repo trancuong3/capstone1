@@ -154,13 +154,20 @@ def compute_reading_streak_days(session_dates: Iterable[date], today: date) -> i
 
 
 def sum_unique_reading_minutes(sessions, now: datetime) -> int:
+    from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
+    max_span = timedelta(minutes=MAX_SESSION_MINUTES)
+    now_utc = _as_utc_or_none(now) or now
     intervals: list[tuple[datetime, datetime]] = []
     for session in sessions:
-        started = getattr(session, "StartedAt", None)
-        ended = getattr(session, "EndedAt", None)
-        if started is None or ended is None or ended <= started or ended > now:
+        state = getattr(session, "State", None)
+        if state is not None and state not in ("COMPLETED", "FINISHED"):
             continue
-        intervals.append((started, ended))
+        started = _as_utc_or_none(getattr(session, "StartedAt", None))
+        ended = _as_utc_or_none(getattr(session, "EndedAt", None))
+        if started is None or ended is None or ended <= started or ended > now_utc:
+            continue
+        intervals.append((started, min(ended, started + max_span)))
     return max(0, int(union_duration_seconds(intervals) // 60))
 
 
@@ -188,7 +195,7 @@ def _as_utc_or_none(value: datetime | None) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-    return value
+    return value.astimezone(timezone.utc)
 
 
 def _snapshot_child(child) -> SimpleNamespace:
