@@ -27,15 +27,17 @@ import { StatusMessage } from "@/components/common/status-message";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import type { ChildProgressAssessment } from "@/lib/api/child-progress-service";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 const PERIODS = [7, 30, 90] as const;
 const GRADE_STYLES: Record<string, string> = {
-  EXCELLENT: "border border-success-ink/20 bg-success-surface text-success-ink",
-  GOOD: "border border-primary/20 bg-sky text-primary-hover",
-  FAIR: "border border-warning/25 bg-warning-surface text-warning",
-  NEEDS_SUPPORT: "border border-danger/20 bg-danger-surface text-danger",
+  EXCELLENT: "bg-success-surface text-success-ink",
+  GOOD: "bg-sky text-primary-hover",
+  FAIR: "bg-warning-surface text-warning",
+  NEEDS_SUPPORT: "bg-danger-surface text-danger",
 };
 
 type View =
@@ -71,12 +73,12 @@ function TrendBadge({ delta }: { readonly delta: number | null }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-0.5 text-[11px] font-bold tabular-nums",
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
         up
           ? "bg-success-surface text-success-ink"
           : down
             ? "bg-warning-surface text-warning"
-            : "bg-canvas text-muted ring-1 ring-inset ring-border",
+            : "bg-white text-muted",
       )}
     >
       <Icon aria-hidden="true" className="viread-rtl-flip size-3.5" />
@@ -101,14 +103,14 @@ function ComponentBar({
       ? t("overview.assessmentCard.scoreAriaMissing")
       : t("overview.assessmentCard.scoreAriaValue", { score });
   return (
-    <li className="space-y-1">
+    <li className="min-w-0 space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-bold text-ink sm:text-sm">
+        <span className="truncate text-xs font-bold text-ink">
           {component.label}
         </span>
         <span
           className={cn(
-            "text-xs font-extrabold tabular-nums sm:text-sm",
+            "shrink-0 text-xs font-extrabold tabular-nums",
             score === null ? "text-muted" : "text-primary",
           )}
         >
@@ -125,7 +127,7 @@ function ComponentBar({
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={score ?? undefined}
-        className="h-2 overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
+        className="h-1.5 overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
         role="progressbar"
       >
         <div
@@ -157,11 +159,11 @@ function WeeklyChart({
   return (
     <section
       aria-labelledby="progress-weekly-title"
-      className="flex h-full flex-col justify-between space-y-2 rounded-control border border-border bg-cream/60 p-3"
+      className="flex min-w-0 flex-col justify-between space-y-1.5 rounded-control bg-canvas/65 px-3 py-2"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-1.5">
         <h3
-          className="text-xs font-extrabold text-ink sm:text-sm"
+          className="text-xs font-extrabold text-ink"
           id="progress-weekly-title"
         >
           {t("overview.assessmentCard.weeklyChartTitle")}
@@ -171,25 +173,25 @@ function WeeklyChart({
         </span>
       </div>
       <div aria-hidden="true" className="overflow-x-auto pb-0.5">
-        <div className="flex h-24 min-w-full items-end gap-1.5 border-b border-border pt-1 sm:gap-2">
+        <div className="flex h-16 min-w-full items-end gap-1.5 border-b border-border/80 pt-1 sm:gap-2">
           {weekly.map((week) => {
             const barHeight =
               week.minutes > 0
-                ? Math.max(8, Math.round((week.minutes / maxMinutes) * 44))
+                ? Math.max(6, Math.round((week.minutes / maxMinutes) * 28))
                 : 3;
             return (
               <div
-                className="flex h-full min-w-9 flex-1 flex-col justify-end text-center"
+                className="flex h-full min-w-8 flex-1 flex-col justify-end text-center"
                 key={week.week_start}
               >
-                <span className="mb-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-primary">
+                <span className="whitespace-nowrap text-[10px] font-bold leading-none tabular-nums text-primary">
                   {week.accuracy_pct === null
                     ? "–"
                     : `${Math.round(week.accuracy_pct)}%`}
                 </span>
                 <div
                   className={cn(
-                    "mx-auto w-full max-w-9 rounded-t-control",
+                    "mx-auto mt-0.5 w-full max-w-8 rounded-t-[4px]",
                     week.minutes > 0 ? "bg-primary/85" : "bg-border",
                   )}
                   style={{ height: `${barHeight}px` }}
@@ -198,12 +200,12 @@ function WeeklyChart({
                     sessions: week.sessions,
                   })}
                 />
-                <span className="mt-0.5 whitespace-nowrap text-[10px] font-bold tabular-nums text-ink">
+                <span className="mt-0.5 whitespace-nowrap text-[10px] font-bold leading-none tabular-nums text-ink">
                   {t("overview.assessmentCard.weekBarShort", {
                     minutes: week.minutes,
                   })}
                 </span>
-                <span className="whitespace-nowrap pb-0.5 text-[10px] font-semibold tabular-nums text-muted">
+                <span className="whitespace-nowrap pb-0.5 text-[10px] font-semibold leading-tight tabular-nums text-muted">
                   {shortDate(week.week_start)}
                 </span>
               </div>
@@ -242,8 +244,8 @@ function InsightColumn({
   readonly children: ReactNode;
 }) {
   return (
-    <section className={cn("space-y-2 rounded-control border p-3.5", tone)}>
-      <h4 className="text-sm font-extrabold text-ink">{title}</h4>
+    <section className={cn("space-y-1.5 rounded-control p-3", tone)}>
+      <h4 className="text-xs font-extrabold text-ink sm:text-sm">{title}</h4>
       {children}
     </section>
   );
@@ -253,10 +255,12 @@ export function ChildProgressAssessmentCard({
   childId,
   childName,
   showReadingAssessment = true,
+  compact = false,
 }: {
   readonly childId: string;
   readonly childName: string;
   readonly showReadingAssessment?: boolean;
+  readonly compact?: boolean;
 }) {
   const t = useTranslations("reports");
   const tCommon = useTranslations("common");
@@ -346,36 +350,26 @@ export function ChildProgressAssessmentCard({
   return (
     <section
       aria-labelledby="ai-progress-title"
-      className="rounded-card border border-border bg-white p-3 sm:p-3.5"
+      className="min-w-0 rounded-card border border-border bg-white p-3"
     >
-      <div className="flex flex-col gap-2 border-b border-border pb-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h2
-              className="text-base font-extrabold text-ink sm:text-lg"
-              id="ai-progress-title"
-            >
-              {t("overview.assessmentCard.sectionTitle", { childName })}
-            </h2>
-            <span className="text-xs font-bold text-primary">
-              {t("overview.assessmentCard.sectionEyebrow")}
-            </span>
-          </div>
-          <p className="text-xs text-muted">
-            {t("overview.assessmentCard.sectionSubtitle")}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+        <h2
+          className="min-w-0 text-sm font-extrabold text-ink sm:text-base"
+          id="ai-progress-title"
+        >
+          {t("overview.assessmentCard.sectionTitle", { childName })}
+        </h2>
 
         <div
           aria-label={t("overview.assessmentCard.windowGroupAria")}
-          className="inline-flex shrink-0 self-start rounded-control border border-border bg-canvas p-0.5 sm:self-auto"
+          className="inline-flex shrink-0 rounded-control border border-border bg-canvas p-0.5"
           role="radiogroup"
         >
           {PERIODS.map((option) => (
             <button
               aria-checked={days === option}
               className={cn(
-                "min-h-8 rounded-control px-2.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                "min-h-8 rounded-[6px] px-2.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                 days === option
                   ? "bg-primary text-white"
                   : "text-ink hover:bg-white",
@@ -399,7 +393,7 @@ export function ChildProgressAssessmentCard({
         <div
           aria-busy="true"
           aria-label={t("overview.assessmentCard.loadingAria")}
-          className="mt-5 space-y-4"
+          className="mt-3 space-y-3"
         >
           <AiProgressBar
             active
@@ -412,11 +406,11 @@ export function ChildProgressAssessmentCard({
             size="sm"
             testId="child-progress-initial-loading-progress"
           />
-          <Skeleton className="h-32 rounded-card" />
-          <Skeleton className="h-24 rounded-card" />
+          <Skeleton className="h-24 rounded-control" />
+          <Skeleton className="h-20 rounded-control" />
         </div>
       ) : view.status === "error" ? (
-        <div className="mt-5 space-y-4">
+        <div className="mt-3 space-y-3">
           <StatusMessage
             title={t("overview.assessmentCard.loadErrorTitle")}
             tone="error"
@@ -437,6 +431,7 @@ export function ChildProgressAssessmentCard({
         </div>
       ) : (
         <AssessmentBody
+          compact={compact}
           onRefresh={refreshAi}
           showReadingAssessment={showReadingAssessment}
           view={view}
@@ -452,14 +447,17 @@ function AssessmentBody({
   view,
   onRefresh,
   showReadingAssessment,
+  compact,
 }: {
   readonly view: Extract<View, { status: "ready" }>;
   readonly onRefresh: () => void;
   readonly showReadingAssessment: boolean;
+  readonly compact: boolean;
 }) {
   const t = useTranslations("reports");
   const tCommon = useTranslations("common");
   const shortDate = useShortDate();
+  const teacherPersona = useTeacherPersona();
   const [practiceWordsPage, setPracticeWordsPage] = useState(1);
   const { data } = view;
   const { score, metrics, assessment } = data;
@@ -510,8 +508,8 @@ function AssessmentBody({
   }
 
   return (
-    <div className="mt-2.5 space-y-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-muted">
+    <div className="mt-2 space-y-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px] font-semibold text-muted tabular-nums">
         <p>
           {t("overview.assessmentCard.rangeSummary", {
             start: shortDate(data.period_start),
@@ -519,7 +517,7 @@ function AssessmentBody({
             days: data.days,
           })}
         </p>
-        <p className="tabular-nums">
+        <p>
           {t("overview.assessmentCard.basisSummary", {
             sessions: metrics.sessions,
             minutes: metrics.reading_minutes,
@@ -537,24 +535,26 @@ function AssessmentBody({
       <div
         className={cn(
           "grid gap-2.5 lg:items-stretch",
-          hasWeekly
-            ? "lg:grid-cols-[minmax(196px,0.56fr)_minmax(0,1.2fr)_minmax(230px,0.9fr)]"
-            : "lg:grid-cols-[minmax(196px,0.56fr)_minmax(0,1.44fr)]",
+          compact
+            ? "sm:grid-cols-[minmax(164px,0.44fr)_minmax(0,1fr)]"
+            : hasWeekly
+              ? "lg:grid-cols-[minmax(176px,0.5fr)_minmax(0,1.25fr)_minmax(220px,0.85fr)]"
+              : "lg:grid-cols-[minmax(184px,0.52fr)_minmax(0,1.48fr)]",
         )}
       >
-        <div className="flex flex-col justify-between gap-1.5 rounded-control border border-border bg-cream/70 p-3">
-          <p className="text-xs font-bold text-muted">
+        <div className="flex flex-col justify-between gap-1.5 rounded-control bg-canvas/75 p-2.5">
+          <p className="text-[11px] font-bold text-muted">
             {t("overview.assessmentCard.overallScore")}
           </p>
           <div className="flex flex-wrap items-baseline gap-1.5">
-            <span className="text-3xl font-extrabold tracking-tight tabular-nums text-ink">
+            <span className="text-2xl font-extrabold tracking-tight tabular-nums text-ink sm:text-3xl">
               {score.overall ?? "–"}
             </span>
             <span className="text-xs font-bold text-muted">/ 100</span>
             {score.grade_label ? (
               <span
                 className={cn(
-                  "ms-1 rounded-control px-2 py-0.5 text-xs font-bold",
+                  "ms-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold",
                   GRADE_STYLES[score.grade ?? ""] ??
                     "bg-sky text-primary-hover",
                 )}
@@ -562,7 +562,7 @@ function AssessmentBody({
                 {score.grade_label}
               </span>
             ) : (
-              <span className="ms-1 rounded-control bg-canvas px-2 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
+              <span className="ms-0.5 rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-muted">
                 {t("overview.notEnoughData")}
               </span>
             )}
@@ -573,25 +573,29 @@ function AssessmentBody({
         </div>
 
         {score.components.length > 0 ? (
-          <ul className="grid content-center gap-x-3.5 gap-y-2 sm:grid-cols-2">
+          <ul className="grid content-center gap-x-3 gap-y-1.5 sm:grid-cols-2">
             {score.components.map((component) => (
               <ComponentBar component={component} key={component.key} />
             ))}
           </ul>
         ) : (
-          <p className="rounded-control border border-dashed border-border bg-canvas p-3 text-sm text-muted">
+          <p className="rounded-control bg-canvas/70 p-2.5 text-xs text-muted">
             {t("overview.assessmentCard.insufficientDetailDesc", {
               days: data.days,
             })}
           </p>
         )}
 
-        {hasWeekly ? <WeeklyChart weekly={data.weekly} /> : null}
+        {hasWeekly && !compact ? <WeeklyChart weekly={data.weekly} /> : null}
       </div>
+
+      {hasWeekly && compact ? <WeeklyChart weekly={data.weekly} /> : null}
 
       {showReadingAssessment ? (
         <ReadingAssessmentSummary
           assessment={metrics.reading_assessment}
+          compact={compact}
+          embedded
           scopeLabel={t("overview.assessmentCard.scopeRecentDays", {
             days: data.days,
           })}
@@ -599,30 +603,30 @@ function AssessmentBody({
       ) : null}
 
       <div
-        className="space-y-2 border-t border-border pt-2.5"
         aria-live="polite"
+        className="space-y-2 border-t border-border pt-2.5"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span
               className={cn(
-                "inline-flex items-center rounded-control px-2 py-0.5 text-xs font-bold",
+                "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-bold",
                 assessment.source === "AI"
-                  ? "border border-primary/20 bg-sky text-primary-hover"
-                  : "border border-border bg-canvas text-muted",
+                  ? "bg-sky text-primary-hover"
+                  : "bg-canvas text-muted",
               )}
             >
               {assessment.source === "AI"
                 ? t("overview.assessmentCard.aiCommentBadge")
                 : t("overview.assessmentCard.autoCommentBadge")}
             </span>
-            <h3 className="text-sm font-extrabold text-ink sm:text-base">
+            <h3 className="text-sm font-extrabold text-ink">
               {assessment.headline}
             </h3>
           </div>
           {data.data_status === "OK" ? (
             <Button
-              className="h-8 min-h-8! w-auto px-2.5! py-0! text-xs!"
+              className="h-8 min-h-8! w-auto shrink-0 px-2.5! py-0! text-xs!"
               disabled={view.ai === "writing"}
               isLoading={view.ai === "writing"}
               onClick={onRefresh}
@@ -657,36 +661,42 @@ function AssessmentBody({
           </StatusMessage>
         ) : null}
 
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-          <p className="max-w-3xl text-sm leading-relaxed text-ink">
-            {assessment.summary}
+        <div className="space-y-1.5">
+          <p className="text-xs leading-relaxed text-ink sm:text-sm">
+            {adaptTextToTeacherPersona(
+              assessment.summary,
+              teacherPersona.gender,
+            )}
           </p>
           {assessment.encouragement ? (
-            <p className="shrink-0 border-s-2 border-primary ps-2.5 text-xs font-semibold text-muted sm:max-w-xs">
-              {assessment.encouragement}
+            <p className="rounded-control bg-sky/40 px-2.5 py-1.5 text-xs font-semibold leading-snug text-primary-hover">
+              {adaptTextToTeacherPersona(
+                assessment.encouragement,
+                teacherPersona.gender,
+              )}
             </p>
           ) : null}
         </div>
 
         {hasDetails ? (
-          <details className="group rounded-control border border-border bg-canvas/45 px-3 py-2">
-            <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-xs font-extrabold text-primary sm:text-sm [&::-webkit-details-marker]:hidden">
-              <span className="truncate">{detailSummaryParts.join(" · ")}</span>
+          <details className="group rounded-control bg-canvas/65 px-3 py-1.5">
+            <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 py-0.5 text-xs font-extrabold leading-snug text-primary [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">{detailSummaryParts.join(" · ")}</span>
               <ChevronDown
                 aria-hidden="true"
                 className="size-4 shrink-0 transition-transform group-open:rotate-180"
               />
             </summary>
-            <div className="mt-3 space-y-3 border-t border-border/70 pt-3">
+            <div className="mt-2.5 space-y-2.5 border-t border-border/70 pt-2.5">
               {assessment.strengths.length > 0 ||
               assessment.weaknesses.length > 0 ? (
-                <div className="grid gap-2.5 lg:grid-cols-2">
+                <div className="grid gap-2 lg:grid-cols-2">
                   {assessment.strengths.length > 0 ? (
                     <InsightColumn
                       title={t("overview.assessmentCard.strengthsTitle")}
-                      tone="border-success-ink/20 bg-success-surface/35"
+                      tone="bg-success-surface/45"
                     >
-                      <ul className="list-disc space-y-1 ps-5 text-sm leading-relaxed text-ink">
+                      <ul className="list-disc space-y-1 ps-5 text-xs leading-relaxed text-ink sm:text-sm">
                         {assessment.strengths.map((item) => (
                           <li key={item}>{item}</li>
                         ))}
@@ -696,9 +706,9 @@ function AssessmentBody({
                   {assessment.weaknesses.length > 0 ? (
                     <InsightColumn
                       title={t("overview.assessmentCard.improvementsTitle")}
-                      tone="border-warning/25 bg-warning-surface/40"
+                      tone="bg-warning-surface/45"
                     >
-                      <ul className="space-y-1.5 text-sm">
+                      <ul className="space-y-1.5 text-xs sm:text-sm">
                         {assessment.weaknesses.map((item) => (
                           <li className="flex gap-2" key={item.area}>
                             <TriangleAlert
@@ -720,15 +730,15 @@ function AssessmentBody({
               ) : null}
 
               {assessment.actions.length > 0 ? (
-                <section className="space-y-2">
-                  <h3 className="inline-flex items-center gap-2 text-sm font-extrabold text-ink">
+                <section className="space-y-1.5">
+                  <h3 className="inline-flex items-center gap-1.5 text-xs font-extrabold text-ink sm:text-sm">
                     <Lightbulb
                       aria-hidden="true"
-                      className="size-4 text-primary"
+                      className="size-3.5 text-primary"
                     />
                     {t("overview.assessmentCard.actionsTitle")}
                   </h3>
-                  <div className="grid gap-2.5 lg:grid-cols-2">
+                  <div className="grid gap-2 lg:grid-cols-2">
                     {(
                       [
                         ["PARENT", t("overview.assessmentCard.parentRole")],
@@ -737,20 +747,25 @@ function AssessmentBody({
                     ).map(([audience, title]) =>
                       actionsFor(audience).length > 0 ? (
                         <div
-                          className="space-y-1.5 rounded-control border border-border bg-cream/70 p-3"
+                          className="space-y-1 rounded-control bg-white/85 p-2.5"
                           key={audience}
                         >
-                          <h4 className="text-sm font-extrabold text-primary">
+                          <h4 className="text-xs font-extrabold text-primary sm:text-sm">
                             {title}
                           </h4>
-                          <ul className="space-y-1.5 text-sm">
+                          <ul className="space-y-1 text-xs sm:text-sm">
                             {actionsFor(audience).map((action) => (
                               <li key={action.title}>
                                 <strong className="block font-bold text-ink">
                                   {action.title}
                                 </strong>
                                 <span className="text-muted">
-                                  {action.detail}
+                                  {audience === "CHILD"
+                                    ? adaptTextToTeacherPersona(
+                                        action.detail,
+                                        teacherPersona.gender,
+                                      )
+                                    : action.detail}
                                 </span>
                               </li>
                             ))}
@@ -764,7 +779,7 @@ function AssessmentBody({
 
               {assessment.practice_words.length > 0 ? (
                 <section className="space-y-1.5">
-                  <h3 className="text-sm font-extrabold text-ink">
+                  <h3 className="text-xs font-extrabold text-ink sm:text-sm">
                     {t("overview.assessmentCard.recommendedWordsTitle", {
                       days: data.days,
                     })}
@@ -776,7 +791,7 @@ function AssessmentBody({
                       );
                       return (
                         <li
-                          className="rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
+                          className="rounded-control bg-white px-2.5 py-1 text-xs font-bold text-ink sm:text-sm"
                           key={word}
                           title={
                             detail?.heard_as
@@ -816,7 +831,7 @@ function AssessmentBody({
                         days: data.days,
                       },
                     )}
-                    className="mt-2"
+                    className="mt-1.5"
                     compact
                     onPageChange={setPracticeWordsPage}
                     page={safePracticeWordsPage}

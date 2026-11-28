@@ -190,10 +190,10 @@ function ReportCard({
       data-active-report-id={activeReport.report_id}
       data-report-group={group.key}
     >
-      <div className="flex flex-col justify-between gap-2 border-b border-border pb-2.5 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-2 border-b border-border/80 pb-2 sm:flex-row sm:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-extrabold text-ink sm:text-lg">
+            <h3 className="text-sm font-extrabold text-ink sm:text-base">
               {resolvedPage
                 ? t("sessions.readingReports.pageLabel", {
                     page: resolvedPage.page_number,
@@ -451,7 +451,7 @@ function ReportCard({
             </section>
           ) : null}
 
-          <div className="rounded-control border border-border bg-canvas/70 p-3.5">
+          <div className="rounded-control bg-canvas/70 p-3">
             <p className="text-xs font-bold text-muted">
               {t("sessions.readingReports.recordedSpeechLabel")}
             </p>
@@ -473,7 +473,7 @@ function ReportCard({
       </div>
 
       {group.additionalReports.length > 0 ? (
-        <details className="group rounded-control border border-border bg-canvas/60 px-3.5 py-2.5">
+        <details className="group rounded-control border border-border bg-canvas/60 px-3 py-2">
           <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink [&::-webkit-details-marker]:hidden">
             <span>
               {t("sessions.readingReports.otherComparisonsTitle", {
@@ -781,7 +781,7 @@ export function SessionReadingReports({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
-          className="book-title text-xl text-ink sm:text-2xl"
+          className="book-title text-base text-ink sm:text-lg"
           id="session-reading-reports-title"
         >
           {t("sessions.readingReports.pageHeading")}

@@ -81,16 +81,16 @@ export function VerifiedBookPicker({
 
   return (
     <details
-      className="group/catalog mt-4 border-t border-border"
+      className="group/catalog mt-2.5 border-t border-border/70"
       open={expanded}
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
-      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 rounded-control px-1 font-semibold text-primary hover:bg-sky/45 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-control px-1 text-xs font-bold text-primary hover:bg-sky/45 sm:text-sm [&::-webkit-details-marker]:hidden">
         <BookOpen aria-hidden="true" className="size-4 shrink-0" />
         {t("readingManagement.bookPicker.heading")}
         <ChevronDown
           aria-hidden="true"
-          className="ms-auto size-4 shrink-0 group-open/catalog:rotate-180"
+          className="ms-auto size-4 shrink-0 transition-transform group-open/catalog:rotate-180"
         />
       </summary>
       {books === null ? (
@@ -108,21 +108,21 @@ export function VerifiedBookPicker({
           </Button>
         </StatusMessage>
       ) : books.length === 0 ? (
-        <p className="rounded-control bg-cream p-3 text-sm text-muted">
+        <p className="mt-1.5 rounded-control bg-cream px-3 py-2 text-xs text-muted">
           {t("readingManagement.bookPicker.emptyEligible")}
         </p>
       ) : (
         <>
-          <label className="relative mt-2 block">
+          <label className="relative mt-1.5 block">
             <span className="sr-only">
               {t("readingManagement.bookPicker.searchSr")}
             </span>
             <Search
               aria-hidden="true"
-              className="pointer-events-none absolute start-3 top-3 size-4 text-muted"
+              className="pointer-events-none absolute start-2.5 top-2.5 size-4 text-muted"
             />
             <input
-              className="min-h-10 w-full rounded-control border border-border bg-cream py-2 ps-9 pe-3 text-sm text-ink"
+              className="h-9 min-h-9 w-full rounded-control border border-border bg-cream py-1.5 ps-8 pe-3 text-xs text-ink sm:text-sm"
               type="search"
               placeholder={t("readingManagement.bookPicker.searchPlaceholder")}
               value={query}
@@ -132,7 +132,7 @@ export function VerifiedBookPicker({
               }}
             />
           </label>
-          <p className="mt-3 text-sm text-muted" role="status">
+          <p className="mt-2 text-xs tabular-nums text-muted" role="status">
             {matches.length
               ? t("readingManagement.bookPicker.rangeSummary", {
                   from: (activePage - 1) * PAGE_SIZE + 1,
@@ -141,10 +141,10 @@ export function VerifiedBookPicker({
                 })
               : t("readingManagement.bookPicker.noMatches")}
           </p>
-          <ul className="divide-y divide-border">
+          <ul className="mt-1 divide-y divide-border/70">
             {visible.map((book) => (
               <li
-                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-3"
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 py-2"
                 key={book.id}
               >
                 <BookCover
@@ -155,13 +155,13 @@ export function VerifiedBookPicker({
                 />
                 <div className="min-w-0">
                   <h4
-                    className="viread-learning-content break-words text-base font-bold leading-tight text-ink"
+                    className="viread-learning-content break-words text-sm font-bold leading-snug text-ink"
                     dir="ltr"
                     lang="vi"
                   >
                     {book.title}
                   </h4>
-                  <p className="mt-1 break-words text-sm text-muted">
+                  <p className="mt-0.5 break-words text-xs text-muted">
                     {book.author ? (
                       <span
                         className="viread-learning-content"
@@ -184,7 +184,7 @@ export function VerifiedBookPicker({
                         })}
                   </p>
                 </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
                   {collectionActions.map(
                     ({ type, labelKey, activeLabelKey, icon: Icon }) => {
                       const selected = collections.some(
@@ -201,11 +201,11 @@ export function VerifiedBookPicker({
                           aria-label={`${text} ${book.title}`}
                           disabled={busy}
                           onClick={() => onToggle(book.id, type)}
-                          className={`inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-semibold hover:bg-sky disabled:opacity-55 ${selected ? "bg-sky text-primary" : "text-ink"}`}
+                          className={`inline-flex h-8 min-h-8 items-center gap-1 rounded-control px-2 text-xs font-semibold hover:bg-sky disabled:opacity-55 sm:h-7 sm:min-h-7 ${selected ? "bg-sky text-primary" : "text-ink"}`}
                         >
                           <Icon
                             aria-hidden="true"
-                            className="size-4 shrink-0"
+                            className="size-3.5 shrink-0"
                           />
                           {text}
                         </button>
@@ -217,12 +217,12 @@ export function VerifiedBookPicker({
                       title: book.title,
                     })}
                     href={`/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(childId)}`}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-bold text-primary hover:bg-sky"
+                    className="inline-flex h-8 min-h-8 items-center gap-1 rounded-control px-2 text-xs font-bold text-primary hover:bg-sky sm:h-7 sm:min-h-7"
                   >
                     {t("readingManagement.bookPicker.openBook")}{" "}
                     <ArrowUpRight
                       aria-hidden="true"
-                      className="viread-rtl-flip size-4 shrink-0"
+                      className="viread-rtl-flip size-3.5 shrink-0"
                     />
                   </Link>
                 </div>

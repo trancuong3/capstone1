@@ -72,27 +72,28 @@ export function SessionHistoryItem({
       : BookOpen;
 
   return (
-    <article className="history-entry group relative transition-colors hover:bg-cream/80 focus-within:bg-cream/80">
-      <div className="flex items-center justify-between gap-3 sm:gap-5">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
+    <article className="history-entry group relative px-3.5! py-2.5! transition-colors hover:bg-cream/80 focus-within:bg-cream/80 sm:py-2!">
+      <div className="flex items-center justify-between gap-2.5 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center">
           <span
             aria-hidden="true"
-            className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${statusAccentClass}`}
+            className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full sm:mt-0 ${statusAccentClass}`}
           >
-            <StatusIcon className="size-4.5" strokeWidth={2.1} />
+            <StatusIcon className="size-3.5" strokeWidth={2.2} />
           </span>
 
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
               <h3
-                className="viread-learning-content break-words text-base font-extrabold leading-snug text-ink sm:text-lg"
+                className="viread-learning-content min-w-0 break-words text-sm font-bold leading-snug text-ink sm:truncate"
                 dir="ltr"
                 lang="vi"
+                title={item.book.title}
               >
                 {item.book.title}
               </h3>
               <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${stateStyle.badgeClassName}`}
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-bold leading-tight ${stateStyle.badgeClassName}`}
                 data-session-state={item.session.state}
                 data-state-tone={stateStyle.tone}
               >
@@ -100,14 +101,14 @@ export function SessionHistoryItem({
               </span>
             </div>
 
-            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-muted sm:text-sm">
+            <dl className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-semibold text-muted">
               {showChildAlias ? (
                 <div>
                   <dt className="sr-only">{t("sessions.item.childSr")}</dt>
                   <dd>{item.child.alias}</dd>
                 </div>
               ) : null}
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 <dt className="sr-only">{t("sessions.item.startedSr")}</dt>
                 <dd>
                   <time
@@ -119,8 +120,8 @@ export function SessionHistoryItem({
                   </time>
                 </dd>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Clock3 aria-hidden="true" className="size-3.5 shrink-0" />
+              <div className="flex items-center gap-1">
+                <Clock3 aria-hidden="true" className="size-3 shrink-0" />
                 <dt className="sr-only">{t("sessions.item.durationSr")}</dt>
                 <dd className="tabular-nums">{durationLabel}</dd>
               </div>
@@ -129,7 +130,7 @@ export function SessionHistoryItem({
         </div>
 
         <Link
-          className="inline-flex min-h-12 shrink-0 items-center gap-1 rounded-control px-3 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
+          className="inline-flex min-h-11 shrink-0 items-center gap-0.5 rounded-control px-2 text-xs font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0 sm:min-h-9 sm:px-2.5"
           href={href}
         >
           <span className="sr-only sm:not-sr-only">
@@ -137,7 +138,7 @@ export function SessionHistoryItem({
           </span>
           <ChevronRight
             aria-hidden="true"
-            className="viread-rtl-flip size-5 shrink-0 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
+            className="viread-rtl-flip size-4 shrink-0 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
           />
         </Link>
       </div>
