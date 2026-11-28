@@ -19,7 +19,11 @@ import {
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  DEFAULT_SPEED,
+  getSpeechPreferences,
+  getSpeechPreferencesMeta,
+} from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
@@ -388,15 +392,21 @@ export function createSpeechService(): SpeechService {
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const speechMeta = getSpeechPreferencesMeta();
+      const hasExplicitGlobalSpeed =
+        speechPrefs.speed !== DEFAULT_SPEED || speechMeta.updatedAt > 0;
+      const resolvedRequestSpeed =
+        options.speed ??
+        activeLock?.speed ??
+        (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
+      const effectiveVoiceId = getEffectiveVoiceId();
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        (effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ? effectiveVoiceId : null);
       const cacheVoiceId =
-        resolvedRequestVoiceId ??
-        getEffectiveVoiceId() ??
-        DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -407,7 +417,7 @@ export function createSpeechService(): SpeechService {
             textOrTokens: normalizedText,
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
+            speed: resolvedRequestSpeed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -460,11 +470,9 @@ export function createSpeechService(): SpeechService {
                 ...(resolvedRequestVoiceId
                   ? { voice_id: resolvedRequestVoiceId }
                   : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : activeLock
-                    ? { speed: activeLock.speed }
-                    : {}),
+                ...(resolvedRequestSpeed !== undefined
+                  ? { speed: resolvedRequestSpeed }
+                  : {}),
                 ...(options.wordSample ? { word_sample: true } : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
@@ -600,15 +608,21 @@ export function createSpeechService(): SpeechService {
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const speechMeta = getSpeechPreferencesMeta();
+      const hasExplicitGlobalSpeed =
+        speechPrefs.speed !== DEFAULT_SPEED || speechMeta.updatedAt > 0;
+      const resolvedRequestSpeed =
+        options.speed ??
+        activeLock?.speed ??
+        (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
+      const effectiveVoiceId = getEffectiveVoiceId();
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        (effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ? effectiveVoiceId : null);
       const cacheVoiceId =
-        resolvedRequestVoiceId ??
-        getEffectiveVoiceId() ??
-        DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -625,7 +639,7 @@ export function createSpeechService(): SpeechService {
             ),
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
+            speed: resolvedRequestSpeed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -687,11 +701,9 @@ export function createSpeechService(): SpeechService {
                 ...(resolvedRequestVoiceId
                   ? { voice_id: resolvedRequestVoiceId }
                   : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : activeLock
-                    ? { speed: activeLock.speed }
-                    : {}),
+                ...(resolvedRequestSpeed !== undefined
+                  ? { speed: resolvedRequestSpeed }
+                  : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
                   : {}),

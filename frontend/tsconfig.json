@@ -36,10 +36,8 @@
     ".next/dev/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
     ".next-e2e/dev/types/**/*.ts",
-    ".next-e2e-review/types/**/*.ts",
-    ".next-e2e-review/dev/types/**/*.ts",
-    ".next-e2e-review2/types/**/*.ts",
-    ".next-e2e-review2/dev/types/**/*.ts"
+    ".next-verify/types/**/*.ts",
+    ".next-verify/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

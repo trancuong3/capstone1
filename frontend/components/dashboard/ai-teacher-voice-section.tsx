@@ -281,6 +281,17 @@ export function AiTeacherVoiceSection({
 
   useEffect(() => {
     mountedRef.current = true;
+    if (
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      typeof window.speechSynthesis?.getVoices === "function"
+    ) {
+      try {
+        window.speechSynthesis.getVoices();
+      } catch {
+        // Best-effort browser voice list warmup
+      }
+    }
     return () => {
       mountedRef.current = false;
       speechPlayerRef.current.stop();
@@ -333,6 +344,45 @@ export function AiTeacherVoiceSection({
     activeVoiceId,
     policy.region,
   );
+
+  useEffect(() => {
+    if (speechPlayer.state !== "completed" && speechPlayer.state !== "error") {
+      return;
+    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsPreviewing(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [speechPlayer.state]);
+
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV === "test" ||
+      localWorkerReady !== true ||
+      typeof speechPlayerRef.current.prefetch !== "function"
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const greeting = adaptTextToTeacherPersona(
+      TEACHER_VOICE_PREVIEW_BASE_TEXT,
+      activeGender,
+    );
+    void speechPlayerRef.current
+      .prefetch(greeting, {
+        coaching: true,
+        signal: controller.signal,
+      })
+      .catch(() => undefined);
+    return () => {
+      controller.abort();
+    };
+  }, [activeGender, activeVoiceId, localWorkerReady, preferences.speed]);
 
   const persistChildVoice = useCallback(
     async (
@@ -432,6 +482,11 @@ export function AiTeacherVoiceSection({
           cacheScope: "COACHING",
           bypassSessionLock: true,
           utteranceKind: "voice_preview",
+          onEnded: () => {
+            if (mountedRef.current && gen === previewGenRef.current) {
+              setIsPreviewing(false);
+            }
+          },
         })
         .catch((error: unknown) => {
           const isAbortError =
@@ -578,8 +633,14 @@ export function AiTeacherVoiceSection({
       ? currentVoice
       : findPreferredVoice("male", activeRegion);
 
+  const isPreviewActive =
+    isPreviewing ||
+    speechPlayer.state === "loading" ||
+    speechPlayer.state === "playing" ||
+    speechPlayer.state === "fallback";
+
   const handlePreviewToggle = () => {
-    if (isPreviewing || speechPlayer.isPlaying) {
+    if (isPreviewActive) {
       stopPreview();
       return;
     }
@@ -634,11 +695,9 @@ export function AiTeacherVoiceSection({
           onClick={handlePreviewToggle}
           size="compact"
           type="button"
-          variant={
-            isPreviewing || speechPlayer.isPlaying ? "secondary" : "primary"
-          }
+          variant={isPreviewActive ? "secondary" : "primary"}
         >
-          {isPreviewing || speechPlayer.isPlaying ? (
+          {isPreviewActive ? (
             <>
               <Square aria-hidden="true" className="size-4" />
               {tParent("teacherVoice.stopPreviewButton")}

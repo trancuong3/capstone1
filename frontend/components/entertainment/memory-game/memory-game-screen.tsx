@@ -1455,11 +1455,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <ReadingVoiceSettings
             disabled={isListeningVoice}
             fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
+            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
             onPreview={(sample) => {
               stopMicCapture();
               stopAllTts();
-              return speechPlayer.play(sample, { bypassSessionLock: true });
+              return speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+              });
             }}
             onStopPreview={stopAllTts}
           />

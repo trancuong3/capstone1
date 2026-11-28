@@ -36,13 +36,24 @@ class ReadingContentRepository:
 
     async def initial_word_status(self, session_id: UUID, page_id: UUID,
                                   revision_id: UUID, word_id: UUID) -> str | None:
-        for report in reversed(await self.comparison_reports(session_id)):
-            if (report.PageId != page_id or report.PageRevisionId != revision_id
-                    or not isinstance(report.Summary, dict)
-                    or report.Summary.get("assessment_version") != 1):
+        result = await self.db.execute(
+            select(ReadingComparisonReport.Summary)
+            .where(
+                ReadingComparisonReport.SessionId == session_id,
+                ReadingComparisonReport.PageId == page_id,
+                ReadingComparisonReport.PageRevisionId == revision_id,
+            )
+            .order_by(
+                ReadingComparisonReport.CreatedAt.asc(),
+                ReadingComparisonReport.Id.asc(),
+            )
+        )
+        target_word_id = str(word_id)
+        for summary in result.scalars().all():
+            if not isinstance(summary, dict) or summary.get("assessment_version") != 1:
                 continue
-            for word in report.Summary.get("initial_assessment", []):
-                if isinstance(word, dict) and word.get("word_id") == str(word_id):
+            for word in summary.get("initial_assessment", []):
+                if isinstance(word, dict) and word.get("word_id") == target_word_id:
                     return word.get("status")
             return None
         return None
@@ -302,6 +313,15 @@ class ReadingContentRepository:
     async def page_by_id(self, page_id: UUID) -> BookPage | None:
         return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
 
+    async def pages_by_ids(self, page_ids: list[UUID]) -> dict[UUID, BookPage]:
+        unique_ids = list(dict.fromkeys(page_ids))
+        if not unique_ids:
+            return {}
+        result = await self.db.execute(
+            select(BookPage).where(BookPage.Id.in_(unique_ids))
+        )
+        return {row.Id: row for row in result.scalars().all()}
+
     async def revision_snapshot(self, page_id: UUID, revision_id: UUID) -> PageRevision | None:
         return await self.db.scalar(
             select(PageRevision).where(
@@ -310,6 +330,37 @@ class ReadingContentRepository:
             )
         )
 
+    async def revisions_by_ids(
+        self, revision_ids: list[UUID]
+    ) -> dict[tuple[UUID, UUID], PageRevision]:
+        unique_ids = list(dict.fromkeys(revision_ids))
+        if not unique_ids:
+            return {}
+        result = await self.db.execute(
+            select(PageRevision).where(PageRevision.Id.in_(unique_ids))
+        )
+        return {(row.PageId, row.Id): row for row in result.scalars().all()}
+
+    async def revision_words_by_revision_ids(
+        self, revision_ids: list[UUID]
+    ) -> dict[UUID, list[PageRevisionWord]]:
+        unique_ids = list(dict.fromkeys(revision_ids))
+        if not unique_ids:
+            return {}
+        result = await self.db.execute(
+            select(PageRevisionWord)
+            .where(PageRevisionWord.PageRevisionId.in_(unique_ids))
+            .order_by(
+                PageRevisionWord.PageRevisionId,
+                PageRevisionWord.WordIndex,
+                PageRevisionWord.Id,
+            )
+        )
+        grouped: dict[UUID, list[PageRevisionWord]] = {}
+        for row in result.scalars().all():
+            grouped.setdefault(row.PageRevisionId, []).append(row)
+        return grouped
+
     async def save_session_progress(
         self, session: ReadingSession, page_rows: list[ReadingSessionPage]
     ) -> ReadingSession:
@@ -317,7 +368,9 @@ class ReadingContentRepository:
         self.db.add_all(page_rows)
         try:
             await self.db.commit()
-            await self.db.refresh(session)
+            sync_session = getattr(self.db, "sync_session", None)
+            if getattr(sync_session, "expire_on_commit", True):
+                await self.db.refresh(session)
         except Exception:
             await self.db.rollback()
             raise
@@ -460,10 +513,16 @@ class ReadingContentRepository:
         return list(result.scalars().all())
 
     async def create_reading_event(self, event: ReadingEvent) -> ReadingEvent:
+        if event.Id is None:
+            event.Id = uuid4()
+        if event.CreatedAt is None:
+            event.CreatedAt = datetime.now(timezone.utc)
         self.db.add(event)
         try:
             await self.db.commit()
-            await self.db.refresh(event)
+            sync_session = getattr(self.db, "sync_session", None)
+            if getattr(sync_session, "expire_on_commit", True):
+                await self.db.refresh(event)
         except Exception:
             await self.db.rollback()
             raise

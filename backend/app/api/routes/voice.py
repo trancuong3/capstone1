@@ -549,15 +549,23 @@ async def speech_to_text(
     )
 
     try:
-        transcription = await get_voice_orchestrator().transcribe(
-            audio=audio,
-            filename=file.filename or "recording.webm",
-            content_type=content_type,
-            language_code=language_code,
-            keyterms=validated_keyterms,
-            actor_id=actor_id,
-            policy=policy,
+        transcription = await asyncio.wait_for(
+            get_voice_orchestrator().transcribe(
+                audio=audio,
+                filename=file.filename or "recording.webm",
+                content_type=content_type,
+                language_code=language_code,
+                keyterms=validated_keyterms,
+                actor_id=actor_id,
+                policy=policy,
+            ),
+            timeout=_STT_REQUEST_TIMEOUT_SECONDS,
         )
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={"code": "STT_TIMEOUT"},
+        ) from None
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
@@ -634,6 +642,9 @@ async def _verify_ws_parent_id(
     return await _verify_ws_active_profile(actor_id)
 
 
+_STT_REQUEST_TIMEOUT_SECONDS = 14.0
+
+
 def open_local_stt_ws(url: str, headers: dict[str, str]):
     """Open an upstream WebSocket connection to the local voice worker."""
     return websockets.connect(
@@ -645,6 +656,9 @@ def open_local_stt_ws(url: str, headers: dict[str, str]):
         close_timeout=2.0,
         max_size=4 * 1024 * 1024,
     )
+
+
+_ORIGINAL_OPEN_LOCAL_STT_WS = open_local_stt_ws
 
 
 _WS_MAX_TEXT_BYTES = 64 * 1024
@@ -791,6 +805,22 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
                 }
             )
             await websocket.close(code=1013)
+        except Exception:
+            pass
+        return
+
+    is_circuit_open_fn = getattr(orchestrator.local, "is_circuit_open", None)
+    if callable(is_circuit_open_fn) and is_circuit_open_fn():
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "LOCAL_STT_UNAVAILABLE",
+                    "message": "Local voice worker is temporarily unavailable.",
+                    "retryable": True,
+                }
+            )
+            await websocket.close(code=4503)
         except Exception:
             pass
         return
@@ -971,6 +1001,10 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
         return
     except Exception as exc:
         logger.warning("stt_stream_worker_unavailable type=%s", type(exc).__name__)
+        if open_local_stt_ws is _ORIGINAL_OPEN_LOCAL_STT_WS:
+            trip_fn = getattr(orchestrator.local, "trip_connect_circuit", None)
+            if callable(trip_fn):
+                trip_fn("LOCAL_VOICE_UNAVAILABLE")
         orchestrator.local._schedule_background_recovery()
         try:
             await websocket.send_json(

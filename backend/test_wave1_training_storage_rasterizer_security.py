@@ -244,12 +244,21 @@ class DriveDesktopAndTrainingSecurityTests(unittest.IsolatedAsyncioTestCase):
 
                 # Hydrating store from DB row works when allowlisted, fails when removed from allowlist
                 store = build_google_drive_store_from_row(saved_rows[0], use_warm_cache=False)
-                health = store.health_check()
-                self.assertTrue(health.healthy)
-                self.assertNotIn(str(tmp2), str(health.detail))
-                selftest = store.self_test()
-                self.assertTrue(selftest.ok)
-                self.assertNotIn(str(tmp2), str(selftest.detail))
+                fake_disk_usage = SimpleNamespace(
+                    total=20 * 1024 * 1024 * 1024,
+                    used=5 * 1024 * 1024 * 1024,
+                    free=15 * 1024 * 1024 * 1024,
+                )
+                with patch(
+                    "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+                    return_value=fake_disk_usage,
+                ):
+                    health = store.health_check()
+                    self.assertTrue(health.healthy)
+                    self.assertNotIn(str(tmp2), str(health.detail))
+                    selftest = store.self_test()
+                    self.assertTrue(selftest.ok)
+                    self.assertNotIn(str(tmp2), str(selftest.detail))
 
                 # Raw OSError text and local host path must NOT leak in health_check / ensure_directory_tree / quota_check
                 secret_os_msg = f"[WinError 5] Access is denied: '{tmp2}\\secret_internal_file'"
@@ -848,7 +857,13 @@ class DocumentRasterizerHardeningTests(unittest.TestCase):
             captured_cmd.extend(cmd)
             return SimpleNamespace(returncode=1, stdout=b"", stderr=b"")
 
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
         with patch("app.services.document_rasterizer_service.shutil.which", return_value="/usr/bin/soffice"), \
+             patch("app.services.document_rasterizer_service.shutil.disk_usage", return_value=fake_disk_usage), \
              patch("app.services.document_rasterizer_service.subprocess.run", side_effect=_fake_run):
             result = rasterizer._try_libreoffice_docx_to_pdf(b"PK\x03\x04dummy")
 
@@ -894,9 +909,12 @@ class DocumentRasterizerHardeningTests(unittest.TestCase):
         self.assertEqual(Image.MAX_IMAGE_PIXELS, original_max_pixels)
 
     def test_iter_rasterized_spooled_document_rejects_unsafe_docx_with_422_not_unbound_local_error(self):
-        malicious = _make_docx_zip({
-            "[Content_Types].xml": '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><Types/>',
-        })
+        malicious = _rewrite_docx(
+            _make_base_docx(),
+            replace={
+                "[Content_Types].xml": b'<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><Types/>',
+            },
+        )
         spool = rasterizer.SpooledUploadDocument(
             file_name="evil.docx",
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

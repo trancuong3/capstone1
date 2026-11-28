@@ -73,6 +73,7 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getVoiceEngineHealthForRouting,
   isHostedLocalVoiceUnconfigured,
+  isLocalVoiceConfirmedUnavailable,
   mapLocalVoiceToGoogleBackup,
   recordTtsEngineUsage,
   type VoiceEngineHealthSnapshot,
@@ -307,6 +308,55 @@ function isLocalVoiceUnconfiguredHealth(): boolean {
   );
 }
 
+function isLocalVoiceUnavailableHealth(): boolean {
+  const health = getVoiceEngineHealthForRouting();
+  if (!health) return false;
+  return (
+    isLocalVoiceConfirmedUnavailable(health) ||
+    health.local.tts_error_code === "LOCAL_VOICE_UNAVAILABLE" ||
+    health.local.tts_error_code === "LOCAL_VOICE_TIMEOUT" ||
+    health.local.tts_error_code === "LOCAL_TTS_UNAVAILABLE" ||
+    (!health.local.available && !health.local.tts_ready)
+  );
+}
+
+/**
+ * Dynamic/uncached practice prompts (e.g. interpolated per-word prompts, private
+ * book cues, or plain non-catalog prompts without explicit cache targets) are
+ * never served from backend precomputed catalog/coaching cache and can fast-skip
+ * dead backend TTS when device fallback is allowed by policy.
+ */
+function isDynamicUncachedPrompt(
+  spokenText: string,
+  options: SpeechPlayOptions,
+): boolean {
+  if (options.precomputedAudioUrl) return false;
+  if (options.cacheScope === "PRIVATE" || options.isPrivateBook === true) {
+    return true;
+  }
+  if (
+    !options.wordSample &&
+    !options.bookId &&
+    !options.pageId &&
+    !options.pageRevisionId &&
+    !options.coaching &&
+    options.cacheScope !== "CATALOG" &&
+    options.cacheScope !== "COACHING"
+  ) {
+    return true;
+  }
+  if (
+    options.coaching &&
+    !options.wordSample &&
+    /(?:hãy đọc từ|đọc lại từ|đọc theo nhé:|đọc thử từ|luyện từ)/i.test(
+      spokenText,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function isElevenLabsLiveTtsUsable(
   health: VoiceEngineHealthSnapshot | null,
 ): boolean {
@@ -416,7 +466,9 @@ function canUseAllowedDeviceFallbackTts(
   };
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
-    (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
+    (isTechnicalServerOutage(error) ||
+      isLocalVoiceUnconfiguredHealth() ||
+      isLocalVoiceUnavailableHealth());
   const hostedOnDeviceFallback =
     isHostedNoLiveServerTts(error) &&
     (isAndroidNativeSpeechAvailable() || hasVietnameseBrowserVoice());
@@ -1583,6 +1635,14 @@ export class TtsPlayback {
     const charOffsets = options.words
       ? computeWordCharOffsets(text, options.words)
       : [];
+    const allWordOffsets =
+      charOffsets.length > 0
+        ? charOffsets
+        : computeWordCharOffsets(text, wordList);
+    const finalWordCharOffset =
+      allWordOffsets.length > 0
+        ? (allWordOffsets[allWordOffsets.length - 1] ?? 0)
+        : 0;
     const msPerWord = Math.max(
       140,
       Math.round(340 / Math.max(0.5, operation.voice.speed)),
@@ -1601,6 +1661,10 @@ export class TtsPlayback {
       let startedEmitted = false;
       let speakDispatched = false;
       let sawBoundary = false;
+      let sawAnyBoundary = false;
+      let observedSynthBusy = false;
+      let postBusyIdleTicks = 0;
+      let lastBoundaryAt = 0;
       let lastWordIdx = -1;
       let lastBoundaryCharIndex = 0;
       let currentOffsetBase = 0;
@@ -1706,12 +1770,22 @@ export class TtsPlayback {
         u.rate = operation.voice.speed;
         u.voice = resolvedVoice;
         u.onstart = () => {
+          if (synth.speaking || synth.pending) {
+            observedSynthBusy = true;
+            postBusyIdleTicks = 0;
+          }
           ensureStarted();
         };
         u.onboundary = (event) => {
           if (!active()) return;
+          if (synth.speaking || synth.pending) {
+            observedSynthBusy = true;
+            postBusyIdleTicks = 0;
+          }
           ensureStarted();
           if (typeof event.charIndex === "number") {
+            sawAnyBoundary = true;
+            lastBoundaryAt = Date.now();
             const globalCharIndex = baseOffset + Math.max(0, event.charIndex);
             lastBoundaryCharIndex = Math.max(
               lastBoundaryCharIndex,
@@ -1833,7 +1907,21 @@ export class TtsPlayback {
         speakDispatched = true;
         lastWatchdogTickAt = Date.now();
         try {
+          if (
+            !operation.paused &&
+            Boolean((synth as { paused?: boolean }).paused)
+          ) {
+            try {
+              synth.resume?.();
+            } catch {
+              // Ignore browser resume error before speak
+            }
+          }
           synth.speak(activeUtterance);
+          if (synth.speaking || synth.pending) {
+            observedSynthBusy = true;
+            postBusyIdleTicks = 0;
+          }
           // If voice was paused right before speak, respect pause state
           if (operation.paused) {
             synth.pause?.();
@@ -1842,8 +1930,8 @@ export class TtsPlayback {
           finish(unavailable());
           return;
         }
-        // Watchdog guards Chrome & Android WebView bugs where `onend` (or `onstart`)
-        // is silently swallowed so reading & Quiz flows never hang permanently.
+        // Watchdog guards Chrome, Edge & Android WebView bugs where `onend` (or `onstart`)
+        // is silently swallowed so preview buttons, reading & Quiz flows never stay stuck.
         watchdogTimer = window.setInterval(() => {
           if (!active()) {
             clearTimers();
@@ -1856,6 +1944,11 @@ export class TtsPlayback {
           activeElapsedMs += delta;
 
           const synthStillBusy = Boolean(synth.speaking || synth.pending);
+          const synthPaused = Boolean((synth as { paused?: boolean }).paused);
+          if (synthStillBusy) {
+            observedSynthBusy = true;
+            postBusyIdleTicks = 0;
+          }
           if (activeElapsedMs >= maxWatchdogMs) {
             try {
               synth.cancel?.();
@@ -1863,6 +1956,38 @@ export class TtsPlayback {
               // Ignore cancel error
             }
             ensureStarted();
+            finish();
+            return;
+          }
+          // Real browser SpeechSynthesis: once speaking/pending was observed true and
+          // returns to false (unpaused), finish promptly instead of waiting several seconds.
+          if (
+            speakDispatched &&
+            observedSynthBusy &&
+            !synthStillBusy &&
+            !synthPaused
+          ) {
+            postBusyIdleTicks += 1;
+            if (postBusyIdleTicks >= 2) {
+              ensureStarted();
+              finish();
+              return;
+            }
+          }
+          // Chromium SAPI/Natural voice bug where `synth.speaking` sticks true after the
+          // final word boundary was already spoken.
+          if (
+            startedEmitted &&
+            sawAnyBoundary &&
+            lastBoundaryCharIndex >= finalWordCharOffset &&
+            lastBoundaryAt > 0 &&
+            now - lastBoundaryAt >= Math.max(900, Math.round(msPerWord * 2.5))
+          ) {
+            try {
+              synth.cancel?.();
+            } catch {
+              // Ignore cancel error
+            }
             finish();
             return;
           }
@@ -1884,7 +2009,7 @@ export class TtsPlayback {
             ensureStarted();
             finish();
           }
-        }, 250);
+        }, 150);
       };
 
       try {
@@ -2137,19 +2262,19 @@ export class TtsPlayback {
           this.auditUtterance(operation, kind, spokenText, served);
         };
 
-        const hasCacheTarget = Boolean(
-          options.precomputedAudioUrl ||
-          options.bookId ||
-          options.pageId ||
-          options.pageRevisionId ||
-          options.coaching ||
-          options.wordSample ||
-          options.cacheScope === "CATALOG" ||
-          options.cacheScope === "COACHING" ||
-          this.defaultCacheContext?.bookId ||
-          this.defaultCacheContext?.pageId ||
-          this.defaultCacheContext?.pageRevisionId,
-        );
+        const dynamicUncached = isDynamicUncachedPrompt(spokenText, options);
+        const hasCacheTarget =
+          !dynamicUncached &&
+          Boolean(
+            options.precomputedAudioUrl ||
+            options.bookId ||
+            options.pageId ||
+            options.pageRevisionId ||
+            options.coaching ||
+            options.wordSample ||
+            options.cacheScope === "CATALOG" ||
+            options.cacheScope === "COACHING",
+          );
         let useBrowserFallback =
           this.isSessionPinnedToDeviceTts(operation) ||
           shouldSkipBackendTtsForBrowserFallback(operation, hasCacheTarget);
@@ -2291,6 +2416,9 @@ export class TtsPlayback {
                 ...(audioFormat ? { audioFormat } : {}),
                 ...(operation.voice.bypassSessionLock
                   ? { bypassSessionLock: true }
+                  : {}),
+                ...(operation.voice.utteranceKind === "voice_preview"
+                  ? { timeoutMs: 4_500 }
                   : {}),
                 ...cacheMeta,
                 signal: operation.controller.signal,
@@ -3416,6 +3544,9 @@ export class TtsPlayback {
                 ...(operation.voice.bypassSessionLock
                   ? { bypassSessionLock: true }
                   : {}),
+                ...(operation.voice.utteranceKind === "voice_preview"
+                  ? { timeoutMs: 4_500 }
+                  : {}),
                 ...timedCacheMeta,
                 signal: operation.controller.signal,
               }),
@@ -3844,6 +3975,7 @@ export class TtsPlayback {
         if (this.media === media) this.media = null;
         audio.onended =
           audio.onerror =
+          audio.onpause =
           audio.ontimeupdate =
           audio.onloadedmetadata =
           audio.onstalled =
@@ -3856,6 +3988,14 @@ export class TtsPlayback {
         if (error) reject(error);
         else resolve(duration);
       };
+      const hasReachedNaturalAudioEnd = () =>
+        audio.ended ||
+        (!operation.paused &&
+          audio.paused &&
+          lastObservedAudioTime > 0 &&
+          Number.isFinite(audio.duration) &&
+          audio.duration > 0 &&
+          audio.currentTime >= Math.max(0, audio.duration - 0.08));
       const fail = () => {
         if (
           audio.currentTime <= 0 &&
@@ -3924,9 +4064,13 @@ export class TtsPlayback {
         }
       };
       const tick = () => {
-        if (!active() || operation.paused || audio.paused || audio.ended)
-          return;
+        if (!active() || operation.paused) return;
         recordAudioProgress();
+        if (hasReachedNaturalAudioEnd()) {
+          finish();
+          return;
+        }
+        if (audio.paused) return;
         validate();
         if (!active()) return;
         if (absolute && validated) {
@@ -3962,22 +4106,26 @@ export class TtsPlayback {
           }
           this.onState("playing");
           onStart(audio.duration);
+          if (audio.ended) {
+            finish();
+            return;
+          }
           if (stallWatchdogTimer === null) {
             stallWatchdogTimer = window.setInterval(() => {
               if (!active()) return;
-              if (operation.paused || audio.paused || audio.ended) {
+              if (operation.paused) {
                 lastProgressAt = Date.now();
                 return;
               }
-              if (audio.currentTime > lastObservedAudioTime + 0.005) {
-                lastObservedAudioTime = audio.currentTime;
-                lastProgressAt = Date.now();
+              recordAudioProgress();
+              if (hasReachedNaturalAudioEnd()) {
+                finish();
                 return;
               }
               if (Date.now() - lastProgressAt >= 12_000) {
                 fail();
               }
-            }, 1_500);
+            }, 500);
           }
           this.cancelFrame();
           this.frame = requestAnimationFrame(tick);
@@ -4039,6 +4187,14 @@ export class TtsPlayback {
       };
       audio.onended = () => {
         if (active()) finish();
+      };
+      audio.onpause = () => {
+        if (active()) {
+          recordAudioProgress();
+          if (hasReachedNaturalAudioEnd()) {
+            finish();
+          }
+        }
       };
       audio.onerror = () => {
         if (active()) fail();

@@ -2680,6 +2680,19 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           resolveTranscript = resolve;
         }),
     );
+    let cancelSamplePlayback: ((error: Error) => void) | null = null;
+    speechPlayerMock.play.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          speechPlayerMock.isPlaying = true;
+          cancelSamplePlayback = reject;
+        }),
+    );
+    speechPlayerMock.stop.mockImplementation(() => {
+      speechPlayerMock.isPlaying = false;
+      cancelSamplePlayback?.(new DOMException("Stopped", "AbortError"));
+      cancelSamplePlayback = null;
+    });
     services.readingService.getCurrentPage
       .mockResolvedValueOnce(pageFour)
       .mockResolvedValue(pageFive);
@@ -2696,23 +2709,25 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         name: "Bé đọc với nhận diện giọng nói",
       }),
     );
-    // A word sample stops capture; page navigation can overlap its pending STT.
+    // A word sample stops capture without blocking TTS playback on slow STT;
+    // page navigation can still overlap its background STT request.
     await user.click(screen.getByRole("button", { name: "Bé" }));
-    await waitFor(() =>
-      expect(speechServiceMock.transcribe).toHaveBeenCalledOnce(),
-    );
+    await waitFor(() => {
+      expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
+      expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+        wordSample: true,
+      });
+    });
     await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
+    await screen.findByLabelText("Trang sách 5");
     expect(speechRecorderMock.stop).toHaveBeenCalledOnce();
     expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText("Trang sách 4")).toBeInTheDocument();
     await act(async () =>
       resolveTranscript({ text: "Bé mèo nhỏ đang", words: [] }),
     );
-    await screen.findByLabelText("Trang sách 5");
     const nextWord = screen.getByRole("button", { name: "Bé" });
     expect(nextWord.className).not.toContain("bg-green-200");
     expect(nextWord.className).not.toContain("bg-success-surface");
-    expect(speechPlayerMock.play).not.toHaveBeenCalled();
     expect(speechRecorderMock.start).toHaveBeenCalledOnce();
     expect(services.readingService.completeCurrentPage).not.toHaveBeenCalled();
   });

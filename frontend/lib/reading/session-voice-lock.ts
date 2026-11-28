@@ -568,13 +568,22 @@ export function lockSessionVoice(
   const existing = getSessionVoiceLock(cleanSessionId);
   const speechPrefs = getSpeechPreferences();
   const speechMeta = getSpeechPreferencesMeta();
+  const policyPrefs = getVoicePolicyPreferences();
   const existingLockedAtMs = existing ? Date.parse(existing.lockedAt) : 0;
+  const expectedGlobalVoiceId =
+    speechPrefs.voiceId && !isLegacyExternalVoiceId(speechPrefs.voiceId)
+      ? speechPrefs.voiceId
+      : getDefaultVoiceIdForRegionAndGender(
+          policyPrefs.region,
+          speechMeta.gender,
+        );
   const hasNewerGlobalPreference =
     Boolean(existing) &&
     speechMeta.globalSelectionUpdatedAt > 0 &&
     Number.isFinite(existingLockedAtMs) &&
     speechMeta.globalSelectionUpdatedAt > existingLockedAtMs &&
-    ((speechPrefs.voiceId && speechPrefs.voiceId !== existing!.voiceId) ||
+    (expectedGlobalVoiceId !== existing!.voiceId ||
+      clampSpeed(speechPrefs.speed) !== clampSpeed(existing!.speed) ||
       speechMeta.gender !==
         (existing!.gender ?? resolveVoiceGender(existing!.voiceId)));
 
@@ -596,7 +605,6 @@ export function lockSessionVoice(
     return existing;
   }
 
-  const policyPrefs = getVoicePolicyPreferences();
   let requestedVoice = overrides?.voiceId ?? speechPrefs.voiceId;
   if (isLegacyExternalVoiceId(requestedVoice)) {
     requestedVoice = null;
@@ -967,8 +975,17 @@ export function applyGlobalTeacherVoiceSelection(
     targetVoiceId,
     input.modelVersion ?? currentPolicy.modelVersion,
   );
-  const finalUpdatedAt = input.updatedAt ?? Date.now();
   const prevActiveLock = getActiveSessionVoiceLock();
+  const prevActiveLockedAtMs = prevActiveLock
+    ? Date.parse(prevActiveLock.lockedAt)
+    : 0;
+  const minMonotonicStamp = Math.max(
+    getSpeechPreferencesMeta().globalSelectionUpdatedAt,
+    Number.isFinite(prevActiveLockedAtMs) ? prevActiveLockedAtMs : 0,
+  );
+  const finalUpdatedAt =
+    input.updatedAt ??
+    Math.max(Date.now(), minMonotonicStamp > 0 ? minMonotonicStamp + 1 : 0);
 
   // 1. Update local preferences (notifies useSpeechPreferences, useTeacherPersona, TtsPlayback)
   const storedVoiceId =

@@ -1505,10 +1505,16 @@ export function SentenceShooterScreen({
             <div className="flex shrink-0 items-center gap-2">
               <ReadingVoiceSettings
                 fallbackNotice={speechPlayer.fallbackNotice}
-                isPreviewing={speechPlayer.isPlaying}
+                isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
                 onPreview={(sample) => {
                   speechPlayer.stop();
-                  return speechPlayer.play(sample, { bypassSessionLock: true });
+                  return speechPlayer.play(sample, {
+                    coaching: true,
+                    cacheScope: "COACHING",
+                    isPrivateBook: false,
+                    bypassSessionLock: true,
+                    utteranceKind: "voice_preview",
+                  });
                 }}
                 onStopPreview={speechPlayer.stop}
               />
@@ -2099,10 +2105,16 @@ export function SentenceShooterScreen({
         </div>
         <ReadingVoiceSettings
           fallbackNotice={speechPlayer.fallbackNotice}
-          isPreviewing={speechPlayer.isPlaying}
+          isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
           onPreview={(sample) => {
             speechPlayer.stop();
-            return speechPlayer.play(sample, { bypassSessionLock: true });
+            return speechPlayer.play(sample, {
+              coaching: true,
+              cacheScope: "COACHING",
+              isPrivateBook: false,
+              bypassSessionLock: true,
+              utteranceKind: "voice_preview",
+            });
           }}
           onStopPreview={speechPlayer.stop}
         />

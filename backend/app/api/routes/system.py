@@ -843,6 +843,7 @@ async def evaluate_difficult_word_direct(
     evidence_word_ids: Annotated[str | None, Form(max_length=4096)] = None,
     provider_mode: Annotated[str | None, Form(max_length=40)] = None,
     allow_google_stt: Annotated[str | None, Form(max_length=16)] = None,
+    include_next_recommended: Annotated[bool, Form()] = True,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -878,6 +879,7 @@ async def evaluate_difficult_word_direct(
         session_id=str(session_id) if session_id is not None else None,
         page_id=str(page_id) if page_id is not None else None,
         page_revision_id=page_revision_id,
+        source="difficult_word_practice",
     )
     service = _difficult_words_service(db)
     evaluate_kwargs: dict[str, object] = {
@@ -903,13 +905,17 @@ async def evaluate_difficult_word_direct(
 
     try:
         sig = inspect.signature(service.evaluate_word_direct)
-        if "policy" in sig.parameters or any(
+        has_var_kw = any(
             p.kind == inspect.Parameter.VAR_KEYWORD
             for p in sig.parameters.values()
-        ):
+        )
+        if "policy" in sig.parameters or has_var_kw:
             evaluate_kwargs["policy"] = policy
+        if "include_next_recommended" in sig.parameters or has_var_kw:
+            evaluate_kwargs["include_next_recommended"] = include_next_recommended
     except (TypeError, ValueError):
         evaluate_kwargs["policy"] = policy
+        evaluate_kwargs["include_next_recommended"] = include_next_recommended
 
     return await service.evaluate_word_direct(
         child_id,
@@ -948,26 +954,51 @@ async def evaluate_difficult_word_practice_audio(
     audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
     browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
     browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    provider_mode: Annotated[str | None, Form(max_length=40)] = None,
+    allow_google_stt: Annotated[str | None, Form(max_length=16)] = None,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    import inspect
+    from app.api.routes.voice import _parse_bool_form, _parse_provider_mode
+
     try:
         audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
     finally:
         await file.close()
 
-    return await _difficult_words_service(db).evaluate_audio_attempt(
+    policy = VoicePolicyContext(
+        provider_mode=_parse_provider_mode(provider_mode),
+        allow_google_stt=_parse_bool_form(allow_google_stt),
+        actor_id=actor_id,
+        source="difficult_word_practice",
+    )
+    service = _difficult_words_service(db)
+    eval_kwargs: dict[str, object] = {
+        "completion_request_id": completion_request_id,
+        "audio_bytes": audio_bytes,
+        "filename": file.filename or "practice.webm",
+        "content_type": file.content_type,
+        "audio_duration_ms": audio_duration_ms,
+        "audio_quality_status": audio_quality_status,
+        "browser_transcript": browser_transcript,
+        "browser_confidence": browser_confidence,
+    }
+    try:
+        sig = inspect.signature(service.evaluate_audio_attempt)
+        if "policy" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        ):
+            eval_kwargs["policy"] = policy
+    except (TypeError, ValueError):
+        eval_kwargs["policy"] = policy
+
+    return await service.evaluate_audio_attempt(
         child_id,
         attempt_id,
         actor_id,
-        completion_request_id=completion_request_id,
-        audio_bytes=audio_bytes,
-        filename=file.filename or "practice.webm",
-        content_type=file.content_type,
-        audio_duration_ms=audio_duration_ms,
-        audio_quality_status=audio_quality_status,
-        browser_transcript=browser_transcript,
-        browser_confidence=browser_confidence,
+        **eval_kwargs,  # type: ignore[arg-type]
     )
 
 

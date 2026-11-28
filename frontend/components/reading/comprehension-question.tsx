@@ -1432,7 +1432,9 @@ export function ComprehensionQuestion({
                   <ReadingVoiceSettings
                     disabled={voicePhase === "listening"}
                     fallbackNotice={speechPlayer.fallbackNotice}
-                    isPreviewing={speechPlayer.isPlaying}
+                    isPreviewing={
+                      speechPlayer.isPlaying && !speechPlayer.isPaused
+                    }
                     onPreview={(sample) => {
                       stopAllVoice();
                       return speechPlayer.play(sample, {

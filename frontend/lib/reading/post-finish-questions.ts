@@ -1,7 +1,7 @@
 import type { ComprehensionService } from "@/lib/api/comprehension-service";
 
 /** Generation calls an AI model, so cap how long the finish button may wait. */
-export const QUESTION_PREPARE_TIMEOUT_MS = 45_000;
+export const QUESTION_PREPARE_TIMEOUT_MS = 12_000;
 
 /**
  * Decide what the child sees after a reading session is finished.

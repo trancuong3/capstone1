@@ -1701,11 +1701,17 @@ export function PictureDescriptionScreen() {
             <ReadingVoiceSettings
               disabled={isRecordingVoice}
               fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying}
+              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
               onPreview={(sample) => {
                 abortActiveVoiceCapture({ preserveDraft: true });
                 stopSpeechPlayback();
-                return speechPlayer.play(sample, { bypassSessionLock: true });
+                return speechPlayer.play(sample, {
+                  coaching: true,
+                  cacheScope: "COACHING",
+                  isPrivateBook: false,
+                  bypassSessionLock: true,
+                  utteranceKind: "voice_preview",
+                });
               }}
               onStopPreview={stopSpeechPlayback}
             />

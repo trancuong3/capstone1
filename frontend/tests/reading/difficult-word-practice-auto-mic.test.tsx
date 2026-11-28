@@ -1,9 +1,20 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
 import type { AudioQualitySnapshot } from "@/lib/reading/audio-quality";
+import * as browserWasmStt from "@/lib/reading/browser-wasm-stt";
+import { resetAndroidNativeSpeechBridgeForTests } from "@/lib/reading/native-speech-bridge";
+import {
+  resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
+import * as shortWordAudio from "@/lib/reading/short-word-audio";
+import {
+  resetVoiceEngineStatus,
+  setCachedVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 import type {
   DifficultWordDTO,
   DifficultWordPracticeAttemptDTO,
@@ -13,8 +24,19 @@ import {
   TEST_CHILD_ID,
 } from "@/test/fixtures/report-data-fixture";
 
-const { speechPlayerMock, speechRecorderMock, evaluatePracticeWordMock } =
-  vi.hoisted(() => ({
+const {
+  speechPlayerMock,
+  speechRecorderMock,
+  evaluatePracticeWordMock,
+  getPracticeHistoryMock,
+  difficultWordServiceMock,
+} = vi.hoisted(() => {
+  const evaluatePracticeWord = vi.fn();
+  const getPracticeHistory = vi.fn(async () => ({
+    storage_ready: true,
+    items: [],
+  }));
+  return {
     speechPlayerMock: {
       isPlaying: false,
       isPaused: false,
@@ -39,8 +61,14 @@ const { speechPlayerMock, speechRecorderMock, evaluatePracticeWordMock } =
       getQuality: vi.fn<() => AudioQualitySnapshot>(),
       getSettings: vi.fn(() => ({})),
     },
-    evaluatePracticeWordMock: vi.fn(),
-  }));
+    evaluatePracticeWordMock: evaluatePracticeWord,
+    getPracticeHistoryMock: getPracticeHistory,
+    difficultWordServiceMock: {
+      getPracticeHistory,
+      evaluatePracticeWord,
+    },
+  };
+});
 
 vi.mock("@/hooks/use-speech-player", () => ({
   useSpeechPlayer: () => speechPlayerMock,
@@ -50,13 +78,7 @@ vi.mock("@/hooks/use-speech-recorder", () => ({
 }));
 vi.mock("@/hooks/use-report-services", () => ({
   useReportServices: () => ({
-    difficultWordService: {
-      getPracticeHistory: vi.fn(async () => ({
-        storage_ready: true,
-        items: [],
-      })),
-      evaluatePracticeWord: evaluatePracticeWordMock,
-    },
+    difficultWordService: difficultWordServiceMock,
   }),
 }));
 
@@ -148,10 +170,24 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       isSpeaking: false,
     });
     evaluatePracticeWordMock.mockReset();
+    getPracticeHistoryMock.mockReset().mockResolvedValue({
+      storage_ready: true,
+      items: [],
+    });
+    resetVoiceEngineStatus();
+    resetVoiceLockAndPolicyForTests();
+    browserWasmStt.resetBrowserWasmSttForTests();
+    resetAndroidNativeSpeechBridgeForTests();
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
+    resetVoiceEngineStatus();
+    resetVoiceLockAndPolicyForTests();
+    browserWasmStt.resetBrowserWasmSttForTests();
+    resetAndroidNativeSpeechBridgeForTests();
   });
 
   it("pre-warms mic before prompt, auto-reopens mic after wrong pronunciation, and pauses with explicit buttons on repeated silence", async () => {
@@ -667,4 +703,454 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       else Reflect.deleteProperty(window, "SpeechRecognition");
     }
   }, 20_000);
+
+  it("shows EVALUATING immediately on stop and aborts in-flight WASM decode cleanly on Pause", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNAVAILABLE",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    vi.spyOn(browserWasmStt, "detectBrowserWasmSttSupport").mockReturnValue({
+      supported: true,
+      worker: true,
+      wasm: true,
+      simd: true,
+      indexedDb: true,
+      subtleCrypto: true,
+      isSecureContext: true,
+      reason: null,
+    });
+
+    let capturedSignal: AbortSignal | undefined;
+    let capturedOpts:
+      | { initTimeoutMs?: number; timeoutMs?: number; signal?: AbortSignal }
+      | undefined;
+    let resolveWasm:
+      | ((val: { readonly text: string; readonly decodeMs: number }) => void)
+      | undefined;
+
+    const fakeWasmClient = {
+      isReady: () => true,
+      transcribeSamples: vi.fn(),
+      transcribeBlob: vi.fn(
+        (
+          _blob: Blob,
+          opts?: {
+            initTimeoutMs?: number;
+            timeoutMs?: number;
+            signal?: AbortSignal;
+          },
+        ) => {
+          capturedOpts = opts;
+          capturedSignal = opts?.signal;
+          return new Promise<{
+            readonly text: string;
+            readonly decodeMs: number;
+          }>((resolve, reject) => {
+            resolveWasm = resolve;
+            opts?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        },
+      ),
+    };
+    vi.spyOn(browserWasmStt, "getBrowserWasmSttClient").mockReturnValue(
+      fakeWasmClient as unknown as browserWasmStt.BrowserWasmSttClient,
+    );
+
+    const user = userEvent.setup();
+    render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onClose={vi.fn()}
+        onProgressSaved={vi.fn(async () => {})}
+        onSelectWord={vi.fn()}
+        word={wordItem}
+        words={[wordItem]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+    );
+
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+
+    // Immediately transitions to EVALUATING while WASM is still decoding
+    expect(await screen.findByText("Đang kiểm tra")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("practice-evaluating-progress"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fakeWasmClient.transcribeBlob).toHaveBeenCalledTimes(1),
+    );
+    expect(capturedOpts?.initTimeoutMs).toBe(4_000);
+    expect(capturedOpts?.timeoutMs).toBe(8_000);
+    expect(capturedSignal?.aborted).toBe(false);
+    expect(evaluatePracticeWordMock).not.toHaveBeenCalled();
+
+    // Pause aborts the WASM AbortSignal and exits EVALUATING cleanly
+    await user.click(screen.getByRole("button", { name: /Tạm dừng/ }));
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(
+      await screen.findByRole("button", { name: /Tiếp tục luyện/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("practice-evaluating-progress"),
+    ).not.toBeInTheDocument();
+
+    // Late WASM resolution must never trigger backend evaluation
+    resolveWasm?.({ text: "một", decodeMs: 50 });
+    await Promise.resolve();
+    expect(evaluatePracticeWordMock).not.toHaveBeenCalled();
+
+    // Resuming works cleanly (stopCaptureLockRef and evaluationRef were reset)
+    await user.click(screen.getByRole("button", { name: /Tiếp tục luyện/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  it("omits WAV upload and sends BROWSER_WASM_VERIFIED on WASM match/mismatch under local_only, and skips cold WASM when cloud fallback is enabled", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNAVAILABLE",
+      },
+      google: {
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    vi.spyOn(browserWasmStt, "detectBrowserWasmSttSupport").mockReturnValue({
+      supported: true,
+      worker: true,
+      wasm: true,
+      simd: true,
+      indexedDb: true,
+      subtleCrypto: true,
+      isSecureContext: true,
+      reason: null,
+    });
+
+    const pcm16k = new Float32Array(3200).fill(0.05);
+    const wavWithPcm = Object.assign(
+      new Blob(["wav-16k"], { type: "audio/wav" }),
+      {
+        pcm16k,
+      },
+    );
+    vi.spyOn(shortWordAudio, "prepareShortWordAudio").mockResolvedValue(
+      wavWithPcm as never,
+    );
+
+    let wasmReady = true;
+    const transcribeSamples = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "mốt", decodeMs: 18 })
+      .mockResolvedValueOnce({ text: "một", decodeMs: 15 });
+    const transcribeBlob = vi.fn();
+    vi.spyOn(browserWasmStt, "getBrowserWasmSttClient").mockReturnValue({
+      isReady: () => wasmReady,
+      transcribeSamples,
+      transcribeBlob,
+    } as unknown as browserWasmStt.BrowserWasmSttClient);
+
+    evaluatePracticeWordMock
+      .mockResolvedValueOnce(makeAttempt("INCORRECT", "mốt"))
+      .mockResolvedValueOnce(makeAttempt("CORRECT", "một"));
+
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onClose={vi.fn()}
+        onProgressSaved={vi.fn(async () => {})}
+        onSelectWord={vi.fn()}
+        word={wordItem}
+        words={[wordItem]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+    );
+
+    // Turn 1: WASM mismatch ("mốt") under local_only -> omits audio, uses transcribeSamples & BROWSER_WASM_VERIFIED
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(1),
+    );
+    expect(transcribeSamples).toHaveBeenCalledTimes(1);
+    expect(transcribeBlob).not.toHaveBeenCalled();
+    expect(evaluatePracticeWordMock.mock.calls[0][1]).toMatchObject({
+      audio: undefined,
+      audio_quality_status: "BROWSER_WASM_VERIFIED",
+      browser_transcript: "mốt",
+      browser_confidence: 0.85,
+      includeNextRecommended: false,
+    });
+
+    // Turn 2: WASM exact match ("một") -> omits audio, BROWSER_WASM_VERIFIED with 0.95 confidence, keeps local self-playback
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
+    );
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(2),
+    );
+    expect(evaluatePracticeWordMock.mock.calls[1][1]).toMatchObject({
+      audio: undefined,
+      audio_quality_status: "BROWSER_WASM_VERIFIED",
+      browser_transcript: "một",
+      browser_confidence: 0.95,
+      includeNextRecommended: false,
+    });
+    expect(
+      screen.getByRole("button", { name: /Nghe lại giọng bé/ }),
+    ).toBeInTheDocument();
+    unmount();
+
+    // Scenario 2: Cloud fallback enabled + cold WASM (isReady=false) -> skips cold WASM and uploads audio directly
+    wasmReady = false;
+    transcribeSamples.mockClear();
+    transcribeBlob.mockClear();
+    evaluatePracticeWordMock
+      .mockReset()
+      .mockResolvedValueOnce(makeAttempt("CORRECT", "một"));
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+    });
+
+    render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onClose={vi.fn()}
+        onProgressSaved={vi.fn(async () => {})}
+        onSelectWord={vi.fn()}
+        word={wordItem}
+        words={[wordItem]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
+    );
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(1),
+    );
+    expect(transcribeSamples).not.toHaveBeenCalled();
+    expect(transcribeBlob).not.toHaveBeenCalled();
+    expect(evaluatePracticeWordMock.mock.calls[0][1].audio).toBeInstanceOf(
+      Blob,
+    );
+    expect(evaluatePracticeWordMock.mock.calls[0][1].audio_quality_status).toBe(
+      "SPEECH_DETECTED",
+    );
+    expect(
+      evaluatePracticeWordMock.mock.calls[0][1].includeNextRecommended,
+    ).toBe(false);
+  }, 15_000);
+
+  it("omits fabricated silent WAV and sends ANDROID_NATIVE_STT on Android native speech", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNAVAILABLE",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const messageListeners = new Set<(ev: { data: string }) => void>();
+    let activeSttRequestId: string | null = null;
+    const emitNative = (payload: Record<string, unknown>) => {
+      const data = JSON.stringify(payload);
+      for (const listener of [...messageListeners]) {
+        listener({ data });
+      }
+    };
+    const nativePort = {
+      addEventListener: (type: string, fn: (ev: { data: string }) => void) => {
+        if (type === "message") messageListeners.add(fn);
+      },
+      removeEventListener: (
+        type: string,
+        fn: (ev: { data: string }) => void,
+      ) => {
+        if (type === "message") messageListeners.delete(fn);
+      },
+      postMessage: (raw: string) => {
+        const msg = JSON.parse(raw) as { action?: string; requestId?: string };
+        if (msg.action === "getCapabilities" && msg.requestId) {
+          queueMicrotask(() =>
+            emitNative({
+              type: "capabilities",
+              requestId: msg.requestId,
+              ttsAvailable: true,
+              viVoicesCount: 1,
+              sttAvailable: true,
+              onDeviceSttAvailable: true,
+              platform: "android-webview",
+            }),
+          );
+        } else if (msg.action === "startStt" && msg.requestId) {
+          activeSttRequestId = msg.requestId;
+          queueMicrotask(() =>
+            emitNative({ type: "stt_ready", requestId: msg.requestId }),
+          );
+        } else if (
+          (msg.action === "stopStt" || msg.action === "cancelStt") &&
+          msg.requestId
+        ) {
+          const rid = activeSttRequestId ?? msg.requestId;
+          queueMicrotask(() => emitNative({ type: "stt_end", requestId: rid }));
+        }
+      },
+    };
+    vi.stubGlobal("ViReadNativeSpeech", nativePort);
+
+    evaluatePracticeWordMock.mockResolvedValueOnce(
+      makeAttempt("INCORRECT", "mốt"),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onClose={vi.fn()}
+        onProgressSaved={vi.fn(async () => {})}
+        onSelectWord={vi.fn()}
+        word={wordItem}
+        words={[wordItem]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+    await screen.findByRole("button", { name: /Dừng ghi âm/ });
+    await waitFor(() => expect(activeSttRequestId).not.toBeNull());
+    expect(speechRecorderMock.start).not.toHaveBeenCalled();
+
+    act(() => {
+      emitNative({
+        type: "stt_final",
+        requestId: activeSttRequestId,
+        transcript: "mốt",
+        alternatives: ["mốt"],
+        onsetAt: performance.now() + 500,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(1),
+    );
+    expect(evaluatePracticeWordMock.mock.calls[0][1]).toMatchObject({
+      audio: undefined,
+      audio_quality_status: "ANDROID_NATIVE_STT",
+      browser_transcript: "mốt",
+      browser_confidence: 0.9,
+      includeNextRecommended: false,
+    });
+  }, 15_000);
+
+  it("sends includeNextRecommended=false, skips redundant onProgressSaved on failed attempts, and updates history locally", async () => {
+    const onProgressSaved = vi.fn(async () => {});
+    const onAttemptCompleted = vi.fn();
+    const completedAttempt: DifficultWordPracticeAttemptDTO = {
+      ...makeAttempt("CORRECT", "một"),
+      attempt_id: "55555555-5555-4555-8555-555555555555",
+      attempt_number: 2,
+      word_progress: {
+        ...makeAttempt("CORRECT", "một").word_progress,
+        practice_status: "COMPLETED",
+        practice_attempts_count: 2,
+        consecutive_correct_count: 2,
+      },
+    };
+    evaluatePracticeWordMock
+      .mockResolvedValueOnce(makeAttempt("INCORRECT", "mốt"))
+      .mockResolvedValueOnce(completedAttempt);
+
+    const user = userEvent.setup();
+    render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onAttemptCompleted={onAttemptCompleted}
+        onClose={vi.fn()}
+        onProgressSaved={onProgressSaved}
+        onSelectWord={vi.fn()}
+        word={wordItem}
+        words={[wordItem]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(getPracticeHistoryMock).toHaveBeenCalledTimes(1),
+    );
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+    );
+
+    // Turn 1: INCORRECT -> updates local state/history without calling onProgressSaved or refetching history
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
+    );
+    expect(
+      evaluatePracticeWordMock.mock.calls[0][1].includeNextRecommended,
+    ).toBe(false);
+    expect(onAttemptCompleted).toHaveBeenCalledTimes(1);
+    expect(onProgressSaved).not.toHaveBeenCalled();
+    expect(getPracticeHistoryMock).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(/Lịch sử luyện từ này \(1 lượt\)/),
+    ).toBeInTheDocument();
+
+    // Turn 2: COMPLETED -> triggers onProgressSaved once while still updating history locally
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() => expect(onProgressSaved).toHaveBeenCalledTimes(1));
+    expect(
+      evaluatePracticeWordMock.mock.calls[1][1].includeNextRecommended,
+    ).toBe(false);
+    expect(onAttemptCompleted).toHaveBeenCalledTimes(2);
+    expect(getPracticeHistoryMock).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(/Lịch sử luyện từ này \(2 lượt\)/),
+    ).toBeInTheDocument();
+  }, 15_000);
 });

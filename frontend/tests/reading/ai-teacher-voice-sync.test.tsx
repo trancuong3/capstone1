@@ -1651,4 +1651,315 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
       await screen.findByTestId("teacher-voice-worker-offline-hint"),
     ).toBeInTheDocument();
   });
+
+  it("synchronizes the chosen voice end-to-end across book reading, wrong-word retry, phonics, difficult words, and bidirectional persona until changed again", async () => {
+    const { createSpeechService } = await import("@/lib/api/speech-service");
+    const { setSpeechPreferences } =
+      await import("@/lib/reading/speech-preferences");
+    const { buildPhonicsLesson } = await import("@/lib/reading/phonics-lesson");
+
+    // 1. Bidirectional adaptTextToTeacherPersona (Cô <-> Thầy) preserves collective "thầy cô", fairy-tale roles, and quotes
+    expect(
+      adaptTextToTeacherPersona(
+        "Thầy khen bé đọc chữ “thầy” và câu chuyện về thầy thuốc rất giỏi! Phong cách thầy cô rất ấm áp.",
+        "female",
+      ),
+    ).toBe(
+      "Cô khen bé đọc chữ “thầy” và câu chuyện về thầy thuốc rất giỏi! Phong cách thầy cô rất ấm áp.",
+    );
+    expect(
+      adaptTextToTeacherPersona(
+        "Cô khen bé đọc chữ “cô” và câu chuyện về cô tiên rất giỏi! Phong cách thầy cô rất ấm áp.",
+        "male",
+      ),
+    ).toBe(
+      "Thầy khen bé đọc chữ “cô” và câu chuyện về cô tiên rất giỏi! Phong cách thầy cô rất ấm áp.",
+    );
+
+    // 2. Select Thầy Thái Sơn (Miền Nam, 1.05x) -> must stay locked across Reading, Wrong-Word Retry, Phonics, and Difficult Words
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_south_thai_son",
+      gender: "male",
+      region: "south",
+      speed: 1.05,
+    });
+    lockSessionVoice("reading-session-sync-all");
+
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const capturedRequests: Array<{
+      readonly url: string;
+      readonly body: Record<string, unknown>;
+    }> = [];
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = String(input);
+        const body =
+          init?.body && typeof init.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : {};
+        capturedRequests.push({ url, body });
+        if (url.endsWith("/voice/text-to-speech/phonics")) {
+          return new Response(
+            JSON.stringify({
+              audio_base64: btoa("wav-bytes"),
+              content_type: "audio/mpeg",
+              duration_seconds: 0.4,
+              step_timings: [
+                { id: "s0", index: 0, start: 0, end: 0.1 },
+                { id: "s1", index: 1, start: 0.1, end: 0.2 },
+                { id: "s2", index: 2, start: 0.2, end: 0.3 },
+                { id: "s3", index: 3, start: 0.3, end: 0.4 },
+              ],
+              provider: "local",
+              resolved_voice_id: "local_south_thai_son",
+              region: "south",
+              model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        });
+      });
+
+    try {
+      const speechService = createSpeechService();
+      // Reading coaching prompt
+      await speechService.synthesize("Thầy đọc mẫu cho con nhé.", {
+        cacheScope: "COACHING",
+      });
+      // Wrong-word retry single word sample
+      await speechService.synthesize("mốt", {
+        wordSample: true,
+        cacheScope: "CATALOG",
+      });
+      // Difficult words practice (bypassSessionLock: true)
+      await speechService.synthesize("mốt", {
+        wordSample: true,
+        bypassSessionLock: true,
+        cacheScope: "CATALOG",
+      });
+      // Phonics lesson
+      const lesson = buildPhonicsLesson("mốt");
+      expect(lesson.supported).toBe(true);
+      if (lesson.supported) {
+        await speechService.synthesizePhonics?.(
+          lesson.steps.map((s) => ({
+            id: s.id,
+            spokenText: s.spokenText,
+            pauseAfterMs: s.pauseAfterMs,
+          })),
+          { bypassSessionLock: true, cacheScope: "COACHING" },
+        );
+      }
+
+      expect(capturedRequests).toHaveLength(4);
+      for (const req of capturedRequests) {
+        expect(req.body.voice_id).toBe("local_south_thai_son");
+        expect(req.body.speed).toBe(1.05);
+      }
+
+      // Even when stored voiceId is null with explicit male gender (Northern Male), SpeechService MUST still send local_north_thien_minh!
+      capturedRequests.length = 0;
+      applyGlobalTeacherVoiceSelection({
+        voiceId: "local_north_thien_minh",
+        storedVoiceId: null,
+        gender: "male",
+        region: "north",
+        speed: 0.95,
+      });
+      await speechService.synthesize("Con đọc từ trên màn hình nhé.", {
+        bypassSessionLock: true,
+        cacheScope: "COACHING",
+      });
+      expect(capturedRequests[0]?.body.voice_id).toBe("local_north_thien_minh");
+      expect(capturedRequests[0]?.body.speed).toBe(0.95);
+
+      // Switching back to default Cô Trúc Ly (storedVoiceId: null) in the same ms updates existing session lock immediately!
+      applyGlobalTeacherVoiceSelection({
+        voiceId: "local_north_truc_ly",
+        storedVoiceId: null,
+        gender: "female",
+        region: "north",
+        speed: 0.9,
+      });
+      const relocked = lockSessionVoice("reading-session-sync-all");
+      expect(relocked.voiceId).toBe("local_north_truc_ly");
+      expect(relocked.gender).toBe("female");
+      expect(relocked.speed).toBe(0.9);
+      void setSpeechPreferences;
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("resets preview buttons from 'Dừng nghe thử' back to 'Nghe thử giọng' / 'Nghe thử' immediately when playback finishes (including swallowed onended / SpeechSynthesis onend)", async () => {
+    const user = userEvent.setup();
+
+    // 1. Dashboard AiTeacherVoiceSection: button toggles "Nghe thử giọng" -> "Dừng nghe thử" -> "Nghe thử giọng"
+    let resolvePreview!: () => void;
+    speechPlayerPlayMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePreview = resolve;
+        }),
+    );
+
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePreferencesMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    const { unmount } = render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={CHILD_1} />
+      </AppServicesContext.Provider>,
+    );
+
+    const previewBtn = screen.getByTestId("teacher-voice-preview-btn");
+    expect(previewBtn).toHaveTextContent("Nghe thử giọng");
+
+    await user.click(previewBtn);
+    expect(previewBtn).toHaveTextContent("Dừng nghe thử");
+
+    resolvePreview();
+    await waitFor(() => {
+      expect(previewBtn).toHaveTextContent("Nghe thử giọng");
+    });
+    unmount();
+
+    // 2. ReadingVoiceSettings modal: toggles "Nghe thử" -> "Dừng nghe thử" -> "Nghe thử" when async onPreview resolves
+    let resolveModalPreview!: () => void;
+    const modalPreviewMock = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveModalPreview = resolve;
+        }),
+    );
+    const { unmount: unmountModal } = render(
+      <ReadingVoiceSettings
+        isPreviewing={false}
+        onPreview={modalPreviewMock}
+        onStopPreview={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    const modalBtn = await screen.findByRole("button", { name: "Nghe thử" });
+    await user.click(modalBtn);
+    expect(
+      screen.getByRole("button", { name: "Dừng nghe thử" }),
+    ).toBeInTheDocument();
+
+    resolveModalPreview();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Nghe thử" }),
+      ).toBeInTheDocument();
+    });
+    unmountModal();
+
+    // 3. TtsPlayback: resolves promptly when SpeechSynthesis finishes (speaking: true -> false) WITHOUT firing utterance.onend, and bounds voice_preview timeoutMs to 4500ms
+    vi.useFakeTimers();
+    try {
+      let synthSpeaking = false;
+      const fakeSynth = {
+        get speaking() {
+          return synthSpeaking;
+        },
+        pending: false,
+        paused: false,
+        getVoices: () => [
+          {
+            name: "Microsoft NamMinh Online (Natural) - Vietnamese (Vietnam)",
+            voiceURI: "Microsoft NamMinh Online",
+            lang: "vi-VN",
+            localService: false,
+          } as SpeechSynthesisVoice,
+        ],
+        speak: vi.fn((u: { onstart?: () => void }) => {
+          synthSpeaking = true;
+          u.onstart?.();
+          // Simulate browser finishing audio output at 600ms while swallowing `u.onend`!
+          setTimeout(() => {
+            synthSpeaking = false;
+          }, 600);
+        }),
+        cancel: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+      };
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: fakeSynth,
+      });
+      vi.stubGlobal(
+        "SpeechSynthesisUtterance",
+        class NoEndUtterance {
+          text: string;
+          lang = "";
+          rate = 1;
+          voice: SpeechSynthesisVoice | null = null;
+          onstart: (() => void) | null = null;
+          onend: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          onboundary: (() => void) | null = null;
+          constructor(t: string) {
+            this.text = t;
+          }
+        },
+      );
+
+      const synthMock = vi
+        .fn()
+        .mockRejectedValue(new Error("503 LOCAL_TTS_UNAVAILABLE"));
+      const player = new TtsPlayback(
+        {
+          synthesize: synthMock,
+          transcribe: vi.fn(),
+        } as unknown as SpeechService,
+        {
+          listVoices: vi.fn(),
+          synthesizeTimed: vi.fn(),
+        } as unknown as VoiceStudioService,
+      );
+
+      let completed = false;
+      const playPromise = player
+        .play(
+          "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+          {
+            coaching: true,
+            cacheScope: "COACHING",
+            bypassSessionLock: true,
+            utteranceKind: "voice_preview",
+          },
+        )
+        .then(() => {
+          completed = true;
+        });
+
+      // Voice preview backend request uses bounded 4500ms timeout
+      await vi.advanceTimersByTimeAsync(10);
+      expect(synthMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ timeoutMs: 4_500 }),
+      );
+      expect(player.getState()).toBe("playing");
+
+      // Advance past 600ms audio finish + two 150ms watchdog ticks (~950ms total, NOT 7-19s!)
+      await vi.advanceTimersByTimeAsync(1_000);
+      await playPromise;
+      expect(completed).toBe(true);
+      expect(player.getState()).toBe("completed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

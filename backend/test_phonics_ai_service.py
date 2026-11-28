@@ -149,6 +149,48 @@ class PhonicsAiServiceTests(unittest.TestCase):
         self.assertEqual(data["clean_phrase"], "pizza")
         self.assertTrue(data["can_play_whole_word"])
 
+    def test_phonics_ai_overall_deadline_and_timeout_quota_cooldown(self) -> None:
+        from app.services.cloud_ai_defaults import (
+            is_model_in_cooldown,
+            record_cloud_ai_outcome,
+            reset_cloud_ai_telemetry,
+        )
+
+        reset_cloud_ai_telemetry()
+        try:
+            record_cloud_ai_outcome(
+                "phonics_ai", "gemini", "gemini-timeout-test", ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+            )
+            record_cloud_ai_outcome(
+                "phonics_ai", "gemini", "gemini-quota-test", ok=False, error_code="PROVIDER_QUOTA", http_status=429
+            )
+            self.assertTrue(is_model_in_cooldown("gemini", "gemini-timeout-test"))
+            self.assertTrue(is_model_in_cooldown("gemini", "gemini-quota-test"))
+        finally:
+            reset_cloud_ai_telemetry()
+
+        calls = 0
+
+        async def _slow_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.25)
+            raise httpx.ReadTimeout("simulated timeout")
+
+        env = {"GEMINI_API_KEY": "test-gemini", "GROQ_API_KEY": "test-groq"}
+        with patch.dict(os.environ, env):
+            result = asyncio.run(
+                analyze_phonics_with_ai(
+                    "khúc khuỷu",
+                    timeout_seconds=0.5,
+                    overall_timeout_seconds=0.5,
+                    transport=httpx.MockTransport(_slow_handler),
+                )
+            )
+        self.assertFalse(result.supported)
+        # Overall 0.5s deadline stops before exhausting all 5+ Gemini/Groq candidates
+        self.assertLessEqual(calls, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

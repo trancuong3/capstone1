@@ -70,7 +70,6 @@ import {
 } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
-  getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
@@ -1289,8 +1288,8 @@ function ReadingSessionScreen({
   useEffect(() => {
     mountedRef.current = true;
     // Wait for /voice/status before locking session when health is not cached yet;
-    // if fresh health is already available, lock immediately with the right voice.
-    const cachedHealth = getFreshVoiceEngineHealth();
+    // if routing health is already available, lock immediately with the right voice.
+    const cachedHealth = getVoiceEngineHealthForRouting();
     if (cachedHealth) {
       const policy = getVoicePolicyPreferences();
       const ttsAllowsFallback =
@@ -1597,7 +1596,18 @@ function ReadingSessionScreen({
               return;
             }
             const status = getVoiceEngineStatus();
-            if (status.stt.fallbackUsed || status.tts.fallbackUsed) {
+            const routingHealth = getVoiceEngineHealthForRouting();
+            const localDegraded = Boolean(
+              routingHealth &&
+              (!routingHealth.local.available ||
+                !routingHealth.local.stt_ready ||
+                !routingHealth.local.tts_ready),
+            );
+            if (
+              status.stt.fallbackUsed ||
+              status.tts.fallbackUsed ||
+              localDegraded
+            ) {
               probeVoiceStatus();
             }
           }, 45_000)
@@ -3109,9 +3119,23 @@ function ReadingSessionScreen({
     capturePage: ReadingPageDTO | null,
     explicitWord?: { readonly word_id: string | null; readonly text: string },
     allowInterrupt = false,
+    options?: { readonly resumeRetryAfter?: boolean },
   ): Promise<void> {
-    if (listeningStopRef.current) return;
-    if (assistantAudioPendingRef.current && !allowInterrupt) return;
+    const resumeRetryAfter = Boolean(options?.resumeRetryAfter);
+    if (listeningStopRef.current) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
+    if (assistantAudioPendingRef.current && !allowInterrupt) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
     if (allowInterrupt) {
       stopAssistantAudio();
       setIsReadingWord(false);
@@ -3134,13 +3158,22 @@ function ReadingSessionScreen({
                 : null) ?? capturePage?.words[0];
             return found ? { word_id: found.word_id, text: found.text } : null;
           })());
-    if (!target) return;
+    if (!target) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
 
     let plan = buildPhonicsLesson(target.text);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
     setIsAnalyzingPhonicsAi(false);
+    if (resumeRetryAfter && retryModeRef.current) {
+      setRetryFeedback("playing-sample");
+    }
 
     if (target.word_id && !retryModeRef.current) {
       helpedWordIdsRef.current.add(target.word_id);
@@ -3155,6 +3188,7 @@ function ReadingSessionScreen({
     const isCurrent = () =>
       mountedRef.current && generation === assistantAudioGenerationRef.current;
     const wasListening = isListeningActiveRef.current || isMicRecording;
+    const shouldResumeRetry = resumeRetryAfter || wasListening;
 
     try {
       await playAssistantAudio(
@@ -3210,15 +3244,25 @@ function ReadingSessionScreen({
       if (wasListening && !retryModeRef.current) {
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
-      } else if (wasListening && retryModeRef.current) {
+      } else if (shouldResumeRetry && retryModeRef.current) {
         const cand = retryCandidatesRef.current[retryPositionRef.current];
         if (cand) {
-          void startRetryRecognition(cand);
+          retryProcessingRef.current = false;
+          const restarted = await startRetryRecognition(cand);
+          if (!restarted && isCurrent()) {
+            setRetryFeedback("waiting");
+          }
+        } else if (isCurrent()) {
+          setRetryFeedback("waiting");
         }
       }
     } catch {
       if (isCurrent()) {
         setPhonicsStatusHint(t("session.phonicsLockedVoiceBusy"));
+        if (shouldResumeRetry && retryModeRef.current) {
+          retryProcessingRef.current = false;
+          setRetryFeedback("not-recognized");
+        }
       }
     }
   }
@@ -3290,7 +3334,7 @@ function ReadingSessionScreen({
       detectBrowserWasmSttSupport().supported &&
       !getBrowserWasmSttClient().isReady()
     ) {
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
       const localSttReady = Boolean(
         freshHealth?.local.available && freshHealth.local.stt_ready,
       );
@@ -4470,23 +4514,31 @@ function ReadingSessionScreen({
     isListeningActiveRef.current = false;
     setPreviewSnapshot(null);
 
-    await stopBrowserRecognition({
+    const stopRecognitionPromise = stopBrowserRecognition({
       nonBlockingDrain: Boolean(
         options.nonBlockingDrain ?? options.skipBlockingUpload,
       ),
     });
 
-    let recording: Blob | null = null;
-    if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-      try {
-        recording = await speechRecorder.stop();
-      } catch (error) {
-        speechRecorder.cancel();
-        console.error("Lỗi khi dừng ghi âm:", error);
-      } finally {
-        isUsingRecorderRef.current = false;
-      }
-    }
+    const stopRecorderPromise =
+      isUsingRecorderRef.current || speechRecorder.isRecording
+        ? (async (): Promise<Blob | null> => {
+            try {
+              return await speechRecorder.stop();
+            } catch (error) {
+              speechRecorder.cancel();
+              console.error("Lỗi khi dừng ghi âm:", error);
+              return null;
+            } finally {
+              isUsingRecorderRef.current = false;
+            }
+          })()
+        : Promise.resolve(null);
+
+    const [, recording] = await Promise.all([
+      stopRecognitionPromise,
+      stopRecorderPromise,
+    ]);
 
     // This text already passed the browser evidence checks and was aligned
     // live. A subsequent recorder failure cannot invalidate it.
@@ -4497,16 +4549,25 @@ function ReadingSessionScreen({
 
     const sttStatus = getVoiceEngineStatus().stt;
     const freshSttHealth = getVoiceEngineHealthForRouting();
+    const sttPolicy = getVoicePolicyPreferences();
+    const cloudSttAllowedByPolicy =
+      sttPolicy.providerMode === "local_with_google_fallback" &&
+      sttPolicy.allowGoogleSttFallback;
     const elevenLabsSttUsable = Boolean(
       freshSttHealth?.elevenlabs?.stt_configured &&
       !freshSttHealth?.elevenlabs?.stt_cooldown,
     );
+    const cloudSttUsable =
+      cloudSttAllowedByPolicy &&
+      (elevenLabsSttUsable ||
+        Boolean(
+          freshSttHealth?.google.stt_configured &&
+          !freshSttHealth?.google.stt_cooldown,
+        ));
     const backendSttUnavailable =
       freshSttHealth !== null &&
       (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
-      !elevenLabsSttUsable &&
-      (!freshSttHealth.google.stt_configured ||
-        freshSttHealth.google.stt_cooldown);
+      !cloudSttUsable;
     const alreadyUsingEmergencyBrowserStt =
       sttStatus.tier === "android_native" ||
       sttStatus.tier === "browser_wasm" ||
@@ -4725,6 +4786,7 @@ function ReadingSessionScreen({
               preserveAlignment: !alignBeforePassageHelp,
               forPassageHelp: alignBeforePassageHelp,
               nonBlockingDrain: !alignBeforePassageHelp,
+              skipBlockingUpload: true,
             }),
             new Promise<void>((resolve) => {
               stopTimeoutId = window.setTimeout(() => {
@@ -4860,35 +4922,40 @@ function ReadingSessionScreen({
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
-    return playAssistantAudio(async () => {
-      const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
-      echoGuard.playbackStarted(id, sample, performance.now());
-      let audioPlayed = false;
-      let playbackFailed = false;
-      try {
-        await speechPlayer.playWithWordTimings(sample.split(" "), {
-          bookId: null,
-          pageId: null,
-          pageRevisionId: null,
-          isPrivateBook: false,
-          cacheScope: "COACHING",
-          bypassSessionLock: true,
-          utteranceKind: "voice_preview",
-          onPlay: () => {
-            audioPlayed = true;
-          },
-        });
-      } catch (error) {
-        playbackFailed = true;
-        throw error;
-      } finally {
-        if (playbackFailed && !audioPlayed) {
-          echoGuard.discardPlayback(id);
-        } else {
-          echoGuard.playbackEnded(id, performance.now());
+    return playAssistantAudio(
+      async () => {
+        const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
+        echoGuard.playbackStarted(id, sample, performance.now());
+        let audioPlayed = false;
+        let playbackFailed = false;
+        try {
+          await speechPlayer.playWithWordTimings(sample.split(" "), {
+            text: sample,
+            bookId: null,
+            pageId: null,
+            pageRevisionId: null,
+            isPrivateBook: false,
+            cacheScope: "COACHING",
+            bypassSessionLock: true,
+            utteranceKind: "voice_preview",
+            onPlay: () => {
+              audioPlayed = true;
+            },
+          });
+        } catch (error) {
+          playbackFailed = true;
+          throw error;
+        } finally {
+          if (playbackFailed && !audioPlayed) {
+            echoGuard.discardPlayback(id);
+          } else {
+            echoGuard.playbackEnded(id, performance.now());
+          }
         }
-      }
-    });
+      },
+      false,
+      false,
+    );
   }
 
   function clearRetryCaptureTimeout(): void {
@@ -5404,6 +5471,9 @@ function ReadingSessionScreen({
     setPageNavigationError(null);
     setCountdown(null);
     listeningGenerationRef.current += 1;
+    if (!listeningStopRef.current) {
+      transcriptionAbortRef.current?.abort();
+    }
     preventAssistantAudioResume();
     speechPlayer.stop();
     setIsPlayingPageSample(false);
@@ -5472,6 +5542,9 @@ function ReadingSessionScreen({
     setPageNavigationError(null);
     setCountdown(null);
     listeningGenerationRef.current += 1;
+    if (!listeningStopRef.current) {
+      transcriptionAbortRef.current?.abort();
+    }
     preventAssistantAudioResume();
     speechPlayer.stop();
     try {
@@ -5766,6 +5839,7 @@ function ReadingSessionScreen({
       countdown !== null;
     setTutorOpen(true);
     setIsBusy(true);
+    void speechPlayer.prefetch?.(word, { wordSample: true });
     const playbackGeneration = tutorPlaybackGenerationRef.current;
     try {
       await playAssistantAudio(
@@ -5801,6 +5875,9 @@ function ReadingSessionScreen({
           try {
             await speechPlayer.play(tutorText, {
               wordSample: isVerbatimTutorWord,
+              ...(!isVerbatimTutorWord
+                ? { coaching: true, cacheScope: "COACHING" as const }
+                : {}),
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -5878,6 +5955,9 @@ function ReadingSessionScreen({
           try {
             await speechPlayer.play(retryTutorText, {
               wordSample: isVerbatimRetryTutorWord,
+              ...(!isVerbatimRetryTutorWord
+                ? { coaching: true, cacheScope: "COACHING" as const }
+                : {}),
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -6248,11 +6328,15 @@ function ReadingSessionScreen({
       intent.type === "SPELL" ||
       isSpellingHelpRequest(text, candidate.text)
     ) {
+      if (!isLiveMic) {
+        setRetryFeedback("playing-sample");
+      }
       void offerExplicitPhonicsHelp(
         null,
         page,
         { word_id: candidate.wordId, text: candidate.text },
-        isLiveMic,
+        true,
+        !isLiveMic ? { resumeRetryAfter: true } : undefined,
       );
       return true;
     }
@@ -6265,6 +6349,9 @@ function ReadingSessionScreen({
       return true;
     }
     if (intent.type === "STOP") {
+      if (!isLiveMic) {
+        setRetryFeedback("waiting");
+      }
       void pauseReading();
       return true;
     }
@@ -6533,18 +6620,29 @@ function ReadingSessionScreen({
     // The recognizer may emit its final result after stop().
     const browserFinalResult = recognition
       ? new Promise<void>((resolve) => {
-          const finish = () => {
+          let settled = false;
+          const finish = (timedOut = false) => {
+            if (settled) return;
+            settled = true;
             window.clearTimeout(timer);
+            recognition.onend = null;
+            if (timedOut) {
+              try {
+                recognition.abort?.();
+              } catch {
+                // Safe ignore abort failure on timed-out recognizer
+              }
+            }
             if (recognitionRef.current === recognition)
               recognitionRef.current = null;
             resolve();
           };
-          const timer = window.setTimeout(finish, 300);
-          recognition.onend = finish;
+          const timer = window.setTimeout(() => finish(true), 300);
+          recognition.onend = () => finish(false);
           try {
             recognition.stop();
           } catch {
-            finish();
+            finish(false);
           }
         })
       : Promise.resolve();
@@ -6700,19 +6798,26 @@ function ReadingSessionScreen({
 
       // Lần 1: STT bình thường, không dùng keyterms (tự chuyển sang Browser WASM khi Voice Worker offline).
       const submittedAt = getRetryCaptureTimeMs();
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
       const localSttConfirmedDown =
         freshHealth !== null &&
         (!freshHealth.local.available || !freshHealth.local.stt_ready);
+      const retryPolicy = getVoicePolicyPreferences();
+      const cloudSttFallbackAllowed =
+        retryPolicy.providerMode === "local_with_google_fallback" &&
+        retryPolicy.allowGoogleSttFallback;
+      const wasmClient = getBrowserWasmSttClient();
+      const preparedPcm16k = recording.pcm16k ?? null;
       const tryWasmRetryTranscribe = async () => {
-        const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
-          recording,
-          {
-            signal: controller.signal,
-            timeoutMs: 12_000,
-            voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
-          },
-        );
+        const wasmOptions = {
+          signal: controller.signal,
+          initTimeoutMs: 4_000,
+          timeoutMs: 8_000,
+          voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+        };
+        const wasmRes = preparedPcm16k
+          ? await wasmClient.transcribeSamples(preparedPcm16k, wasmOptions)
+          : await wasmClient.transcribeBlob(recording, wasmOptions);
         recordSttEngineUsage({
           provider: "wasm",
           fallbackUsed: true,
@@ -6728,8 +6833,15 @@ function ReadingSessionScreen({
         };
       };
 
+      const skipColdWasmForCloudFallback =
+        cloudSttFallbackAllowed && !wasmClient.isReady();
+
       let transcription;
-      if (localSttConfirmedDown && detectBrowserWasmSttSupport().supported) {
+      if (
+        localSttConfirmedDown &&
+        detectBrowserWasmSttSupport().supported &&
+        !skipColdWasmForCloudFallback
+      ) {
         try {
           transcription = await tryWasmRetryTranscribe();
         } catch (wasmErr) {
@@ -6738,7 +6850,7 @@ function ReadingSessionScreen({
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
             signal: controller.signal,
-            timeoutMs: 10_000,
+            timeoutMs: 7_000,
           });
         }
       } else {
@@ -6746,7 +6858,7 @@ function ReadingSessionScreen({
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
             signal: controller.signal,
-            timeoutMs: 10_000,
+            timeoutMs: 7_000,
           });
         } catch (serverErr) {
           if (controller.signal.aborted) return;
@@ -6825,7 +6937,11 @@ function ReadingSessionScreen({
       ) {
         status = "CORRECT";
       }
+      const usedWasmProvider =
+        "provider" in transcription && transcription.provider === "wasm";
       if (
+        !localSttConfirmedDown &&
+        !usedWasmProvider &&
         (!nonViLanguage || browserStatus === "CORRECT") &&
         shouldAttemptShortWordKeytermPass2({
           status,
@@ -6842,7 +6958,7 @@ function ReadingSessionScreen({
               retryContextPhrase,
             ),
             signal: controller.signal,
-            timeoutMs: 5_000,
+            timeoutMs: 3_500,
           });
 
           if (
@@ -7078,27 +7194,35 @@ function ReadingSessionScreen({
       AudioContext?: typeof AudioContext;
       webkitAudioContext?: typeof AudioContext;
     };
-    const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
-      win,
-      speechService,
-      () => ({
-        sessionId,
-        pageId: page?.page_id ?? null,
-        keyterms: [
-          candidate.text,
-          ...(resolveRetrySentenceContext(candidate)?.split(/\s+/) ?? []),
-        ].filter(Boolean),
-      }),
-      () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
-      {
-        onBeforeExternalMicStart: () => {
-          if (retryRecorderActiveRef.current || speechRecorder.isRecording) {
-            retryRecorderActiveRef.current = false;
-            speechRecorder.cancel({ retainStream: false });
-          }
-        },
-      },
-    ) as (new () => BrowserSpeechRecognition) | undefined;
+    const injectedCtor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const allowParallelRecognition =
+      preferAndroidNativeStt || isInjectedTestSpeechRecognition(injectedCtor);
+    const SpeechRec = allowParallelRecognition
+      ? (resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: [
+              candidate.text,
+              ...(resolveRetrySentenceContext(candidate)?.split(/\s+/) ?? []),
+            ].filter(Boolean),
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+          {
+            onBeforeExternalMicStart: () => {
+              if (
+                retryRecorderActiveRef.current ||
+                speechRecorder.isRecording
+              ) {
+                retryRecorderActiveRef.current = false;
+                speechRecorder.cancel({ retainStream: false });
+              }
+            },
+          },
+        ) as (new () => BrowserSpeechRecognition) | undefined)
+      : undefined;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -7458,6 +7582,16 @@ function ReadingSessionScreen({
     setLatestTranscript(t("session.preparingMicShort"));
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    // Eagerly prefetch the retry word sample & coaching cues in parallel with
+    // microphone preparation so wrong-word retry speaks with zero inter-cue lag.
+    if (!retryPhraseRef.current) {
+      void speechPlayer.prefetch?.(candidate.text, { wordSample: true });
+      if (guidedHelp) {
+        void speechPlayer.prefetch?.("Đến lượt con đọc nhé.", {
+          coaching: true,
+        });
+      }
+    }
     if (!preferAndroidNativeStt) {
       try {
         await (permissionRequest ?? speechRecorder.prepare());
@@ -7476,6 +7610,41 @@ function ReadingSessionScreen({
       return;
     }
 
+    const RETRY_TTS_CUE_TIMEOUT_MS = 6_000;
+    const speakRetryCueBounded = async (
+      text: string,
+      options?: SpeechPlayOptions & { readonly preserveBookText?: boolean },
+    ): Promise<boolean> => {
+      const speakPromise = speakGuarded(text, options);
+      let timeoutId: number | null = null;
+      let timedOut = false;
+      try {
+        await Promise.race([
+          speakPromise,
+          new Promise<void>((resolve) => {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              speechPlayer.stop();
+              resolve();
+            }, RETRY_TTS_CUE_TIMEOUT_MS);
+          }),
+        ]);
+        return !timedOut;
+      } catch (error) {
+        if (timedOut && error instanceof Error && error.name === "AbortError") {
+          return false;
+        }
+        throw error;
+      } finally {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+        if (timedOut) {
+          void speakPromise.catch(() => undefined);
+        }
+      }
+    };
+
     try {
       await playAssistantAudio(async () => {
         setRetryFeedback("playing-instruction");
@@ -7483,20 +7652,20 @@ function ReadingSessionScreen({
         const phrase = retryPhraseRef.current;
         if (phrase) {
           setLatestTranscript(t("session.readWholePhrasePrompt"));
-          await speakGuarded(`Con hãy đọc cả cụm: ${phrase}.`, {
+          await speakRetryCueBounded(`Con hãy đọc cả cụm: ${phrase}.`, {
             coaching: true,
             preserveBookText: true,
           });
           return;
         }
-        await speakGuarded(
+        const introCompleted = await speakRetryCueBounded(
           guidedHelp
             ? adaptPersona("Cô đọc mẫu cho con nhé.")
             : "Con nghe từ này nhé.",
           { coaching: true },
         );
 
-        if (!isCurrent()) {
+        if (!introCompleted || !isCurrent()) {
           return;
         }
 
@@ -7506,11 +7675,14 @@ function ReadingSessionScreen({
         );
         setIsReadingWord(true);
         try {
-          await speakGuarded(candidate.text, { wordSample: true });
-          if (guidedHelp && isCurrent())
-            await speakGuarded("Đến lượt con đọc nhé.", {
+          const sampleCompleted = await speakRetryCueBounded(candidate.text, {
+            wordSample: true,
+          });
+          if (sampleCompleted && guidedHelp && isCurrent()) {
+            await speakRetryCueBounded("Đến lượt con đọc nhé.", {
               coaching: true,
             });
+          }
         } finally {
           if (isCurrent()) setIsReadingWord(false);
         }
@@ -7715,9 +7887,14 @@ function ReadingSessionScreen({
         .filter(Boolean);
       const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
 
-      const persistedCompletion = await services.readingService
-        .getCompletionSummary(sessionId)
-        .catch(() => null);
+      const [persistedCompletion, postFinishState] = await Promise.all([
+        services.readingService
+          .getCompletionSummary(sessionId)
+          .catch(() => null),
+        resolvePostFinishUiState(services.comprehensionService, sessionId),
+      ]);
+
+      if (!mountedRef.current) return;
 
       const correctWordIds = Array.from(correctWordIdsRef.current).filter(
         (wordId) =>
@@ -7780,10 +7957,6 @@ function ReadingSessionScreen({
       retryModeRef.current = false;
       setRetryMode(false);
       speechRecorder.cancel();
-      const postFinishState = await resolvePostFinishUiState(
-        services.comprehensionService,
-        sessionId,
-      );
       if (postFinishState === "question") {
         automationRuntimeRef.current?.dispatch({ type: "QUIZ_START" });
       } else {
@@ -7826,33 +7999,60 @@ function ReadingSessionScreen({
       ? t("session.uncertainRecordedSeparately")
       : null;
 
-    for (const bucket of pageBuckets) {
-      const transcript = bucket.segments.join(" ").trim();
-      if (!transcript) continue;
+    const nonEmptyBuckets = pageBuckets
+      .map((bucket) => ({
+        bucket,
+        transcript: bucket.segments.join(" ").trim(),
+      }))
+      .filter((entry) => Boolean(entry.transcript));
 
-      try {
-        latestResult = await compareTranscript(
-          sessionId,
-          transcript,
-          bucket.words,
-          {
-            page_id: bucket.page_id,
-            page_revision_id: bucket.page_revision_id,
-            initial_assessment: bucket.initial_assessment,
-          },
-        );
-        savedInitialPagesRef.current.add(
-          `${bucket.page_id}:${bucket.page_revision_id}`,
-        );
-      } catch (error) {
-        allSaved = false;
-        console.error("Lỗi so sánh bài đọc:", {
-          sessionId,
-          pageId: bucket.page_id,
-          pageRevisionId: bucket.page_revision_id,
-          error,
-        });
-        firstComparisonError = t("session.saveSessionReportFailed");
+    const resultsByIndex: Array<ComparisonResult | null> = new Array(
+      nonEmptyBuckets.length,
+    ).fill(null);
+    const CONCURRENCY = 3;
+    let nextIndex = 0;
+
+    const runCompareWorker = async () => {
+      while (nextIndex < nonEmptyBuckets.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const { bucket, transcript } = nonEmptyBuckets[currentIndex];
+        try {
+          const result = await compareTranscript(
+            sessionId,
+            transcript,
+            bucket.words,
+            {
+              page_id: bucket.page_id,
+              page_revision_id: bucket.page_revision_id,
+              initial_assessment: bucket.initial_assessment,
+            },
+          );
+          resultsByIndex[currentIndex] = result;
+          savedInitialPagesRef.current.add(
+            `${bucket.page_id}:${bucket.page_revision_id}`,
+          );
+        } catch (error) {
+          allSaved = false;
+          console.error("Lỗi so sánh bài đọc:", {
+            sessionId,
+            pageId: bucket.page_id,
+            pageRevisionId: bucket.page_revision_id,
+            error,
+          });
+          firstComparisonError = t("session.saveSessionReportFailed");
+        }
+      }
+    };
+
+    const workerCount = Math.min(CONCURRENCY, nonEmptyBuckets.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, () => runCompareWorker()),
+    );
+    for (let i = resultsByIndex.length - 1; i >= 0; i -= 1) {
+      if (resultsByIndex[i]) {
+        latestResult = resultsByIndex[i];
+        break;
       }
     }
 
@@ -8568,7 +8768,7 @@ function ReadingSessionScreen({
               }
               disabled={isMicRecording}
               fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying}
+              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
               onPreview={handleVoicePreview}
               onStopPreview={stopAssistantAudio}
             />

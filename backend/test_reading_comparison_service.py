@@ -255,6 +255,63 @@ class ReadingComparisonServiceTests(unittest.IsolatedAsyncioTestCase):
         service.content.get_session_summary.assert_not_awaited()
         service.repository.delete.assert_not_awaited()
 
+    async def test_compare_real_services_use_lightweight_page_and_single_report_list(self):
+        from unittest.mock import MagicMock
+        from app.repositories.reading_comparison_repository import ReadingComparisonRepository
+        from app.repositories.reading_content_repository import ReadingContentRepository
+        from app.schemas.reading import InitialWordAssessment
+        from app.services.reading_content_service import ReadingContentService
+
+        word_id = UUID("60000000-0000-4000-8000-000000000001")
+        book_id = UUID("70000000-0000-4000-8000-000000000001")
+        fake_db = MagicMock()
+        fake_db.sync_session = SimpleNamespace(expire_on_commit=False)
+        fake_db.add = MagicMock()
+        fake_db.commit = AsyncMock()
+        fake_db.refresh = AsyncMock()
+        fake_db.rollback = AsyncMock()
+        fake_db.begin_nested = MagicMock(side_effect=AssertionError("compare must not open media/TTS savepoints"))
+
+        service = ReadingComparisonService(fake_db)
+        assert isinstance(service.content, ReadingContentService)
+        assert isinstance(service.repository, ReadingComparisonRepository)
+
+        session_obj = SimpleNamespace(Id=SESSION_ID, BookId=book_id, State="IN_PROGRESS")
+        book_obj = SimpleNamespace(Id=book_id, VisibilityScope="CATALOG", OwnerParentId=None)
+        page_obj = SimpleNamespace(Id=PAGE_ID, BookId=book_id, PageNumber=1, Width=800, Height=1000, ImagePath="books/p1.png", CurrentVerifiedRevisionId=REVISION_ID)
+        rev_obj = SimpleNamespace(Id=REVISION_ID, PageId=PAGE_ID, VerifiedText="Con", VerificationStatus="VERIFIED", ProcessingMeta={})
+        snap_obj = SimpleNamespace(PageId=PAGE_ID, PageRevisionId=REVISION_ID, PageNumber=1, PageOrder=0, Status="IN_PROGRESS")
+        word_row = SimpleNamespace(Id=word_id, WordIndex=0, Text="Con", BoundingBox=[0.1, 0.1, 0.2, 0.08], LineIndex=0)
+
+        with (
+            patch.object(service.content.repository, "profile_role", AsyncMock(return_value="parent")),
+            patch.object(service.content.repository, "session_with_ownership_and_book", AsyncMock(return_value=(session_obj, book_obj, True))),
+            patch.object(service.content.repository, "session_pages_with_content", AsyncMock(return_value=[(snap_obj, page_obj, rev_obj)])),
+            patch.object(service.content.repository, "revision_words", AsyncMock(return_value=[word_row])),
+            patch.object(service.content.repository, "book_by_id", AsyncMock(side_effect=AssertionError("compare must not query book_by_id"))),
+            patch("app.services.reading_content_service.create_signed_image_url", side_effect=AssertionError("compare must not sign URLs")),
+            patch("app.services.reading_content_service.create_cached_signed_image_urls", side_effect=AssertionError("compare must not sign URLs")),
+            patch.object(service.repository, "lock_session", AsyncMock(return_value=session_obj)),
+            patch.object(service.repository, "list_for_session", AsyncMock(return_value=[])) as list_mock,
+            patch.object(service.repository, "find_exact", AsyncMock(side_effect=AssertionError("finalize=True must not call find_exact"))),
+        ):
+            result = await service.compare(
+                SESSION_ID,
+                ACTOR_ID,
+                CompareReadingRequest(
+                    transcript="Con",
+                    page_id=PAGE_ID,
+                    page_revision_id=REVISION_ID,
+                    finalize=True,
+                    initial_assessment=[InitialWordAssessment(word_id=word_id, status="CORRECT")],
+                ),
+            )
+
+        self.assertEqual(result.page_id, PAGE_ID)
+        self.assertEqual(result.page_revision_id, REVISION_ID)
+        list_mock.assert_awaited_once_with(SESSION_ID)
+        fake_db.refresh.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

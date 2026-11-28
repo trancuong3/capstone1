@@ -1,11 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AudioQualityMonitor,
   hasShortWordBlockingAudioIssue,
   hasUnusableAudio,
 } from "@/lib/reading/audio-quality";
+import { resetBrowserWasmSttForTests } from "@/lib/reading/browser-wasm-stt";
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
+import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import {
+  resetVoiceEngineStatus,
+  setCachedVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
+import {
+  PHRASE_CAPTURE_CONFIG,
   SHORT_WORD_CAPTURE_CONFIG,
   SHORT_WORD_CONTEXT_RETRY_THRESHOLD,
   classifyShortWordFailureLabel,
@@ -87,21 +94,32 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
 
   it("stops promptly after a full quiet tail and guards 1-poll energy spikes", () => {
     expect(SHORT_WORD_CONTEXT_RETRY_THRESHOLD).toBe(1);
-    expect(SHORT_WORD_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(950);
+    expect(SHORT_WORD_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(550);
+    expect(SHORT_WORD_CAPTURE_CONFIG.minCaptureMs).toBe(600);
+    expect(SHORT_WORD_CAPTURE_CONFIG.noSpeechTimeoutMs).toBe(3_500);
+    expect(SHORT_WORD_CAPTURE_CONFIG.maxCaptureMs).toBe(4_800);
 
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 500,
+        elapsedMs: 450,
         speechObserved: true,
-        silenceElapsedMs: 800,
+        silenceElapsedMs: 550,
       }),
     ).toBe(false);
 
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 1050,
+        elapsedMs: 600,
         speechObserved: true,
-        silenceElapsedMs: 950,
+        silenceElapsedMs: 400,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoStopShortWordCapture({
+        elapsedMs: 650,
+        speechObserved: true,
+        silenceElapsedMs: 550,
       }),
     ).toBe(true);
 
@@ -472,5 +490,137 @@ describe("12 mandatory recognition test cases for target word 'có'", () => {
     expect(
       classifyShortWordFailureLabel("INCORRECT", "SPEECH_DETECTED", "mốt"),
     ).toBe("Đọc sai");
+  });
+
+  describe("Latency hardening: fan-noise unlatch, tightened VAD, pcm16k, and dead-backend Pass 2 skip", () => {
+    afterEach(() => {
+      resetVoiceEngineStatus();
+      resetBrowserWasmSttForTests();
+      vi.unstubAllGlobals();
+    });
+
+    it("unlatches stationary ambient fan/AC noise in short-word mode (both initial and post-speech)", () => {
+      // 1. Constant moderate fan noise (rms = 0.018) from frame 1 must unlatch instead of staying isSpeaking=true
+      const fanMonitor = new AudioQualityMonitor({ mode: "short-word" });
+      const fanFrame = createNoiseFrame(320, 0.018);
+      for (let t = 0; t <= 900; t += 20) {
+        fanMonitor.addFrame(fanFrame, t);
+      }
+      const fanSnap = fanMonitor.getSnapshot();
+      expect(fanSnap.isSpeaking).toBe(false);
+      expect(fanSnap.noiseFloor).toBeGreaterThanOrEqual(0.015);
+      expect(fanSnap.status).toBe("BACKGROUND_NOISE");
+
+      // 2. Real speech followed by constant fan hum (rms = 0.016) must drop isSpeaking cleanly
+      //    while preserving the child's SPEECH_DETECTED evidence!
+      const postSpeechMonitor = new AudioQualityMonitor({ mode: "short-word" });
+      const quiet = createNoiseFrame(320, 0.002);
+      const speech = createSyntheticFormantSpeechFrame(320, 16_000, 0.14);
+      const hum = createNoiseFrame(320, 0.016);
+      for (let t = 0; t <= 40; t += 20) postSpeechMonitor.addFrame(quiet, t);
+      for (let t = 60; t <= 300; t += 20) postSpeechMonitor.addFrame(speech, t);
+      expect(postSpeechMonitor.getSnapshot().isSpeaking).toBe(true);
+      for (let t = 320; t <= 1200; t += 20) postSpeechMonitor.addFrame(hum, t);
+      const postSnap = postSpeechMonitor.getSnapshot();
+      expect(postSnap.isSpeaking).toBe(false);
+      expect(postSnap.status).toBe("SPEECH_DETECTED");
+      expect(postSnap.speechDurationMs).toBeGreaterThanOrEqual(100);
+    });
+
+    it("tightens PHRASE_CAPTURE_CONFIG and rejects mild post-speech room noise in hasShortWordSpeechActivity", () => {
+      expect(PHRASE_CAPTURE_CONFIG.minCaptureMs).toBe(1_000);
+      expect(PHRASE_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(750);
+      expect(PHRASE_CAPTURE_CONFIG.maxCaptureMs).toBe(8_500);
+
+      // Mild room noise (rms=0.010, noiseFloor=0.004) after speechObserved must NOT keep resetting silence timer
+      expect(
+        hasShortWordSpeechActivity({
+          isSpeakingNow: false,
+          audioLevel: 5,
+          speechObserved: true,
+          quality: {
+            status: "SPEECH_DETECTED",
+            durationMs: 700,
+            speechDurationMs: 220,
+            silenceDurationMs: 320,
+            rms: 0.01,
+            peak: 0.018,
+            noiseFloor: 0.004,
+            clipped: false,
+            isSpeaking: false,
+          },
+          hasLiveBrowserSpeech: false,
+          previousSpeechDurationMs: 220,
+        }),
+      ).toBe(false);
+    });
+
+    it("returns conditioned pcm16k alongside blob from prepareShortWordAudio while remaining a Blob", async () => {
+      const sr = 16_000;
+      const samples = new Float32Array(Math.round(sr * 0.5));
+      for (let i = Math.round(sr * 0.1); i < Math.round(sr * 0.35); i += 1) {
+        samples[i] = 0.04 * Math.sin((2 * Math.PI * 280 * i) / sr);
+      }
+      vi.stubGlobal(
+        "OfflineAudioContext",
+        class {
+          async decodeAudioData() {
+            return {
+              numberOfChannels: 1,
+              getChannelData: () => samples,
+            };
+          }
+        },
+      );
+
+      const prepared = await prepareShortWordAudio(
+        new Blob(["webm"], { type: "audio/webm" }),
+      );
+      expect(prepared).not.toBeNull();
+      expect(prepared).toBeInstanceOf(Blob);
+      expect(prepared!.type).toBe("audio/wav");
+      expect(prepared!.blob).toBeInstanceOf(Blob);
+      expect(prepared!.pcm16k).toBeInstanceOf(Float32Array);
+      expect(prepared!.pcm16k!.length).toBeGreaterThan(0);
+    });
+
+    it("skips Pass 2 keyterm backend STT in evaluateRecordedShortWord when local STT is confirmed unavailable", async () => {
+      setCachedVoiceEngineHealth({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          configured: true,
+          available: false,
+          stt_ready: false,
+          tts_ready: false,
+          error_code: "LOCAL_VOICE_UNAVAILABLE",
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
+      // Disable Worker so WASM is unavailable and evaluateRecordedShortWord falls through to speechService
+      vi.stubGlobal("Worker", undefined);
+
+      const transcribe = vi.fn().mockResolvedValue({
+        text: "",
+        language_code: "vi",
+        language_probability: 0.4,
+        words: null,
+      });
+
+      const res = await evaluateRecordedShortWord({
+        expectedWord: "có",
+        audioBlob: dummyBlob,
+        audioQuality: goodQuality,
+        speechService: { transcribe },
+      });
+
+      expect(transcribe).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe("UNCERTAIN");
+    });
   });
 });

@@ -35,6 +35,7 @@ import {
   getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
+  getEffectiveTeacherPersona,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
   lockSessionVoice,
@@ -312,8 +313,32 @@ export function ReadingVoiceSettings({
           !data.voices.some((voice) => voice.voice_id === storedVoice)
         ) {
           setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
-          update({ voiceId: null, gender: "female" });
-          syncPausedSessionLock(null);
+          const preservedGender = resolveVoiceGender(
+            storedVoice,
+            getEffectiveTeacherPersona().gender,
+          );
+          const sameGenderReplacement =
+            preservedGender === "male"
+              ? data.voices.find(
+                  (v) => resolveVoiceGender(v.voice_id, v.gender) === "male",
+                )
+              : undefined;
+          if (sameGenderReplacement) {
+            applyGlobalTeacherVoiceSelection({
+              voiceId: sameGenderReplacement.voice_id,
+              storedVoiceId:
+                sameGenderReplacement.voice_id === data.default_voice_id
+                  ? null
+                  : sameGenderReplacement.voice_id,
+              gender: "male",
+              region:
+                resolveVoiceRegion(sameGenderReplacement) ??
+                getVoicePolicyPreferences().region,
+            });
+          } else {
+            update({ voiceId: null, gender: "female" });
+            syncPausedSessionLock(null);
+          }
         }
         setLoadState({ status: "ready", data });
       })
@@ -671,7 +696,7 @@ export function ReadingVoiceSettings({
                 variant="primary"
               >
                 <Volume2 aria-hidden="true" className="size-5" />
-                {isPreviewing
+                {isPreviewing || isSynthesizingPreview
                   ? t("settings.stopPreview")
                   : t("settings.preview")}
               </Button>

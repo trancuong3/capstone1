@@ -7,11 +7,14 @@ proper name, or loanword that still benefits from step-by-step Grade-1 spelling.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
+import time
 import unicodedata
+import weakref
 from collections import OrderedDict
 from typing import Any
 
@@ -148,6 +151,36 @@ _RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 _cache: OrderedDict[tuple[str, str], PhonicsAnalyzeResponse] = OrderedDict()
+_ORIGINAL_ASYNC_CLIENT = httpx.AsyncClient
+_LOOP_CLIENTS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, httpx.AsyncClient
+] = weakref.WeakKeyDictionary()
+_DEFAULT_PHONICS_CANDIDATE_TIMEOUT_SECONDS = 4.5
+_DEFAULT_PHONICS_OVERALL_TIMEOUT_SECONDS = 9.0
+
+
+def _get_pooled_client() -> httpx.AsyncClient | None:
+    """Return a per-event-loop pooled HTTP client unless httpx.AsyncClient was patched."""
+    if httpx.AsyncClient is not _ORIGINAL_ASYNC_CLIENT:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    client = _LOOP_CLIENTS.get(loop)
+    if client is not None and not getattr(client, "is_closed", False):
+        return client
+    client = _ORIGINAL_ASYNC_CLIENT(
+        trust_env=False,
+        follow_redirects=False,
+        limits=httpx.Limits(
+            max_connections=16,
+            max_keepalive_connections=8,
+            keepalive_expiry=30.0,
+        ),
+    )
+    _LOOP_CLIENTS[loop] = client
+    return client
 
 
 def clear_phonics_ai_cache() -> None:
@@ -420,25 +453,43 @@ async def _call_gemini_phonics(
         "contents": [{"role": "user", "parts": [{"text": "\n".join(prompt_lines)}]}],
         "generationConfig": generation_config,
     }
+    req_timeout = httpx.Timeout(timeout_seconds, connect=min(3.0, timeout_seconds))
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds),
-            trust_env=False,
-            follow_redirects=False,
-            transport=transport,
-        ) as client:
-            response = await client.post(
+        pooled = _get_pooled_client() if transport is None else None
+        if pooled is not None:
+            response = await pooled.post(
                 f"{_GEMINI_API_BASE}/models/{model}:generateContent",
                 headers={"x-goog-api-key": api_key},
                 json=payload,
+                timeout=req_timeout,
             )
             if response.status_code == 400 and thinking_cfg is not None:
                 generation_config.pop("thinkingConfig", None)
+                response = await pooled.post(
+                    f"{_GEMINI_API_BASE}/models/{model}:generateContent",
+                    headers={"x-goog-api-key": api_key},
+                    json=payload,
+                    timeout=req_timeout,
+                )
+        else:
+            async with httpx.AsyncClient(
+                timeout=req_timeout,
+                trust_env=False,
+                follow_redirects=False,
+                transport=transport,
+            ) as client:
                 response = await client.post(
                     f"{_GEMINI_API_BASE}/models/{model}:generateContent",
                     headers={"x-goog-api-key": api_key},
                     json=payload,
                 )
+                if response.status_code == 400 and thinking_cfg is not None:
+                    generation_config.pop("thinkingConfig", None)
+                    response = await client.post(
+                        f"{_GEMINI_API_BASE}/models/{model}:generateContent",
+                        headers={"x-goog-api-key": api_key},
+                        json=payload,
+                    )
     except httpx.TimeoutException:
         logger.warning("phonics_ai_gemini_timeout model=%s", model)
         if transport is None:
@@ -516,18 +567,28 @@ async def _call_groq_phonics(
             {"role": "user", "content": "\n".join(prompt_lines)},
         ],
     }
+    req_timeout = httpx.Timeout(timeout_seconds, connect=min(3.0, timeout_seconds))
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds),
-            trust_env=False,
-            follow_redirects=False,
-            transport=transport,
-        ) as client:
-            response = await client.post(
+        pooled = _get_pooled_client() if transport is None else None
+        if pooled is not None:
+            response = await pooled.post(
                 _GROQ_CHAT_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
+                timeout=req_timeout,
             )
+        else:
+            async with httpx.AsyncClient(
+                timeout=req_timeout,
+                trust_env=False,
+                follow_redirects=False,
+                transport=transport,
+            ) as client:
+                response = await client.post(
+                    _GROQ_CHAT_URL,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json=payload,
+                )
     except httpx.TimeoutException:
         logger.warning("phonics_ai_groq_timeout model=%s", model)
         if transport is None:
@@ -584,7 +645,8 @@ async def analyze_phonics_with_ai(
     text: str,
     *,
     context_phrase: str | None = None,
-    timeout_seconds: float = 8.0,
+    timeout_seconds: float = _DEFAULT_PHONICS_CANDIDATE_TIMEOUT_SECONDS,
+    overall_timeout_seconds: float = _DEFAULT_PHONICS_OVERALL_TIMEOUT_SECONDS,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> PhonicsAnalyzeResponse:
     """Analyze a word/phrase using AI to produce validated Grade-1 Vietnamese phonics."""
@@ -624,6 +686,9 @@ async def analyze_phonics_with_ai(
         default=_DEFAULT_GROQ_MODEL,
     )
 
+    candidate_timeout = max(0.5, float(timeout_seconds))
+    deadline = time.monotonic() + max(0.5, float(overall_timeout_seconds))
+
     raw_ai: dict[str, Any] | None = None
     if gemini_key:
         gemini_chain = list(build_gemini_model_chain(gemini_model, gemini_fallback))
@@ -632,12 +697,16 @@ async def analyze_phonics_with_ai(
             if non_cooled:
                 gemini_chain = non_cooled
         for candidate_model in gemini_chain:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.2:
+                logger.warning("phonics_ai_deadline_exceeded stage=gemini")
+                break
             raw_ai = await _call_gemini_phonics(
                 clean_phrase=clean,
                 context_phrase=ctx_clean,
                 api_key=gemini_key,
                 model=candidate_model,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=min(candidate_timeout, remaining),
                 transport=transport,
             )
             if raw_ai is not None:
@@ -650,12 +719,16 @@ async def analyze_phonics_with_ai(
             if non_cooled:
                 groq_chain = non_cooled
         for candidate_model in groq_chain:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.2:
+                logger.warning("phonics_ai_deadline_exceeded stage=groq")
+                break
             raw_ai = await _call_groq_phonics(
                 clean_phrase=clean,
                 context_phrase=ctx_clean,
                 api_key=groq_key,
                 model=candidate_model,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=min(candidate_timeout, remaining),
                 transport=transport,
             )
             if raw_ai is not None:

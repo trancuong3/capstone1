@@ -678,7 +678,7 @@ export function ReadingPreparationScreen({
           <ReadingVoiceSettings
             disabled={isStarting}
             fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
+            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
             onPreview={(sample) =>
               speechPlayer.play(sample, {
                 coaching: true,
