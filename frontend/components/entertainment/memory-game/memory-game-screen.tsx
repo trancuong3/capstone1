@@ -57,7 +57,6 @@ import {
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
@@ -425,27 +424,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             echoGuard.playbackEnded(playbackId, performance.now());
             return;
           }
-          // Last-resort fallback only if TtsPlayback (Offline -> Cloud -> Android/Browser)
-          // could not speak (e.g., browser exposes speechSynthesis without getVoices()).
-          if (
-            typeof window !== "undefined" &&
-            "speechSynthesis" in window &&
-            typeof window.SpeechSynthesisUtterance === "function"
-          ) {
-            try {
-              const utterance = new window.SpeechSynthesisUtterance(
-                adaptedText,
-              );
-              utterance.lang = "vi-VN";
-              utterance.rate = getSpeechPreferences().speed;
-              utterance.onend = finishSpeak;
-              utterance.onerror = finishSpeak;
-              window.speechSynthesis.speak(utterance);
-              return;
-            } catch {
-              // Fall through to finishSpeak cleanly.
-            }
-          }
+          // Strictly forbid raw genderless SpeechSynthesisUtterance fallback so a
+          // male/female teacher selection never switches genders mid-session.
           finishSpeak();
         });
     },

@@ -25,6 +25,7 @@ import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import {
   getVoicePreloadState,
   preloadReadingVoiceEngines,
@@ -198,6 +199,7 @@ export function ReadingPreparationScreen({
 
   useEffect(() => {
     if (state.status !== "ready" || !state.data.startPage) return;
+    hydrateTeacherVoiceFromChildProfile(state.data.child);
     const isPrivateBook = state.data.book.visibility_scope === "PARENT_PRIVATE";
     const preloadArgs = {
       bookId: state.data.book.id,

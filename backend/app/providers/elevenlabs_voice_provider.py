@@ -365,10 +365,17 @@ class ElevenLabsVoiceProvider:
             words=words,
         )
 
-    def _resolve_effective_voice(self, requested_voice_id: str | None) -> tuple[str, bool]:
+    def _resolve_effective_voice(
+        self,
+        requested_voice_id: str | None,
+        *,
+        allow_default_fallback: bool = True,
+    ) -> tuple[str, bool]:
         requested = self._voice_id(requested_voice_id)
         fp = self._key_fingerprint or ""
         if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
+            if not allow_default_fallback:
+                raise VoiceProviderUnavailable()
             return DEFAULT_VOICE_ID, True
         return requested, False
 
@@ -430,6 +437,7 @@ class ElevenLabsVoiceProvider:
         text: str,
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        allow_default_fallback: bool = True,
     ) -> SynthesizedAudio:
         headers = self._headers()
         configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
@@ -442,10 +450,18 @@ class ElevenLabsVoiceProvider:
         normalized_speed = settings["speed"]
         fp = self._key_fingerprint or ""
 
-        voice_id, used_fallback = self._resolve_effective_voice(requested_voice_id)
+        male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+        block_default_fallback = (
+            not allow_default_fallback
+            or (bool(male_voice_id) and requested_voice_id == male_voice_id)
+        )
+        voice_id, used_fallback = self._resolve_effective_voice(
+            requested_voice_id,
+            allow_default_fallback=not block_default_fallback,
+        )
         candidates = (
             [(voice_id, used_fallback)]
-            if voice_id == DEFAULT_VOICE_ID
+            if voice_id == DEFAULT_VOICE_ID or block_default_fallback
             else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
         )
 
@@ -540,6 +556,7 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None = None,
         speed: float = 1.0,
         region: str = "north",
+        allow_default_fallback: bool = True,
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalTimedSpeech,
@@ -556,6 +573,7 @@ class ElevenLabsVoiceProvider:
             text=normalized_passage,
             requested_voice_id=requested_voice_id,
             speed=speed,
+            allow_default_fallback=allow_default_fallback,
         )
         duration = self._estimate_mp3_duration_seconds(audio.content)
         projected = project_chunk_spans_to_surface_words(
@@ -590,6 +608,7 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None = None,
         speed: float = 1.0,
         region: str = "north",
+        allow_default_fallback: bool = True,
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalPhonicsSpeech,
@@ -610,6 +629,7 @@ class ElevenLabsVoiceProvider:
                 text=spoken,
                 requested_voice_id=requested_voice_id,
                 speed=speed,
+                allow_default_fallback=allow_default_fallback,
             )
 
         synthesized_steps = await asyncio.gather(*(_synth_step(step) for step in steps))

@@ -82,6 +82,11 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
+import {
+  getFreshVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
+} from "@/lib/reading/voice-engine-status";
 import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
@@ -1181,19 +1186,11 @@ export function PictureDescriptionScreen() {
               .map((item) => item.word)
               .slice(0, 10)
           : [];
-        try {
-          const sttResult = await speechService.transcribe(audioBlob, {
-            languageCode: "vi",
-            keyterms,
-            signal: sttController.signal,
-          });
-          if (isStaleCapture()) return;
-          sttTranscript = sttResult.text?.trim() || null;
-        } catch {
-          if (isStaleCapture()) return;
-          sttTranscript = null;
-        }
-        if (!sttTranscript && detectBrowserWasmSttSupport().supported) {
+        const localUnconfigured = isPermanentlyHostedLocalUnconfigured(
+          getFreshVoiceEngineHealth(),
+        );
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
+        if (localUnconfigured && wasmSupported) {
           try {
             const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
               audioBlob,
@@ -1203,6 +1200,39 @@ export function PictureDescriptionScreen() {
             sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
           } catch {
             if (isStaleCapture()) return;
+            sttTranscript = null;
+          }
+        } else {
+          try {
+            const sttResult = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: sttController.signal,
+            });
+            if (isStaleCapture()) return;
+            sttTranscript = sttResult.text?.trim() || null;
+          } catch (err) {
+            if (isStaleCapture()) return;
+            const errText =
+              typeof err === "object" && err !== null
+                ? `${String((err as { code?: unknown }).code ?? "")} ${String((err as { providerCode?: unknown }).providerCode ?? "")} ${err instanceof Error ? err.message : ""}`
+                : "";
+            if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+              markHostedLocalUnconfigured();
+            }
+            sttTranscript = null;
+          }
+          if (!sttTranscript && wasmSupported) {
+            try {
+              const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
+                audioBlob,
+                { timeoutMs: 12_000 },
+              );
+              if (isStaleCapture()) return;
+              sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
+            } catch {
+              if (isStaleCapture()) return;
+            }
           }
         }
       }

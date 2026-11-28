@@ -19,7 +19,10 @@ import {
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  getSpeechPreferences,
+  getSpeechPreferencesMeta,
+} from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
@@ -385,11 +388,16 @@ export function createSpeechService(): SpeechService {
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const defaultVoiceOverride =
+        policy.region !== "north" ||
+        getSpeechPreferencesMeta().gender === "male"
+          ? getEffectiveVoiceId()
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
         resolvedRequestVoiceId ??
         getEffectiveVoiceId() ??
@@ -594,11 +602,16 @@ export function createSpeechService(): SpeechService {
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const defaultVoiceOverride =
+        policy.region !== "north" ||
+        getSpeechPreferencesMeta().gender === "male"
+          ? getEffectiveVoiceId()
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
         resolvedRequestVoiceId ??
         getEffectiveVoiceId() ??

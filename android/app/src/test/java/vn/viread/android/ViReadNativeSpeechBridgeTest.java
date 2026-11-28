@@ -3,6 +3,7 @@ package vn.viread.android;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
@@ -939,5 +940,38 @@ public final class ViReadNativeSpeechBridgeTest {
         assertNotNull("Expected tts_start event", startEvent);
         assertTrue(startEvent.optBoolean("voiceGenderMismatch", false));
         assertEquals("vi-vn-x-vie-local", startEvent.optString("resolvedVoiceName"));
+
+        Voice mienNamNeutral = new Voice(
+                "vi-vn-mien-nam-standard",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                null);
+        assertNull(
+                "Southern region label mien-nam must not misclassify gender as male",
+                ViReadNativeSpeechBridge.inferAndroidVoiceGender(mienNamNeutral));
+        Voice genericLangVoice = new Voice(
+                "vi-vn-language",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                null);
+        Voice pickedForMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(
+                Collections.singleton(genericLangVoice), "male");
+        assertNotNull(pickedForMale);
+        assertTrue(
+                "Generic vi-vn-language fallback for requested male voice must flag gender mismatch",
+                ViReadNativeSpeechBridge.isVoiceGenderMismatch(pickedForMale, "male"));
+        assertFalse(
+                "Generic vi-vn-language fallback for female voice should not flag male mismatch",
+                ViReadNativeSpeechBridge.isVoiceGenderMismatch(pickedForMale, "female"));
+        assertFalse(
+                "Matched male voice must not flag gender mismatch",
+                ViReadNativeSpeechBridge.isVoiceGenderMismatch(maleVoice, "male"));
+        assertTrue(
+                "Female voice when male requested must flag gender mismatch",
+                ViReadNativeSpeechBridge.isVoiceGenderMismatch(femaleVoice, "male"));
     }
 }

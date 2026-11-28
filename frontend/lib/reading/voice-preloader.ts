@@ -18,6 +18,10 @@ import {
   type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
+  detectBrowserWasmTtsSupport,
+  getBrowserWasmTtsClient,
+} from "@/lib/reading/browser-wasm-tts";
+import {
   getAndroidSpeechCapabilities,
   isAndroidNativeSpeechAvailable,
 } from "@/lib/reading/native-speech-bridge";
@@ -31,9 +35,14 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
+import {
+  resolveVoiceGender,
+  type VoiceGender,
+} from "@/lib/reading/voice-persona";
 
 export type VoiceEnginePreloadStatus =
   "idle" | "loading" | "ready" | "degraded";
@@ -70,6 +79,8 @@ const listeners = new Set<() => void>();
 let state: VoicePreloadState = INITIAL_STATE;
 let activePreloadPromise: Promise<void> | null = null;
 let wasmInitPromise: Promise<boolean> | null = null;
+let wasmTtsInitPromise: Promise<boolean> | null = null;
+let wasmTtsWarmGender: VoiceGender | null = null;
 let wasmProgressUnsub: (() => void) | null = null;
 let pendingTtsWarmOptions: PreloadReadingVoiceOptions | null = null;
 let warmTtsAbortController: AbortController | null = null;
@@ -227,17 +238,50 @@ function startWasmSttWarmup(): Promise<boolean> {
   return wasmInitPromise;
 }
 
+function startWasmTtsWarmup(gender?: VoiceGender): Promise<boolean> {
+  const resolvedGender = gender ?? resolveVoiceGender(getEffectiveVoiceId());
+  if (
+    isAndroidNativeSpeechAvailable() ||
+    !detectBrowserWasmTtsSupport().supported
+  ) {
+    return Promise.resolve(false);
+  }
+  const client = getBrowserWasmTtsClient();
+  if (client.isReady(resolvedGender)) {
+    return Promise.resolve(true);
+  }
+  if (wasmTtsInitPromise && wasmTtsWarmGender === resolvedGender) {
+    return wasmTtsInitPromise;
+  }
+  wasmTtsWarmGender = resolvedGender;
+  const req = client
+    .init({ gender: resolvedGender })
+    .then(() => true)
+    .catch(() => false)
+    .finally(() => {
+      if (wasmTtsInitPromise === req && !client.isReady(resolvedGender)) {
+        wasmTtsInitPromise = null;
+      }
+    });
+  wasmTtsInitPromise = req;
+  return req;
+}
+
 function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
   if (!health) return false;
   const policy = getVoicePolicyPreferences();
+  const cloudTtsAllowed =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleTtsFallback;
   const localTtsReady = Boolean(
     health.local.available && health.local.tts_ready,
   );
   return Boolean(
     localTtsReady ||
-    (health.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) ||
-    (policy.providerMode === "local_with_google_fallback" &&
-      policy.allowGoogleTtsFallback &&
+    (cloudTtsAllowed &&
+      health.elevenlabs?.tts_configured &&
+      !health.elevenlabs.tts_cooldown) ||
+    (cloudTtsAllowed &&
       health.google.tts_configured &&
       !health.google.tts_cooldown),
   );
@@ -415,19 +459,52 @@ export function preloadReadingVoiceEngines(
       ? warmBrowserSpeechVoices()
       : Promise.resolve(false);
 
+    const wasmTtsSupported =
+      !isAndroid &&
+      options.warmTts !== false &&
+      detectBrowserWasmTtsSupport().supported;
+    const isHostedOrigin =
+      typeof window !== "undefined" &&
+      Boolean(window.location?.hostname) &&
+      window.location.hostname !== "localhost" &&
+      window.location.hostname !== "127.0.0.1";
+    const initialHealth = getFreshVoiceEngineHealth();
+    const initialUnconfigured =
+      isPermanentlyHostedLocalUnconfigured(initialHealth);
+
     let earlyWasmStarted = false;
     if (wasmSupported) {
-      void getWasmModelCacheStatus()
-        .then((cacheStatus) => {
-          if (cacheStatus.ready && !earlyWasmStarted) {
-            const currentHealth = getFreshVoiceEngineHealth();
-            if (!currentHealth || !currentHealth.local.stt_ready) {
-              earlyWasmStarted = true;
-              void startWasmSttWarmup();
+      if (
+        initialUnconfigured ||
+        (initialHealth && !initialHealth.local.stt_ready) ||
+        isHostedOrigin
+      ) {
+        earlyWasmStarted = true;
+        void startWasmSttWarmup();
+      } else {
+        void getWasmModelCacheStatus()
+          .then((cacheStatus) => {
+            if (cacheStatus.ready && !earlyWasmStarted) {
+              const currentHealth = getFreshVoiceEngineHealth();
+              if (!currentHealth || !currentHealth.local.stt_ready) {
+                earlyWasmStarted = true;
+                void startWasmSttWarmup();
+              }
             }
-          }
-        })
-        .catch(() => undefined);
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    let earlyWasmTtsStarted = false;
+    if (
+      wasmTtsSupported &&
+      (initialUnconfigured ||
+        (initialHealth && !hasLiveServerTts(initialHealth)) ||
+        isHostedOrigin)
+    ) {
+      earlyWasmTtsStarted = true;
+      void startWasmTtsWarmup(resolveVoiceGender(getEffectiveVoiceId()));
     }
 
     const [, fetchedHealth, androidCaps] = await Promise.all([
@@ -491,11 +568,26 @@ export function preloadReadingVoiceEngines(
           : options;
       void warmInitialTtsCues(mergedTtsOptions, health);
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
+    } else if (wasmTtsSupported) {
+      earlyWasmTtsStarted = true;
+      void startWasmTtsWarmup(resolveVoiceGender(getEffectiveVoiceId())).then(
+        () => {
+          updateState({ ttsStatus: "ready", readyAt: Date.now() });
+        },
+      );
+      if (
+        getBrowserWasmTtsClient().isReady(
+          resolveVoiceGender(getEffectiveVoiceId()),
+        )
+      ) {
+        updateState({ ttsStatus: "ready", readyAt: Date.now() });
+      }
     } else {
       // Hosted on-device TTS (Android Native or Browser SpeechSynthesis):
       // already warmed via getAndroidSpeechCapabilities() / warmBrowserSpeechVoices().
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
     }
+    void earlyWasmTtsStarted;
   };
 
   activePreloadPromise = run().finally(() => {
@@ -520,7 +612,8 @@ export async function awaitSttReadyBeforeListening(
   }
   const startedAt = Date.now();
   let health = getFreshVoiceEngineHealth();
-  if (!health && maxWaitMs > 0) {
+  const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
+  if (!health && !permanentlyUnconfigured && maxWaitMs > 0) {
     const healthBudgetMs = Math.min(1_500, maxWaitMs);
     health = await new Promise<VoiceEngineHealthSnapshot | null>((resolve) => {
       let settled = false;
@@ -537,7 +630,11 @@ export async function awaitSttReadyBeforeListening(
       );
     });
   }
-  if (health?.local.available && health.local.stt_ready) {
+  if (
+    !permanentlyUnconfigured &&
+    health?.local.available &&
+    health.local.stt_ready
+  ) {
     return true;
   }
   if (!detectBrowserWasmSttSupport().supported) {
@@ -569,10 +666,61 @@ export async function awaitSttReadyBeforeListening(
   });
 }
 
+export async function awaitVoiceEnginesReadyBeforeListening(
+  maxWaitMs = 2_800,
+): Promise<{ readonly sttReady: boolean; readonly ttsReady: boolean }> {
+  if (typeof window === "undefined") {
+    return { sttReady: true, ttsReady: true };
+  }
+  if (isAndroidNativeSpeechAvailable()) {
+    await getAndroidSpeechCapabilities().catch(() => null);
+    return { sttReady: true, ttsReady: true };
+  }
+  const health = getFreshVoiceEngineHealth();
+  const needWasmTts =
+    detectBrowserWasmTtsSupport().supported &&
+    (!health ||
+      !hasLiveServerTts(health) ||
+      isPermanentlyHostedLocalUnconfigured(health));
+  const gender = resolveVoiceGender(getEffectiveVoiceId());
+  const ttsPromise: Promise<boolean> = needWasmTts
+    ? new Promise<boolean>((resolve) => {
+        const client = getBrowserWasmTtsClient();
+        if (client.isReady(gender)) {
+          resolve(true);
+          return;
+        }
+        let settled = false;
+        const finish = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(ok);
+        };
+        const timer = window.setTimeout(
+          () => finish(client.isReady(gender)),
+          maxWaitMs,
+        );
+        startWasmTtsWarmup(gender).then(
+          (ok) => finish(ok),
+          () => finish(false),
+        );
+      })
+    : Promise.resolve(true);
+
+  const [sttReady, ttsReady] = await Promise.all([
+    awaitSttReadyBeforeListening(maxWaitMs),
+    ttsPromise,
+  ]);
+  return { sttReady, ttsReady };
+}
+
 export function resetVoicePreloaderForTests(): void {
   state = INITIAL_STATE;
   activePreloadPromise = null;
   wasmInitPromise = null;
+  wasmTtsInitPromise = null;
+  wasmTtsWarmGender = null;
   wasmProgressUnsub?.();
   wasmProgressUnsub = null;
   pendingTtsWarmOptions = null;

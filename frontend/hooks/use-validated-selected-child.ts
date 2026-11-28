@@ -11,6 +11,7 @@ import {
   invalidateUserCacheKey,
   readUserCacheWithStale,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO } from "@/types/profile";
 
@@ -119,6 +120,7 @@ export function useValidatedSelectedChild() {
           replace("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
+        hydrateTeacherVoiceFromChildProfile(child);
         setValidatedSelectedChild(child);
         setState({ status: "ready", childId: requestChildId, child });
       })

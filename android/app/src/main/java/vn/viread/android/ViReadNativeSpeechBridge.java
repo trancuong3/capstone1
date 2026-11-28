@@ -1528,6 +1528,17 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         return "unknown".equals(classified) ? null : classified;
     }
 
+    static boolean isVoiceGenderMismatch(
+            @Nullable Voice resolvedVoice, @Nullable String requestedGender) {
+        String normalizedGender = normalizeVoiceGender(requestedGender);
+        if (normalizedGender == null || resolvedVoice == null) {
+            return false;
+        }
+        String inferred = inferAndroidVoiceGender(resolvedVoice);
+        return (inferred != null && !normalizedGender.equals(inferred))
+                || (inferred == null && "male".equals(normalizedGender));
+    }
+
     @Nullable
     static Voice selectBestVietnameseVoice(@Nullable Set<Voice> voices) {
         return selectBestVietnameseVoice(voices, null);
@@ -1553,12 +1564,17 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         if (voice.getName() == null) {
             return "unknown";
         }
-        // Strip "vietnamese" / "vietnam" BEFORE tokenizing so the substring "nam" inside
-        // "vietnam" never falsely classifies female/neutral Vietnamese voices as male.
+        // Strip "vietnamese" / "vietnam" / southern dialect region labels BEFORE tokenizing
+        // so the substring "nam" inside "vietnam" or "miền nam" never falsely classifies
+        // female/neutral Vietnamese voices as male.
         String sanitized = voice.getName()
                 .toLowerCase(Locale.ROOT)
                 .replace("vietnamese", " ")
-                .replace("vietnam", " ");
+                .replace("vietnam", " ")
+                .replace("miền nam", " ")
+                .replace("mien nam", " ")
+                .replace("mien-nam", " ")
+                .replace("mien_nam", " ");
         boolean looksMale = sanitized.contains("wavenet-b") || sanitized.contains("neural2-d");
         boolean looksFemale = sanitized.contains("wavenet-c") || sanitized.contains("neural2-a");
         String[] tokens = sanitized.split("[^a-z0-9]+");
@@ -2080,12 +2096,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                     pinnedVoiceId = requestedVoiceId;
                     activeVoiceGender = classifyVoiceGender(best);
                     lastResolvedVoiceName = best.getName();
-                    if (normalizedGender != null) {
-                        String inferred = inferAndroidVoiceGender(best);
-                        if (inferred != null && !normalizedGender.equals(inferred)) {
-                            lastVoiceGenderMismatch = true;
-                        }
-                    }
+                    lastVoiceGenderMismatch = isVoiceGenderMismatch(best, normalizedGender);
                 } else {
                     pinnedVoice = null;
                     pinnedVoiceGender = normalizedGender;

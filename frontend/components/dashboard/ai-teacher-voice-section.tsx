@@ -45,6 +45,10 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
+import {
+  detectBrowserWasmTtsSupport,
+  getBrowserWasmTtsClient,
+} from "@/lib/reading/browser-wasm-tts";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -352,7 +356,7 @@ export function AiTeacherVoiceSection({
       readonly modelVersion?: string;
     }) => {
       stopPreview();
-      applyGlobalTeacherVoiceSelection({
+      const applied = applyGlobalTeacherVoiceSelection({
         ...input,
         childId: selectedChild?.id ?? null,
         persistToBackend: selectedChild?.id ? persistChildVoice : undefined,
@@ -361,8 +365,24 @@ export function AiTeacherVoiceSection({
             ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
             : undefined,
       });
+      if (detectBrowserWasmTtsSupport().supported) {
+        const nextGender =
+          input.gender ??
+          resolveVoiceGender(
+            applied?.voiceId ?? input.voiceId ?? effectiveVoiceId,
+          );
+        void getBrowserWasmTtsClient()
+          .init({ gender: nextGender })
+          .catch(() => undefined);
+      }
     },
-    [persistChildVoice, selectedChild?.id, stopPreview, voiceStudio],
+    [
+      effectiveVoiceId,
+      persistChildVoice,
+      selectedChild?.id,
+      stopPreview,
+      voiceStudio,
+    ],
   );
 
   const findPreferredVoice = useCallback(
