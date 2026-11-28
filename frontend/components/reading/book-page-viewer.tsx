@@ -622,7 +622,7 @@ function PageSurface(
               <button
                 aria-selected={effectiveReadingMode === "ILLUSTRATED"}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:min-h-9 md:gap-1.5 md:px-3 md:py-1 md:text-xs",
+                  "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                   effectiveReadingMode === "ILLUSTRATED"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -639,7 +639,7 @@ function PageSurface(
             <button
               aria-selected={effectiveReadingMode === "TEXT"}
               className={cn(
-                "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:min-h-9 md:gap-1.5 md:px-3 md:py-1 md:text-xs",
+                "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                 effectiveReadingMode === "TEXT"
                   ? "border-primary bg-primary text-white shadow-xs"
                   : "border-border bg-white text-ink hover:bg-canvas",
@@ -656,7 +656,7 @@ function PageSurface(
               <button
                 aria-selected={effectiveReadingMode === "ORIGINAL"}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:min-h-9 md:gap-1.5 md:px-3 md:py-1 md:text-xs",
+                  "inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary md:gap-1.5 md:px-3 md:py-1.5 md:text-xs",
                   effectiveReadingMode === "ORIGINAL"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
