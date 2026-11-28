@@ -730,13 +730,19 @@ class ParentPrivateBookService:
             readable_ids = await self._readable_private_book_ids(book_ids, actor_id)
 
         texts_by_book: dict[UUID, list[str]] = {}
-        if isinstance(getattr(self, "db", None), AsyncSession) and book_ids:
+        committed_book_ids = [
+            b_id for b_id in book_ids if committed_map.get(b_id, 0) > 0
+        ]
+        if (
+            isinstance(getattr(self, "db", None), AsyncSession)
+            and committed_book_ids
+        ):
             try:
                 text_rows = await self.db.execute(
                     select(BookPage.BookId, PageRevision.VerifiedText)
                     .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
                     .where(
-                        BookPage.BookId.in_(book_ids),
+                        BookPage.BookId.in_(committed_book_ids),
                         BookPage.LifecycleStatus == "ACTIVE",
                         PageRevision.VerificationStatus == "VERIFIED",
                     )
