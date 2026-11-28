@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import UUID
 
 
@@ -22,6 +23,9 @@ class SourcePage:
     page_number: int
     text: str
     tokens: tuple[str, ...]
+    page_kind: str | None = None
+    blocks: tuple[dict[str, Any], ...] = ()
+    style_bible: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

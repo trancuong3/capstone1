@@ -470,5 +470,31 @@
     "keepTrying": "נסה/י לקרוא לאט ובבירור.",
     "wordsRead": "{count, plural, =0 {לא נקראו מילים} one {נקראה מילה אחת} other {נקראו # מילים}}"
   },
-  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון."
+  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון.",
+  "pageKinds": {
+    "TEXT_ONLY": "טקסט",
+    "TEXT_AND_IMAGE": "סיפור מאויר",
+    "IMAGE_PRIMARY": "עמוד איור",
+    "COMIC": "קומיקס / דו-שיח",
+    "POEM": "שיר ילדים",
+    "EXERCISE": "עמוד תרגול",
+    "MULTI_COLUMN": "רב-עמודות",
+    "TEXT_OVER_IMAGE": "טקסט על איור",
+    "LOW_QUALITY": "דרוש בדיקה"
+  },
+  "duet": {
+    "toggleLabel": "קריאה משותפת בתורות",
+    "toggleActive": "מצב תורות פעיל",
+    "parentTurnBadge": "תור ההורה להוביל",
+    "childTurnBadge": "עכשיו תור הילד/ה לקרוא!",
+    "listenParentSample": "האזנה לדוגמה",
+    "completeParentTurn": "סיימתי לקרוא — תור הילד/ה",
+    "turnCounter": "תור {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "גלו את האיור והמשפטים שבעמוד",
+    "subtitle": "הרחיבו אוצר מילים ומשפטים ישירות מהעמוד שקראתם כעת.",
+    "pictureCta": "תיאור איור העמוד",
+    "shooterCta": "הרכבת משפטי העמוד"
+  }
 }

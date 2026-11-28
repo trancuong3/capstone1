@@ -52,10 +52,19 @@ def _service(db: AsyncSession) -> PictureDescriptionService:
 @router.get("/catalog", response_model=PictureCatalogRead)
 async def get_picture_catalog(
     child_id: UUID = Query(...),
+    book_id: UUID | None = Query(default=None),
+    book_page_id: UUID | None = Query(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _service(db).get_catalog(actor_id, child_id)
+    safe_book_id = book_id if isinstance(book_id, UUID) else None
+    safe_page_id = book_page_id if isinstance(book_page_id, UUID) else None
+    return await _service(db).get_catalog(
+        actor_id,
+        child_id,
+        book_id=safe_book_id,
+        book_page_id=safe_page_id,
+    )
 
 
 @router.get("/sessions", response_model=list[PictureSessionSummaryRead])
@@ -72,6 +81,7 @@ async def create_picture_session(
     child_id: UUID = Form(...),
     source_type: SourceType = Form(...),
     sample_key: str | None = Form(default=None),
+    book_id: UUID | None = Form(default=None),
     book_page_id: UUID | None = Form(default=None),
     teaching_mode: TeachingMode = Form(default="OBSERVE"),
     target_words: str | None = Form(default=None),
@@ -107,6 +117,8 @@ async def create_picture_session(
     safe_teacher_gender = (
         teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
     )
+    safe_book_id = book_id if isinstance(book_id, UUID) else None
+    extra_kwargs = {"book_id": safe_book_id} if safe_book_id is not None else {}
     return await _service(db).create_session(
         actor_id,
         child_id=child_id,
@@ -118,6 +130,7 @@ async def create_picture_session(
         target_words=_parse_target_words_form(resolved_target_words),
         refresh_ai_guide=resolved_refresh,
         teacher_gender=safe_teacher_gender,
+        **extra_kwargs,
     )
 
 

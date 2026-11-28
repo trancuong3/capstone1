@@ -191,6 +191,34 @@ class PhonicsAiServiceTests(unittest.TestCase):
         # Overall 0.5s deadline stops before exhausting all 5+ Gemini/Groq candidates
         self.assertLessEqual(calls, 2)
 
+    def test_all_20_synced_rhymes_present_in_backend_phonics_set(self) -> None:
+        from app.services.vietnamese_phonics import VALID_VIETNAMESE_UNTONED_RHYMES
+
+        expected_20 = {
+            "oam",
+            "oăm",
+            "uâm",
+            "uêm",
+            "uym",
+            "uyn",
+            "oong",
+            "oeng",
+            "êc",
+            "oec",
+            "ooc",
+            "uâc",
+            "uêc",
+            "yêc",
+            "ưp",
+            "oăp",
+            "oep",
+            "uôp",
+            "uyp",
+            "uêt",
+        }
+        missing = sorted(r for r in expected_20 if r not in VALID_VIETNAMESE_UNTONED_RHYMES)
+        self.assertEqual(missing, [])
+
 
 if __name__ == "__main__":
     unittest.main()

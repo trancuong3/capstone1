@@ -470,5 +470,31 @@
     "keepTrying": "请尝试让孩子慢一点、清晰地读出每个字。",
     "wordsRead": "{count, plural, =0 {尚未阅读任何词汇} other {已阅读 # 个词汇}}"
   },
-  "learningContentNotice": "越南语阅读内容始终从左到右显示，以保持正确的拼写。"
+  "learningContentNotice": "越南语阅读内容始终从左到右显示，以保持正确的拼写。",
+  "pageKinds": {
+    "TEXT_ONLY": "纯文本",
+    "TEXT_AND_IMAGE": "插图故事",
+    "IMAGE_PRIMARY": "图画页",
+    "COMIC": "漫画 / 对话",
+    "POEM": "儿童诗歌",
+    "EXERCISE": "练习页",
+    "MULTI_COLUMN": "多栏排版",
+    "TEXT_OVER_IMAGE": "图上文字",
+    "LOW_QUALITY": "待核对"
+  },
+  "duet": {
+    "toggleLabel": "亲子分角色共读",
+    "toggleActive": "分角色共读已开启",
+    "parentTurnBadge": "家长领读回合",
+    "childTurnBadge": "轮到宝贝朗读啦！",
+    "listenParentSample": "试听本段示范",
+    "completeParentTurn": "家长已读完 — 轮到宝贝",
+    "turnCounter": "第 {current}/{total} 段"
+  },
+  "multimodalBridge": {
+    "title": "探索本页插画与句子",
+    "subtitle": "直接基于刚读完的书页拓展词汇表达与句子结构。",
+    "pictureCta": "看图说话（本页插画）",
+    "shooterCta": "句子射击（本页好句）"
+  }
 }

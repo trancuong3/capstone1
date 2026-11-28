@@ -66,7 +66,9 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   fetchVoiceEngineHealth,
+  getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
+  isPermanentlyHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -1675,10 +1677,15 @@ export function DifficultWordPracticePanel({
         let effectiveConfidence = browserBestConfRef.current;
         let effectiveQualityStatus: string | undefined = quality?.status;
         let uploadAudioBlob: Blob | undefined = recording;
+        const freshHealth = getFreshVoiceEngineHealth();
         const routingHealth = getVoiceEngineHealthForRouting();
+        const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(
+          freshHealth ?? routingHealth,
+        );
         const localSttDown =
-          routingHealth !== null &&
-          (!routingHealth.local.available || !routingHealth.local.stt_ready);
+          permanentlyUnconfigured ||
+          (routingHealth !== null &&
+            (!routingHealth.local.available || !routingHealth.local.stt_ready));
         if (
           localSttDown &&
           !effectiveTranscript &&
@@ -1707,8 +1714,10 @@ export function DifficultWordPracticePanel({
                 effectiveTranscript = wasmText;
                 recordSttEngineUsage({
                   provider: "wasm",
-                  fallbackUsed: true,
-                  fallbackReason: "LOCAL_STT_UNAVAILABLE",
+                  fallbackUsed: !permanentlyUnconfigured,
+                  fallbackReason: permanentlyUnconfigured
+                    ? null
+                    : "LOCAL_STT_UNAVAILABLE",
                 });
                 const isExactMatch =
                   normalizeVietnameseWord(wasmText) ===

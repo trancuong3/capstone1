@@ -470,5 +470,31 @@
     "keepTrying": "حاول القراءة ببطء ووضوح لكل مقطع.",
     "wordsRead": "{count, plural, =0 {لم يتم قراءة أي كلمات} one {تم قراءة كلمة واحدة} few {تم قراءة # كلمات} many {تم قراءة # كلمة} other {تم قراءة # كلمة}}"
   },
-  "learningContentNotice": "يتم عرض محتوى القراءة وتدريبها من اليسار إلى اليمين للحفاظ على الإملاء الصحيح."
+  "learningContentNotice": "يتم عرض محتوى القراءة وتدريبها من اليسار إلى اليمين للحفاظ على الإملاء الصحيح.",
+  "pageKinds": {
+    "TEXT_ONLY": "نص سردي",
+    "TEXT_AND_IMAGE": "قصة مصورة",
+    "IMAGE_PRIMARY": "صفحة مصورة",
+    "COMIC": "قصص مصورة / حوار",
+    "POEM": "شعر أطفال",
+    "EXERCISE": "صفحة تدريبات",
+    "MULTI_COLUMN": "متعدد الأعمدة",
+    "TEXT_OVER_IMAGE": "نص فوق الرسم",
+    "LOW_QUALITY": "يحتاج مراجعة"
+  },
+  "duet": {
+    "toggleLabel": "قراءة تبادلية مع الوالد",
+    "toggleActive": "وضع القراءة التبادلية مفعّل",
+    "parentTurnBadge": "دور الوالد في القراءة التمهيدية",
+    "childTurnBadge": "حان دور طفلك للقراءة!",
+    "listenParentSample": "استمع للنموذج",
+    "completeParentTurn": "أنهى الوالد القراءة — دور الطفل",
+    "turnCounter": "الدور {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "استكشف رسوم وجمل الصفحة",
+    "subtitle": "وسّع المفردات ومهارات بناء الجمل مباشرة من الصفحة التي قرأها طفلك للتو.",
+    "pictureCta": "وصف رسم الصفحة",
+    "shooterCta": "ترتيب جمل الصفحة"
+  }
 }

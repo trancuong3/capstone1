@@ -200,6 +200,7 @@ export function useValidatedSelectedChild() {
           replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
+        hydrateTeacherVoiceFromChildProfile(child);
         setValidatedSelectedChild(child);
         setState((current) =>
           current.status === "ready" &&

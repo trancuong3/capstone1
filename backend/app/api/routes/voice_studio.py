@@ -17,6 +17,7 @@ from app.api.routes.voice import (
     _extract_audio_accept,
     _tts_cache_headers,
     get_voice_orchestrator,
+    lookup_voice_gender,
     provider_http_exception,
 )
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -173,6 +174,11 @@ async def timed_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    response.headers["X-Voice-Gender"] = (
+        lookup_voice_gender(speech.resolved_voice_id)
+        or lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
     fallback_reason = getattr(speech, "fallback_reason", None)
     if getattr(speech, "used_fallback_voice", False) and fallback_reason:
         response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)

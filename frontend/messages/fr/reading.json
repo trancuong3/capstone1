@@ -470,5 +470,31 @@
     "keepTrying": "Essaie de lire lentement et clairement, mon petit.",
     "wordsRead": "{count, plural, =0 {Aucun mot lu} other {(#) mots lus}}"
   },
-  "learningContentNotice": "Le contenu des livres et les exercices de lecture en vietnamien s'affichent toujours de gauche à droite afin de préserver l'orthographe correcte."
+  "learningContentNotice": "Le contenu des livres et les exercices de lecture en vietnamien s'affichent toujours de gauche à droite afin de préserver l'orthographe correcte.",
+  "pageKinds": {
+    "TEXT_ONLY": "Texte",
+    "TEXT_AND_IMAGE": "Histoire illustrée",
+    "IMAGE_PRIMARY": "Page illustrée",
+    "COMIC": "BD / Dialogue",
+    "POEM": "Poème enfantin",
+    "EXERCISE": "Page d’exercice",
+    "MULTI_COLUMN": "Multi-colonnes",
+    "TEXT_OVER_IMAGE": "Texte sur illustration",
+    "LOW_QUALITY": "À vérifier"
+  },
+  "duet": {
+    "toggleLabel": "Lecture en duo",
+    "toggleActive": "Mode duo actif",
+    "parentTurnBadge": "Tour du parent",
+    "childTurnBadge": "À ton tour de lire !",
+    "listenParentSample": "Écouter le modèle",
+    "completeParentTurn": "Lu — Au tour de l’enfant",
+    "turnCounter": "Tour {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Explorer l’illustration et les phrases",
+    "subtitle": "Enrichissez le vocabulaire et les phrases à partir de la page lue.",
+    "pictureCta": "Décrire l’illustration",
+    "shooterCta": "Construire les phrases"
+  }
 }

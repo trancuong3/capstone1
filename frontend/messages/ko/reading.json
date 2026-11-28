@@ -470,5 +470,31 @@
     "keepTrying": "천천히 한 음절씩 명확하게 읽어보세요.",
     "wordsRead": "{count, plural, =0 {읽은 단어 없음} other {단어 #개 읽음}}"
   },
-  "learningContentNotice": "올바른 철자를 유지하기 위해 베트남어 읽기 콘텐츠는 항상 왼쪽에서 오른쪽으로 표시됩니다."
+  "learningContentNotice": "올바른 철자를 유지하기 위해 베트남어 읽기 콘텐츠는 항상 왼쪽에서 오른쪽으로 표시됩니다.",
+  "pageKinds": {
+    "TEXT_ONLY": "본문",
+    "TEXT_AND_IMAGE": "삽화 동화",
+    "IMAGE_PRIMARY": "그림 중심",
+    "COMIC": "만화 / 대화",
+    "POEM": "어린이 동시",
+    "EXERCISE": "연습 활동",
+    "MULTI_COLUMN": "다단 구성",
+    "TEXT_OVER_IMAGE": "그림 위 글자",
+    "LOW_QUALITY": "검토 필요"
+  },
+  "duet": {
+    "toggleLabel": "부모·아이 번갈아 읽기",
+    "toggleActive": "번갈아 읽기 켜짐",
+    "parentTurnBadge": "부모님이 먼저 읽는 차례",
+    "childTurnBadge": "이제 아이가 읽을 차례예요!",
+    "listenParentSample": "이 차례 예시 듣기",
+    "completeParentTurn": "부모 읽기 완료 — 아이 차례로",
+    "turnCounter": "차례 {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "이 페이지 그림과 문장 탐험하기",
+    "subtitle": "방금 읽은 책 페이지로 어휘와 문장 감각을 이어서 키워 보세요.",
+    "pictureCta": "책 페이지 그림 묘사",
+    "shooterCta": "책 페이지 문장 맞추기"
+  }
 }

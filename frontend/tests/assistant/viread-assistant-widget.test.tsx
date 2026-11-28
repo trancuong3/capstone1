@@ -509,12 +509,23 @@ describe("ViReadAssistantWidget", () => {
     await user.click(screen.getByTestId("viread-assistant-launcher"));
     const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
 
-    // 1. Progressive loading card + Cancel restores prompt text
+    // 1. Messenger-style typing bubble + circular avatar + 3 waving dots + Cancel
     await user.type(input, "Tôi muốn đổi mật khẩu");
     await user.click(screen.getByLabelText("Gửi câu hỏi"));
+    const loadingCard = await screen.findByTestId(
+      "viread-assistant-loading-card",
+    );
+    expect(loadingCard).toBeInTheDocument();
+    const typingAvatar = screen.getByTestId("viread-assistant-typing-avatar");
+    expect(typingAvatar).toHaveClass("rounded-full");
     expect(
-      await screen.findByTestId("viread-assistant-loading-card"),
+      screen.getByTestId("viread-assistant-typing-bubble"),
     ).toBeInTheDocument();
+    const typingDots = screen.getAllByTestId("viread-assistant-typing-dot");
+    expect(typingDots).toHaveLength(3);
+    expect(typingDots[0]).toHaveClass("viread-messenger-dot-1");
+    expect(typingDots[1]).toHaveClass("viread-messenger-dot-2");
+    expect(typingDots[2]).toHaveClass("viread-messenger-dot-3");
     await user.click(screen.getByTestId("viread-assistant-cancel"));
     rejectRef.fn?.(new DOMException("Aborted", "AbortError"));
     expect(input).toHaveValue("Tôi muốn đổi mật khẩu");
@@ -524,6 +535,9 @@ describe("ViReadAssistantWidget", () => {
     expect(
       await screen.findByTestId("viread-assistant-nav-card"),
     ).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("viread-assistant-message-avatar").length,
+    ).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByTestId("viread-assistant-nav-no"));
     expect(navState.routerPush).not.toHaveBeenCalled();
     expect(

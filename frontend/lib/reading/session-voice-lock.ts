@@ -313,6 +313,38 @@ function removeFromPreviousSessionIds(sessionId: string): void {
   }
 }
 
+export type SessionDeviceTtsTransport =
+  "wasm_tts" | "android_native" | "browser";
+
+const sessionDeviceTransports = new Map<string, SessionDeviceTtsTransport>();
+const sessionServerAudioServedKeys = new Set<string>();
+
+export function getSessionDeviceTransport(
+  key: string,
+): SessionDeviceTtsTransport | null {
+  return sessionDeviceTransports.get(key) ?? null;
+}
+
+export function pinSessionDeviceTransport(
+  key: string,
+  transport: SessionDeviceTtsTransport,
+): void {
+  sessionDeviceTransports.set(key, transport);
+}
+
+export function clearSessionDeviceTransports(): void {
+  sessionDeviceTransports.clear();
+  sessionServerAudioServedKeys.clear();
+}
+
+export function markSessionServerAudioServedKey(key: string): void {
+  sessionServerAudioServedKeys.add(key);
+}
+
+export function hasSessionServerAudioServedKey(key: string): boolean {
+  return sessionServerAudioServedKeys.has(key);
+}
+
 export function registerVoiceCacheInvalidator(fn: Listener): () => void {
   voiceCacheInvalidators.add(fn);
   return () => {
@@ -321,6 +353,7 @@ export function registerVoiceCacheInvalidator(fn: Listener): () => void {
 }
 
 function invalidateRegisteredVoiceCaches(): void {
+  clearSessionDeviceTransports();
   voiceCacheInvalidators.forEach((fn) => {
     try {
       fn();
@@ -358,7 +391,9 @@ export function inferRegionFromVoiceId(
   if (lower.includes("central") || lower.includes("trung")) return "central";
   if (
     lower.includes("south") ||
-    lower.includes("nam") ||
+    /(?:^|[_\-\s])(mien[_\-\s]?nam|nam[_\-\s]?bo|sai[_\-\s]?gon)(?:$|[_\-\s])/u.test(
+      lower,
+    ) ||
     lower.includes("wavenet_b") ||
     lower.includes("wavenet_c")
   ) {
@@ -1396,4 +1431,5 @@ export function resetVoiceLockAndPolicyForTests(): void {
   memoryLocks.clear();
   voiceSwitchedSessions.clear();
   utteranceAudits.clear();
+  clearSessionDeviceTransports();
 }

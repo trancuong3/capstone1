@@ -329,15 +329,18 @@ export function createVoiceStudioService(): VoiceStudioService {
         activeLock?.speed ??
         (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
       const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         (options.voiceId === null
           ? null
-          : (speechPrefs.voiceId ??
-            (effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID
-              ? effectiveVoiceId
-              : null)));
+          : (speechPrefs.voiceId ?? defaultVoiceOverride));
       const cacheVoiceId =
         resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =

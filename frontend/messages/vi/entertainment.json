@@ -587,7 +587,8 @@
     },
     "emptyBookPagesBridgeCta": "✨ Chọn ngay Tranh Chủ Đề mang theo từ cần ôn",
     "ephemeralFocusBarTitle": "✨ Thẻ Từ Thử Thách Của Cú Mèo (Chơi xong tự xóa)",
-    "ephemeralFocusBarHint": "Chạm thẻ để nghe phát âm (0.9×) — bé thử đưa 1–2 từ này vào câu chuyện nhé!"
+    "ephemeralFocusBarHint": "Chạm thẻ để nghe phát âm (0.9×) — bé thử đưa 1–2 từ này vào câu chuyện nhé!",
+    "studioIllustrationBadge": "Minh họa sạch chữ"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Chưa phát lặp được. Hãy bấm nghe câu để thử lại.",

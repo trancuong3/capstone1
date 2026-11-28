@@ -291,7 +291,37 @@
     "addPagesPrimary": "Añadir páginas",
     "managePagesSecondary": "Gestionar páginas",
     "editModalTitle": "Editar información del libro",
-    "deleteModalTitle": "¿Eliminar este libro privado?"
+    "deleteModalTitle": "¿Eliminar este libro privado?",
+    "storyweaver": {
+      "openAction": "Taller Familiar de Minilibros",
+      "createdNotice": "¡Minilibro familiar creado y listo para leer!",
+      "modalTitle": "Taller Familiar de Minilibros Decodificables",
+      "modalDescription": "Crea junto a tu hijo un minilibro vietnamita de 3–4 páginas acorde a su grado integrando sus palabras de práctica.",
+      "stagePreparing": "Preparando vocabulario y nivel del grado…",
+      "stageWeaving": "Tejiendo el minicuento vietnamita para la familia…",
+      "themeRequiredError": "Ingresa un tema para el cuento (al menos 2 caracteres).",
+      "genericError": "No se pudo crear el minilibro ahora. Inténtalo de nuevo.",
+      "wordsUsedLabel": "Palabras practicadas incluidas: {words}",
+      "readTogetherNow": "Leer juntos ahora",
+      "openBookDetail": "Abrir detalles del libro",
+      "childLabel": "Para el niño",
+      "gradeLabel": "Grado objetivo",
+      "themeLabel": "Tema del cuento",
+      "themePlaceholder": "p. ej., jardín soleado, gatito curioso…",
+      "titleOptionalLabel": "Título del libro (opcional)",
+      "titleOptionalPlaceholder": "Déjalo vacío para sugerencia automática",
+      "styleModeLabel": "Estilo de lectura",
+      "styleDuet": "Lectura por turnos Padres e Hijo (Diálogo)",
+      "stylePoem": "Poema infantil de 4 versos",
+      "styleProse": "Cuento corto en prosa",
+      "pageCountLabel": "Extensión del minilibro",
+      "threePages": "3 páginas breves",
+      "fourPages": "4 páginas completas",
+      "customWordsLabel": "Palabras adicionales para incluir (separadas por comas)",
+      "customWordsPlaceholder": "p. ej., sol cálido, diligente, flor",
+      "submitAction": "Crear minilibro ahora",
+      "safetyFootnote": "Revisado automáticamente para seguridad infantil y guardado en privado para tu familia."
+    }
   },
   "privateManager": {
     "backToMyBooks": "Volver a Mis libros",
@@ -539,5 +569,12 @@
     "enableError": "No se pudo actualizar la preferencia de aporte de muestras.",
     "disabledNotice": "Se detuvo el aporte de muestras para este libro y quedará excluido de futuras actualizaciones.",
     "disableError": "No se pudo detener el aporte de muestras en este momento."
+  },
+  "readability": {
+    "matched": "Acorde al grado",
+    "tooHard": "Desafiante (Grado {min}–{max})",
+    "tooEasy": "Ligero de calentamiento (Grado {min}–{max})",
+    "estimatedGrade": "Grado est. {min}–{max}",
+    "phonicsScore": "Fonética {score}%"
   }
 }

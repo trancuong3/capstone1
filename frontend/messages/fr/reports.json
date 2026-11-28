@@ -697,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Passages à chanter lentement à 0,85x",
     "openSongAction": "Ouvrir la chanson",
     "homeTipsTitle": "Conseils d'accompagnement à la maison"
+  },
+  "printCertificate": {
+    "brandTagline": "Bilan familial de progression en lecture",
+    "printA4Action": "Imprimer le bilan A4",
+    "downloadCertificateAction": "Télécharger le certificat (.png)",
+    "certificateHeading": "CERTIFICAT D’ÉTAPE DE LECTURE",
+    "certificateSubtitle": "Célébrant la persévérance en lecture vietnamienne en famille",
+    "awardedTo": "Décerné avec fierté à",
+    "progressAchievement": "{alias} a pratiqué la lecture avec régularité et enrichi son vocabulaire vietnamien !",
+    "progressStatsLine": "Séances : {sessions} · Mots lus : {words} · Précision moy. : {accuracy}",
+    "sessionReaderFallback": "Jeune lecteur assidu",
+    "sessionAchievement": "A terminé une séance de lecture claire et confiante !",
+    "sessionStatsLine": "Pages lues : {pages} · Mots totaux : {words} · Meilleure précision : {accuracy}",
+    "issuedOn": "Délivré le : {date}",
+    "encouragementFooter": "Chaque page lue aujourd’hui sème une graine chaleureuse de savoir en famille."
   }
 }
