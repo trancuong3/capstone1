@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -62,6 +63,20 @@ class AssistantChatRequest(BaseModel):
     bandwidth_profile: BandwidthProfile = "high"
     history: list[AssistantHistoryTurn] = Field(default_factory=list, max_length=8)
     force_llm: bool = False
+    selected_child_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("selected_child_id", mode="before")
+    @classmethod
+    def validate_selected_child_id(cls, value: Any) -> str | None:
+        if value is None or not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 64:
+            return None
+        try:
+            return str(UUID(cleaned))
+        except (ValueError, TypeError, AttributeError):
+            return None
 
     @field_validator("message")
     @classmethod
@@ -132,6 +147,7 @@ class AssistantChatResponse(BaseModel):
     quick_actions: list[AssistantQuickAction] = Field(default_factory=list, max_length=3)
     suggested_prompts: list[str] = Field(default_factory=list, max_length=3)
     navigation_offer: AssistantNavigationOffer | None = None
+    live_grounded: bool = False
 
 
 class AssistantContextSuggestionsResponse(BaseModel):

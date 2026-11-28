@@ -16,7 +16,7 @@ from app.database.role_cache import (
     get_cached_profile_role,
     peek_cached_profile_role,
 )
-from app.database.session import get_db, sqlalchemy_database_url
+from app.database.session import AsyncSessionLocal, get_db, sqlalchemy_database_url
 from app.schemas.assistant import (
     AssistantChatRequest,
     AssistantChatResponse,
@@ -24,6 +24,15 @@ from app.schemas.assistant import (
     AssistantRoleScope,
     AssistantStatusResponse,
     sanitize_current_path,
+)
+from app.services.assistant_kb import (
+    detect_disallowed_scope_request,
+    detect_off_topic_request,
+)
+from app.services.assistant_live_context import (
+    LiveAssistantContext,
+    detect_live_context_intent,
+    fetch_live_assistant_context,
 )
 from app.services.assistant_service import (
     ViReadAssistantService,
@@ -38,6 +47,7 @@ router = APIRouter()
 class AssistantActorContext:
     role_scope: AssistantRoleScope
     subject_key: str
+    actor_uuid: UUID | None = None
 
 
 def get_assistant_service() -> ViReadAssistantService:
@@ -107,10 +117,18 @@ async def resolve_assistant_actor(
 
     role = await _lookup_active_role(request, actor_uuid)
     if role == "admin":
-        return AssistantActorContext(role_scope="admin", subject_key=f"user:{actor_uuid}")
+        return AssistantActorContext(
+            role_scope="admin",
+            subject_key=f"user:{actor_uuid}",
+            actor_uuid=actor_uuid,
+        )
     if role == "parent":
-        return AssistantActorContext(role_scope="parent", subject_key=f"user:{actor_uuid}")
-    return AssistantActorContext(role_scope="public", subject_key=ip_subject)
+        return AssistantActorContext(
+            role_scope="parent",
+            subject_key=f"user:{actor_uuid}",
+            actor_uuid=actor_uuid,
+        )
+    return AssistantActorContext(role_scope="public", subject_key=ip_subject, actor_uuid=None)
 
 
 def _enforce_assistant_rate_limit(actor: AssistantActorContext) -> None:
@@ -139,15 +157,97 @@ def _enforce_assistant_rate_limit(actor: AssistantActorContext) -> None:
         )
 
 
+async def _resolve_live_context(
+    request: Request,
+    payload: AssistantChatRequest,
+    actor: AssistantActorContext,
+) -> LiveAssistantContext | None:
+    if actor.role_scope not in ("parent", "admin") or actor.actor_uuid is None:
+        return None
+    if detect_disallowed_scope_request(payload.message, role_scope=actor.role_scope) is not None:
+        return None
+    if detect_off_topic_request(payload.message, role_scope=actor.role_scope):
+        return None
+    intent = detect_live_context_intent(payload.message, actor.role_scope)
+    if intent is None:
+        return None
+
+    overrides = getattr(getattr(request, "app", None), "dependency_overrides", None) or {}
+    db_override = overrides.get(get_db)
+    if db_override is not None:
+        produced = db_override()
+        try:
+            if inspect.isasyncgen(produced):
+                try:
+                    db_session = await produced.__anext__()
+                    return await fetch_live_assistant_context(
+                        db_session,
+                        role_scope=actor.role_scope,
+                        actor_uuid=actor.actor_uuid,
+                        selected_child_id=payload.selected_child_id,
+                        intent=intent,
+                    )
+                finally:
+                    await produced.aclose()
+            if inspect.isgenerator(produced):
+                try:
+                    db_session = next(produced)
+                    return await fetch_live_assistant_context(
+                        db_session,
+                        role_scope=actor.role_scope,
+                        actor_uuid=actor.actor_uuid,
+                        selected_child_id=payload.selected_child_id,
+                        intent=intent,
+                    )
+                finally:
+                    produced.close()
+            db_session = await produced if inspect.isawaitable(produced) else produced
+            return await fetch_live_assistant_context(
+                db_session,
+                role_scope=actor.role_scope,
+                actor_uuid=actor.actor_uuid,
+                selected_child_id=payload.selected_child_id,
+                intent=intent,
+            )
+        except Exception:
+            return None
+
+    if (
+        APP_ENVIRONMENT == "test"
+        and sqlalchemy_database_url.port == 1
+        and sqlalchemy_database_url.host in ("127.0.0.1", "localhost")
+    ):
+        return None
+
+    try:
+        async with AsyncSessionLocal() as db_session:
+            return await fetch_live_assistant_context(
+                db_session,
+                role_scope=actor.role_scope,
+                actor_uuid=actor.actor_uuid,
+                selected_child_id=payload.selected_child_id,
+                intent=intent,
+            )
+    except Exception:
+        return None
+
+
 @router.post("/chat", response_model=AssistantChatResponse)
 async def chat_with_assistant(
     payload: AssistantChatRequest,
+    request: Request,
     actor: AssistantActorContext = Depends(resolve_assistant_actor),
     service: ViReadAssistantService = Depends(get_assistant_service),
 ) -> AssistantChatResponse:
     """Answer ViRead product questions via Tier 0 KB -> Cloud LLM -> Local Ollama -> Fallback."""
     _enforce_assistant_rate_limit(actor)
-    return await service.chat(payload, role_scope=actor.role_scope)
+    live_context = await _resolve_live_context(request, payload, actor)
+    return await service.chat(
+        payload,
+        role_scope=actor.role_scope,
+        actor_uuid=actor.actor_uuid,
+        live_context=live_context,
+    )
 
 
 @router.get("/context", response_model=AssistantContextSuggestionsResponse)

@@ -167,7 +167,17 @@
     "quickActionGateIntro": "開啟 **{label}** 前，先確認目前選擇的孩子檔案。",
     "scopePublic": "訪客支援",
     "scopeParent": "家長支援",
-    "scopeAdmin": "管理支援"
+    "scopeAdmin": "管理支援",
+    "voiceStartAria": "語音輸入問題",
+    "voiceStopAria": "停止語音輸入",
+    "voiceListening": "正在聆聽…",
+    "copyReply": "複製",
+    "copiedReply": "已複製",
+    "feedbackHelpful": "有幫助",
+    "feedbackNotHelpful": "沒幫助",
+    "feedbackThanks": "感謝您的回饋",
+    "liveParentBadge": "您的即時帳戶資料",
+    "liveAdminBadge": "系統即時指標"
   },
   "taskCenter": {
     "backgroundProcessing": "正在背景處理…",

@@ -167,7 +167,17 @@
     "quickActionGateIntro": "**{label}** を開く前に、選択中の子どもプロフィールを確認します。",
     "scopePublic": "ゲストサポート",
     "scopeParent": "保護者サポート",
-    "scopeAdmin": "管理者サポート"
+    "scopeAdmin": "管理者サポート",
+    "voiceStartAria": "音声で質問を入力",
+    "voiceStopAria": "音声入力を停止",
+    "voiceListening": "聞き取り中…",
+    "copyReply": "コピー",
+    "copiedReply": "コピーしました",
+    "feedbackHelpful": "役に立った",
+    "feedbackNotHelpful": "役に立たなかった",
+    "feedbackThanks": "ご意見ありがとうございます",
+    "liveParentBadge": "アカウントの最新データ",
+    "liveAdminBadge": "リアルタイム稼働指標"
   },
   "taskCenter": {
     "backgroundProcessing": "バックグラウンド処理中…",

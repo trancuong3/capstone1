@@ -141,6 +141,11 @@ describe("ViReadAssistantWidget", () => {
       selectedChild: null,
     });
     window.localStorage.clear();
+    window.sessionStorage.clear();
+    delete (window as Window & { SpeechRecognition?: unknown })
+      .SpeechRecognition;
+    delete (window as Window & { webkitSpeechRecognition?: unknown })
+      .webkitSpeechRecognition;
     Object.defineProperty(window.navigator, "onLine", {
       configurable: true,
       value: true,
@@ -149,6 +154,11 @@ describe("ViReadAssistantWidget", () => {
 
   afterEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
+    delete (window as Window & { SpeechRecognition?: unknown })
+      .SpeechRecognition;
+    delete (window as Window & { webkitSpeechRecognition?: unknown })
+      .webkitSpeechRecognition;
   });
 
   it("renders a compact minimized launcher by default and opens a non-modal complementary panel with page guides", async () => {
@@ -1239,5 +1249,411 @@ describe("ViReadAssistantWidget", () => {
     expect(screen.getByTestId("viread-assistant-role-badge")).toHaveTextContent(
       "Hỗ trợ Quản trị",
     );
+  });
+
+  it("forwards selectedChildId only in parent scope and strips it in public and admin scopes", async () => {
+    const user = userEvent.setup();
+    readAssistantChildContextMock.mockResolvedValue({
+      userId: PARENT_ID,
+      selectedChildId: CHILD_ONE.id,
+      children: [CHILD_ONE],
+      selectedChild: CHILD_ONE,
+    });
+    sendAssistantMessageMock.mockResolvedValue({
+      reply: "Đã kiểm tra ngữ cảnh.",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_kb",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 5,
+      cached: false,
+      live_grounded: false,
+      role_scope: "parent",
+      quick_actions: [],
+      suggested_prompts: [],
+    });
+
+    navState.pathname = "/dashboard";
+    const { rerender } = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    await waitFor(() =>
+      expect(readAssistantChildContextMock).toHaveBeenCalled(),
+    );
+    await user.type(input, "Bé yếu từ nào?{Enter}");
+
+    await waitFor(() =>
+      expect(sendAssistantMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selectedChildId: CHILD_ONE.id,
+        }),
+        expect.any(Object),
+      ),
+    );
+
+    // Switch to admin scope -> selectedChildId must be null
+    navState.pathname = "/admin/health";
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    await user.type(input, "Trạng thái OCR?{Enter}");
+    await waitFor(() =>
+      expect(sendAssistantMessageMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          current_path: "/admin/health",
+          selectedChildId: null,
+        }),
+        expect.any(Object),
+      ),
+    );
+
+    // Switch to public scope -> selectedChildId must be null
+    navState.pathname = "/login";
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    await user.type(input, "Cách đăng nhập?{Enter}");
+    await waitFor(() =>
+      expect(sendAssistantMessageMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          current_path: "/login",
+          selectedChildId: null,
+        }),
+        expect.any(Object),
+      ),
+    );
+  });
+
+  it("renders liveGrounded badge, Copy button with copied state, and Helpful/Not-Helpful feedback controls", async () => {
+    const user = userEvent.setup();
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextMock },
+    });
+
+    sendAssistantMessageMock
+      .mockResolvedValueOnce({
+        reply: "Bé An cần luyện thêm từ **nghiêng**.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_live_parent",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 9,
+        cached: false,
+        live_grounded: true,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+      })
+      .mockResolvedValueOnce({
+        reply: "Hệ thống đang có 2 tác vụ OCR chờ xử lý.",
+        source_tier: "tier_1_cloud",
+        provider_id: "gemini_primary",
+        model_id: "gemini-3.5-flash-lite",
+        bandwidth_applied: "high",
+        latency_ms: 210,
+        cached: false,
+        live_grounded: true,
+        role_scope: "admin",
+        quick_actions: [],
+        suggested_prompts: [],
+      })
+      .mockResolvedValueOnce({
+        reply: "Phân tích sâu từ AI cho quản trị viên.",
+        source_tier: "tier_2_ollama",
+        provider_id: "ollama_local",
+        model_id: "qwen3-vl:4b-instruct-q4_K_M",
+        bandwidth_applied: "high",
+        latency_ms: 600,
+        cached: false,
+        live_grounded: true,
+        role_scope: "admin",
+        quick_actions: [],
+        suggested_prompts: [],
+      })
+      .mockResolvedValueOnce({
+        reply: "Trợ lý ViRead chỉ hỗ trợ về ViRead.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_domain_guard",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 2,
+        cached: false,
+        live_grounded: false,
+        role_scope: "admin",
+        quick_actions: [],
+        suggested_prompts: [],
+      });
+
+    navState.pathname = "/dashboard";
+    const { rerender } = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    await user.type(input, "Bé yếu từ nào?{Enter}");
+    expect(
+      await screen.findByTestId("viread-assistant-live-badge"),
+    ).toHaveTextContent("Dữ liệu thực tế của bạn");
+
+    const copyBtn = screen.getByTestId("viread-assistant-copy-btn");
+    await user.click(copyBtn);
+    expect(writeTextMock).toHaveBeenCalledWith(
+      "Bé An cần luyện thêm từ **nghiêng**.",
+    );
+    expect(copyBtn).toHaveTextContent("Đã sao chép");
+
+    const upBtn = screen.getByTestId("viread-assistant-feedback-up");
+    await user.click(upBtn);
+    expect(upBtn).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Cảm ơn phản hồi của bạn")).toBeInTheDocument();
+
+    // Switch to admin -> liveAdminBadge + down feedback reveals 1-tap "Hỏi AI sâu hơn"
+    navState.pathname = "/admin/tasks";
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+
+    await user.type(input, "Thống kê OCR hiện tại?{Enter}");
+    expect(
+      await screen.findByTestId("viread-assistant-live-badge"),
+    ).toHaveTextContent("Thống kê hệ thống trực tiếp");
+    expect(
+      screen.queryByRole("button", { name: /Hỏi AI sâu hơn/i }),
+    ).not.toBeInTheDocument();
+
+    const downBtn = screen.getByTestId("viread-assistant-feedback-down");
+    await user.click(downBtn);
+    expect(downBtn).toHaveAttribute("aria-pressed", "true");
+
+    const deeperBtn = screen.getByRole("button", { name: /Hỏi AI sâu hơn/i });
+    await user.click(deeperBtn);
+    await waitFor(() =>
+      expect(sendAssistantMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Thống kê OCR hiện tại?",
+          force_llm: true,
+        }),
+        expect.any(Object),
+      ),
+    );
+    expect(
+      await screen.findByText("Phân tích sâu từ AI cho quản trị viên."),
+    ).toBeInTheDocument();
+
+    // Domain guard refusal must NOT expose "Hỏi AI sâu hơn" even after thumbs-down
+    await user.type(input, "Giá bitcoin hôm nay?{Enter}");
+    expect(
+      await screen.findByText("Trợ lý ViRead chỉ hỗ trợ về ViRead."),
+    ).toBeInTheDocument();
+    const downBtns = screen.getAllByTestId("viread-assistant-feedback-down");
+    await user.click(downBtns[downBtns.length - 1]);
+    expect(
+      screen.queryAllByRole("button", { name: /Hỏi AI sâu hơn/i }),
+    ).toHaveLength(1);
+  });
+
+  it("hides voice input button when SpeechRecognition is absent and supports voice transcript + auto-stop when supported", async () => {
+    const user = userEvent.setup();
+    const { rerender, unmount } = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel");
+
+    expect(
+      screen.queryByTestId("viread-assistant-voice-btn"),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    const instances: Array<{
+      lang: string;
+      interimResults: boolean;
+      continuous: boolean;
+      onresult: ((event: unknown) => void) | null;
+      onerror: ((event: unknown) => void) | null;
+      onend: (() => void) | null;
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+      abort: ReturnType<typeof vi.fn>;
+    }> = [];
+
+    class MockSpeechRecognition {
+      lang = "";
+      interimResults = false;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      writable: true,
+      value: MockSpeechRecognition,
+    });
+
+    const rendered = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel");
+
+    const voiceBtn = screen.getByTestId("viread-assistant-voice-btn");
+    expect(voiceBtn).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(voiceBtn);
+    expect(instances).toHaveLength(1);
+    expect(instances[0].lang).toBe("vi-VN");
+    expect(instances[0].start).toHaveBeenCalledTimes(1);
+    expect(voiceBtn).toHaveAttribute("aria-pressed", "true");
+
+    await act(async () => {
+      instances[0].onresult?.({
+        results: [[{ transcript: "Bé hôm nay nên đọc sách gì" }]],
+      });
+    });
+
+    const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
+    expect(input).toHaveValue("Bé hôm nay nên đọc sách gì");
+
+    // Role change automatically stops active SpeechRecognition
+    navState.pathname = "/admin/health";
+    rendered.rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    expect(instances[0].stop).toHaveBeenCalled();
+    expect(voiceBtn).toHaveAttribute("aria-pressed", "false");
+    rendered.unmount();
+    void rerender;
+  });
+
+  it("persists up to 12 sanitized messages in scoped sessionStorage, drops corrupted entries, hydrates cleanly, and purges on clear/switch/logout", async () => {
+    const scopeKey = `viread:assistant:history:v1:parent:${PARENT_ID}`;
+    const seededItems: unknown[] = [];
+    for (let i = 1; i <= 13; i += 1) {
+      seededItems.push({
+        id: `msg-${i}`,
+        role: i % 2 === 1 ? "user" : "assistant",
+        content: `Tin nhắn lịch sử ${i}`,
+        roleScope: "parent",
+      });
+    }
+    seededItems.push({ invalid: true });
+    seededItems.push({
+      id: "cross-role",
+      role: "assistant",
+      content: "Rò rỉ admin",
+      roleScope: "admin",
+    });
+    seededItems.push({
+      id: "jwt-leak",
+      role: "user",
+      content:
+        "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturetoken123",
+    });
+    window.sessionStorage.setItem(scopeKey, JSON.stringify(seededItems));
+
+    // Verify SSR HTML has zero messages -> zero hydration mismatch
+    const { renderToString } = await import("react-dom/server");
+    const { hydrateRoot } = await import("react-dom/client");
+    const element = (
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>
+    );
+
+    const ssrHtml = renderToString(element);
+    const container = document.createElement("div");
+    container.innerHTML = ssrHtml;
+    document.body.appendChild(container);
+
+    const consoleErrors: unknown[][] = [];
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args) => {
+        consoleErrors.push(args);
+      });
+
+    const user = userEvent.setup();
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, element);
+      });
+      expect(consoleErrors).toEqual([]);
+
+      await user.click(
+        within(container).getByTestId("viread-assistant-launcher"),
+      );
+      const panel = await within(container).findByTestId(
+        "viread-assistant-panel",
+        undefined,
+        { timeout: 5000 },
+      );
+
+      // Keeps latest 12 valid messages (msg-2..msg-13), drops msg-1, corrupted, cross-role, and Bearer JWT!
+      await waitFor(() =>
+        expect(
+          within(panel).getByText("Tin nhắn lịch sử 13"),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        within(panel).queryByText("Tin nhắn lịch sử 1"),
+      ).not.toBeInTheDocument();
+      expect(within(panel).queryByText("Rò rỉ admin")).not.toBeInTheDocument();
+      expect(within(panel).queryByText(/Bearer/)).not.toBeInTheDocument();
+
+      // Clear removes active sessionStorage key immediately
+      await user.click(within(panel).getByTestId("viread-assistant-clear"));
+      expect(window.sessionStorage.getItem(scopeKey)).toBeNull();
+
+      // Send a new message -> persisted, then purged on SIGNED_OUT
+      sendAssistantMessageMock.mockResolvedValueOnce({
+        reply: "Hướng dẫn lưu trong sessionStorage.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 4,
+        cached: false,
+        live_grounded: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+      });
+      const input = within(panel).getByLabelText("Nhập câu hỏi về ViRead");
+      await user.type(input, "Kiểm tra lưu lịch sử{Enter}");
+      await waitFor(() =>
+        expect(window.sessionStorage.getItem(scopeKey)).toContain(
+          "Hướng dẫn lưu trong sessionStorage.",
+        ),
+      );
+
+      await act(async () => {
+        authState.emit("SIGNED_OUT", null);
+      });
+      expect(window.sessionStorage.getItem(scopeKey)).toBeNull();
+      expect(
+        within(panel).queryByText("Hướng dẫn lưu trong sessionStorage."),
+      ).not.toBeInTheDocument();
+    } finally {
+      errorSpy.mockRestore();
+      await act(async () => {
+        root?.unmount();
+      });
+      container.remove();
+    }
   });
 });

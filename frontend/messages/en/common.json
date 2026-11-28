@@ -167,7 +167,17 @@
     "quickActionGateIntro": "Before opening **{label}**, let's check your selected child profile.",
     "scopePublic": "Guest Help",
     "scopeParent": "Parent Help",
-    "scopeAdmin": "Admin Help"
+    "scopeAdmin": "Admin Help",
+    "voiceStartAria": "Speak your question",
+    "voiceStopAria": "Stop voice input",
+    "voiceListening": "Listening…",
+    "copyReply": "Copy",
+    "copiedReply": "Copied",
+    "feedbackHelpful": "Helpful",
+    "feedbackNotHelpful": "Not helpful",
+    "feedbackThanks": "Thanks for your feedback",
+    "liveParentBadge": "Your live account data",
+    "liveAdminBadge": "Live system metrics"
   },
   "taskCenter": {
     "backgroundProcessing": "Processing in background…",

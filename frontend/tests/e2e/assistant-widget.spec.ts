@@ -256,6 +256,27 @@ async function installAssistantMockApi(page: Page): Promise<void> {
         );
         return;
       }
+      if (msg.includes("yếu từ") || msg.includes("từ khó")) {
+        await route.fulfill(
+          json({
+            reply:
+              "Bé An đang cần luyện thêm các từ: **nghiêng**, **khuỷu tay**.",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_live_parent",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 11,
+            cached: false,
+            live_grounded: true,
+            role_scope: "parent",
+            quick_actions: [
+              { label: "Mở Từ khó của bé", href: "/reports/difficult-words" },
+            ],
+            suggested_prompts: [],
+          }),
+        );
+        return;
+      }
       if (msg.includes("mật khẩu")) {
         await route.fulfill(
           json({
@@ -695,6 +716,20 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
       page.getByTestId("viread-assistant-source-meta"),
     ).toContainText("Gemini");
 
+    // Copy & Helpful feedback controls work on assistant replies
+    const copyBtn = panel.getByTestId("viread-assistant-copy-btn");
+    await copyBtn.click();
+    await expect(copyBtn).toContainText("Đã sao chép");
+    await panel.getByTestId("viread-assistant-feedback-up").click();
+    await expect(panel).toContainText("Cảm ơn phản hồi của bạn");
+
+    // Live-grounded parent reply shows live badge
+    await panel.getByLabel("Nhập câu hỏi về ViRead").fill("Bé yếu từ nào?");
+    await panel.getByLabel("Gửi câu hỏi").click();
+    await expect(panel.getByTestId("viread-assistant-live-badge")).toHaveText(
+      "Dữ liệu thực tế của bạn",
+    );
+
     // Interactive Yes/No navigation confirmation: Không stays on /dashboard, Có navigates to /settings
     await panel
       .getByLabel("Nhập câu hỏi về ViRead")
@@ -715,7 +750,8 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     await page.waitForURL("**/settings");
     await page.goto("/dashboard", { waitUntil: "networkidle" });
     await expect(page.getByRole("button", { name: /Bé An/i })).toBeVisible();
-    await openAssistantPanel(page);
+    const restoredPanel = await openAssistantPanel(page);
+    await expect(restoredPanel).toContainText("Quản lý đọc");
 
     // Hide assistant -> persists across reload -> restore via edge tab
     await page.getByTestId("viread-assistant-hide").click();

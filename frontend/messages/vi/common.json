@@ -167,7 +167,17 @@
     "quickActionGateIntro": "Trước khi mở **{label}**, mình kiểm tra nhanh hồ sơ bé đang chọn nhé.",
     "scopePublic": "Hỗ trợ Khách",
     "scopeParent": "Hỗ trợ Phụ huynh",
-    "scopeAdmin": "Hỗ trợ Quản trị"
+    "scopeAdmin": "Hỗ trợ Quản trị",
+    "voiceStartAria": "Nhập câu hỏi bằng giọng nói",
+    "voiceStopAria": "Dừng ghi âm giọng nói",
+    "voiceListening": "Đang nghe…",
+    "copyReply": "Sao chép",
+    "copiedReply": "Đã sao chép",
+    "feedbackHelpful": "Hữu ích",
+    "feedbackNotHelpful": "Chưa hữu ích",
+    "feedbackThanks": "Cảm ơn phản hồi của bạn",
+    "liveParentBadge": "Dữ liệu thực tế của bạn",
+    "liveAdminBadge": "Thống kê hệ thống trực tiếp"
   },
   "taskCenter": {
     "backgroundProcessing": "Đang xử lý nền…",

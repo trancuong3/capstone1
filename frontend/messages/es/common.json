@@ -167,7 +167,17 @@
     "quickActionGateIntro": "Antes de abrir **{label}**, comprobemos el perfil infantil seleccionado.",
     "scopePublic": "Ayuda de invitados",
     "scopeParent": "Ayuda para padres",
-    "scopeAdmin": "Ayuda de administración"
+    "scopeAdmin": "Ayuda de administración",
+    "voiceStartAria": "Hacer pregunta por voz",
+    "voiceStopAria": "Detener entrada de voz",
+    "voiceListening": "Escuchando…",
+    "copyReply": "Copiar",
+    "copiedReply": "Copiado",
+    "feedbackHelpful": "Útil",
+    "feedbackNotHelpful": "Poco útil",
+    "feedbackThanks": "Gracias por tu opinión",
+    "liveParentBadge": "Datos en vivo de tu cuenta",
+    "liveAdminBadge": "Métricas del sistema en vivo"
   },
   "taskCenter": {
     "backgroundProcessing": "Procesando en segundo plano…",

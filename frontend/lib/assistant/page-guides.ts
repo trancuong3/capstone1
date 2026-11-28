@@ -1286,6 +1286,44 @@ function foldAscii(input: string): string {
     .trim();
 }
 
+const VIETNAMESE_SHORTHAND_MAP: Readonly<Record<string, string>> = {
+  mk: "mat khau",
+  ko: "khong",
+  k: "khong",
+  dc: "duoc",
+  tk: "tai khoan",
+  hs: "ho so",
+  qr: "ma qr",
+  dt: "dien thoai",
+  gd: "gia dinh",
+  bn: "bao nhieu",
+  ntn: "nhu the nao",
+};
+
+function expandVietnameseShorthand(folded: string): string {
+  if (!folded) return "";
+  const tokens = folded.split(" ");
+  const expanded: string[] = [];
+  for (const token of tokens) {
+    if (!token) continue;
+    if (token === "qr" && expanded[expanded.length - 1] === "ma") {
+      expanded.push("qr");
+      continue;
+    }
+    const replacement = VIETNAMESE_SHORTHAND_MAP[token];
+    if (replacement) {
+      expanded.push(...replacement.split(" "));
+    } else {
+      expanded.push(token);
+    }
+  }
+  return expanded.join(" ");
+}
+
+export function normalizeQuery(input: string): string {
+  return expandVietnameseShorthand(foldAscii(input));
+}
+
 const CUSTOMER_PATH_RE =
   /(?:^|[\s"'`(\[])\/(dashboard|books|my-books|book-scanner|children|profile|settings|reports|sessions|reading-management|reading-preparation|reading|entertainment|karaoke|achievements|learning-train|help-support|book-reports|studio\/tasks)(?:\/|\b)/i;
 
@@ -1298,7 +1336,7 @@ export function detectOfflineScopeBoundary(
   message: string,
   roleScope: AssistantRoleScope,
 ): AssistantScopeBoundaryReason | null {
-  const folded = foldAscii(message);
+  const folded = normalizeQuery(message);
   const lowerRaw = message.toLowerCase();
 
   // 1. Other users' data is forbidden across EVERY role (including admin).
@@ -1480,6 +1518,20 @@ const VIREAD_DOMAIN_ANCHORS: readonly string[] = [
   "dong dao",
   "ho so be",
   "tu can luyen",
+  "tu yeu",
+  "vong lap tu yeu",
+  "autopilot",
+  "offline reading pack",
+  "reading pack",
+  "the qr",
+  "ma qr",
+  "den chieu",
+  "line spotlight",
+  "luc bat",
+  "van lung",
+  "hard sample",
+  "mau ocr kho",
+  "radar ocr",
   "wasm",
   "apps script bridge",
 ];
@@ -1564,7 +1616,7 @@ const OFF_TOPIC_PATTERNS: readonly string[] = [
 ];
 
 export function detectOfflineOffTopicRequest(message: string): boolean {
-  const folded = foldAscii(message);
+  const folded = normalizeQuery(message);
   if (!folded || GREETING_ONLY_RE.test(folded)) {
     return false;
   }
@@ -1588,6 +1640,34 @@ interface OfflineRule {
 
 const OFFLINE_RULES: readonly OfflineRule[] = [
   // --- ADMIN-ONLY RULES ---
+  {
+    scopes: ["admin"],
+    keywords: [
+      "radar",
+      "mau ocr kho",
+      "hard sample",
+      "ocr kho",
+      "do tin cay thap",
+      "low confidence",
+      "flow2 opt in",
+    ],
+    replyVi:
+      "Radar mẫu OCR khó (`/admin/metadata-quality` & `/admin/viread-training`):\n• Tự động quét các trang sách có độ tin cậy OCR thấp (`<= 0.88`) để quản trị viên rà soát ưu tiên.\n• Chỉ thu thập từ sách thư viện `CATALOG` và sách gia đình đã bật đồng thuận `FLOW2_OPT_IN_STRICT_V1` (tuyệt đối không lộ PII), sẵn sàng đưa vào Flow 2 cải thiện mô hình.",
+    replyEn:
+      "OCR Hard-Sample Radar (`/admin/metadata-quality` & `/admin/viread-training`):\n• Surfaces low-confidence OCR pages (`<= 0.88`) for prioritized admin review.\n• Strictly limited to `CATALOG` books and consented private books (`FLOW2_OPT_IN_STRICT_V1`, zero PII) for Flow 2 curation.",
+    actions: [
+      {
+        labelVi: "Chất lượng sách",
+        labelEn: "Book Quality",
+        href: "/admin/metadata-quality",
+      },
+      {
+        labelVi: "Mô hình đọc chữ",
+        labelEn: "OCR Training",
+        href: "/admin/viread-training",
+      },
+    ],
+  },
   {
     scopes: ["admin"],
     keywords: [
@@ -1668,6 +1748,83 @@ const OFFLINE_RULES: readonly OfflineRule[] = [
   },
 
   // --- PARENT-ONLY FEATURE RULES ---
+  {
+    scopes: ["parent"],
+    keywords: [
+      "offline pack",
+      "reading pack",
+      "tai sach offline",
+      "tai goi doc",
+      "the qr",
+      "ma qr",
+      "in the qr",
+      "qr card",
+      "outbox",
+      "dong bo ngoai tuyen",
+    ],
+    replyVi:
+      "Gói đọc ngoại tuyến (Offline Reading Pack) & Thẻ QR in (`/books`):\n• Mở chi tiết sách trong Kho sách (`/books`) → chọn **Tải gói đọc ngoại tuyến** để lưu sẵn trang chữ, âm thanh mẫu & từ cần luyện trên thiết bị.\n• Bé đọc khi mất mạng vẫn được lưu vào hàng chờ phiên đọc (session outbox) và tự đồng bộ khi có mạng lại.\n• Bấm **Thẻ QR** để tạo & in mã QR riêng giúp bé quét mở nhanh đúng cuốn sách.",
+    replyEn:
+      "Offline Reading Pack & Printable QR Card (`/books`):\n• Open any book in Library (`/books`) and download its **Offline Reading Pack** to store pages, audio, and practice words locally.\n• Offline sessions queue safely in the outbox and sync automatically when online.\n• Use **Print QR Card** to launch the exact book immediately.",
+    actions: [
+      { labelVi: "Kho sách", labelEn: "Books", href: "/books" },
+      { labelVi: "Quét sách", labelEn: "Book Scanner", href: "/book-scanner" },
+    ],
+  },
+  {
+    scopes: ["parent"],
+    keywords: [
+      "den chieu",
+      "spotlight",
+      "h 1",
+      "theo doi dong",
+      "luc bat",
+      "nhip tho",
+      "van lung",
+      "tho 6 8",
+      "6 8",
+    ],
+    replyVi:
+      "Đèn chiếu từng dòng `H^-1` trên sách giấy & Nhịp thơ Lục Bát 6–8 (`/reading-preparation`):\n• **Đèn chiếu dòng `H^-1`**: khi dùng camera đọc sách giấy, ViRead tính ma trận homography ngược `H^-1` để chiếu sáng đúng dòng bé đang đọc theo thời gian thực.\n• **Nhịp thơ Lục Bát 6–8**: tự động nhận diện cặp câu 6–8, đánh dấu nhịp ngắt `2/2/2` – `2/2/2/2` và vần lưng tiếng thứ 6 giúp bé đọc thơ đúng điệu.",
+    replyEn:
+      "Paper-Book `H^-1` Line Spotlight & Lục Bát 6–8 Poetry Cadence (`/reading-preparation`):\n• **`H^-1` Line Spotlight**: uses inverse-homography camera tracking to illuminate the active line directly over printed pages.\n• **Lục Bát 6–8 Cadence**: detects 6–8 couplets, `2/2/2` & `2/2/2/2` rhythm pauses, and 6th-syllable rhymes.",
+    actions: [
+      {
+        labelVi: "Chuẩn bị đọc",
+        labelEn: "Reading Prep",
+        href: "/reading-preparation",
+      },
+      { labelVi: "Kho sách", labelEn: "Books", href: "/books" },
+    ],
+  },
+  {
+    scopes: ["parent"],
+    keywords: [
+      "tu yeu",
+      "vong lap tu yeu",
+      "word loop",
+      "autopilot",
+      "tu dong luyen",
+      "entertainment v4",
+      "on tu yeu",
+    ],
+    replyVi:
+      "Vòng lặp từ yếu Entertainment v4.1 & Child Autopilot (`/entertainment` & `/reports/difficult-words`):\n• Tự động lấy các từ yếu từ buổi đọc gần đây của bé đưa vào Karaoke, Memory Game, Ghép câu và Mô tả tranh AI.\n• Chế độ **Autopilot** (`autoplay=1`) nối nhịp luyện nhẹ nhàng và cập nhật thẳng tiến độ về `/reports/difficult-words`.",
+    replyEn:
+      "Difficult-Word Practice Loop (Entertainment v4.1) & Child Autopilot (`/entertainment` & `/reports/difficult-words`):\n• Feeds your child's active weak words into Kids Karaoke, Memory Game, Sentence Shooter, and AI Picture Description.\n• Calm **Autopilot** (`autoplay=1`) pacing syncs mastery progress straight back to `/reports/difficult-words`.",
+    actions: [
+      {
+        labelVi: "Góc giải trí",
+        labelEn: "Entertainment",
+        href: "/entertainment",
+      },
+      {
+        labelVi: "Từ cần luyện",
+        labelEn: "Difficult Words",
+        href: "/reports/difficult-words",
+      },
+    ],
+  },
   {
     scopes: ["parent"],
     keywords: [
@@ -2165,6 +2322,16 @@ function resolveOfflineNavigationOffer(
   }[] = [
     // --- ADMIN CANDIDATES ---
     {
+      phrases: ["radar", "mau ocr kho", "hard sample", "ocr kho"],
+      href: "/admin/metadata-quality",
+      scenarioId: "admin_ocr_hard_sample_radar",
+      labelVi: "Đi đến Radar mẫu OCR khó (Admin)",
+      labelEn: "Go to OCR Hard-Sample Radar (Admin)",
+      reasonVi: "Rà soát các trang OCR độ tin cậy thấp để đưa vào Flow 2.",
+      reasonEn:
+        "Inspect low-confidence OCR pages eligible for Flow 2 curation.",
+    },
+    {
       phrases: ["admin/books/new", "them sach moi", "tao sach moi"],
       href: "/admin/books/new",
       scenarioId: "admin_books_new",
@@ -2414,6 +2581,22 @@ function resolveOfflineNavigationOffer(
     },
     {
       phrases: [
+        "tu yeu",
+        "vong lap tu yeu",
+        "word loop",
+        "autopilot",
+        "entertainment v4",
+      ],
+      href: "/entertainment",
+      scenarioId: "entertainment_word_loop_autopilot",
+      labelVi: "Đi đến Vòng lặp từ yếu (Giải trí)",
+      labelEn: "Go to Difficult-Word Loop (Entertainment)",
+      reasonVi: "Cho bé luyện lại các từ yếu qua trò chơi và Karaoke tự động.",
+      reasonEn:
+        "Practice active weak words automatically through games and Karaoke.",
+    },
+    {
+      phrases: [
         "tu kho",
         "tu can luyen",
         "doc cham",
@@ -2543,6 +2726,22 @@ function resolveOfflineNavigationOffer(
     },
     {
       phrases: [
+        "den chieu",
+        "spotlight",
+        "luc bat",
+        "nhip tho",
+        "van lung",
+        "tho 6 8",
+      ],
+      href: "/reading-preparation",
+      scenarioId: "camera_line_spotlight_and_luc_bat",
+      labelVi: "Đi đến Chuẩn bị buổi đọc",
+      labelEn: "Go to Reading Preparation",
+      reasonVi: "Bật đèn chiếu dòng H^-1 trên sách giấy và đọc thơ Lục Bát.",
+      reasonEn: "Configure paper-book H^-1 line spotlight and Lục Bát cadence.",
+    },
+    {
+      phrases: [
         "micro",
         "camera",
         "quyen thiet bi",
@@ -2558,6 +2757,24 @@ function resolveOfflineNavigationOffer(
       labelEn: "Go to Reading Preparation",
       reasonVi: "Kiểm tra nhanh micro, chế độ đọc đôi Duet và phạm vi trang.",
       reasonEn: "Check mic, Duet Reading, and page range before reading.",
+    },
+    {
+      phrases: [
+        "offline pack",
+        "reading pack",
+        "tai sach offline",
+        "the qr",
+        "ma qr",
+        "in the qr",
+        "qr card",
+      ],
+      href: "/books",
+      scenarioId: "offline_pack_and_printable_qr",
+      labelVi: "Đi đến Kho sách (Gói Offline & QR)",
+      labelEn: "Go to Library (Offline Pack & QR)",
+      reasonVi: "Tải gói đọc ngoại tuyến hoặc in Thẻ QR mở nhanh cuốn sách.",
+      reasonEn:
+        "Download an Offline Reading Pack or print a quick-launch QR card.",
     },
     {
       phrases: [
@@ -2614,7 +2831,7 @@ export function resolveOfflineAssistantReply(
   bandwidth: BandwidthProfile,
 ): AssistantChatResponse {
   const useEn = !locale.toLowerCase().startsWith("vi");
-  const folded = foldAscii(message);
+  const folded = normalizeQuery(message);
   const pageGuide = resolvePageGuide(pathname, locale);
   const roleScope = inferAssistantRoleScope(pathname);
   const safePageActions = pageGuide.actions.filter((a) =>
@@ -2643,6 +2860,7 @@ export function resolveOfflineAssistantReply(
       bandwidth_applied: bandwidth,
       latency_ms: 1,
       cached: false,
+      live_grounded: false,
       role_scope: roleScope,
       quick_actions:
         guestSignInActions.length > 0
@@ -2665,6 +2883,7 @@ export function resolveOfflineAssistantReply(
       bandwidth_applied: bandwidth,
       latency_ms: 1,
       cached: false,
+      live_grounded: false,
       role_scope: roleScope,
       quick_actions: safePageActions.slice(0, 2),
       suggested_prompts: pageGuide.prompts,
@@ -2682,6 +2901,7 @@ export function resolveOfflineAssistantReply(
       bandwidth_applied: bandwidth,
       latency_ms: 1,
       cached: false,
+      live_grounded: false,
       role_scope: roleScope,
       quick_actions: safePageActions.slice(0, 2),
       suggested_prompts: pageGuide.prompts,
@@ -2717,6 +2937,7 @@ export function resolveOfflineAssistantReply(
         bandwidth_applied: bandwidth,
         latency_ms: 1,
         cached: false,
+        live_grounded: false,
         role_scope: roleScope,
         quick_actions:
           actions.length > 0 ? actions : safePageActions.slice(0, 2),
@@ -2736,6 +2957,7 @@ export function resolveOfflineAssistantReply(
     bandwidth_applied: bandwidth,
     latency_ms: 1,
     cached: false,
+    live_grounded: false,
     role_scope: roleScope,
     quick_actions: safePageActions.slice(0, 2),
     suggested_prompts: pageGuide.prompts,
