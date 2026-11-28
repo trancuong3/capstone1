@@ -14,14 +14,19 @@ import type { WarmupMicroStoryDTO } from "@/types/adaptive-learning";
 interface WarmupMicroStoryCardProps {
   readonly childId: string;
   readonly bookId?: string;
+  readonly initialOpen?: boolean;
 }
 
-export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
+export function WarmupMicroStoryCard({
+  childId,
+  initialOpen = false,
+}: WarmupMicroStoryCardProps) {
   const t = useTranslations("reading");
   const tCommon = useTranslations("common");
   const speechPlayer = useSpeechPlayer();
   const service = useMemo(() => createAdaptiveLearningService(), []);
 
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [loadedState, setLoadedState] = useState<{
     readonly childId: string;
     readonly story: WarmupMicroStoryDTO | null;
@@ -32,12 +37,15 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
 
   const story = loadedState?.childId === childId ? loadedState.story : null;
   const failed = loadedState?.childId === childId ? loadedState.failed : false;
-  const isLoading = isRefreshing || loadedState?.childId !== childId;
+  const isLoading =
+    isOpen &&
+    Boolean(childId) &&
+    (isRefreshing || loadedState?.childId !== childId);
 
   const loadProgress = useAiProgress({
     active: isLoading,
     expectedDurationMs: 4_500,
-    resetKey: childId,
+    resetKey: `${childId}:${isOpen ? 1 : 0}`,
   });
 
   const ttsProgress = useAiProgress({
@@ -66,7 +74,7 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
   }, [childId, service, speechPlayer]);
 
   useEffect(() => {
-    if (!childId || loadedState?.childId === childId) return;
+    if (!isOpen || !childId || loadedState?.childId === childId) return;
     let mounted = true;
     service
       .getWarmupStory(childId)
@@ -87,7 +95,7 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
     return () => {
       mounted = false;
     };
-  }, [childId, loadedState?.childId, service, speechPlayer]);
+  }, [childId, isOpen, loadedState?.childId, service, speechPlayer]);
 
   const handleTogglePlay = useCallback(async () => {
     if (!story?.full_text) return;
@@ -110,7 +118,7 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
     }
   }, [speechPlayer, story]);
 
-  if (failed && !story) {
+  if (isOpen && failed && !story) {
     return null;
   }
 
@@ -121,7 +129,7 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
       data-testid="warmup-micro-story-card"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <div className="inline-flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-primary uppercase">
             <BookHeart aria-hidden="true" className="size-3.5" />
             {story?.has_due_words
@@ -133,8 +141,19 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
           </h2>
         </div>
 
-        {story ? (
-          <div className="flex items-center gap-2">
+        {!isOpen ? (
+          <Button
+            data-testid="warmup-micro-story-open-btn"
+            onClick={() => setIsOpen(true)}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <Sparkles aria-hidden="true" className="size-3.5" />
+            {t("preparation.warmupStory.listenStory")}
+          </Button>
+        ) : story ? (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               onClick={() => void handleTogglePlay()}
               size="compact"
@@ -167,7 +186,7 @@ export function WarmupMicroStoryCard({ childId }: WarmupMicroStoryCardProps) {
         ) : null}
       </div>
 
-      {isLoading ? (
+      {isOpen && isLoading ? (
         <div className="mt-3">
           <AiProgressBar
             active
