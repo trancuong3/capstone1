@@ -16,7 +16,8 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
-import { fiveMinTrainVi } from "../features/five_min_train";
+import { fiveMinTrainVi } from "@/messages/features/five_min_train";
+import { microStoryVi } from "../features/micro_story";
 import { scanInstantVi } from "../features/scan_instant";
 import { wordGlossaryVi } from "../features/word_glossary";
 import type { MessagesDictionary } from "@/lib/i18n/types";
@@ -43,6 +44,7 @@ export const viMessages: MessagesDictionary = {
   scanInstant: scanInstantVi,
   wordGlossary: wordGlossaryVi,
   fiveMinTrain: fiveMinTrainVi,
+  microStory: microStoryVi,
 };
 
 export default viMessages;

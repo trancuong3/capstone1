@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -33,9 +34,11 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { CreateMicroStoryModal } from "@/components/reports/create-micro-story-modal";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useMicroStoryTranslations } from "@/messages/features/micro_story";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
@@ -118,7 +121,9 @@ function ParentMyBooksContent({
   initialPage: number;
 }) {
   const t = useTranslations("books");
+  const tMicroStory = useMicroStoryTranslations();
   const service = useParentPrivateBookService();
+  const [showMicroStoryModal, setShowMicroStoryModal] = useState(false);
   const taskCenter = useOptionalAiTaskCenter();
   const router = useRouter();
   const requestIdRef = useRef(0);
@@ -503,6 +508,16 @@ function ParentMyBooksContent({
           >
             <RefreshCw aria-hidden="true" className="size-4" />
             {t("myBooks.reload")}
+          </Button>
+          <Button
+            className="w-auto"
+            data-testid="my-books-open-micro-story-cta"
+            fullWidth={false}
+            onClick={() => setShowMicroStoryModal(true)}
+            variant="secondary"
+          >
+            <Sparkles aria-hidden="true" className="size-4 text-primary" />
+            {tMicroStory("ctaButton")}
           </Button>
           <Button
             className="w-auto"
@@ -1225,6 +1240,13 @@ function ParentMyBooksContent({
           </div>
         ) : null}
       </Modal>
+      <CreateMicroStoryModal
+        isOpen={showMicroStoryModal}
+        onClose={() => setShowMicroStoryModal(false)}
+        onStoryCreated={() => {
+          loadBooks();
+        }}
+      />
     </section>
   );
 }

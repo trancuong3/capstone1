@@ -19,6 +19,7 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { CreateMicroStoryModal } from "@/components/reports/create-micro-story-modal";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
@@ -34,6 +35,7 @@ import { translateMessage } from "@/lib/i18n/formatter";
 import { normalizeLocale, type SupportedLocale } from "@/lib/i18n/locales";
 import { readLocaleCookie } from "@/lib/i18n/persistence";
 import { getCachedLocaleMessages } from "@/messages/loader";
+import { useMicroStoryTranslations } from "@/messages/features/micro_story";
 import { viMessages } from "@/messages/vi";
 import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import { isServiceError } from "@/lib/api/service-error";
@@ -341,6 +343,8 @@ export function DifficultWordPracticePanel({
   const { formatDateTime } = useI18n();
   const t = useTranslations("difficultWords");
   const tCommon = useTranslations("common");
+  const tMicroStory = useMicroStoryTranslations();
+  const [showMicroStoryModal, setShowMicroStoryModal] = useState(false);
   const { difficultWordService } = useReportServices();
   const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -2762,6 +2766,22 @@ export function DifficultWordPracticePanel({
           {t("practice.listenSample")}
         </Button>
 
+        <Button
+          className="min-h-14 rounded-2xl sm:w-auto"
+          data-testid="practice-open-micro-story-cta"
+          disabled={isBusyActive}
+          onClick={() => {
+            flowGenerationRef.current += 1;
+            cleanupRef.current();
+            setFlowState("IDLE");
+            setShowMicroStoryModal(true);
+          }}
+          variant="secondary"
+        >
+          <Sparkles aria-hidden="true" className="size-4 text-primary" />
+          {tMicroStory("ctaButton")}
+        </Button>
+
         {recordedBlob ? (
           <Button
             className="min-h-14 rounded-2xl sm:w-auto"
@@ -2865,6 +2885,12 @@ export function DifficultWordPracticePanel({
           )}
         </div>
       </details>
+
+      <CreateMicroStoryModal
+        child={child}
+        isOpen={showMicroStoryModal}
+        onClose={() => setShowMicroStoryModal(false)}
+      />
     </section>
   );
 }
