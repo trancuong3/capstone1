@@ -48,11 +48,12 @@ export function AccountAvatarMenu({
   const [view, setView] = useState<AvatarMenuView>("main");
   const [returningFromLanguage, setReturningFromLanguage] = useState(false);
   const [languageAnnouncement, setLanguageAnnouncement] = useState("");
+  const [languageOpenedByKeyboard, setLanguageOpenedByKeyboard] =
+    useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const languageTriggerRef = useRef<HTMLButtonElement>(null);
-  const languageOpenedByKeyboardRef = useRef(false);
   const restoreLanguageFocusRef = useRef(false);
   const menuId = useId();
   const languagePanelId = useId();
@@ -68,13 +69,13 @@ export function AccountAvatarMenu({
     setOpen(false);
     setView("main");
     setReturningFromLanguage(false);
-    languageOpenedByKeyboardRef.current = false;
+    setLanguageOpenedByKeyboard(false);
     restoreLanguageFocusRef.current = false;
     if (restoreFocus) triggerRef.current?.focus();
   }, []);
 
   const openLanguageView = useCallback((byKeyboard: boolean) => {
-    languageOpenedByKeyboardRef.current = byKeyboard;
+    setLanguageOpenedByKeyboard(byKeyboard);
     restoreLanguageFocusRef.current = false;
     setReturningFromLanguage(false);
     setView("language");
@@ -83,7 +84,7 @@ export function AccountAvatarMenu({
   const handleBackToMain = useCallback(
     (options?: { readonly restoreFocus?: boolean }) => {
       restoreLanguageFocusRef.current = options?.restoreFocus ?? true;
-      languageOpenedByKeyboardRef.current = false;
+      setLanguageOpenedByKeyboard(false);
       setReturningFromLanguage(true);
       setView("main");
     },
@@ -219,7 +220,7 @@ export function AccountAvatarMenu({
               id={languagePanelId}
               onAnnouncement={setLanguageAnnouncement}
               onBack={handleBackToMain}
-              openedByKeyboard={languageOpenedByKeyboardRef.current}
+              openedByKeyboard={languageOpenedByKeyboard}
             />
           ) : (
             <div

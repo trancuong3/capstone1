@@ -123,8 +123,9 @@ export function ParentAccountDropdown({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const languageTriggerRef = useRef<HTMLButtonElement>(null);
   const openedByKeyboardRef = useRef(false);
-  const languageOpenedByKeyboardRef = useRef(false);
   const restoreLanguageFocusRef = useRef(false);
+  const [languageOpenedByKeyboard, setLanguageOpenedByKeyboard] =
+    useState(false);
   const languagePanelId = useId();
 
   const [menuState, setMenuState] = useState<{
@@ -221,7 +222,7 @@ export function ParentAccountDropdown({
 
   const closeMenu = useCallback(() => {
     openedByKeyboardRef.current = false;
-    languageOpenedByKeyboardRef.current = false;
+    setLanguageOpenedByKeyboard(false);
     restoreLanguageFocusRef.current = false;
     setMenuState((current) => ({
       ...current,
@@ -232,7 +233,7 @@ export function ParentAccountDropdown({
   }, []);
 
   const openLanguageView = useCallback((byKeyboard: boolean) => {
-    languageOpenedByKeyboardRef.current = byKeyboard;
+    setLanguageOpenedByKeyboard(byKeyboard);
     restoreLanguageFocusRef.current = false;
     setMenuState((current) => ({
       ...current,
@@ -244,7 +245,7 @@ export function ParentAccountDropdown({
   const handleBackToMain = useCallback(
     (options?: { readonly restoreFocus?: boolean }) => {
       restoreLanguageFocusRef.current = options?.restoreFocus ?? true;
-      languageOpenedByKeyboardRef.current = false;
+      setLanguageOpenedByKeyboard(false);
       setMenuState((current) => ({
         ...current,
         view: "main",
@@ -488,7 +489,7 @@ export function ParentAccountDropdown({
                 id={languagePanelId}
                 onAnnouncement={setLanguageAnnouncement}
                 onBack={handleBackToMain}
-                openedByKeyboard={languageOpenedByKeyboardRef.current}
+                openedByKeyboard={languageOpenedByKeyboard}
               />
             ) : (
               <div
