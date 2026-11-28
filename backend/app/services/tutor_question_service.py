@@ -428,6 +428,8 @@ class TutorQuestionService:
             )
         is_correct = normalized_answer in accepted
         question_id_val = question.Id
+        question_type_val = getattr(question, "Type", None)
+        child_id_val = getattr(session, "ChildId", None)
         story_hint = None if is_correct else await self._build_story_hint(question)
 
         record = ComprehensionAnswer(
@@ -439,6 +441,18 @@ class TutorQuestionService:
         self.repository.add_answer(record)
         await self.repository.commit()
         await self.repository.refresh(record)
+        from app.services.reading_skill_evidence import (
+            emit_comprehension_skill_evidence,
+        )
+
+        await emit_comprehension_skill_evidence(
+            self.repository,
+            child_id=child_id_val,
+            parent_id=actor_id,
+            answer_id=getattr(record, "Id", None),
+            question_type=question_type_val,
+            is_correct=is_correct,
+        )
         return TutorAnswerResultRead(
             answer_id=record.Id,
             question_id=question_id_val,

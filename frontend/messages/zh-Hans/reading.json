@@ -174,6 +174,15 @@
       "no_device": "设备上未找到麦克风。请连接麦克风后重试。",
       "device_busy": "麦克风正被其他应用使用。请关闭该应用后重试。",
       "error": "无法检查麦克风。请确认安全连接和浏览器设置后重试。"
+    },
+    "warmupStory": {
+      "spacedEyebrow": "间隔重复词汇复习（1-3-7天）",
+      "starterEyebrow": "阅读前轻松热身",
+      "title": "热身微故事",
+      "listenStory": "听示范故事",
+      "stopListen": "停止播放",
+      "refreshStory": "换一则热身故事",
+      "focusWordsLabel": "今日融入词汇"
     }
   },
   "ready": {

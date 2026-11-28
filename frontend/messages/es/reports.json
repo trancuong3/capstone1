@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Palabras sugeridas para practicar ({days} días)",
       "heardAsCount": "El niño suele leerlo como “{heardAs}” ({times} veces)",
       "recordedCount": "Registrado {times} veces",
-      "heardAsInline": "(leído como “{heardAs}”)"
+      "heardAsInline": "(leído como “{heardAs}”)",
+      "phonologyTitle": "Tonos y sonidos que suelen requerir práctica",
+      "phonologyDisclaimer": "Agrupado de sesiones recientes para calentamiento breve (no es diagnóstico médico).",
+      "openMinimalPairSandbox": "Pares mínimos 60s",
+      "phonologySessionsBadge": "{sessions} sesiones"
     },
     "firstPassSummary": {
       "regionAria": "Resultados del primer intento y la práctica",
@@ -670,7 +674,8 @@
     "focusAria": "Filtrar secciones de gestión de lectura",
     "focusPlans": "Planes",
     "focusGoals": "Objetivos",
-    "focusReminders": "Recordatorios"
+    "focusReminders": "Recordatorios",
+    "androidReminderBody": "¡Es hora de leer con {alias} en ViRead!"
   },
   "entertainmentSummary": {
     "loading": "Resumiendo el progreso lúdico de {childName}…",

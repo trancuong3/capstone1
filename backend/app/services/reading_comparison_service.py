@@ -205,6 +205,18 @@ class ReadingComparisonService:
             Summary=summary,
         )
         persisted = await self.repository.create(report)
+        from app.services.reading_skill_evidence import (
+            emit_reading_comparison_skill_evidence,
+        )
+
+        await emit_reading_comparison_skill_evidence(
+            self.repository,
+            child_id=getattr(session, "ChildId", None),
+            parent_id=actor_id,
+            report_id=getattr(persisted, "Id", None),
+            alignment=result["alignment"],
+            summary=summary,
+        )
         return self._to_read(persisted)
 
     async def list_for_session(

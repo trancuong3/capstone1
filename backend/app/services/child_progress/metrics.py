@@ -14,6 +14,10 @@ from typing import Any
 from types import SimpleNamespace
 from uuid import UUID
 from app.schemas.reading import ReadingAssessmentMetrics
+from app.services.child_progress.phonology_profiler import (
+    PracticeAttemptEvidenceRow,
+    compute_phonological_patterns,
+)
 from app.services.reading_assessment import aggregate_assessment, initial_snapshot
 
 VIETNAM_TZ = timezone(timedelta(hours=7))
@@ -92,6 +96,7 @@ class WindowMetrics:
     word_errors: Counter = field(default_factory=Counter)
     heard_as: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     weekly: list[dict[str, Any]] = field(default_factory=list)
+    phonological_patterns: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def accuracy_pct(self) -> float | None:
@@ -341,6 +346,7 @@ def compute_window(
     reports: list[ReportRow],
     retries: list[RetryEventRow],
     answers: list[AnswerRow],
+    practice_attempts: list[PracticeAttemptEvidenceRow] | None = None,
 ) -> WindowMetrics:
     """Aggregate everything whose local date falls in [start, end]."""
 
@@ -486,6 +492,16 @@ def compute_window(
                 "accuracy_pct": _pct(correct, reached),
             }
         )
+
+    metrics.phonological_patterns = compute_phonological_patterns(
+        start=start,
+        end=end,
+        session_ids_in_window=window_ids,
+        reports=reports,
+        retries=retries,
+        practice_attempts=practice_attempts,
+        local_date_fn=local_date,
+    )
     return metrics
 
 

@@ -92,3 +92,15 @@ export interface ParentEntertainmentAnalyticsDTO {
   home_support_tips_vi: string[];
   generated_at: string;
 }
+
+export interface WarmupMicroStoryDTO {
+  child_id: string;
+  local_date: string;
+  has_due_words: boolean;
+  target_words: string[];
+  title_vi: string;
+  sentences: string[];
+  full_text: string;
+  source: "AI" | "RULE_BASED";
+  cached: boolean;
+}

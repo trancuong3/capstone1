@@ -172,5 +172,25 @@
   "runtime": {
     "practiceOpened": "Séance d’entraînement #{attempt} ouverte pour le mot « {word} ».",
     "unknownBookSource": "Source du livre non spécifiée"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "Échauffement phonétique 60 s",
+    "title": "Atelier de Paires Minimales et Miroir Tonal",
+    "subtitle": "Aide {alias} à écouter et différencier les tons et sons proches.",
+    "openButton": "Ouvrir l'atelier 60s",
+    "collapseButton": "Réduire",
+    "unavailableHint": "Impossible de charger les exercices de paires minimales pour le moment.",
+    "pairCounter": "Paire {current}/{total}",
+    "listenWord": "Écouter",
+    "speakWord": "Prononcer",
+    "listening": "Écoute en cours...",
+    "spokenMatch": "Bravo ! Le mot cible est prononcé clairement !",
+    "spokenContrast": "Proche de \"{heard}\" — écoute le modèle et réessaie lentement !",
+    "spokenRetry": "Son pas assez clair. Approche-toi du micro et lis lentement !",
+    "earChallengeButton": "Défi d'écoute",
+    "earCorrect": "Exact ! Très bonne écoute !",
+    "earRetry": "Presque ! Réécoute encore une fois !",
+    "nextPairButton": "Paire suivante",
+    "nonClinicalDisclaimer": "Conseils d'entraînement à la lecture basés sur la reconnaissance vocale (non médical et non orthophonique)."
   }
 }
