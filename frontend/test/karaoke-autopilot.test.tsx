@@ -377,6 +377,46 @@ describe("Karaoke V4.1 difficult-word badges & 1-tap Autopilot", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("preserves ?focus= query during /karaoke?autoplay=1 redirect and skips redirect for magic-chant mode", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/karaoke?autoplay=1&focus=tr%C6%B0%E1%BB%9Dng",
+    );
+    try {
+      const view1 = render(
+        <Harness>
+          <KaraokeLibraryScreen autoPlay />
+        </Harness>,
+      );
+      await vi.waitFor(() => {
+        expect(replace).toHaveBeenCalledWith(
+          `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1&focus=tr%C6%B0%E1%BB%9Dng`,
+        );
+      });
+      view1.unmount();
+
+      replace.mockReset();
+      window.history.replaceState(
+        {},
+        "",
+        "/karaoke?mode=magic-chant&autoplay=1",
+      );
+      const view2 = render(
+        <Harness>
+          <KaraokeLibraryScreen autoPlay initialMode="magic-chant" />
+        </Harness>,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(replace).not.toHaveBeenCalled();
+      view2.unmount();
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
+
   it("never auto-starts countdown when ?autoplay=1 is missing from URL", async () => {
     installRecognition();
     searchParamsState.current = new URLSearchParams(`version=${versionId}`);

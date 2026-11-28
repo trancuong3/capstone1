@@ -2000,7 +2000,7 @@ export function PictureDescriptionScreen({
           ...(session.target_vocabulary ?? []),
           ...(session.target_words ?? []),
           ...(session.guide.target_words ?? []),
-          ...urlFocusWords,
+          ...combinedFocusWords,
         ]),
       );
       const effectiveInputMode = overrideMode ?? inputMode;
@@ -2079,7 +2079,7 @@ export function PictureDescriptionScreen({
       t,
       teacherPersona.gender,
       teachingMode,
-      urlFocusWords,
+      combinedFocusWords,
     ],
   );
 

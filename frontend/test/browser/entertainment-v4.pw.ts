@@ -557,7 +557,7 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
     page.getByRole("link", { name: /Khám phá trí nhớ/i }),
   ];
 
-  // V4.1 Hub checks: misread-word chips, 1-tap Cú Mèo quick-play, 4 "Vào nhanh" links, hub-autoplay-toggle
+  // V4.1 Hub checks: misread-word chips, 1-tap Cú Mèo quick-play, 4 "Vào nhanh" links, hub-autopilot-toggle
   const misreadWordChips = page.getByTestId("hub-misread-word-chips");
   await expect(misreadWordChips).toBeVisible();
   await expect(misreadWordChips).toContainText("mèo mướp");
@@ -595,7 +595,7 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
   );
   await expect(page.getByText("Vào nhanh", { exact: true })).toHaveCount(4);
 
-  const autoPlayToggle = page.getByTestId("hub-autoplay-toggle");
+  const autoPlayToggle = page.getByTestId("hub-autopilot-toggle");
   await expect(autoPlayToggle).toHaveAttribute("aria-pressed", "true");
 
   // Verify first-visit onboarding is non-blocking (quick-play links stay enabled underneath) then dismiss (3 steps -> Done)
@@ -668,7 +668,7 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
   await expect(hubSection).toHaveAttribute("data-reduced-motion", "true");
   await expect(hubSection).toHaveAttribute("data-calm-sound", "false");
   await expect(hubSection).toHaveAttribute("data-auto-play-flow", "false");
-  await expect(page.getByTestId("hub-autoplay-toggle")).toHaveAttribute(
+  await expect(page.getByTestId("hub-autopilot-toggle")).toHaveAttribute(
     "aria-pressed",
     "false",
   );
@@ -857,9 +857,12 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Chọn tranh/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/picture-description$/, {
-    timeout: 30_000,
-  });
+  await expect(page).toHaveURL(
+    /\/entertainment\/picture-description(?:\?focus=.*)?$/,
+    {
+      timeout: 30_000,
+    },
+  );
 
   await expect(
     page.getByRole("tab", { name: "Tranh chủ đề ViRead" }),
@@ -1101,9 +1104,12 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Bắt đầu chơi/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/sentence-shooter$/, {
-    timeout: 30_000,
-  });
+  await expect(page).toHaveURL(
+    /\/entertainment\/sentence-shooter(?:\?focus=.*)?$/,
+    {
+      timeout: 30_000,
+    },
+  );
 
   // Verify V4.1 quick-start card, difficult-word badge, and autoplay toggle on lobby
   await expect(page.getByTestId("shooter-quick-start-card")).toBeVisible();
@@ -1379,7 +1385,9 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Mở thư viện bài hát/i }).click();
-  await expect(page).toHaveURL(/\/karaoke$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/karaoke(?:\?focus=.*)?$/, {
+    timeout: 30_000,
+  });
   await expect(page.getByRole("heading", { name: "Ngôi sao nhỏ" })).toBeVisible(
     { timeout: 30_000 },
   );
@@ -1396,7 +1404,9 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   const singNowLink = page.getByRole("link", { name: "Hát ngay", exact: true });
   await expect(singNowLink).toHaveAttribute(
     "href",
-    `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+    new RegExp(
+      `^/karaoke/${songId}\\?version=${versionId}&autoplay=1&scored=1(?:&focus=.+)?$`,
+    ),
   );
 
   await assertViewportHealth(page, `karaoke-${testInfo.project.name}`, [
@@ -2154,7 +2164,7 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Khám phá trí nhớ/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/memory-game$/, {
+  await expect(page).toHaveURL(/\/entertainment\/memory-game(?:\?focus=.*)?$/, {
     timeout: 30_000,
   });
 
@@ -2167,7 +2177,7 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
   await expect(page.getByTestId("memory-quick-play-btn")).toContainText(
     "Chơi ngay (Ôn từ khó)",
   );
-  await expect(page.getByTestId("memory-autoplay-toggle")).toHaveAttribute(
+  await expect(page.getByTestId("memory-autopilot-toggle")).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -3517,8 +3527,10 @@ test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=
   await selectChildAndEnterEntertainment(page, false);
 
   // 1) Library route (/karaoke without ?autoplay=1) shows difficult-word chips and 1-tap Hát ngay link
-  await page.locator('main a[href="/karaoke"]').first().click();
-  await expect(page).toHaveURL(/\/karaoke$/, { timeout: 30_000 });
+  await page.getByRole("link", { name: /Mở thư viện bài hát/i }).click();
+  await expect(page).toHaveURL(/\/karaoke(?:\?focus=.*)?$/, {
+    timeout: 30_000,
+  });
   await expect(page.getByTestId("karaoke-song-difficult-words")).toContainText(
     "trường",
   );
@@ -3526,7 +3538,9 @@ test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=
     page.getByRole("link", { name: "Hát ngay", exact: true }),
   ).toHaveAttribute(
     "href",
-    `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+    new RegExp(
+      `^/karaoke/${songId}\\?version=${versionId}&autoplay=1&scored=1`,
+    ),
   );
 
   // 2) Hub Quick Play (/karaoke?autoplay=1) skips the library and enters the top recommended song directly (0 extra taps)
