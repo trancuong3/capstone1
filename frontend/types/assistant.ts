@@ -23,6 +23,8 @@ export interface AssistantNavigationOffer {
   readonly label: string;
   readonly href: string;
   readonly reason?: string | null;
+  readonly requires_child_selection?: boolean;
+  readonly scenario_id?: string | null;
 }
 
 export interface AssistantHistoryTurn {
@@ -67,7 +69,12 @@ export interface AssistantMessage {
   readonly quickActions?: readonly AssistantQuickAction[];
   readonly suggestedPrompts?: readonly string[];
   readonly navigationOffer?: AssistantNavigationOffer | null;
-  readonly navigationDecision?: "pending" | "accepted" | "declined";
+  readonly navigationDecision?:
+    | "pending"
+    | "needs_child"
+    | "needs_reading_exit_confirm"
+    | "accepted"
+    | "declined";
   readonly canDeepenWithAi?: boolean;
   readonly canRetryOnline?: boolean;
   readonly sourcePrompt?: string;

@@ -44,6 +44,8 @@ const assistantNavigationOfferSchema = z.object({
       { message: "Invalid internal path" },
     ),
   reason: z.string().max(160).nullable().optional().default(null),
+  requires_child_selection: z.boolean().optional().default(false),
+  scenario_id: z.string().max(64).nullable().optional().default(null),
 });
 
 const assistantChatResponseSchema = z.object({
