@@ -1133,5 +1133,113 @@ class RealOcrAndEndToEndDocumentScenarios(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ocr_mock.call_count, 3)
 
 
+class StreamingSinglePageReplacementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_replace_page_and_submission_reject_multipage_after_at_most_two_iterations_and_cleanup(
+        self,
+    ) -> None:
+        import contextlib
+        import glob
+        import tempfile
+        from pathlib import Path
+        from app.services import document_rasterizer_service as drs
+        from app.services import parent_private_book_service as pbs_mod
+        from app.services.parent_private_book_service import ParentPrivateBookService
+
+        pdf_bytes = _make_pdf_bytes(["Page 1", "Page 2", "Page 3", "Page 4", "Page 5"])
+        book_id = uuid4()
+        page_id = uuid4()
+        sub_id = uuid4()
+
+        fake_book = SimpleNamespace(
+            Id=book_id,
+            ModerationStatus="ACTIVE",
+            LifecycleStatus="ACTIVE",
+            SourceDeclaration="USER_SCAN:test",
+        )
+        fake_page = SimpleNamespace(Id=page_id, PageNumber=1)
+        fake_sub = SimpleNamespace(Id=sub_id, WorkflowStatus="DRAFT")
+        fake_repo = SimpleNamespace(
+            get_owned_private_book=AsyncMock(return_value=fake_book),
+            get_committed_page=AsyncMock(return_value=fake_page),
+            get_submission_by_committed_page_id=AsyncMock(return_value=None),
+            get_owned_submission=AsyncMock(return_value=fake_sub),
+            rollback=AsyncMock(),
+        )
+        fake_db = SimpleNamespace(rollback=AsyncMock(), commit=AsyncMock())
+        svc = ParentPrivateBookService(fake_db)  # type: ignore[arg-type]
+        svc.repo = fake_repo  # type: ignore[assignment]
+        svc._require_parent = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        for label, call_fn in (
+            (
+                "committed_page",
+                lambda up: svc.replace_committed_page_file(ACTOR_ID, book_id, page_id, up),
+            ),
+            (
+                "submission",
+                lambda up: svc.replace_submission_file(ACTOR_ID, book_id, sub_id, up),
+            ),
+        ):
+            pulled_pages = 0
+            closed_spooled: list[bool] = []
+            temp_dir = Path(tempfile.gettempdir())
+            before_pdfs = set(glob.glob(str(temp_dir / "viread_pdf_*.pdf")))
+
+            real_spool = drs.spool_upload_file
+            real_iter = drs.iter_rasterized_spooled_document
+
+            async def _tracked_spool(upload, *, max_bytes=drs.MAX_DOCUMENT_BYTES):
+                spooled = await real_spool(upload, max_bytes=max_bytes)
+                orig_close = spooled.close
+
+                def _close():
+                    closed_spooled.append(True)
+                    return orig_close()
+
+                spooled.close = _close  # type: ignore[method-assign]
+                return spooled
+
+            @contextlib.contextmanager
+            def _tracked_iter(spooled):
+                nonlocal pulled_pages
+                with real_iter(spooled) as (fname, fmt, sha, page_iter):
+                    def _counting_iter():
+                        nonlocal pulled_pages
+                        try:
+                            for p in page_iter:
+                                pulled_pages += 1
+                                yield p
+                        finally:
+                            close_fn = getattr(page_iter, "close", None)
+                            if callable(close_fn):
+                                close_fn()
+
+                    it = _counting_iter()
+                    try:
+                        yield fname, fmt, sha, it
+                    finally:
+                        it.close()
+
+            upload = UploadFile(
+                file=BytesIO(pdf_bytes),
+                filename="five_pages.pdf",
+                headers={"content-type": "application/pdf"},
+            )
+            with (
+                patch.object(pbs_mod, "spool_upload_file", side_effect=_tracked_spool),
+                patch.object(pbs_mod, "iter_rasterized_spooled_document", side_effect=_tracked_iter),
+                patch.object(pbs_mod, "upload_object") as upload_mock,
+            ):
+                with self.assertRaises(HTTPException) as ctx:
+                    await call_fn(upload)
+
+            self.assertEqual(ctx.exception.status_code, 422, msg=label)
+            self.assertLessEqual(pulled_pages, 2, msg=f"{label} pulled too many pages: {pulled_pages}")
+            self.assertEqual(len(closed_spooled), 1, msg=f"{label} did not close spooled file")
+            upload_mock.assert_not_called()
+            after_pdfs = set(glob.glob(str(temp_dir / "viread_pdf_*.pdf")))
+            self.assertEqual(after_pdfs - before_pdfs, set(), msg=f"{label} leaked temp PDF file")
+
+
 if __name__ == "__main__":
     unittest.main()

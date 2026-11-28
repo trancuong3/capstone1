@@ -29,6 +29,7 @@ from app.providers.elevenlabs_voice_provider import (
     VoiceProviderError,
     VoiceProviderUnavailable,
     clear_caches as clear_base_caches,
+    is_constrained_web_runtime,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,26 @@ VOICE_CACHE_TTL_SECONDS = 600
 MAX_VOICE_PAGES = 5  # bounded pagination: never loop on a misbehaving provider
 AUDIO_CACHE_MAX_ENTRIES = 24
 AUDIO_CACHE_MAX_BYTES = 32 * 1024 * 1024
+CONSTRAINED_AUDIO_CACHE_MAX_ENTRIES = 12
+CONSTRAINED_AUDIO_CACHE_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _resolve_timed_cache_limits() -> tuple[int, int]:
+    constrained = is_constrained_web_runtime()
+    default_bytes = (
+        CONSTRAINED_AUDIO_CACHE_MAX_BYTES if constrained else AUDIO_CACHE_MAX_BYTES
+    )
+    max_entries = (
+        CONSTRAINED_AUDIO_CACHE_MAX_ENTRIES if constrained else AUDIO_CACHE_MAX_ENTRIES
+    )
+    raw = (os.getenv("VIREAD_ELEVENLABS_TIMED_CACHE_MAX_BYTES") or "").strip()
+    if raw:
+        try:
+            max_bytes = max(0, min(64 * 1024 * 1024, int(raw)))
+            return max_bytes, max_entries
+        except ValueError:
+            pass
+    return default_bytes, max_entries
 
 
 @dataclass(frozen=True)
@@ -72,7 +93,8 @@ class _TimedSpeechCache:
         return item
 
     def put(self, key: str, value: TimedSpeech) -> None:
-        if len(value.audio) > AUDIO_CACHE_MAX_BYTES // 2:
+        max_bytes, max_entries = _resolve_timed_cache_limits()
+        if max_bytes <= 0 or max_entries <= 0 or len(value.audio) > max_bytes // 2:
             return
         previous = self._items.pop(key, None)
         if previous is not None:
@@ -80,8 +102,8 @@ class _TimedSpeechCache:
         self._items[key] = value
         self._bytes += len(value.audio)
         while self._items and (
-            len(self._items) > AUDIO_CACHE_MAX_ENTRIES
-            or self._bytes > AUDIO_CACHE_MAX_BYTES
+            len(self._items) > max_entries
+            or self._bytes > max_bytes
         ):
             _, evicted = self._items.popitem(last=False)
             self._bytes -= len(evicted.audio)

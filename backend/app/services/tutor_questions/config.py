@@ -42,9 +42,9 @@ class TutorQuestionConfig:
     ai_enabled: bool = True
     gemini_api_key: str | None = field(default=None, repr=False)
     groq_api_key: str | None = field(default=None, repr=False)
-    gemini_model: str = "gemini-3.5-flash-lite"
-    gemini_fallback_model: str = "gemini-3.1-flash-lite"
-    groq_model: str = "qwen/qwen3.8-27b"
+    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_fallback_model: str = "gemini-2.5-flash"
+    groq_model: str = "llama-3.3-70b-versatile"
     timeout_seconds: int = 20
     # Each lesson gets a random number of questions in [min, max], limited by
     # how much text the child actually read.
@@ -61,11 +61,11 @@ class TutorQuestionConfig:
             ai_enabled=_bool("TUTOR_QUESTIONS_AI_ENABLED", True),
             gemini_api_key=_secret("GEMINI_API_KEY"),
             groq_api_key=_secret("GROQ_API_KEY"),
-            gemini_model=_model("TUTOR_QUESTIONS_GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            gemini_model=_model("TUTOR_QUESTIONS_GEMINI_MODEL", "gemini-2.5-flash-lite"),
             gemini_fallback_model=_model(
-                "TUTOR_QUESTIONS_GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite"
+                "TUTOR_QUESTIONS_GEMINI_FALLBACK_MODEL", "gemini-2.5-flash"
             ),
-            groq_model=_model("TUTOR_QUESTIONS_GROQ_MODEL", "qwen/qwen3.8-27b"),
+            groq_model=_model("TUTOR_QUESTIONS_GROQ_MODEL", "llama-3.3-70b-versatile"),
             timeout_seconds=_int("TUTOR_QUESTIONS_TIMEOUT_SECONDS", 20, 1, 120),
             min_questions=minimum,
             max_questions=maximum,

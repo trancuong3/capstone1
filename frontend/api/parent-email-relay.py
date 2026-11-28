@@ -58,7 +58,7 @@ def deliver(body, timestamp, signature):
     # Gmail's TLS submission endpoint is fixed: callers cannot supply an SMTP host.
     try:
         with smtplib.SMTP_SSL(
-            "smtp.gmail.com", 465, timeout=10, context=ssl.create_default_context()
+            "smtp.gmail.com", 465, timeout=20, context=ssl.create_default_context()
         ) as client:
             client.login(username, password)
             client.sendmail(sender, [recipients[0][1]], body)

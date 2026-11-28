@@ -31,6 +31,8 @@ from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.models.book_content_quality import BookQualityScanRun
 from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowRepository
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
+from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
 from app.services import local_ocr_scan_service
 from app.services.ocr_inference_job_service import (
     OcrInferenceJobService,
@@ -41,6 +43,7 @@ from app.services.remote_ocr_wakeup import (
     maybe_keep_warm_hf_space_from_cron,
     maybe_nudge_ocr_wakeup_for_stale_queued_job,
 )
+from app.services.tts_audio_cache_service import delete_stale_tts_objects
 from app.services.worker_telemetry import (
     persist_worker_heartbeat_with_factory,
     persist_worker_heartbeats_batch_with_factory,
@@ -59,6 +62,9 @@ DEFAULT_SWEEP_MAX_ITEMS = 5
 DEFAULT_ORPHAN_RECONCILE_LIMIT = 20
 DEFAULT_STALE_HEARTBEAT_MAX_AGE_HOURS = 24
 DEFAULT_LOCAL_SCAN_MAX_AGE_HOURS = 24
+DEFAULT_TTS_CACHE_PRUNE_AGE_DAYS = 14
+DEFAULT_TTS_DAILY_USAGE_RETAIN_DAYS = 90
+DEFAULT_OCR_TERMINAL_JOB_PRUNE_AGE_DAYS = 30
 
 
 def _remaining_budget(deadline: float, cap_seconds: float) -> float:
@@ -222,6 +228,80 @@ async def _sweep_ocr_leases_and_heartbeats(*, max_age_hours: int) -> tuple[int, 
         )
 
     return requeued, dead_lettered, heartbeats_pruned
+
+
+async def _sweep_phase1_db_pruning(*, now: datetime, deadline: float) -> dict[str, int]:
+    """Bounded Phase 1 DB cleanup for aged TTS cache rows/usage and terminal OCR jobs."""
+    counts = {
+        "tts_cache_entries_pruned": 0,
+        "tts_daily_usage_pruned": 0,
+        "ocr_jobs_pruned": 0,
+    }
+    budget = max(0.0, min(DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS, deadline - time.monotonic()))
+    if budget <= 0.25:
+        return counts
+
+    stale_objects: list[tuple[str, str]] = []
+
+    async def _run_db_prune() -> None:
+        nonlocal stale_objects
+        async with AsyncSessionLocal() as db:
+            if not inspect.iscoroutinefunction(getattr(db, "execute", None)):
+                return
+            tts_repo = TtsAudioCacheRepository(db)
+            ocr_repo = OcrInferenceJobRepository(db)
+            if await tts_repo.is_storage_ready():
+                pruned_entries, unreferenced_stale = await tts_repo.prune_inactive_entries(
+                    older_than_days=DEFAULT_TTS_CACHE_PRUNE_AGE_DAYS,
+                    limit=200,
+                    now=now,
+                )
+                pruned_usage = await tts_repo.prune_daily_usage(
+                    retain_days=DEFAULT_TTS_DAILY_USAGE_RETAIN_DAYS,
+                    limit=500,
+                    now=now,
+                )
+                counts["tts_cache_entries_pruned"] = max(0, int(pruned_entries))
+                counts["tts_daily_usage_pruned"] = max(0, int(pruned_usage))
+                stale_objects = list(unreferenced_stale)
+            if await ocr_repo.is_storage_ready():
+                counts["ocr_jobs_pruned"] = max(
+                    0,
+                    int(
+                        await ocr_repo.prune_terminal_jobs(
+                            older_than_days=DEFAULT_OCR_TERMINAL_JOB_PRUNE_AGE_DAYS,
+                            limit=200,
+                            now=now,
+                        )
+                    ),
+                )
+            if (
+                counts["tts_cache_entries_pruned"]
+                or counts["tts_daily_usage_pruned"]
+                or counts["ocr_jobs_pruned"]
+            ):
+                await db.commit()
+            else:
+                await db.rollback()
+
+    await asyncio.wait_for(_run_db_prune(), timeout=budget)
+
+    if stale_objects:
+        storage_budget = max(
+            0.0, min(DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS, deadline - time.monotonic())
+        )
+        if storage_budget > 0.25:
+            try:
+                await asyncio.wait_for(
+                    delete_stale_tts_objects(stale_objects[:25]),
+                    timeout=storage_budget,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "cron_tts_stale_object_delete_skipped error=%s",
+                    type(exc).__name__,
+                )
+    return counts
 
 
 async def _sweep_admin_ai_workflows(
@@ -497,6 +577,9 @@ async def run_scheduled_cron_dispatch(
     book_quality_scans_swept = 0
     ocr_outbox_swept = 0
     local_scan_objects_cleaned = 0
+    tts_cache_entries_pruned = 0
+    tts_daily_usage_pruned = 0
+    ocr_jobs_pruned = 0
     hf_space_keepwarm_pinged = False
     ocr_training_maintenance_ran = False
     sweep_errors: list[str] = []
@@ -764,6 +847,26 @@ async def run_scheduled_cron_dispatch(
                     type(exc).__name__,
                 )
 
+        # 9b. Bounded Phase 1 DB pruning (aged TTS cache rows/usage & terminal OCR jobs)
+        try:
+            prune_counts = await _sweep_phase1_db_pruning(
+                now=current,
+                deadline=deadline,
+            )
+            tts_cache_entries_pruned = int(
+                prune_counts.get("tts_cache_entries_pruned") or 0
+            )
+            tts_daily_usage_pruned = int(
+                prune_counts.get("tts_daily_usage_pruned") or 0
+            )
+            ocr_jobs_pruned = int(prune_counts.get("ocr_jobs_pruned") or 0)
+        except Exception as exc:
+            sweep_errors.append("phase1_db_pruning")
+            logger.warning(
+                "cron_phase1_db_pruning_skipped error=%s",
+                type(exc).__name__,
+            )
+
     # ── Phase 2: Outbound HTTP / email delivery sweeps ────────────────────────
     # 10. Isolated reading reminders runner (15.0s cap)
     rem_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
@@ -898,6 +1001,9 @@ async def run_scheduled_cron_dispatch(
         "book_quality_scans_swept": book_quality_scans_swept,
         "ocr_outbox_swept": ocr_outbox_swept,
         "local_scan_objects_cleaned": local_scan_objects_cleaned,
+        "tts_cache_entries_pruned": tts_cache_entries_pruned,
+        "tts_daily_usage_pruned": tts_daily_usage_pruned,
+        "ocr_jobs_pruned": ocr_jobs_pruned,
         "hf_space_keepwarm_pinged": hf_space_keepwarm_pinged,
         "ocr_training_maintenance_ran": ocr_training_maintenance_ran,
         "sweep_errors": sweep_errors,

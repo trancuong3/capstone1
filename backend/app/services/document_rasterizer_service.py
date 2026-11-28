@@ -1296,6 +1296,8 @@ def iter_rasterized_spooled_document(
         header_bytes=spooled.header_bytes,
     )
     temp_pdf_path: Path | None = None
+    page_iter: Iterator[RasterizedDocumentPage] | None = None
+    bounded_iter: Iterator[RasterizedDocumentPage] | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
@@ -1314,17 +1316,38 @@ def iter_rasterized_spooled_document(
 
         def _bounded_iter() -> Iterator[RasterizedDocumentPage]:
             count = 0
-            for page in page_iter:
-                count += 1
-                if count > MAX_DOCUMENT_PAGES:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Document exceeds the 30-page limit per upload",
-                    )
-                yield page
+            try:
+                assert page_iter is not None
+                for page in page_iter:
+                    count += 1
+                    if count > MAX_DOCUMENT_PAGES:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Document exceeds the 30-page limit per upload",
+                        )
+                    yield page
+            finally:
+                close_inner = getattr(page_iter, "close", None)
+                if callable(close_inner):
+                    close_inner()
 
-        yield clean_name, detected, spooled.source_sha256, _bounded_iter()
+        bounded_iter = _bounded_iter()
+        yield clean_name, detected, spooled.source_sha256, bounded_iter
     finally:
+        if bounded_iter is not None:
+            close_bounded = getattr(bounded_iter, "close", None)
+            if callable(close_bounded):
+                try:
+                    close_bounded()
+                except Exception:
+                    pass
+        if page_iter is not None:
+            close_page_iter = getattr(page_iter, "close", None)
+            if callable(close_page_iter):
+                try:
+                    close_page_iter()
+                except Exception:
+                    pass
         if temp_pdf_path is not None:
             try:
                 temp_pdf_path.unlink(missing_ok=True)

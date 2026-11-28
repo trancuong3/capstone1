@@ -8,6 +8,11 @@ import httpx
 from app.services.admin_ocr_chunking import OcrTextChunk
 from app.services.ocr_ai.exceptions import OcrProviderError
 from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt, json_output_contract
+from app.services.ocr_ai.runtime import (
+    detect_limit_zero,
+    get_shared_ocr_ai_http_client,
+    parse_retry_after_seconds,
+)
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import decode_and_validate_content
 
@@ -35,6 +40,8 @@ class GroqOcrProvider:
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
+        if self._transport is None:
+            return get_shared_ocr_ai_http_client()
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout_seconds),
@@ -90,6 +97,7 @@ class GroqOcrProvider:
                 _GROQ_CHAT_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=payload,
+                timeout=httpx.Timeout(self._timeout_seconds),
             )
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
@@ -141,11 +149,15 @@ class GroqOcrProvider:
             response.headers.get("x-request-id")
             or response.headers.get("request-id")
         )
+        retry_after_seconds = parse_retry_after_seconds(response.headers.get("retry-after"))
+        limit_zero = detect_limit_zero(response)
         diagnostic = {
             "upstream_status_code": status_code,
             "upstream_error_type": error_type,
             "upstream_error_code": error_code,
             "upstream_request_id": request_id,
+            "retry_after_seconds": retry_after_seconds,
+            "limit_zero": limit_zero,
         }
         if status_code in (401, 403):
             return OcrProviderError(

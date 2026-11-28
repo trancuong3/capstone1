@@ -11,7 +11,7 @@ param(
     [ValidateSet("BelowNormal", "Idle", "Normal")]
     [string]$Priority = "BelowNormal",
     [string]$QuietStandby = "",
-    [int]$QuietStandbyKeepaliveSeconds = 30,
+    [int]$QuietStandbyKeepaliveSeconds = 0,
     [int]$MaxIdlePollSeconds = 20,
     [switch]$AllowDegradedStart
 )

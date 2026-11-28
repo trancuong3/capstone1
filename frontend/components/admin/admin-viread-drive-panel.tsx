@@ -164,6 +164,11 @@ export function AdminVireadDrivePanel({
   } | null>(null);
   const [selfTestResult, setSelfTestResult] =
     useState<GoogleDriveSelfTestResult | null>(null);
+  const [healthTelemetry, setHealthTelemetry] = useState<{
+    advanced_drive_enabled?: boolean | null;
+    delete_mode?: string | null;
+    warnings?: string[];
+  } | null>(null);
   const [showBridgeForm, setShowBridgeForm] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState("");
   const [bridgeSecret, setBridgeSecret] = useState("");
@@ -309,9 +314,15 @@ export function AdminVireadDrivePanel({
     setFeedback(null);
     try {
       const refreshed = await vireadTraining.checkDriveHealth();
+      setHealthTelemetry({
+        advanced_drive_enabled: refreshed.advanced_drive_enabled,
+        delete_mode: refreshed.delete_mode,
+        warnings: refreshed.warnings,
+      });
       setFeedback({
         tone: refreshed.connected ? "info" : "error",
         text:
+          refreshed.warnings?.[0] ||
           refreshed.health_detail ||
           (refreshed.connected
             ? t("training.drive.notices.checkOk")
@@ -618,6 +629,36 @@ export function AdminVireadDrivePanel({
                   ? t("common.yes")
                   : t("common.notYet")}
               </strong>
+              {selfTestResult.delete_mode ? (
+                <>
+                  {" "}
+                  · Delete mode:{" "}
+                  <code className="font-mono">{selfTestResult.delete_mode}</code>
+                </>
+              ) : null}
+            </p>
+            {selfTestResult.warning || selfTestResult.delete_mode === "trash_fallback" ? (
+              <p className="mt-2 rounded-control border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-amber-900">
+                {selfTestResult.warning ||
+                  "Apps Script Bridge đang fallback sang Thùng rác (trash_fallback). Hãy bật Services (+) -> Drive API trong Google Apps Script để xóa vĩnh viễn."}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {(status.delete_mode ?? healthTelemetry?.delete_mode) === "trash_fallback" ||
+        (status.advanced_drive_enabled ?? healthTelemetry?.advanced_drive_enabled) === false ||
+        (status.warnings && status.warnings.length > 0) ||
+        (healthTelemetry?.warnings && healthTelemetry.warnings.length > 0) ? (
+          <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+            <div className="flex items-center gap-2 font-bold">
+              <AlertTriangle aria-hidden className="size-4 shrink-0" />
+              <span>Cảnh báo xóa tạm thời (Google Drive Trash Fallback)</span>
+            </div>
+            <p className="mt-1">
+              {status.warnings?.[0] ||
+                healthTelemetry?.warnings?.[0] ||
+                "Apps Script Advanced Drive Service (Drive API) chưa được bật. Các tệp bị xóa sẽ nằm trong Thùng rác Drive 30 ngày và tiếp tục chiếm dung lượng 15 GiB."}
             </p>
           </div>
         ) : null}

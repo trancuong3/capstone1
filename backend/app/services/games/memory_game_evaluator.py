@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
-DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # Explicit imagination markers so creative elaborations are NEVER treated as factual errors.
 IMAGINATION_MARKERS_FOLDED: tuple[str, ...] = (

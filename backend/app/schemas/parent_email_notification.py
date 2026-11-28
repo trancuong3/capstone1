@@ -84,3 +84,4 @@ class ParentEmailCronDispatchResponse(BaseModel):
     reminders_sent: int = 0
     engagement_sent: int = 0
     checked_at: datetime
+    dry_run: bool = False
