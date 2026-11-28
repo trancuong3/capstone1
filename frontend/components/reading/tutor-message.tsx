@@ -47,11 +47,11 @@ export function TutorMessage({
     return (
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-3 bottom-32 z-40 flex justify-center sm:inset-x-auto sm:right-6 sm:bottom-28 sm:max-w-md"
+        className="mx-auto w-full max-w-[1008px]"
         data-testid="tts-error-banner"
         role="status"
       >
-        <div className="pointer-events-auto w-full rounded-card border border-amber-300 bg-paper/98 p-4 shadow-lg backdrop-blur-xs">
+        <div className="w-full rounded-card border border-amber-300 bg-paper p-3 shadow-xs sm:p-4">
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-2">
               <p className="text-label font-semibold text-ink">
@@ -80,13 +80,13 @@ export function TutorMessage({
               </p>
             ) : null}
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
             <Button
-              className="w-auto!"
               disabled={isPlaying}
+              fullWidth={false}
               isLoading={isRetrying}
               onClick={onRetry}
-              size="compact"
+              size="touch"
               variant="secondary"
             >
               {isPlaying
@@ -96,9 +96,9 @@ export function TutorMessage({
                   : t("tutor.listenAction")}
             </Button>
             <Button
-              className="w-auto!"
+              fullWidth={false}
               onClick={onClose}
-              size="compact"
+              size="touch"
               variant="quiet"
             >
               {t("tutor.continueReading")}

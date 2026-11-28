@@ -6,7 +6,6 @@ import { useState } from "react";
 import { AuthLoadingState, AuthShell } from "@/components/auth/auth-shell";
 import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 import { Button, ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -48,12 +47,12 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
   if (submittedEmail) {
     return (
       <AuthShell>
-        <Card className="border border-border bg-white">
+        <div className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6">
           <div>
-            <p className="text-sm font-semibold text-primary">
+            <p className="inline-flex w-fit items-center rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold sm:text-primary">
               {tAuth("securityEyebrow")}
             </p>
-            <h1 className="mt-2 text-heading font-extrabold text-ink">
+            <h1 className="mt-2.5 text-heading font-extrabold text-ink sm:mt-2">
               {resendState === "success"
                 ? tAuth("forgotPassword.resentTitle")
                 : tAuth("forgotPassword.checkEmailTitle")}
@@ -81,19 +80,19 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
               ? tAuth("forgotPassword.resending")
               : tAuth("forgotPassword.resend")}
           </Button>
-        </Card>
+        </div>
       </AuthShell>
     );
   }
 
   return (
     <AuthShell>
-      <Card className="border border-border bg-white">
+      <div className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6">
         <div>
-          <p className="text-sm font-semibold text-primary">
+          <p className="inline-flex w-fit items-center rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold sm:text-primary">
             {tAuth("securityEyebrow")}
           </p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
+          <h1 className="mt-2.5 text-heading font-extrabold text-ink sm:mt-2">
             {tAuth("forgotPassword.heading")}
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">
@@ -104,7 +103,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
           hasInitialError={scenario === "safe-error"}
           onSubmitted={setSubmittedEmail}
         />
-      </Card>
+      </div>
     </AuthShell>
   );
 }

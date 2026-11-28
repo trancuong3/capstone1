@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Mic,
   Pause,
   Play,
@@ -1743,16 +1744,17 @@ export function DifficultWordPracticePanel({
   return (
     <section
       aria-labelledby="practice-word-heading"
-      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 shadow-sm sm:gap-5 sm:p-8"
+      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-3xl border border-border bg-white p-4 shadow-sm sm:gap-5 sm:p-8"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#DCE8E4] pb-3 sm:gap-3 sm:pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border pb-3 sm:gap-3 sm:pb-4">
         <Button
-          className="min-h-12 sm:w-auto"
+          className="sm:w-auto"
           onClick={() => {
             flowGenerationRef.current += 1;
             cleanupRef.current();
             onClose();
           }}
+          size="compact"
           variant="secondary"
         >
           <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
@@ -1762,7 +1764,7 @@ export function DifficultWordPracticePanel({
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
           {wordIndexInQueue >= 0 ? (
-            <span className="rounded-full bg-[#F6FAF8] px-3 py-1 text-xs font-bold text-[#526970]">
+            <span className="rounded-full bg-canvas px-3 py-1 text-xs font-bold text-muted ring-1 ring-inset ring-border">
               {t("practice.wordPosition", {
                 current: wordIndexInQueue + 1,
                 total: words.length,
@@ -1778,10 +1780,10 @@ export function DifficultWordPracticePanel({
       </div>
 
       {primarySource?.book_title ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-[#526970]">
-          <BookOpen aria-hidden="true" className="size-4 text-[#147D87]" />
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <BookOpen aria-hidden="true" className="size-4 text-primary" />
           <span
-            className="viread-learning-content font-bold text-[#213C42]"
+            className="viread-learning-content font-bold text-ink"
             dir="ltr"
             lang="vi"
           >
@@ -1794,7 +1796,7 @@ export function DifficultWordPracticePanel({
           ) : null}
           {primarySource.context_phrase ? (
             <span
-              className="viread-learning-content rounded-lg bg-[#F6FAF8] px-2.5 py-0.5 text-xs italic text-[#526970]"
+              className="viread-learning-content rounded-lg bg-canvas px-2.5 py-0.5 text-xs italic text-muted ring-1 ring-inset ring-border/70"
               dir="ltr"
               lang="vi"
             >
@@ -1814,7 +1816,7 @@ export function DifficultWordPracticePanel({
         </p>
 
         {failureDisplay && flowState !== "SUCCESS" ? (
-          <span className="rounded-full border border-warning/30 bg-white/90 px-3 py-0.5 text-xs font-extrabold text-[#213C42]">
+          <span className="rounded-full border border-warning/30 bg-white/90 px-3 py-0.5 text-xs font-extrabold text-ink">
             {failureDisplay}
           </span>
         ) : null}
@@ -1829,7 +1831,7 @@ export function DifficultWordPracticePanel({
         ) : null}
 
         <h2
-          className="viread-learning-content text-5xl font-black tracking-tight text-[#213C42] sm:text-6xl"
+          className="viread-learning-content text-5xl font-black tracking-tight text-ink sm:text-6xl"
           dir="ltr"
           id="practice-word-heading"
           lang="vi"
@@ -1837,10 +1839,7 @@ export function DifficultWordPracticePanel({
           {word.display_text}
         </h2>
 
-        <p
-          aria-live="polite"
-          className="max-w-md text-base font-bold text-[#213C42]"
-        >
+        <p aria-live="polite" className="max-w-md text-base font-bold text-ink">
           {flowState === "PREPARING"
             ? t("practice.promptPreparing")
             : flowState === "INSTRUCTING"
@@ -1874,14 +1873,14 @@ export function DifficultWordPracticePanel({
         </p>
 
         {latestResult?.spoken_transcript ? (
-          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">
+          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-muted">
             {t("practice.heardFinalPrefix")}
             <span className="viread-learning-content" dir="ltr" lang="vi">
               “{latestResult.spoken_transcript}”
             </span>
           </p>
         ) : liveTranscript ? (
-          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">
+          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-muted">
             {t("practice.heardLivePrefix")}
             <span className="viread-learning-content" dir="ltr" lang="vi">
               “{liveTranscript}”
@@ -1898,7 +1897,7 @@ export function DifficultWordPracticePanel({
 
         {masteryOutcome ? (
           <span
-            className="rounded-full border border-[#DCE8E4] bg-white px-3.5 py-1 text-xs font-extrabold text-[#147D87]"
+            className="rounded-full border border-border bg-white px-3.5 py-1 text-xs font-extrabold text-primary"
             data-mastery-outcome={masteryOutcome}
             data-testid="word-mastery-outcome"
           >
@@ -2096,31 +2095,33 @@ export function DifficultWordPracticePanel({
         ) : null}
       </div>
 
-      <details className="rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-3 text-sm">
-        <summary className="cursor-pointer font-bold text-[#213C42]">
-          {t("practice.historySummary", { count: historyItems.length })}
+      <details className="group rounded-2xl border border-border bg-canvas/70 px-4 py-2 text-sm">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-bold text-ink">
+          <span>
+            {t("practice.historySummary", { count: historyItems.length })}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180"
+          />
         </summary>
-        <div className="mt-3 border-t border-[#DCE8E4] pt-3">
+        <div className="mt-2.5 border-t border-border pt-3">
           {historyLoading ? (
-            <p className="text-xs text-[#526970]">
-              {t("practice.historyLoading")}
-            </p>
+            <p className="text-xs text-muted">{t("practice.historyLoading")}</p>
           ) : !historyStorageReady && historyItems.length === 0 ? (
-            <p className="text-xs text-[#526970]">
+            <p className="text-xs text-muted">
               {t("practice.historyUnavailable")}
             </p>
           ) : historyItems.length === 0 ? (
-            <p className="text-xs text-[#526970]">
-              {t("practice.historyEmpty")}
-            </p>
+            <p className="text-xs text-muted">{t("practice.historyEmpty")}</p>
           ) : (
-            <ul className="space-y-1.5 text-xs text-[#526970]">
+            <ul className="space-y-1.5 text-xs text-muted">
               {historyItems.map((item) => (
                 <li
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-white px-3 py-2"
                   key={item.attempt_id}
                 >
-                  <span className="font-bold text-[#213C42]">
+                  <span className="font-bold text-ink">
                     {t("practice.attemptNumber", {
                       number: item.attempt_number,
                     })}

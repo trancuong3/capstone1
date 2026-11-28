@@ -90,7 +90,7 @@ export function ResetPasswordForm({
 
   return (
     <form
-      className="flex w-full flex-col gap-4 sm:gap-6"
+      className="flex w-full flex-col gap-5 sm:gap-6"
       noValidate
       onSubmit={onSubmit}
     >

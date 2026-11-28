@@ -25,6 +25,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/common/button";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { KaraokeScoreCard } from "@/components/karaoke/karaoke-score-card";
 import { StatusMessage } from "@/components/common/status-message";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
@@ -222,7 +223,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
           </div>
           <Button
             variant="secondary"
-            className="sm:w-auto"
+            fullWidth={false}
             onClick={() => onPracticeSegment(evaluation.weakestSegment!)}
           >
             {t("karaoke.stage.musicalSummary.retrySegmentSlow")}
@@ -232,7 +233,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
 
       {evaluation.segments.length > 0 && !isInsufficient && (
         <details className="rounded-control border border-border bg-slate-50/70 p-3">
-          <summary className="cursor-pointer text-sm font-bold text-primary">
+          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-bold text-primary">
             {t("karaoke.stage.musicalSummary.segmentReportSummary", {
               count: evaluation.segments.length,
             })}
@@ -270,7 +271,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
                 {seg.status === "PRACTICE" && (
                   <button
                     type="button"
-                    className="min-h-10 rounded-control border border-primary bg-sky px-3 py-1.5 text-xs font-bold text-primary"
+                    className="min-h-11 rounded-control border border-primary bg-sky px-3 py-2 text-xs font-bold text-primary"
                     onClick={() => onPracticeSegment(seg)}
                   >
                     {t("karaoke.stage.musicalSummary.retrySegmentSlow")}
@@ -316,6 +317,7 @@ export function KaraokeStage({
   // Stabilize lyric & song references even if parent wrapper clones `source` per frame.
   const lyrics = source.lyrics;
   const t = useTranslations("entertainment");
+  const isMobile = useIsMobileViewport();
   const { reducedMotion, calmSound } = useEntertainmentPreferences();
   const root = useRef<HTMLElement>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -967,73 +969,113 @@ export function KaraokeStage({
       aria-label={label}
       data-reduced-motion={reducedMotion ? "true" : undefined}
       onKeyDown={keyboard}
-      className={`${styles.stage} ${expanded ? styles.expanded : ""} grid gap-5 focus-visible:outline-3 focus-visible:outline-primary`}
+      className={`${styles.stage} ${expanded ? styles.expanded : ""} grid gap-3.5 focus-visible:outline-3 focus-visible:outline-primary sm:gap-5`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
-            <Music2 aria-hidden className="size-6" />
+      {isMobile ? (
+        <div className="flex items-start justify-between gap-2.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <div className="grid size-10 shrink-0 place-items-center rounded-full bg-sky text-primary">
+              <Music2 aria-hidden className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-primary">
+                {t("karaoke.stage.eyebrow", { alias: childAlias })}
+              </p>
+              <h1
+                className="viread-learning-content break-words text-xl leading-snug font-extrabold text-ink"
+                dir="ltr"
+                lang="vi"
+              >
+                {source.title}
+              </h1>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-label font-bold text-primary">
-              {t("karaoke.stage.eyebrow", { alias: childAlias })}
-            </p>
-            <h1
-              className="viread-learning-content break-words text-heading font-extrabold"
-              dir="ltr"
-              lang="vi"
-            >
-              {source.title}
-            </h1>
-          </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <button
             ref={expandButton}
             type="button"
-            className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-auto"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-control bg-sky px-3 py-2 text-xs font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
             aria-pressed={expanded}
             onClick={() => void toggleExpanded()}
           >
             {expanded ? (
-              <Minimize2 aria-hidden className="size-5" />
+              <Minimize2 aria-hidden className="size-4" />
             ) : (
-              <Maximize2 aria-hidden className="size-5" />
+              <Maximize2 aria-hidden className="size-4" />
             )}
             {expanded ? t("karaoke.stage.collapse") : t("karaoke.stage.expand")}
           </button>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
+              <Music2 aria-hidden className="size-6" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-label font-bold text-primary">
+                {t("karaoke.stage.eyebrow", { alias: childAlias })}
+              </p>
+              <h1
+                className="viread-learning-content break-words text-heading font-extrabold"
+                dir="ltr"
+                lang="vi"
+              >
+                {source.title}
+              </h1>
+            </div>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <button
+              ref={expandButton}
+              type="button"
+              className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-auto"
+              aria-pressed={expanded}
+              onClick={() => void toggleExpanded()}
+            >
+              {expanded ? (
+                <Minimize2 aria-hidden className="size-5" />
+              ) : (
+                <Maximize2 aria-hidden className="size-5" />
+              )}
+              {expanded
+                ? t("karaoke.stage.collapse")
+                : t("karaoke.stage.expand")}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div
         role="group"
         aria-label={t("karaoke.stage.modeGroupAria")}
-        className="flex flex-wrap gap-2"
+        className={isMobile ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"}
       >
         <Button
-          className="sm:w-auto"
+          fullWidth={false}
+          size={isMobile ? "touch" : "compact"}
           variant={scoredMode ? "secondary" : "primary"}
           aria-pressed={!scoredMode}
           onClick={() => selectMode(false)}
         >
-          <MicOff aria-hidden className="size-5" />
+          <MicOff aria-hidden className={isMobile ? "size-4" : "size-5"} />
           {t("karaoke.stage.freeMode")}
         </Button>
         <Button
-          className="sm:w-auto"
+          fullWidth={false}
+          size={isMobile ? "touch" : "compact"}
           variant={scoredMode ? "primary" : "secondary"}
           aria-pressed={scoredMode}
           disabled={!scoring.supported}
           onClick={() => selectMode(true)}
         >
-          <Mic aria-hidden className="size-5" />
+          <Mic aria-hidden className={isMobile ? "size-4" : "size-5"} />
           {t("karaoke.stage.scoredMode")}
         </Button>
       </div>
       <div
         role="group"
         aria-label={t("karaoke.stage.practiceModeGroupAria")}
-        className="flex flex-wrap gap-2"
+        className={isMobile ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"}
       >
         {PRACTICE_MODES.map((item) => {
           const active = practiceMode === item.mode;
@@ -1161,9 +1203,10 @@ export function KaraokeStage({
                 : t("karaoke.stage.thanksSinging")}
             </p>
           )}
-          <div className="flex flex-wrap justify-center gap-3 px-4">
+          <div className="flex flex-wrap justify-center gap-2.5 px-2 sm:gap-3 sm:px-4">
             <Button
-              className={`${styles.action} sm:w-auto`}
+              className={styles.action}
+              fullWidth={false}
               onClick={restartSong}
             >
               <RotateCcw aria-hidden className="size-5" />
@@ -1171,7 +1214,8 @@ export function KaraokeStage({
             </Button>
             <ButtonLink
               variant="secondary"
-              className={`${styles.action} sm:w-auto`}
+              className={styles.action}
+              fullWidth={false}
               href="/karaoke"
             >
               {t("karaoke.stage.chooseAnother")}
@@ -1376,16 +1420,17 @@ export function KaraokeStage({
             <p role="status">{t("karaoke.stage.notClearRetry")}</p>
           )}
           {practiceLine && (scoredMode || practiceMode === "SEGMENT") && (
-            <Button variant="quiet" onClick={leavePractice}>
+            <Button fullWidth={false} variant="quiet" onClick={leavePractice}>
               {scoring.songScore || practiceReturnMs >= source.duration_ms
                 ? t("karaoke.stage.backToSongScore")
                 : t("karaoke.stage.backToFullSong")}
             </Button>
           )}
-          <div className="flex flex-wrap justify-center gap-3">
+          <div className="flex flex-wrap justify-center gap-2.5 sm:gap-3">
             <Button
-              className={`${styles.action} sm:min-w-56 sm:w-auto`}
+              className={`${styles.action} sm:min-w-56`}
               disabled={!player.ready}
+              fullWidth={isMobile}
               onClick={togglePlay}
             >
               {player.playing || countdown !== null ? (
@@ -1405,8 +1450,9 @@ export function KaraokeStage({
             </Button>
             <Button
               variant="secondary"
-              className={`${styles.action} sm:w-auto`}
+              className={styles.action}
               disabled={!player.ready || !targetLine}
+              fullWidth={false}
               onClick={() => practice()}
             >
               <RotateCcw aria-hidden className="size-5" />
@@ -1418,7 +1464,8 @@ export function KaraokeStage({
               countdown === null && (
                 <Button
                   variant="secondary"
-                  className={`${styles.action} sm:w-auto`}
+                  className={styles.action}
+                  fullWidth={false}
                   onClick={finishAndScoreSong}
                 >
                   <Star aria-hidden className="size-5" />
@@ -1428,7 +1475,8 @@ export function KaraokeStage({
             {practiceLine && (
               <Button
                 variant="secondary"
-                className={`${styles.action} sm:w-auto`}
+                className={styles.action}
+                fullWidth={false}
                 aria-pressed={repeat}
                 disabled={
                   scoredMode &&
@@ -1514,7 +1562,7 @@ export function KaraokeStage({
           {t("karaoke.stage.tempoLabel")}
           <select
             aria-label={t("karaoke.stage.tempoLabel")}
-            className="min-h-14 rounded-control border border-border bg-white px-4"
+            className="min-h-11 rounded-control border border-border bg-white px-3.5 sm:min-h-14 sm:px-4"
             value={player.rate}
             onChange={(event) => player.setRate(Number(event.target.value))}
           >
@@ -1524,8 +1572,8 @@ export function KaraokeStage({
           </select>
         </label>
       </div>
-      <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
-        <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
+      <details className="min-w-0 rounded-2xl border border-border bg-white/85 px-3.5 py-2 sm:rounded-control sm:bg-white/70 sm:p-4">
+        <summary className="flex min-h-11 cursor-pointer items-center font-bold text-primary">
           {t("karaoke.stage.pickLineSummary")}
         </summary>
         <LyricPickerList
@@ -1537,15 +1585,16 @@ export function KaraokeStage({
         {practiceLine && (
           <Button
             variant="secondary"
-            className="mt-3 sm:w-auto"
+            className="mt-3"
+            fullWidth={false}
             onClick={leavePractice}
           >
             {t("karaoke.stage.backToWholeSong")}
           </Button>
         )}
       </details>
-      <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
-        <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
+      <details className="min-w-0 rounded-2xl border border-border bg-white/85 px-3.5 py-2 sm:rounded-control sm:bg-white/70 sm:p-4">
+        <summary className="flex min-h-11 cursor-pointer items-center font-bold text-primary">
           {t("karaoke.stage.volumeAndInfoSummary")}
         </summary>
         <div className="mt-3 grid min-w-0 gap-4">
@@ -1579,7 +1628,7 @@ export function KaraokeStage({
           <div className="flex flex-wrap gap-3">
             <Button
               variant="secondary"
-              className="sm:w-auto"
+              fullWidth={false}
               disabled={!player.ready}
               onClick={restartSong}
             >
@@ -1588,7 +1637,7 @@ export function KaraokeStage({
             {onReload && (
               <Button
                 variant="quiet"
-                className="sm:w-auto"
+                fullWidth={false}
                 onClick={() => {
                   cancelPreparation();
                   player.pause();
@@ -1611,7 +1660,7 @@ export function KaraokeStage({
       {player.error && onReload && (
         <Button
           variant="secondary"
-          className="sm:w-auto"
+          fullWidth={false}
           onClick={() => {
             cancelPreparation();
             player.pause();

@@ -2,7 +2,6 @@
 
 import { AuthLoadingState, AuthShell } from "@/components/auth/auth-shell";
 import { LoginForm } from "@/components/auth/login-form";
-import { Card } from "@/components/common/card";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { AuthMockScenario } from "@/types/auth";
 
@@ -27,12 +26,12 @@ export function LoginScreen({
 
   return (
     <AuthShell>
-      <Card className="border border-border bg-white">
+      <div className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6">
         <div>
-          <p className="text-sm font-semibold text-primary">
+          <p className="inline-flex w-fit items-center rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold sm:text-primary">
             {tAuth("login.eyebrow")}
           </p>
-          <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
+          <h1 className="mt-2.5 text-heading font-extrabold leading-tight text-ink sm:mt-1">
             {tAuth("login.heading")}
           </h1>
           <p className="mt-2 text-body leading-6 text-muted">
@@ -45,7 +44,7 @@ export function LoginScreen({
           oauthError={oauthError}
           scenario={scenario}
         />
-      </Card>
+      </div>
     </AuthShell>
   );
 }

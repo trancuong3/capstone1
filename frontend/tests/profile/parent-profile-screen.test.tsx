@@ -395,4 +395,48 @@ describe("ParentProfileScreen", () => {
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
   });
+
+  it("renders dedicated single-mounted mobile view on < 768px with >= 44px touch targets and no ID leaks", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: () => true,
+      })),
+    );
+    apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
+    const user = userEvent.setup();
+
+    const { container } = renderProfile();
+
+    expect(
+      await screen.findByRole("heading", { name: profile.display_name ?? "" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { name: "Thông tin tài khoản" }),
+    ).toHaveLength(1);
+
+    const manageChildrenLink = screen.getByRole("link", {
+      name: "Quản lý hồ sơ trẻ",
+    });
+    expect(manageChildrenLink.className).toContain("min-h-11");
+    expect(screen.queryByText(profile.id)).not.toBeInTheDocument();
+    expect(screen.queryByText(/mã tài khoản/i)).not.toBeInTheDocument();
+    expect(container.querySelector("section")?.className).not.toContain(
+      "pb-24",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Chỉnh sửa hồ sơ" }));
+    expect(screen.getAllByLabelText("Họ và tên")).toHaveLength(1);
+    const detailsSummary = screen.getByText("Thông tin tài khoản", {
+      selector: "summary",
+    });
+    expect(detailsSummary.className).toContain("min-h-11");
+  });
 });

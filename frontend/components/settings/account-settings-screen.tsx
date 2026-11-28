@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Eye, EyeOff, Globe, Mail } from "lucide-react";
+import { ArrowRight, Globe, Mail } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -10,8 +10,15 @@ import { FormPage } from "@/components/common/form-page";
 import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { LanguageSelector } from "@/components/i18n/language-selector";
+import {
+  MobileAccountSettings,
+  MobileAccountSettingsError,
+  MobileAccountSettingsLoading,
+} from "@/components/settings/mobile-account-settings";
 import { ParentEmailPreferencesCard } from "@/components/settings/parent-email-preferences-card";
+import { PasswordField } from "@/components/settings/password-field";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
@@ -41,61 +48,11 @@ type NoticeState = {
   kind: SettingsNoticeKind;
 };
 
-function PasswordField({
-  id,
-  label,
-  value,
-  onChange,
-  visible,
-  onToggle,
-  autoComplete,
-  toggleAriaLabel,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  visible: boolean;
-  onToggle: () => void;
-  autoComplete: string;
-  toggleAriaLabel: string;
-}) {
-  return (
-    <div className="flex min-h-[64px] w-full flex-col gap-1 rounded-control border border-border bg-white px-3.5 py-2.5 sm:min-h-[72px] sm:px-4 sm:py-3">
-      <label className="text-label font-semibold text-muted" htmlFor={id}>
-        {label}
-      </label>
-      <div className="flex min-w-0 items-center gap-2">
-        <input
-          autoComplete={autoComplete}
-          className="min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
-          id={id}
-          onChange={(event) => onChange(event.target.value)}
-          required
-          type={visible ? "text" : "password"}
-          value={value}
-        />
-        <button
-          aria-label={toggleAriaLabel}
-          className="flex size-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-sky hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          onClick={onToggle}
-          type="button"
-        >
-          {visible ? (
-            <EyeOff aria-hidden="true" className="size-5" />
-          ) : (
-            <Eye aria-hidden="true" className="size-5" />
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function AccountSettingsScreen() {
   const { t } = useI18n();
   const authService = useAuthService();
   const profileService = useMemo(() => createProfileService(), []);
+  const isMobile = useIsMobileViewport();
   const [state, setState] = useState<SettingsState>({ status: "loading" });
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -232,6 +189,10 @@ export function AccountSettingsScreen() {
   }
 
   if (state.status === "loading") {
+    if (isMobile) {
+      return <MobileAccountSettingsLoading />;
+    }
+
     return (
       <section
         aria-busy="true"
@@ -249,18 +210,22 @@ export function AccountSettingsScreen() {
   }
 
   if (state.status === "error") {
+    if (isMobile) {
+      return (
+        <MobileAccountSettingsError
+          onRetry={() => setRetryKey((key) => key + 1)}
+        />
+      );
+    }
+
     return (
-      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pb-4">
         <PageHeader
-          className="mb-0 gap-2 pb-3 sm:gap-4 sm:pb-5 [&_h1]:text-xl [&_h1]:sm:text-3xl [&_h1]:lg:text-[40px] max-sm:[&_p]:text-xs max-sm:[&_p]:leading-relaxed max-sm:[&_h1+p]:mt-1"
+          className="mb-0"
           description={t("settings.account.description")}
           title={t("settings.account.title")}
         />
-        <StatusMessage
-          className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
-          tone="error"
-          title={t("common.states.unavailable")}
-        >
+        <StatusMessage title={t("common.states.unavailable")} tone="error">
           {t("settings.account.loadErrorBody")}
         </StatusMessage>
         <Button
@@ -283,6 +248,45 @@ export function AccountSettingsScreen() {
   const isEmailPasswordAccount = user.providers?.includes("email") ?? false;
   const emailStatus = resolveVerificationLabel(profile);
 
+  if (isMobile) {
+    return (
+      <MobileAccountSettings
+        confirmPassword={confirmPassword}
+        currentPassword={currentPassword}
+        displayName={displayName}
+        email={email}
+        emailStatus={emailStatus}
+        isChangingPassword={isChangingPassword}
+        isEmailPasswordAccount={isEmailPasswordAccount}
+        isRequestingRecovery={isRequestingRecovery}
+        languageChangedTo={languageChangedTo}
+        newPassword={newPassword}
+        noticeMessage={notice ? resolveNoticeMessage(notice.kind) : null}
+        noticeTone={notice ? notice.tone : null}
+        onBackFromPasswordEditor={() => setShowPasswordEditor(false)}
+        onConfirmPasswordChange={setConfirmPassword}
+        onCurrentPasswordChange={setCurrentPassword}
+        onLocaleChange={(next) => setLanguageChangedTo(next)}
+        onNewPasswordChange={setNewPassword}
+        onOpenPasswordEditor={() => setShowPasswordEditor(true)}
+        onPasswordChange={(event) => void handlePasswordChange(event)}
+        onPasswordRecovery={() => void handlePasswordRecovery()}
+        onToggleConfirmPassword={() =>
+          setShowConfirmPassword((value) => !value)
+        }
+        onToggleCurrentPassword={() =>
+          setShowCurrentPassword((value) => !value)
+        }
+        onToggleNewPassword={() => setShowNewPassword((value) => !value)}
+        profile={profile}
+        showConfirmPassword={showConfirmPassword}
+        showCurrentPassword={showCurrentPassword}
+        showNewPassword={showNewPassword}
+        showPasswordEditor={showPasswordEditor}
+      />
+    );
+  }
+
   const currentPasswordLabel = t("auth.fields.currentPassword");
   const newPasswordLabel = t("auth.fields.newPassword");
   const confirmPasswordLabel = t("auth.fields.confirmPassword");
@@ -290,16 +294,13 @@ export function AccountSettingsScreen() {
   if (showPasswordEditor)
     return (
       <FormPage
-        title={t("settings.password.title")}
         description={t("settings.password.description")}
-        width="standard"
         onBack={() => setShowPasswordEditor(false)}
+        title={t("settings.password.title")}
+        width="standard"
       >
         {notice ? (
-          <StatusMessage
-            className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
-            tone={notice.tone}
-          >
+          <StatusMessage tone={notice.tone}>
             {resolveNoticeMessage(notice.kind)}
           </StatusMessage>
         ) : null}
@@ -364,7 +365,7 @@ export function AccountSettingsScreen() {
               value={confirmPassword}
               visible={showConfirmPassword}
             />
-            <p className="text-xs leading-relaxed text-muted sm:text-sm">
+            <p className="text-sm leading-relaxed text-muted">
               {t("settings.password.minLengthHint", { min: 8 })}
             </p>
             <Button
@@ -378,7 +379,7 @@ export function AccountSettingsScreen() {
           </form>
         ) : (
           <div className="flex flex-col gap-3">
-            <p className="text-xs leading-relaxed text-muted sm:text-sm">
+            <p className="text-sm leading-relaxed text-muted">
               {t("settings.password.noPasswordDescription")}
             </p>
             <Button
@@ -396,25 +397,25 @@ export function AccountSettingsScreen() {
     );
 
   return (
-    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
+    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-6 pb-4">
       <PageHeader
-        className="mb-0 gap-2 pb-3 sm:gap-4 sm:pb-5 [&_h1]:text-xl [&_h1]:sm:text-3xl [&_h1]:lg:text-[40px] max-sm:[&_p]:text-xs max-sm:[&_p]:leading-relaxed max-sm:[&_h1+p]:mt-1"
+        className="mb-0"
         description={t("settings.account.description")}
         eyebrow={t("settings.account.eyebrow")}
         title={t("settings.account.title")}
       />
 
-      <Card className="gap-2.5 p-3.5 sm:gap-4 sm:p-6">
-        <div className="flex items-start gap-2.5 sm:gap-3">
+      <Card>
+        <div className="flex items-start gap-3">
           <Globe
             aria-hidden="true"
-            className="mt-0.5 size-5 shrink-0 text-primary sm:mt-1 sm:size-6"
+            className="mt-1 size-6 shrink-0 text-primary"
           />
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-2xl font-extrabold text-ink">
               {t("settings.language.heading")}
             </h2>
-            <p className="mt-1 text-xs leading-relaxed text-muted sm:text-sm">
+            <p className="mt-1 text-sm leading-relaxed text-muted">
               {t("settings.language.description")}
             </p>
           </div>
@@ -425,18 +426,11 @@ export function AccountSettingsScreen() {
             variant="settings"
           />
         </div>
-        <StatusMessage
-          className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
-          tone="info"
-        >
+        <StatusMessage tone="info">
           {t("settings.language.learningContentNote")}
         </StatusMessage>
         {languageChangedTo ? (
-          <StatusMessage
-            className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
-            role="status"
-            tone="success"
-          >
+          <StatusMessage role="status" tone="success">
             {t("notifications.updates.localeChanged", {
               language: getLocaleMetadata(languageChangedTo).nativeName,
             })}
@@ -444,53 +438,53 @@ export function AccountSettingsScreen() {
         ) : null}
       </Card>
 
-      <Card className="gap-2.5 p-3.5 sm:gap-4 sm:p-6">
+      <Card>
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-2xl font-extrabold text-ink">
               {t("settings.account.infoHeading")}
             </h2>
           </div>
         </div>
 
-        <dl className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-          <div className="rounded-control border border-border bg-white px-3 py-2 sm:px-4 sm:py-3">
-            <dt className="text-xs font-semibold text-muted sm:text-sm">
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-sm font-semibold text-muted">
               {t("settings.account.displayName")}
             </dt>
-            <dd className="mt-0.5 break-words text-sm font-semibold text-ink sm:mt-1 sm:text-body">
+            <dd className="mt-1 break-words text-body font-semibold text-ink">
               {displayName}
             </dd>
           </div>
-          <div className="rounded-control border border-border bg-white px-3 py-2 sm:px-4 sm:py-3">
-            <dt className="text-xs font-semibold text-muted sm:text-sm">
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-sm font-semibold text-muted">
               {t("settings.account.email")}
             </dt>
-            <dd className="mt-0.5 break-all text-sm font-semibold text-ink sm:mt-1 sm:text-body">
+            <dd className="mt-1 break-all text-body font-semibold text-ink">
               {email || t("common.states.unavailable")}
             </dd>
             {profile.pending_email ? (
-              <p className="mt-1.5 break-all text-xs text-warning sm:mt-2 sm:text-sm">
+              <p className="mt-2 break-all text-sm text-warning">
                 {t("settings.account.pendingEmailNotice")}{" "}
                 <strong>{profile.pending_email}</strong>
               </p>
             ) : null}
           </div>
-          <div className="rounded-control border border-border bg-white px-3 py-2 sm:px-4 sm:py-3">
-            <dt className="text-xs font-semibold text-muted sm:text-sm">
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-sm font-semibold text-muted">
               {t("settings.account.role")}
             </dt>
-            <dd className="mt-0.5 text-sm font-semibold text-ink sm:mt-1 sm:text-body">
+            <dd className="mt-1 text-body font-semibold text-ink">
               {profile.role === "admin"
                 ? t("parent.profile.roleAdmin")
                 : t("parent.profile.roleParent")}
             </dd>
           </div>
-          <div className="rounded-control border border-border bg-white px-3 py-2 sm:px-4 sm:py-3">
-            <dt className="text-xs font-semibold text-muted sm:text-sm">
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-sm font-semibold text-muted">
               {t("settings.account.emailStatus")}
             </dt>
-            <dd className="mt-0.5 flex items-center gap-2 text-sm font-semibold text-ink sm:mt-1 sm:text-body">
+            <dd className="mt-1 flex items-center gap-2 text-body font-semibold text-ink">
               {emailStatus}
             </dd>
           </div>
@@ -507,42 +501,42 @@ export function AccountSettingsScreen() {
 
       <Button
         className="sm:max-w-72"
-        variant="secondary"
         onClick={() => setShowPasswordEditor(true)}
+        variant="secondary"
       >
         {t("settings.account.changePassword")}
       </Button>
 
       <ParentEmailPreferencesCard emailVerified={profile.email_verified} />
 
-      <Card className="gap-2.5 p-3.5 sm:gap-4 sm:p-6">
+      <Card>
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-2xl font-extrabold text-ink">
               {t("settings.account.emailVerificationHeading")}
             </h2>
           </div>
         </div>
-        <p className="text-xs leading-relaxed text-muted sm:text-sm">
+        <p className="text-sm leading-relaxed text-muted">
           {profile.pending_email
             ? t("settings.account.emailPendingBody")
             : t("settings.account.emailDefaultBody")}
         </p>
         <Link
-          className="inline-flex min-h-10 w-fit items-center text-sm font-semibold text-primary underline-offset-4 hover:underline sm:text-base"
+          className="inline-flex min-h-11 w-fit items-center text-base font-semibold text-primary underline-offset-4 hover:underline"
           href="/profile"
         >
           {t("settings.account.openParentProfile")}
         </Link>
       </Card>
 
-      <Card className="gap-2.5 p-3.5 sm:gap-4 sm:p-6">
+      <Card>
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-2xl font-extrabold text-ink">
               {t("settings.account.readingRemindersHeading")}
             </h2>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted sm:text-sm">
+            <p className="mt-0.5 text-sm leading-relaxed text-muted">
               {t("settings.account.readingRemindersDescription")}
             </p>
           </div>

@@ -50,7 +50,10 @@ export function SessionEventList({ events }: SessionEventListProps) {
               const recognizedText = metadata.recognized_text;
               const targetWord = metadata.target_word;
               return (
-                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
+                <li
+                  className="min-w-0 space-y-1.5 break-words p-3.5 sm:p-4"
+                  key={event.id}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-bold text-ink">
                       {event.status === "CONFIRMED"
@@ -133,7 +136,10 @@ export function SessionEventList({ events }: SessionEventListProps) {
                 ].includes(event.type);
 
               return (
-                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
+                <li
+                  className="min-w-0 space-y-1.5 break-words p-3.5 sm:p-4"
+                  key={event.id}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-bold text-ink">
                       {t(`sessions.events.types.${event.type}`)}

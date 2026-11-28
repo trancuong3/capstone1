@@ -19,7 +19,7 @@ export type ButtonVariant =
   | "destructive"
   | "outline"
   | "destructive-outline";
-export type ButtonSize = "default" | "compact" | "admin";
+export type ButtonSize = "default" | "compact" | "touch" | "icon" | "admin";
 
 export const ButtonSizeContext = createContext<ButtonSize>("default");
 
@@ -41,7 +41,11 @@ const baseClassName =
   "inline-flex items-center justify-center gap-2 rounded-control text-center font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
 
 const explicitWidthClassPattern =
-  /(?:^|\s)(?:w-(?:auto|fit|min|max|\d+|\[.+?\])|(?:sm|md|lg|xl):w-auto|size-\S+)/;
+  /(?:^|\s)(?:w-(?:auto|fit|min|max|\d+|\[.+?\])!?|(?:sm|md|lg|xl):w-\S+|size-\S+)/;
+const explicitHeightClassPattern = /(?:^|\s)(?:min-h-|h-|size-)\S+/;
+const explicitPaddingClassPattern = /(?:^|\s)p(?:[xytrblse])?-\S+/;
+const explicitTextSizeClassPattern =
+  /(?:^|\s)text-(?:xs|sm|base|lg|xl|\d|button|label|heading|\[)\S*/;
 
 function resolveWidthClassName(
   fullWidth: boolean | undefined,
@@ -51,6 +55,7 @@ function resolveWidthClassName(
 ): string | undefined {
   if (fullWidth === false) return "w-auto";
   if (fullWidth === true) return "w-full";
+  if (resolvedSize === "icon") return undefined;
   if (className && explicitWidthClassPattern.test(className)) {
     return undefined;
   }
@@ -70,11 +75,55 @@ const variantClassNames: Record<ButtonVariant, string> = {
     "border border-danger/30 bg-white text-danger hover:bg-danger-surface",
 };
 
-const sizeClassNames: Record<ButtonSize, string> = {
-  default: "min-h-14 px-4 py-2 text-button",
-  compact: "min-h-12 px-4 py-2.5 text-label leading-5",
-  admin: "min-h-10 px-3 py-1.5 text-sm leading-5",
+const sizeClassParts: Record<
+  ButtonSize,
+  { readonly height: string; readonly padding: string; readonly text: string }
+> = {
+  default: {
+    height: "min-h-14",
+    padding: "px-4 py-2",
+    text: "text-button",
+  },
+  compact: {
+    height: "min-h-12",
+    padding: "px-4 py-2.5",
+    text: "text-label leading-5",
+  },
+  touch: {
+    height: "min-h-11",
+    padding: "px-3.5 py-2",
+    text: "text-sm leading-5",
+  },
+  icon: {
+    height: "size-11 sm:size-12",
+    padding: "p-0",
+    text: "text-label",
+  },
+  admin: {
+    height: "min-h-11 sm:min-h-10",
+    padding: "px-3 py-1.5",
+    text: "text-sm leading-5",
+  },
 };
+
+function resolveSizeClassName(
+  resolvedSize: ButtonSize,
+  className: string | undefined,
+): string {
+  const parts = sizeClassParts[resolvedSize];
+  const hasExplicitHeight =
+    Boolean(className) && explicitHeightClassPattern.test(className ?? "");
+  const hasExplicitPadding =
+    Boolean(className) && explicitPaddingClassPattern.test(className ?? "");
+  const hasExplicitTextSize =
+    Boolean(className) && explicitTextSizeClassPattern.test(className ?? "");
+
+  return cn(
+    !hasExplicitHeight && parts.height,
+    !hasExplicitPadding && parts.padding,
+    !hasExplicitTextSize && parts.text,
+  );
+}
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
@@ -110,7 +159,7 @@ export function Button({
           inheritedSize,
         ),
         variantClassNames[variant],
-        sizeClassNames[resolvedSize],
+        resolveSizeClassName(resolvedSize, className),
         className,
       )}
       disabled={disabled || isLoading}
@@ -122,7 +171,9 @@ export function Button({
           aria-hidden="true"
           className={cn(
             "animate-spin",
-            resolvedSize === "admin" ? "size-4" : "size-5",
+            resolvedSize === "admin" || resolvedSize === "touch"
+              ? "size-4"
+              : "size-5",
           )}
         />
       ) : null}
@@ -162,7 +213,7 @@ export function ButtonLink({
           inheritedSize,
         ),
         variantClassNames[variant],
-        sizeClassNames[resolvedSize],
+        resolveSizeClassName(resolvedSize, className),
         className,
       )}
       href={href}

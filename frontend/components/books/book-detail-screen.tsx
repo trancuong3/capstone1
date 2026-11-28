@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -49,6 +50,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   const { formatPercent } = useI18n();
   const t = useTranslations("books");
   const tc = useTranslations("child");
+  const isMobile = useIsMobileViewport();
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
@@ -250,7 +252,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         <StatusMessage title={tc("verification.errorTitle")} tone="error">
           {tc("verification.errorBody")}
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           {tc("verification.retry")}
         </Button>
@@ -342,7 +348,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             {t("catalog.loadErrorBody")}
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start sm:px-8"
+            className="w-full sm:w-auto sm:self-start sm:px-8"
             onClick={() => setRequestKey((key) => key + 1)}
             variant="secondary"
           >
@@ -380,6 +386,312 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         selectedRangePages[selectedRangePages.length - 1]?.page_number !==
           selectedEndPage.page_number),
     );
+
+  const bookSummary =
+    book.title === "Chú Mèo Nhỏ"
+      ? t("detail.summaryLittleCat")
+      : t("detail.summaryDefault", {
+          title: book.title.toLocaleLowerCase("vi"),
+        });
+
+  if (isMobile) {
+    return (
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3.5 pt-0 pb-28">
+        {reportTarget ? (
+          <BookContentReportDialog
+            bookId={book.id}
+            bookTitle={book.title}
+            onClose={() => setReportTarget(null)}
+            pageId={reportTarget.pageId}
+            pageNumber={reportTarget.pageNumber}
+          />
+        ) : null}
+        <BookChildHeader
+          backHref={booksHref}
+          child={child}
+          fullBleedDesktop
+          mobileLabel={t("detail.pageTitle")}
+        />
+
+        <div className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 shadow-xs">
+          <div className="flex items-start gap-3.5">
+            <BookCover
+              book={book}
+              className="shrink-0 rounded-card border border-border/60"
+              showTitle={false}
+              size="medium"
+            />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              {book.visibility_scope === "PARENT_PRIVATE" ? (
+                <span className="inline-flex w-fit items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+                  {t("card.privateFamilyBadge")}
+                </span>
+              ) : null}
+              <h1
+                className="viread-learning-content break-words text-xl font-extrabold leading-snug text-ink"
+                dir="ltr"
+                lang="vi"
+              >
+                {book.title}
+              </h1>
+              <p className="text-sm text-muted">
+                {book.author ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {book.author}
+                  </span>
+                ) : (
+                  t("card.authorPending")
+                )}{" "}
+                ·{" "}
+                <span className="font-semibold text-primary">
+                  {formatGradeRange(book, t)}
+                </span>
+              </p>
+              {targetPageId &&
+              targetConfidence !== null &&
+              targetConfidence >= 0 &&
+              targetConfidence <= 1 ? (
+                <p className="text-xs font-semibold text-primary">
+                  {t("detail.confidenceLabel", {
+                    percent: Math.round(targetConfidence * 100),
+                  })}{" "}
+                  <span className="sr-only">
+                    ({formatPercent(targetConfidence)})
+                  </span>
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <p className="border-t border-border/60 pt-3 text-sm leading-relaxed text-ink">
+            {bookSummary}
+          </p>
+        </div>
+
+        {targetPageId && !selectedPage ? (
+          <StatusMessage
+            title={t("detail.matchedPageMissingTitle")}
+            tone="warning"
+          >
+            {t("detail.matchedPageMissingDescription")}
+          </StatusMessage>
+        ) : null}
+
+        <div className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-xs">
+          {selectedPage && selectedEndPage ? (
+            <section className="rounded-control bg-sky px-3.5 py-3">
+              <h2 className="text-sm font-extrabold text-ink">
+                {t("detail.readingRangeHeading", {
+                  start: selectedPage.page_number,
+                  end: selectedEndPage.page_number,
+                })}
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {t("detail.readingRangeValidPages", {
+                  count: selectedRangePages.length,
+                })}
+              </p>
+            </section>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex min-h-[84px] flex-col justify-between gap-1.5 rounded-control border border-border bg-canvas/50 p-3">
+              <span className="text-xs font-semibold text-ink">
+                {t("detail.startPageLabel")}
+              </span>
+              <span className="text-base font-bold text-primary">
+                {selectedPage
+                  ? t("detail.pageNumberOption", {
+                      page: selectedPage.page_number,
+                    })
+                  : t("detail.noPageSelected")}
+              </span>
+            </div>
+            <div className="flex min-h-[84px] flex-col justify-between gap-1.5 rounded-control border border-border bg-white p-3">
+              <label
+                className="text-xs font-semibold text-ink"
+                htmlFor="reading-end-page"
+              >
+                {t("detail.endPageLabel")}
+              </label>
+              <select
+                className="min-h-11 w-full rounded-control border border-border bg-white px-2.5 text-base text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                disabled={
+                  !selectedPage ||
+                  pages.length === 0 ||
+                  startState === "starting"
+                }
+                id="reading-end-page"
+                onChange={(event) => {
+                  setSelectedEndPageId(event.target.value || null);
+                  setStartState("idle");
+                }}
+                value={selectedEndPageId ?? ""}
+              >
+                {pages
+                  .filter((candidate) =>
+                    selectedPage
+                      ? candidate.page_number >= selectedPage.page_number
+                      : false,
+                  )
+                  .map((candidate) => (
+                    <option key={candidate.page_id} value={candidate.page_id}>
+                      {t("detail.pageNumberOption", {
+                        page: candidate.page_number,
+                      })}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedRangeHasGap ? (
+            <StatusMessage title={t("detail.nonContiguousTitle")} tone="error">
+              {t("detail.nonContiguousDescription")}
+            </StatusMessage>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {previewUnavailable ? (
+            <div className="flex flex-col gap-2.5">
+              <StatusMessage
+                title={t("detail.previewPendingTitle")}
+                tone="info"
+              >
+                {t("detail.previewPendingDescription")}
+              </StatusMessage>
+              <Button
+                className="w-full"
+                onClick={() => setRequestKey((key) => key + 1)}
+                size="touch"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden="true" className="size-5" />
+                {t("detail.retryImages")}
+              </Button>
+            </div>
+          ) : null}
+          <div
+            aria-label={t("detail.previewGridAria")}
+            className="no-scrollbar -mx-3.5 flex gap-3 overflow-x-auto px-3.5 pb-1"
+          >
+            {pages
+              .slice(
+                (thumbnailPage - 1) * THUMBNAILS_PER_PAGE,
+                thumbnailPage * THUMBNAILS_PER_PAGE,
+              )
+              .map((page) => (
+                <BookPageThumbnail
+                  isSelected={selectedPage?.page_id === page.page_id}
+                  key={page.page_id}
+                  onSelect={(nextPage) => {
+                    setSelectedPage(nextPage);
+                    setSelectedEndPageId((currentEndId) => {
+                      const currentEnd = pages.find(
+                        (candidate) => candidate.page_id === currentEndId,
+                      );
+                      return !currentEnd ||
+                        currentEnd.page_number < nextPage.page_number
+                        ? nextPage.page_id
+                        : currentEnd.page_id;
+                    });
+                    setStartState("idle");
+                  }}
+                  page={page}
+                />
+              ))}
+          </div>
+          {pages.length > THUMBNAILS_PER_PAGE ? (
+            <PaginationBar
+              ariaLabel={t("detail.previewPaginationAria")}
+              className="mt-1"
+              compact
+              itemLabel={t("detail.previewPaginationItemLabel")}
+              onPageChange={setThumbnailPage}
+              page={thumbnailPage}
+              pageSize={THUMBNAILS_PER_PAGE}
+              total={pages.length}
+            />
+          ) : null}
+        </div>
+
+        <div className="rounded-card border border-border bg-white p-4 shadow-xs">
+          {book.visibility_scope === "PARENT_PRIVATE" ? (
+            <ButtonLink
+              href={`/my-books/${encodeURIComponent(book.id)}`}
+              size="touch"
+              variant="secondary"
+            >
+              {t("detail.manageInMyBooks")}
+            </ButtonLink>
+          ) : (
+            <div
+              aria-label={t("detail.reportMenuAria")}
+              className="flex flex-col gap-2"
+              role="group"
+            >
+              <ButtonLink href="/book-reports" size="touch" variant="quiet">
+                <ClipboardList aria-hidden="true" className="size-4" />{" "}
+                {t("detail.myReportsButton")}
+              </ButtonLink>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={() =>
+                    setReportTarget({ pageId: null, pageNumber: null })
+                  }
+                  size="touch"
+                  variant="secondary"
+                >
+                  {t("detail.reportBookButton")}
+                </Button>
+                <Button
+                  disabled={!selectedPage}
+                  onClick={() =>
+                    selectedPage
+                      ? setReportTarget({
+                          pageId: selectedPage.page_id,
+                          pageNumber: selectedPage.page_number,
+                        })
+                      : undefined
+                  }
+                  size="touch"
+                  variant="secondary"
+                >
+                  {t("detail.reportPageButton")}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(35,62,64,0.08)] backdrop-blur-sm">
+          <Button
+            id="start-reading-button"
+            className="min-h-12 w-full"
+            disabled={
+              !selectedPage ||
+              !selectedEndPageId ||
+              !child ||
+              selectedRangeHasGap ||
+              pages.length === 0
+            }
+            isLoading={startState === "starting"}
+            onClick={handleStartReading}
+          >
+            {startState === "starting"
+              ? t("detail.preparingButton")
+              : t("detail.prepareButton")}
+            {startState === "idle" ? (
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-5"
+              />
+            ) : null}
+          </Button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 pt-0 pb-24 sm:gap-6 sm:px-8 sm:py-8">
@@ -459,7 +771,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               <ButtonLink
                 href={`/my-books/${encodeURIComponent(book.id)}`}
                 variant="secondary"
-                className="min-h-10 text-xs sm:min-h-12 sm:w-auto sm:text-button"
+                className="min-h-11 w-full text-xs sm:min-h-12 sm:w-auto sm:text-button"
               >
                 {t("detail.manageInMyBooks")}
               </ButtonLink>
@@ -473,13 +785,13 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               <ButtonLink
                 href="/book-reports"
                 variant="quiet"
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
               >
                 <ClipboardList aria-hidden="true" className="size-4" />{" "}
                 {t("detail.myReportsButton")}
               </ButtonLink>
               <Button
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
                 onClick={() =>
                   setReportTarget({ pageId: null, pageNumber: null })
                 }
@@ -488,7 +800,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 {t("detail.reportBookButton")}
               </Button>
               <Button
-                className="min-h-10 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
                 disabled={!selectedPage}
                 onClick={() =>
                   selectedPage
@@ -506,17 +818,13 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           )}
 
           <p className="text-sm leading-relaxed text-ink sm:text-xl sm:font-medium sm:leading-7">
-            {book.title === "Chú Mèo Nhỏ"
-              ? t("detail.summaryLittleCat")
-              : t("detail.summaryDefault", {
-                  title: book.title.toLocaleLowerCase("vi"),
-                })}
+            {bookSummary}
           </p>
 
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(35,62,64,0.08)] backdrop-blur-sm sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
             <Button
               id="start-reading-button"
-              className="min-h-12 sm:min-h-16 sm:w-[360px]"
+              className="min-h-12 w-full sm:min-h-16 sm:w-[360px]"
               disabled={
                 !selectedPage ||
                 !selectedEndPageId ||
@@ -635,7 +943,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   {t("detail.previewPendingDescription")}
                 </StatusMessage>
                 <Button
-                  className="sm:w-auto sm:self-start"
+                  className="w-full sm:w-auto sm:self-start"
                   onClick={() => setRequestKey((key) => key + 1)}
                   variant="secondary"
                 >

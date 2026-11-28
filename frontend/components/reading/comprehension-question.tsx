@@ -1066,14 +1066,14 @@ export function ComprehensionQuestion({
   };
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 py-3 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 pt-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader
         backHref="/dashboard"
         child={child}
         mobileLabel={t("session.mobileLabel")}
       />
       <div className="mx-auto flex w-full max-w-[700px] flex-col gap-3 sm:gap-4">
-        <h1 className="text-heading font-extrabold text-ink sm:text-center">
+        <h1 className="text-xl font-extrabold text-ink sm:text-center sm:text-heading">
           {t("comprehension.heading")}
         </h1>
         <div
@@ -1113,7 +1113,7 @@ export function ComprehensionQuestion({
             </StatusMessage>
             <div className="flex flex-wrap gap-3">
               <Button
-                className="sm:w-auto"
+                className="w-full sm:w-auto"
                 onClick={() => {
                   setLoadState({ status: "loading" });
                   setLoadKey((key) => key + 1);
@@ -1124,7 +1124,7 @@ export function ComprehensionQuestion({
                 {t("comprehension.retry")}
               </Button>
               <Button
-                className="sm:w-auto"
+                className="w-full sm:w-auto"
                 onClick={onComplete}
                 variant="primary"
               >
@@ -1138,7 +1138,7 @@ export function ComprehensionQuestion({
           </div>
         ) : (
           <>
-            <div className="rounded-card bg-cream p-3.5 sm:p-6">
+            <div className="rounded-2xl border border-border bg-white p-4 shadow-xs sm:rounded-card sm:border-0 sm:bg-cream sm:p-6 sm:shadow-none">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-label font-semibold text-purple-ink">
                   {loadState.value.progress_label}
@@ -1151,7 +1151,7 @@ export function ComprehensionQuestion({
                       setVoicePausedByUser(false);
                       void readQuestionAloud(loadState.value);
                     }}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-control bg-white px-3 py-1.5 text-sm font-semibold text-primary shadow-xs hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border/80 bg-white px-3 py-1.5 text-sm font-semibold text-primary shadow-xs hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <Volume2 aria-hidden="true" className="size-4" />
                     {t("comprehension.replayAudio")}
@@ -1160,7 +1160,7 @@ export function ComprehensionQuestion({
                     type="button"
                     onClick={handleToggleVoicePause}
                     aria-pressed={voicePausedByUser}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-control bg-white px-3 py-1.5 text-sm font-semibold text-ink shadow-xs hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border/80 bg-white px-3 py-1.5 text-sm font-semibold text-ink shadow-xs hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     {voicePausedByUser ? (
                       <>
@@ -1198,7 +1198,7 @@ export function ComprehensionQuestion({
                     data-reading-choice={beingRead ? "true" : undefined}
                     data-preview-choice={previewing ? "true" : undefined}
                     className={cn(
-                      "flex min-h-13 w-full items-center gap-3 rounded-card border-2 px-3.5 py-2.5 text-start text-base font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-18 sm:gap-6 sm:p-4 sm:text-body",
+                      "flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 px-3.5 py-2.5 text-start text-base font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-18 sm:gap-6 sm:rounded-card sm:p-4 sm:text-body",
                       // Hover only applies to answers that can still be chosen.
                       "enabled:cursor-pointer enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-semibold enabled:hover:shadow-md",
                       !correct &&
@@ -1210,7 +1210,7 @@ export function ComprehensionQuestion({
                         "border-primary bg-sky/50 ring-2 ring-primary/40",
                       previewing &&
                         "border-dashed border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400/50",
-                      selected && "border-primary",
+                      selected && !result && "border-primary",
                       selected &&
                         result?.is_correct === false &&
                         "border-warning bg-warning-surface",
@@ -1222,11 +1222,11 @@ export function ComprehensionQuestion({
                     onClick={() => void submitAnswer(choice.value, "click")}
                     type="button"
                   >
-                    <span className="w-8 shrink-0 text-purple-ink">
+                    <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-purple/60 text-sm font-extrabold text-purple-ink sm:size-auto sm:w-8 sm:rounded-none sm:bg-transparent sm:text-base">
                       {choice.id}
                     </span>
                     <span
-                      className="viread-learning-content flex-1 text-center"
+                      className="viread-learning-content min-w-0 flex-1 text-start sm:text-center"
                       dir="ltr"
                       lang="vi"
                     >

@@ -32,6 +32,7 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import {
   OrderedShotQueue,
   type QueuedShot,
@@ -209,7 +210,7 @@ function SentenceShooterResultView({
   return (
     <section
       className={cn(
-        "mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10",
+        "mx-auto flex w-full max-w-[900px] flex-col gap-5 px-0 py-2 sm:gap-6 sm:px-8 sm:py-10",
         reducedMotion && "motion-reduce",
       )}
       data-calm-sound={calmSound ? "true" : "false"}
@@ -342,7 +343,7 @@ function SentenceShooterResultView({
         </p>
       </div>
       <Link
-        className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
+        className="inline-flex min-h-11 items-center self-center rounded-control px-4 py-2.5 font-bold text-primary hover:bg-sky"
         href={backHref}
       >
         <ArrowLeft
@@ -362,6 +363,7 @@ export function SentenceShooterScreen({
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
+  const isMobile = useIsMobileViewport();
   const gameError = t("sentenceShooter.gameError");
   const shootError = t("sentenceShooter.shootError");
   const router = useRouter();
@@ -389,6 +391,22 @@ export function SentenceShooterScreen({
   const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("viread:immersive-mode", {
+        detail: { active: isMobile && mode === "playing" },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: false },
+        }),
+      );
+    };
+  }, [isMobile, mode]);
 
   const [session, setSession] = useState<SentenceShooterSessionDTO | null>(
     null,
@@ -1145,7 +1163,7 @@ export function SentenceShooterScreen({
     return (
       <section
         className={cn(
-          "mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5",
+          "mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-0 py-2 sm:px-6 sm:py-5",
           reducedMotion && "motion-reduce",
         )}
         data-calm-sound={calmSound ? "true" : "false"}
@@ -1529,7 +1547,7 @@ export function SentenceShooterScreen({
                 <ToyCannon angle={cannonAngle} className="size-14" />
               </div>
               <p
-                className="min-h-10 min-w-40 flex-1 content-center break-words text-sm font-bold text-primary"
+                className="min-h-10 min-w-0 flex-1 content-center break-words text-sm font-bold text-primary"
                 role="status"
                 aria-live="polite"
               >
@@ -1573,7 +1591,7 @@ export function SentenceShooterScreen({
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                   <button
-                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#98D4A2] bg-white px-4 py-1.5 text-sm font-extrabold text-success-ink hover:bg-cream disabled:opacity-50"
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-[#98D4A2] bg-white px-4 py-2 text-sm font-extrabold text-success-ink hover:bg-cream disabled:opacity-50"
                     disabled={!calmSound}
                     onClick={() => playSentenceAudio(completedDisplaySentence)}
                     type="button"
@@ -1720,7 +1738,7 @@ export function SentenceShooterScreen({
   return (
     <section
       className={cn(
-        "mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7",
+        "mx-auto flex w-full max-w-[1130px] flex-col gap-5 px-0 py-2 pb-4 sm:gap-6 sm:px-8 sm:py-7",
         reducedMotion && "motion-reduce",
       )}
       data-calm-sound={calmSound ? "true" : "false"}

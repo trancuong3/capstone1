@@ -45,7 +45,7 @@ export function ChildProfileCard({
         </span>
       </span>
       {selected ? (
-        <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
+        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-sm font-semibold text-primary">
           <Check aria-hidden="true" className="size-4" />{" "}
           {tParent("children.selectedBadge")}
         </span>

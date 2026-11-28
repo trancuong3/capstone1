@@ -277,7 +277,11 @@ export function LoginForm({
               : null;
 
   return (
-    <form className="flex w-full flex-col gap-4" noValidate onSubmit={onSubmit}>
+    <form
+      className="flex w-full flex-col gap-5 sm:gap-4"
+      noValidate
+      onSubmit={onSubmit}
+    >
       {noticeMessage ? (
         <StatusMessage tone="error">{noticeMessage}</StatusMessage>
       ) : null}
@@ -298,7 +302,7 @@ export function LoginForm({
                 : t("auth.passwordToggle.show")
             }
             aria-pressed={showPassword}
-            className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            className="-me-1 inline-flex size-11 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
             onClick={() => setShowPassword((prev) => !prev)}
             type="button"
           >
@@ -314,9 +318,11 @@ export function LoginForm({
         type={showPassword ? "text" : "password"}
         {...register("password")}
       />
-      <Link href="/forgot-password" className="account-forgot">
-        {t("auth.login.forgotPassword")}
-      </Link>
+      <div className="flex justify-end pt-1.5 sm:pt-0">
+        <Link href="/forgot-password" className="account-forgot">
+          {t("auth.login.forgotPassword")}
+        </Link>
+      </div>
       <Button
         disabled={
           !isHydrated ||
@@ -343,13 +349,13 @@ export function LoginForm({
             <span className="w-full border-t border-border" />
           </div>
           <div className="relative flex justify-center">
-            <span className="bg-white px-3 text-sm font-semibold text-muted">
+            <span className="bg-canvas px-3 text-sm font-semibold text-muted sm:bg-white">
               {t("auth.login.orContinueWith")}
             </span>
           </div>
         </div>
         <Button
-          className="border border-border bg-white text-ink hover:bg-sky"
+          className="border border-border"
           disabled={
             !isHydrated ||
             authRuntime.status === "initializing" ||
@@ -366,7 +372,7 @@ export function LoginForm({
           {t("auth.login.continueWithGoogle")}
         </Button>
         <Button
-          className="border border-border bg-white text-ink hover:bg-sky"
+          className="border border-border"
           disabled={
             !isHydrated ||
             authRuntime.status === "initializing" ||
@@ -383,7 +389,11 @@ export function LoginForm({
           {t("auth.login.continueWithFacebook")}
         </Button>
       </div>
-      <ButtonLink href="/register" variant="quiet" className="account-signup">
+      <ButtonLink
+        href="/register"
+        variant="quiet"
+        className="account-signup border border-border sm:border-0"
+      >
         <span className="sm:hidden">{t("auth.login.signupMobile")}</span>
         <span className="hidden sm:inline">
           {t("auth.login.signupDesktop")}

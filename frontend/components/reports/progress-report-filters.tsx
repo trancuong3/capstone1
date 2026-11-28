@@ -19,6 +19,7 @@ interface ProgressReportFiltersProps {
   readonly hasMore: boolean;
   readonly loadingMore: boolean;
   readonly onLoadMore: () => void;
+  readonly variant?: "desktop" | "mobile";
 }
 
 export function ProgressReportFilters({
@@ -29,6 +30,7 @@ export function ProgressReportFilters({
   hasMore,
   loadingMore,
   onLoadMore,
+  variant = "desktop",
 }: ProgressReportFiltersProps) {
   const t = useTranslations("reports");
   const tc = useTranslations("child");
@@ -45,7 +47,11 @@ export function ProgressReportFilters({
 
   return (
     <div
-      className={`grid grid-cols-1 items-end gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`}
+      className={
+        variant === "mobile"
+          ? "grid grid-cols-1 items-end gap-3 rounded-3xl border border-border bg-white p-4 shadow-2xs"
+          : `grid grid-cols-1 items-end gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`
+      }
     >
       <div className="min-w-0">
         <label

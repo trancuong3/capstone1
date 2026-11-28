@@ -22,19 +22,21 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end",
+        "flex flex-col justify-between gap-2.5 border-b border-border pb-3.5 sm:gap-4 sm:pb-5 lg:flex-row lg:items-end",
         className,
       )}
     >
       <div className="min-w-0 max-w-3xl">
         {eyebrow ? (
-          <p className="text-sm font-semibold text-muted">{eyebrow}</p>
+          <p className="text-xs font-semibold text-muted sm:text-sm">
+            {eyebrow}
+          </p>
         ) : null}
-        <h1 className="book-title mt-1 text-3xl text-ink sm:text-[40px]">
+        <h1 className="book-title mt-1 text-2xl text-ink sm:text-3xl lg:text-[40px]">
           {title}
         </h1>
         {description ? (
-          <p className="mt-2 max-w-2xl text-body leading-6 text-muted">
+          <p className="mt-1.5 max-w-2xl text-sm leading-5 text-muted sm:mt-2 sm:text-body sm:leading-6">
             {description}
           </p>
         ) : null}
@@ -42,7 +44,7 @@ export function PageHeader({
       {action ? (
         <div
           className={cn(
-            "flex w-full shrink-0 flex-wrap gap-3 sm:w-auto",
+            "flex w-full shrink-0 flex-wrap gap-2 sm:w-auto sm:gap-3 max-sm:[&>a]:min-h-11 max-sm:[&>button]:min-h-11",
             actionClassName,
           )}
         >

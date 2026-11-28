@@ -96,32 +96,34 @@ export function BookContentReportDialog({
       closeOnEscape={!submitting}
       footer={
         created ? (
-          <div className="flex flex-wrap gap-3">
-            <Button fullWidth={false} onClick={onClose}>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+            <Button className="w-full sm:w-auto" onClick={onClose} size="touch">
               {t("reportDialog.done")}
             </Button>
             <Link
-              className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-canvas"
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-control border border-border px-4 py-2 text-sm font-semibold text-primary hover:bg-canvas sm:w-auto"
               href="/book-reports"
             >
               {t("reportDialog.viewMyReports")}
             </Link>
           </div>
         ) : (
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-3">
             <Button
+              className="w-full sm:w-auto"
               disabled={submitting}
-              fullWidth={false}
               onClick={onClose}
+              size="touch"
               type="button"
               variant="secondary"
             >
               {t("reportDialog.cancel")}
             </Button>
             <Button
+              className="w-full sm:w-auto"
               disabled={submitting || !description.trim()}
               form="book-content-report-form"
-              fullWidth={false}
+              size="touch"
               type="submit"
             >
               {submitting
@@ -132,6 +134,7 @@ export function BookContentReportDialog({
         )
       }
       isOpen
+      mobilePresentation="sheet"
       onClose={() => {
         if (!submitting) onClose();
       }}
@@ -204,7 +207,7 @@ export function BookContentReportDialog({
               {t("reportDialog.issueTypeLabel")}
             </label>
             <select
-              className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
               id="book-report-issue"
               onChange={(event) =>
                 setIssueType(event.target.value as BookContentIssueType)
@@ -228,7 +231,7 @@ export function BookContentReportDialog({
               <span className="text-danger">*</span>
             </label>
             <textarea
-              className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
               id="book-report-description"
               maxLength={4000}
               onChange={(event) => setDescription(event.target.value)}
@@ -249,7 +252,7 @@ export function BookContentReportDialog({
               {t("reportDialog.suspectedTextLabel")}
             </label>
             <textarea
-              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
               dir="ltr"
               id="book-report-text"
               lang="vi"
@@ -268,7 +271,7 @@ export function BookContentReportDialog({
               {t("reportDialog.suggestedTextLabel")}
             </label>
             <textarea
-              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
               dir="ltr"
               id="book-report-correction"
               lang="vi"

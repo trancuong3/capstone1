@@ -474,7 +474,7 @@ export function BookCoverStudio({
 
           <div className="flex flex-wrap gap-2">
             <Button
-              className="min-h-11 w-auto px-3.5 text-xs"
+              className="min-h-11 w-auto px-3.5 py-2 text-xs"
               disabled={busyAction !== null}
               fullWidth={false}
               onClick={() => cameraInputRef.current?.click()}
@@ -485,7 +485,7 @@ export function BookCoverStudio({
               Chụp ảnh bìa
             </Button>
             <Button
-              className="min-h-11 w-auto px-3.5 text-xs"
+              className="min-h-11 w-auto px-3.5 py-2 text-xs"
               disabled={busyAction !== null}
               fullWidth={false}
               onClick={() => galleryInputRef.current?.click()}
@@ -497,7 +497,7 @@ export function BookCoverStudio({
             </Button>
             {hasRealCover && !stagedFile ? (
               <Button
-                className="min-h-11 w-auto px-3.5 text-xs"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs"
                 disabled={busyAction !== null}
                 fullWidth={false}
                 isLoading={busyAction === "delete"}
@@ -523,7 +523,7 @@ export function BookCoverStudio({
                   Chỉnh khung cắt 3:4 & xoay ảnh
                 </p>
                 <Button
-                  className="min-h-10 w-auto px-3 text-xs"
+                  className="min-h-11 w-auto px-3 py-2 text-xs sm:min-h-10"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   onClick={() =>
@@ -556,7 +556,7 @@ export function BookCoverStudio({
                     key={key}
                     aria-pressed={cropPreset === key}
                     className={cn(
-                      "min-h-9 rounded-full border px-3 text-xs font-semibold transition-colors",
+                      "min-h-11 rounded-full border px-3.5 text-xs font-semibold transition-colors sm:min-h-9 sm:px-3",
                       cropPreset === key
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:bg-canvas",
@@ -571,10 +571,11 @@ export function BookCoverStudio({
 
               {cropPreset === "CUSTOM" ? (
                 <div className="grid gap-2 sm:grid-cols-3">
-                  <label className="flex flex-col gap-1 text-[11px] font-semibold text-ink">
+                  <label className="flex min-h-11 flex-col justify-center gap-1 text-[11px] font-semibold text-ink">
                     Dịch ngang ({Math.round(customCrop.crop_x * 100)}%)
                     <input
                       aria-label="Vị trí cắt ngang"
+                      className="min-h-11 w-full cursor-pointer accent-primary sm:min-h-6"
                       max={Math.round((1 - customCrop.crop_w) * 100)}
                       min={0}
                       onChange={(event) => {
@@ -585,10 +586,11 @@ export function BookCoverStudio({
                       value={Math.round(customCrop.crop_x * 100)}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-[11px] font-semibold text-ink">
+                  <label className="flex min-h-11 flex-col justify-center gap-1 text-[11px] font-semibold text-ink">
                     Dịch dọc ({Math.round(customCrop.crop_y * 100)}%)
                     <input
                       aria-label="Vị trí cắt dọc"
+                      className="min-h-11 w-full cursor-pointer accent-primary sm:min-h-6"
                       max={Math.round((1 - customCrop.crop_h) * 100)}
                       min={0}
                       onChange={(event) => {
@@ -599,10 +601,11 @@ export function BookCoverStudio({
                       value={Math.round(customCrop.crop_y * 100)}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-[11px] font-semibold text-ink">
+                  <label className="flex min-h-11 flex-col justify-center gap-1 text-[11px] font-semibold text-ink">
                     Kích thước khung ({Math.round(customCrop.crop_w * 100)}%)
                     <input
                       aria-label="Kích thước khung cắt"
+                      className="min-h-11 w-full cursor-pointer accent-primary sm:min-h-6"
                       max={100}
                       min={30}
                       onChange={(event) => {
@@ -623,7 +626,7 @@ export function BookCoverStudio({
 
               <div className="flex flex-wrap gap-2">
                 <Button
-                  className="min-h-11 w-auto px-4 text-xs"
+                  className="min-h-11 w-auto px-4 py-2 text-xs"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   isLoading={busyAction === "upload"}
@@ -634,7 +637,7 @@ export function BookCoverStudio({
                   Lưu ảnh bìa
                 </Button>
                 <Button
-                  className="min-h-11 w-auto px-3 text-xs"
+                  className="min-h-11 w-auto px-3 py-2 text-xs"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   onClick={clearStagedFile}
@@ -669,16 +672,15 @@ export function BookCoverStudio({
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 aria-label="Gợi ý cảnh cho bìa AI"
-                className="min-h-10 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink placeholder:text-muted"
+                className="min-h-11 flex-1 rounded-control border border-border bg-white px-3 text-base text-ink placeholder:text-muted sm:text-xs"
                 onChange={(event) => setAiPromptHint(event.target.value)}
                 placeholder="Gợi ý cảnh tùy chọn (ví dụ: mèo con bên cửa sổ nắng sớm)…"
                 type="text"
                 value={aiPromptHint}
               />
               <Button
-                className="min-h-10 w-auto shrink-0 px-3.5 text-xs"
+                className="min-h-11 w-full shrink-0 px-3.5 py-2 text-xs sm:w-auto"
                 disabled={busyAction !== null}
-                fullWidth={false}
                 isLoading={busyAction === "ai"}
                 onClick={() => void handleGenerateAiCover()}
                 type="button"

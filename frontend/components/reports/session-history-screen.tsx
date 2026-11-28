@@ -3,7 +3,9 @@
 import { BarChart3, History, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { ChildSelector } from "@/components/reports/child-selector";
+import { MobileSessionHistory } from "@/components/reports/mobile-session-history";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionHistoryItem } from "@/components/reports/session-history-item";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -50,6 +52,7 @@ export function SessionHistoryScreen({
 }: SessionHistoryScreenProps) {
   const { formatDate, locale } = useI18n();
   const t = useTranslations("reports");
+  const isMobile = useIsMobileViewport();
   const { childService, sessionService } = useReportServices();
   const currentPage =
     Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
@@ -236,13 +239,28 @@ export function SessionHistoryScreen({
     });
   };
 
+  if (isMobile) {
+    return (
+      <MobileSessionHistory
+        child={state.child}
+        childrenProfiles={state.children}
+        currentPage={currentPage}
+        dayGroups={dayGroups}
+        formatGroupHeading={formatGroupHeading}
+        items={state.items}
+        nextPage={nextPage}
+      />
+    );
+  }
+
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-2 sm:gap-5 sm:pb-4">
       <ReportPageHeader
         action={
           <ButtonLink
-            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+            fullWidth={false}
             href={`/reports?${childQuery}`}
+            size="touch"
             variant="secondary"
           >
             <BarChart3 aria-hidden="true" className="size-4" />

@@ -77,9 +77,7 @@ export function PaginationBar({
         total: totalFormatted,
       });
 
-  const buttonSizeClass = compact
-    ? "min-h-10 px-3 py-1.5 text-sm"
-    : "min-h-11 px-3.5 py-2 text-sm";
+  const buttonSize = compact ? "admin" : "touch";
 
   return (
     <nav
@@ -95,10 +93,10 @@ export function PaginationBar({
       {!isSinglePage ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            className={buttonSizeClass}
             disabled={disabled || safePage <= 1}
             fullWidth={false}
             onClick={() => onPageChange(Math.max(1, safePage - 1))}
+            size={buttonSize}
             type="button"
             variant="secondary"
           >
@@ -118,10 +116,10 @@ export function PaginationBar({
             })}
           </span>
           <Button
-            className={buttonSizeClass}
             disabled={disabled || safePage >= totalPages}
             fullWidth={false}
             onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+            size={buttonSize}
             type="button"
             variant="secondary"
           >

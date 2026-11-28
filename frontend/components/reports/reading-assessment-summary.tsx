@@ -72,7 +72,7 @@ export function ReadingAssessmentSummary({
       </div>
 
       <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:divide-x lg:divide-y-0">
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+        <div className="flex flex-col justify-between gap-4 p-3.5 sm:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               {t("overview.firstPassSummary.firstPassTitle")}
@@ -98,7 +98,7 @@ export function ReadingAssessmentSummary({
           </div>
           {firstPassCorrectPct !== null ? (
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-semibold text-muted">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-muted">
                 <span>{t("overview.firstPassSummary.firstPassAccuracy")}</span>
                 <span className="tabular-nums text-ink">
                   {firstPassCorrectPct}%{" "}
@@ -121,7 +121,7 @@ export function ReadingAssessmentSummary({
           ) : null}
         </div>
 
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+        <div className="flex flex-col justify-between gap-4 p-3.5 sm:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               {t("overview.firstPassSummary.retrySectionTitle")}

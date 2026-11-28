@@ -386,4 +386,32 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     );
     expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
   });
+
+  it("uses non-sticky mobile parent-topbar and hides MobileBottomNav below sm on /reading-preparation while preserving pb-24", () => {
+    const authService = createAuthServiceFixture();
+    navigationState.pathname = "/reading-preparation";
+
+    render(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Chuẩn bị đọc</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    const topbar = screen.getByRole("banner");
+    expect(topbar.className).toContain("relative");
+    expect(topbar.className).toContain("sm:sticky");
+    expect(topbar.className).not.toContain(" sticky ");
+
+    const bottomNav = screen.getByTestId("mobile-bottom-nav");
+    expect(bottomNav.parentElement?.className).toContain("hidden");
+    expect(bottomNav.parentElement?.className).toContain("sm:block");
+    expect(bottomNav.className).toContain("xl:hidden");
+    expect(screen.getByRole("main").className).toContain("pb-24");
+  });
 });

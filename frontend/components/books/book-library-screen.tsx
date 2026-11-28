@@ -1,6 +1,13 @@
 "use client";
 
-import { BookMarked, BookOpenText, RefreshCw, SearchX } from "lucide-react";
+import {
+  BookMarked,
+  BookOpenText,
+  RefreshCw,
+  Search,
+  SearchX,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
@@ -11,6 +18,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -34,6 +42,8 @@ const BOOKS_PAGE_SIZE = 12;
 export function BookLibraryScreen() {
   const t = useTranslations("books");
   const tc = useTranslations("child");
+  const tCommon = useTranslations("common");
+  const isMobile = useIsMobileViewport();
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
@@ -242,7 +252,11 @@ export function BookLibraryScreen() {
         <StatusMessage title={tc("verification.errorTitle")} tone="error">
           {tc("verification.errorBody")}
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           {tc("verification.retry")}
         </Button>
@@ -251,11 +265,16 @@ export function BookLibraryScreen() {
   }
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 pt-0 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+    <section
+      className={cn(
+        "mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col",
+        isMobile ? "gap-4 px-3.5 pt-0 pb-6" : "gap-6 px-8 py-8",
+      )}
+    >
       <BookChildHeader
         child={child}
         fullBleedDesktop
-        mobileLabel={t("catalog.subtitle")}
+        mobileLabel={isMobile ? t("catalog.title") : t("catalog.subtitle")}
       />
 
       {collectionNotice ? (
@@ -271,40 +290,99 @@ export function BookLibraryScreen() {
         </StatusMessage>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 sm:gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-2.5 border-b border-border pb-3 sm:gap-4 sm:pb-6">
-          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-start sm:gap-2">
-            <h1 className="book-title min-w-0 truncate text-xl text-ink sm:whitespace-normal sm:break-words sm:text-4xl lg:text-5xl">
-              {child
-                ? t("catalog.familyBooksTitle", { alias: child.alias })
-                : t("catalog.familyBooksDefaultTitle")}
-            </h1>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[1130px] flex-col",
+          isMobile ? "gap-4" : "gap-6",
+        )}
+      >
+        {isMobile ? (
+          <div className="flex flex-col gap-3.5 border-b border-border pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <h1 className="book-title min-w-0 flex-1 break-words text-[26px] leading-tight text-ink">
+                {child
+                  ? t("catalog.familyBooksTitle", { alias: child.alias })
+                  : t("catalog.familyBooksDefaultTitle")}
+              </h1>
               <ButtonLink
+                className="shrink-0"
+                fullWidth={false}
                 href="/my-books"
+                size="touch"
                 variant="secondary"
-                className="min-h-10! w-auto gap-1.5 px-3! py-1.5! text-xs! sm:min-h-12! sm:gap-2 sm:px-4! sm:py-2! sm:text-sm!"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
                 {t("catalog.myBooksLink")}
               </ButtonLink>
             </div>
+            <div className="relative w-full">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute start-3.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+              />
+              <input
+                aria-label={t("catalog.searchAria")}
+                className="h-12 w-full rounded-control border border-border bg-white ps-10 pe-12 text-base text-ink outline-none placeholder:text-muted/70 focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("catalog.searchInputPlaceholder")}
+                type="search"
+                value={search}
+              />
+              {search ? (
+                <button
+                  aria-label={tCommon("languageSelector.clearSearch")}
+                  className="absolute end-0.5 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-control text-muted hover:text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                  onClick={() => setSearch("")}
+                  type="button"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
-          <div className="w-full sm:max-w-sm [&_input]:h-12 [&_input]:pt-5 [&_input]:pb-1.5 [&_input]:text-sm [&_label]:top-1.5 [&_label]:text-[11px] sm:[&_input]:h-[72px] sm:[&_input]:pt-8 sm:[&_input]:pb-3 sm:[&_input]:text-body sm:[&_label]:top-3 sm:[&_label]:text-sm">
-            <TextField
-              aria-label={t("catalog.searchAria")}
-              label={t("catalog.searchLabel")}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("catalog.searchInputPlaceholder")}
-              type="search"
-              value={search}
-            />
+        ) : (
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
+            <div className="flex flex-col items-start gap-2">
+              <h1 className="book-title min-w-0 break-words text-4xl text-ink lg:text-5xl">
+                {child
+                  ? t("catalog.familyBooksTitle", { alias: child.alias })
+                  : t("catalog.familyBooksDefaultTitle")}
+              </h1>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <ButtonLink
+                  className="gap-2"
+                  fullWidth={false}
+                  href="/my-books"
+                  size="compact"
+                  variant="secondary"
+                >
+                  <BookMarked aria-hidden="true" className="size-4" />
+                  {t("catalog.myBooksLink")}
+                </ButtonLink>
+              </div>
+            </div>
+            <div className="w-full sm:max-w-sm">
+              <TextField
+                aria-label={t("catalog.searchAria")}
+                label={t("catalog.searchLabel")}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("catalog.searchInputPlaceholder")}
+                type="search"
+                value={search}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         <fieldset className="min-w-0">
           <legend className="sr-only">{t("catalog.gradeFilterLegend")}</legend>
-          <div className="no-scrollbar -mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-0.5 sm:mx-0 sm:flex-wrap sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0">
+          <div
+            className={cn(
+              isMobile
+                ? "no-scrollbar -mx-3.5 flex flex-nowrap gap-2 overflow-x-auto px-3.5 pb-1"
+                : "flex flex-wrap gap-2",
+            )}
+          >
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -312,10 +390,14 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex min-h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-12 sm:rounded-control sm:border-0 sm:px-4 sm:text-label",
+                    isMobile
+                      ? "flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                      : "flex min-h-12 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-control px-4 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                     isSelected
                       ? "border-primary/30 bg-sky text-primary-hover"
-                      : "border-border bg-white text-ink hover:bg-sky",
+                      : isMobile
+                        ? "border-border bg-white text-ink hover:bg-sky"
+                        : "bg-white text-ink hover:bg-sky",
                   )}
                   key={grade ?? "all"}
                   onClick={() => {
@@ -338,14 +420,22 @@ export function BookLibraryScreen() {
           <div
             aria-busy="true"
             aria-label={t("catalog.loadingAria")}
-            className="grid gap-3 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3"
+            className={cn(
+              isMobile
+                ? "flex flex-col gap-3.5"
+                : "grid gap-6 sm:grid-cols-2 lg:grid-cols-3",
+            )}
           >
             <span className="sr-only" role="status">
               {t("catalog.loadingText")}
             </span>
             {[0, 1, 2, 3].map((item) => (
               <Skeleton
-                className="h-[126px] w-full rounded-card sm:h-[432px] sm:w-64"
+                className={cn(
+                  isMobile
+                    ? "h-[196px] w-full rounded-card"
+                    : "h-[432px] w-64 rounded-card",
+                )}
                 key={item}
               />
             ))}
@@ -358,7 +448,7 @@ export function BookLibraryScreen() {
               {t("catalog.loadErrorBody")}
             </StatusMessage>
             <Button
-              className="sm:w-auto sm:self-start sm:px-8"
+              className="w-full sm:w-auto sm:self-start sm:px-8"
               onClick={() => setRequestKey((key) => key + 1)}
               variant="secondary"
             >
@@ -412,7 +502,13 @@ export function BookLibraryScreen() {
 
         {catalogState.status === "ready" && catalogState.books.length > 0 ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+            <div
+              className={cn(
+                isMobile
+                  ? "flex flex-col gap-3.5"
+                  : "grid gap-6 sm:grid-cols-2 lg:grid-cols-3",
+              )}
+            >
               {catalogState.books
                 .slice((page - 1) * BOOKS_PAGE_SIZE, page * BOOKS_PAGE_SIZE)
                 .map((book) => (

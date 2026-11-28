@@ -28,7 +28,7 @@ export function SelectedChildIdentity({ child }: { child: ChildProfileDTO }) {
         </p>
       </div>
       <Link
-        className="rounded-md px-2 py-2 text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+        className="inline-flex min-h-11 shrink-0 items-center rounded-control px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
         href="/dashboard?focus=child-selection"
       >
         {tParent("children.switchProfile")}

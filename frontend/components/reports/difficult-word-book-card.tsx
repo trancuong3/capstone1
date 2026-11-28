@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type {
   DifficultWordBookGroup,
@@ -58,6 +59,7 @@ export function DifficultWordBookCard({
   onSelectWord,
 }: DifficultWordBookCardProps) {
   const { formatNumber } = useI18n();
+  const isMobile = useIsMobileViewport();
   const t = useTranslations("difficultWords");
   const tr = useTranslations("reading");
   const [coverError, setCoverError] = useState(false);
@@ -80,11 +82,11 @@ export function DifficultWordBookCard({
 
   return (
     <article
-      className="flex min-w-0 flex-col justify-between gap-5 rounded-[24px] border border-[#DCE8E4] bg-white p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6"
+      className="flex min-w-0 flex-col justify-between gap-4 rounded-3xl border border-border bg-white p-4 shadow-2xs transition-shadow hover:shadow-md sm:gap-5 sm:rounded-[24px] sm:p-6"
       data-book-group={group.key}
     >
       <div className="flex flex-col gap-4">
-        <div className="flex items-start gap-4">
+        <div className="flex items-start gap-3.5 sm:gap-4">
           {group.bookId ? (
             group.bookCoverUrl && !coverError ? (
               /* eslint-disable-next-line @next/next/no-img-element --
@@ -94,7 +96,7 @@ export function DifficultWordBookCard({
                  safest option until cover URLs are served from a known CDN. */
               <img
                 alt={t("bookCard.coverAlt", { title: group.bookTitle })}
-                className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover sm:h-28 sm:w-24"
+                className="h-24 w-20 shrink-0 rounded-2xl border border-border object-cover sm:h-28 sm:w-24"
                 loading="lazy"
                 onError={handleCoverError}
                 src={group.bookCoverUrl}
@@ -109,25 +111,25 @@ export function DifficultWordBookCard({
                   max_grade: group.maxGrade ?? group.minGrade ?? 1,
                   lifecycle_status: "ACTIVE",
                 }}
-                className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 sm:h-28! sm:w-24!"
-                hero
+                showTitle={false}
+                size={isMobile ? "small" : "medium"}
               />
             )
           ) : (
-            <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] text-[#147D87] sm:h-28 sm:w-24">
-              <BookOpen aria-hidden="true" className="size-8" />
+            <div className="flex h-20 w-14 shrink-0 items-center justify-center rounded-card border border-border bg-sky/50 text-primary sm:h-36 sm:w-28">
+              <BookOpen aria-hidden="true" className="size-7 sm:size-8" />
             </div>
           )}
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {gradeLabel ? (
-                <span className="inline-flex items-center rounded-full bg-[#DDF3F5] px-2.5 py-0.5 text-xs font-bold text-[#0E6D76]">
+                <span className="inline-flex items-center rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary">
                   {gradeLabel}
                 </span>
               ) : null}
               {allCompleted ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-900">
+                <span className="inline-flex items-center gap-1 rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-bold text-success-ink">
                   <Sparkles aria-hidden="true" className="size-3.5" />
                   {t("bookCard.completedBadge")}
                 </span>
@@ -135,7 +137,7 @@ export function DifficultWordBookCard({
             </div>
 
             <h2
-              className="viread-learning-content mt-1.5 text-xl font-extrabold leading-snug text-[#213C42]"
+              className="viread-learning-content mt-1.5 break-words text-lg font-extrabold leading-snug text-ink sm:text-xl"
               dir="ltr"
               lang="vi"
             >
@@ -144,7 +146,7 @@ export function DifficultWordBookCard({
 
             {group.bookAuthor ? (
               <p
-                className="viread-learning-content mt-0.5 truncate text-sm text-[#526970]"
+                className="viread-learning-content mt-0.5 line-clamp-1 text-sm text-muted"
                 dir="ltr"
                 lang="vi"
               >
@@ -153,23 +155,23 @@ export function DifficultWordBookCard({
             ) : null}
 
             <div className="mt-3">
-              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-[#526970]">
+              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-muted">
                 <span>
                   {t("bookCard.progressSummary", {
                     completed: formatNumber(group.completedWords),
                     total: formatNumber(group.totalWords),
                   })}
                 </span>
-                <span className="tabular-nums text-[#0E6D76]">
+                <span className="tabular-nums text-primary">
                   {group.progressPercent}%
                 </span>
               </div>
               <div
                 aria-hidden="true"
-                className="h-2.5 w-full overflow-hidden rounded-full bg-[#E8EFEA]"
+                className="h-2.5 w-full overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
               >
                 <div
-                  className="h-full rounded-full bg-[#147D87] transition-all duration-300"
+                  className="h-full rounded-full bg-primary transition-all duration-300"
                   style={{ width: `${group.progressPercent}%` }}
                 />
               </div>
@@ -217,15 +219,15 @@ export function DifficultWordBookCard({
           })}
         </div>
 
-        <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-2.5 text-sm">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-bold text-[#213C42]">
+        <details className="group rounded-2xl border border-border bg-canvas/70 px-4 py-2 text-sm">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-bold text-ink">
             <span>{t("bookCard.parentDetails")}</span>
             <ChevronDown
               aria-hidden="true"
-              className="size-4 text-[#526970] transition-transform group-open:rotate-180"
+              className="size-4 text-muted transition-transform group-open:rotate-180"
             />
           </summary>
-          <ul className="mt-2.5 space-y-2 border-t border-[#DCE8E4] pt-2.5 text-xs text-[#526970]">
+          <ul className="mt-2 space-y-2 border-t border-border pt-2.5 text-xs text-muted">
             {group.words.map((word) => {
               const source = word.sources?.[0];
               return (
@@ -235,7 +237,7 @@ export function DifficultWordBookCard({
                 >
                   <div>
                     <span
-                      className="viread-learning-content font-bold text-[#213C42]"
+                      className="viread-learning-content font-bold text-ink"
                       dir="ltr"
                       lang="vi"
                     >

@@ -6,22 +6,30 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
+  Eye,
+  Image as ImageIcon,
   RefreshCw,
+  SlidersHorizontal,
   Volume2,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
+import { READING_DOCK_BUTTON_CLASS } from "@/components/reading/reading-controls";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -326,6 +334,8 @@ function ReadingSessionScreen({
 }: ReadingScreenProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
+  const tc = useTranslations("child");
+  const isMobile = useIsMobileViewport();
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -1737,7 +1747,14 @@ function ReadingSessionScreen({
         playModel: async (effect) => {
           const engine = alignmentEngineRef.current;
           const activePage = pageRef.current;
-          if (!engine || !activePage || !mountedRef.current) return;
+          if (
+            !engine ||
+            !activePage ||
+            !mountedRef.current ||
+            retryModeRef.current
+          ) {
+            return;
+          }
           if (
             effect.kind !== "encourage" &&
             effect.kind !== "clarify" &&
@@ -1833,7 +1850,8 @@ function ReadingSessionScreen({
     if (
       !isListeningActiveRef.current ||
       assistantAudioPendingRef.current ||
-      listeningStopRef.current
+      listeningStopRef.current ||
+      retryModeRef.current
     ) {
       return;
     }
@@ -7093,6 +7111,10 @@ function ReadingSessionScreen({
     setIsBusy(true);
     preventAssistantAudioResume();
     speechPlayer.stop();
+    automationRuntimeRef.current?.dispatch({
+      type: "PAUSE",
+      by: "child",
+    });
 
     let isCompletingSession = false;
 
@@ -7440,6 +7462,227 @@ function ReadingSessionScreen({
     );
   }
 
+  const controlsDisabled =
+    (uiState !== "reading" && uiState !== "tts-error") ||
+    (isBusy && !speechPlayer.isPlaying) ||
+    (retryMode && pageNavigationError !== null) ||
+    (retryMode &&
+      [
+        "preparing-microphone",
+        "playing-instruction",
+        "playing-sample",
+      ].includes(retryFeedback));
+  const currentWordText = retryMode
+    ? (retryCandidates[retryWordPosition]?.text ?? null)
+    : (page.words.find(
+        (w) => w.word_id === (previewSnapshot?.currentWordId ?? currentWordId),
+      )?.text ?? null);
+  const pageHasVerifiedIllustration =
+    Boolean(page.illustration_url) && page.illustration_text_free === true;
+  const activeMobileReadingMode: ReadingDisplayMode =
+    readingMode ??
+    (pageHasVerifiedIllustration
+      ? "ILLUSTRATED"
+      : page.image_url
+        ? "ORIGINAL"
+        : "TEXT");
+  const isExclusiveModalOpen =
+    pickerIndex !== null ||
+    Boolean(retryPrompt) ||
+    confirmFinish ||
+    uiState === "paused" ||
+    uiState === "microphone-denied" ||
+    uiState === "page-confidence-low" ||
+    uiState === "reconnecting" ||
+    uiState === "stt-error" ||
+    tutorOpen;
+  const isMobileSheetOpen =
+    isMobile && pageOptionsOpen && !isExclusiveModalOpen;
+  const isNonBlockingTtsError =
+    uiState === "tts-error" &&
+    !tutorOpen &&
+    pickerIndex === null &&
+    !retryPrompt &&
+    !confirmFinish;
+
+  const mobileTopBar = (
+    <div className="flex w-full min-w-0 items-center gap-0.5">
+      <Link
+        aria-label={t("layout.exitAria")}
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky"
+        href={detailHref}
+        onClick={(event) => {
+          event.preventDefault();
+          setConfirmFinish(true);
+        }}
+      >
+        <ArrowLeft
+          aria-hidden="true"
+          className="viread-rtl-flip size-5 shrink-0"
+        />
+      </Link>
+      {pageProgress ? (
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <Button
+            aria-label={t("session.previousPage")}
+            className="shrink-0"
+            disabled={
+              (isBusy && !speechPlayer.isPlaying) ||
+              (uiState !== "reading" && uiState !== "tts-error") ||
+              pageProgress.current_index <= 0
+            }
+            onClick={() =>
+              void navigateWithinRange(pageProgress.current_index - 1)
+            }
+            size="icon"
+            variant="secondary"
+          >
+            <ChevronLeft
+              aria-hidden="true"
+              className="viread-rtl-flip size-4 shrink-0"
+            />
+          </Button>
+          <button
+            type="button"
+            data-reading-page-pill="true"
+            aria-label={`${t("session.pageProgress", {
+              current: formatNumber(pageProgress.current_index + 1),
+              total: formatNumber(pageProgress.total_pages),
+            })} (${t("controls.choosePageAria")})`}
+            disabled={
+              isBusy ||
+              retryMode ||
+              (uiState !== "reading" &&
+                uiState !== "paused" &&
+                uiState !== "tts-error")
+            }
+            onClick={() => void openPagePicker()}
+            className="inline-flex min-h-11 min-w-0 shrink items-center justify-center truncate rounded-full border border-border bg-sky/50 px-1.5 text-[11px] font-bold text-ink transition hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
+          >
+            {t("session.pageProgress", {
+              current: formatNumber(pageProgress.current_index + 1),
+              total: formatNumber(pageProgress.total_pages),
+            })}
+          </button>
+          <Button
+            aria-label={t("session.nextPage")}
+            className="shrink-0"
+            disabled={
+              (isBusy && !speechPlayer.isPlaying) ||
+              (uiState !== "reading" && uiState !== "tts-error") ||
+              pageProgress.current_index >= pageProgress.total_pages - 1
+            }
+            onClick={() =>
+              void navigateWithinRange(pageProgress.current_index + 1)
+            }
+            size="icon"
+            variant="secondary"
+          >
+            <ChevronRight
+              aria-hidden="true"
+              className="viread-rtl-flip size-4 shrink-0"
+            />
+          </Button>
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1 px-1">
+          <p className="truncate text-xs font-bold text-primary">
+            {child.alias} · {tc("switcher.gradeLabel", { grade: child.grade })}
+          </p>
+        </div>
+      )}
+      <div className="ms-auto flex shrink-0 items-center gap-0.5">
+        {currentWordText || page.words.length > 0 ? (
+          <button
+            type="button"
+            aria-label={t("layout.phonicsAria")}
+            title={t("layout.phonicsAria")}
+            onClick={handleSpellCurrentWord}
+            disabled={controlsDisabled}
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-control border border-primary/30 bg-sky/60 text-primary hover:bg-sky disabled:opacity-55"
+          >
+            <Volume2 aria-hidden="true" className="size-4.5 shrink-0" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          aria-label={t("layout.tutorAria")}
+          title={t("layout.tutorAria")}
+          onClick={() => void requestTutor()}
+          disabled={controlsDisabled || retryMode}
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-ink hover:bg-sky disabled:opacity-55"
+        >
+          <CircleHelp aria-hidden="true" className="size-5 shrink-0" />
+        </button>
+        <button
+          type="button"
+          aria-label={t("session.pageOptionsAria")}
+          aria-expanded={isMobileSheetOpen}
+          title={t("session.pageOptionsAria")}
+          onClick={() => setPageOptionsOpen((open) => !open)}
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-control border border-border bg-white text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <SlidersHorizontal aria-hidden="true" className="size-4.5 shrink-0" />
+        </button>
+      </div>
+    </div>
+  );
+
+  const readingFeedbackBanner =
+    isNonBlockingTtsError ||
+    uiState === "page-turn" ||
+    (isMobile && pageNavigationError && pickerIndex === null) ? (
+      <div className="space-y-1.5">
+        {uiState === "page-turn" ? (
+          <StatusBanner>{t("session.navigatingAndAligning")}</StatusBanner>
+        ) : null}
+        {isMobile && pageNavigationError && pickerIndex === null ? (
+          <div
+            data-topbar-notice-overlay="true"
+            className="flex flex-wrap items-center gap-2 rounded-control border border-border bg-white px-3 py-2"
+          >
+            <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+            {pageProgress?.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                disabled={isBusy}
+                fullWidth={false}
+                onClick={() => void confirmCurrentPageCompleted()}
+                size="touch"
+                variant="quiet"
+              >
+                {t("session.markPageDone")}
+              </Button>
+            ) : null}
+            {retryMode ? (
+              <Button
+                disabled={isBusy}
+                fullWidth={false}
+                onClick={() => void beginRetryWord(retryPositionRef.current)}
+                size="touch"
+                variant="secondary"
+              >
+                {t("session.retryOpenPage")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {isNonBlockingTtsError ? (
+          <TutorMessage
+            action={tutorAction}
+            isPlaying={speechPlayer.isPlaying}
+            isRetrying={isBusy}
+            nonBlocking
+            onClose={closeTutor}
+            onRetry={() => void retryTutor()}
+            ttsFailed
+            word={currentWord}
+          />
+        ) : null}
+      </div>
+    ) : undefined;
+
   const hasTopBarContent = Boolean(
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
@@ -7616,23 +7859,15 @@ function ReadingSessionScreen({
     >
       <ReadingLayout
         topBar={readingTopBar}
+        mobileTopBar={mobileTopBar}
+        feedbackBanner={readingFeedbackBanner}
         audioLevel={speechRecorder.audioLevel}
         book={book}
         child={child}
         onChoosePage={() => void openPagePicker()}
         bookTitle={book.title}
         previewSnapshot={previewSnapshot}
-        controlsDisabled={
-          (uiState !== "reading" && uiState !== "tts-error") ||
-          (isBusy && !speechPlayer.isPlaying) ||
-          (retryMode && pageNavigationError !== null) ||
-          (retryMode &&
-            [
-              "preparing-microphone",
-              "playing-instruction",
-              "playing-sample",
-            ].includes(retryFeedback))
-        }
+        controlsDisabled={controlsDisabled}
         selfCorrectedWordIds={retryConfirmedWordIds}
         unresolvedWordIds={unresolvedRetryWordIds}
         uncertainWordIds={uncertainWordIds}
@@ -7651,19 +7886,12 @@ function ReadingSessionScreen({
         }
         countdown={countdown}
         currentWordId={previewSnapshot?.currentWordId ?? currentWordId}
-        currentWordText={
-          retryMode
-            ? (retryCandidates[retryWordPosition]?.text ?? null)
-            : (page.words.find(
-                (w) =>
-                  w.word_id ===
-                  (previewSnapshot?.currentWordId ?? currentWordId),
-              )?.text ?? null)
-        }
+        currentWordText={currentWordText}
         exitHref={detailHref}
         onExit={() => setConfirmFinish(true)}
         voiceSettings={
           <ReadingVoiceSettings
+            buttonClassName={READING_DOCK_BUTTON_CLASS}
             disabled={isMicRecording}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}
@@ -7852,13 +8080,179 @@ function ReadingSessionScreen({
             </div>
           ) : null
         }
+      />
+      {isMobile && !isMobileSheetOpen ? (
+        <div className="sr-only">
+          <VoiceEngineBadge compact />
+        </div>
+      ) : null}
+      <Modal
+        closeOnBackdropClick
+        isOpen={isMobileSheetOpen}
+        mobilePresentation="sheet"
+        onClose={() => setPageOptionsOpen(false)}
+        title={t("session.pageOptionsAria")}
       >
-        {uiState === "page-turn" ? (
-          <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
-            {t("session.navigatingAndAligning")}
-          </StatusBanner>
-        ) : null}
-      </ReadingLayout>
+        <div className="space-y-4">
+          <div className="space-y-2 rounded-card border border-border bg-white p-3.5">
+            <p
+              className="viread-learning-content text-base font-extrabold text-ink"
+              dir="ltr"
+              lang="vi"
+            >
+              {book.title}
+            </p>
+            <p className="text-xs font-bold text-primary">
+              {child.alias} ·{" "}
+              {tc("switcher.gradeLabel", { grade: child.grade })}
+            </p>
+            <VoiceEngineBadge />
+          </div>
+
+          <div className="space-y-2">
+            <div
+              aria-label={t("pageViewer.readingModeSwitcherAria")}
+              className="grid grid-cols-1 gap-2"
+              data-testid="reading-mode-switcher"
+              role="tablist"
+            >
+              {pageHasVerifiedIllustration ? (
+                <button
+                  aria-selected={activeMobileReadingMode === "ILLUSTRATED"}
+                  className={cn(
+                    "flex min-h-11 items-center gap-2 rounded-control border px-3.5 py-2 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                    activeMobileReadingMode === "ILLUSTRATED"
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:bg-canvas",
+                  )}
+                  onClick={() => {
+                    setReadingMode("ILLUSTRATED");
+                    setPageOptionsOpen(false);
+                  }}
+                  role="tab"
+                  title={t("pageViewer.readingModeIllustratedTitle")}
+                  type="button"
+                >
+                  <ImageIcon aria-hidden="true" className="size-4 shrink-0" />
+                  {t("pageViewer.readingModeIllustrated")}
+                </button>
+              ) : null}
+              <button
+                aria-selected={activeMobileReadingMode === "TEXT"}
+                className={cn(
+                  "flex min-h-11 items-center gap-2 rounded-control border px-3.5 py-2 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  activeMobileReadingMode === "TEXT"
+                    ? "border-primary bg-primary text-white shadow-xs"
+                    : "border-border bg-white text-ink hover:bg-canvas",
+                )}
+                onClick={() => {
+                  setReadingMode("TEXT");
+                  setPageOptionsOpen(false);
+                }}
+                role="tab"
+                title={t("pageViewer.readingModeTextTitle")}
+                type="button"
+              >
+                <BookOpen aria-hidden="true" className="size-4 shrink-0" />
+                {t("pageViewer.readingModeText")}
+              </button>
+              {page.image_url ? (
+                <button
+                  aria-selected={activeMobileReadingMode === "ORIGINAL"}
+                  className={cn(
+                    "flex min-h-11 items-center gap-2 rounded-control border px-3.5 py-2 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                    activeMobileReadingMode === "ORIGINAL"
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:bg-canvas",
+                  )}
+                  onClick={() => {
+                    setReadingMode("ORIGINAL");
+                    setPageOptionsOpen(false);
+                  }}
+                  role="tab"
+                  title={t("pageViewer.readingModeOriginalTitle")}
+                  type="button"
+                >
+                  <Eye aria-hidden="true" className="size-4 shrink-0" />
+                  {t("pageViewer.readingModeOriginal")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {pageProgress ? (
+            <div className="space-y-1.5 rounded-card border border-border bg-white p-3.5 text-sm">
+              <p
+                data-reading-range-label="true"
+                className="font-semibold text-ink"
+              >
+                {t("preparation.rangeSummary", {
+                  start: formatNumber(pageProgress.start_page_number),
+                  end: formatNumber(pageProgress.end_page_number),
+                })}
+              </p>
+              <p
+                data-reading-page-summary="true"
+                className="text-muted"
+                aria-live="polite"
+              >
+                {t("session.pageProgressDetail", {
+                  page: formatNumber(pageProgress.current_page_number),
+                  index: formatNumber(pageProgress.current_index + 1),
+                  total: formatNumber(pageProgress.total_pages),
+                  completed: formatNumber(pageProgress.completed_pages),
+                })}
+              </p>
+              {pageProgress.current_index === pageProgress.total_pages - 1 ? (
+                <p
+                  data-reading-end-hint="true"
+                  className="pt-1 text-xs font-semibold text-primary"
+                  role="status"
+                >
+                  {t("session.lastPageHint")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            {!retryMode ? (
+              <Button
+                disabled={
+                  isBusy ||
+                  (uiState !== "reading" &&
+                    uiState !== "paused" &&
+                    uiState !== "tts-error")
+                }
+                onClick={() => {
+                  setPageOptionsOpen(false);
+                  void openPagePicker();
+                }}
+                size="touch"
+                variant="secondary"
+              >
+                <BookOpen aria-hidden="true" className="size-4 shrink-0" />
+                {t("controls.choosePage")}
+              </Button>
+            ) : null}
+            {pageProgress?.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                disabled={isBusy || uiState !== "reading"}
+                onClick={() => {
+                  setPageOptionsOpen(false);
+                  void confirmCurrentPageCompleted();
+                }}
+                size="touch"
+                variant="quiet"
+              >
+                {t("session.markPageDone")}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Modal>
       {pickerIndex !== null && pageProgress ? (
         <Modal
           isOpen
@@ -8049,12 +8443,12 @@ function ReadingSessionScreen({
               : t("session.reconnectingBannerFallback")
           }
         />
-      ) : uiState === "tts-error" || tutorOpen ? (
+      ) : tutorOpen ? (
         <TutorMessage
           action={tutorAction}
           isPlaying={speechPlayer.isPlaying}
           isRetrying={isBusy}
-          nonBlocking={uiState === "tts-error" && !tutorOpen}
+          nonBlocking={false}
           onClose={closeTutor}
           onRetry={() => void retryTutor()}
           ttsFailed={uiState === "tts-error"}

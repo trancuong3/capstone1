@@ -16,7 +16,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -132,9 +132,12 @@ export function StudioTasksPageScreen({
   service: injectedService,
 }: StudioTasksPageScreenProps) {
   const taskCenter = useOptionalAiTaskCenter();
-  const useProviderData = Boolean(
-    !injectedService && taskCenter && taskCenter.scopeKey,
-  );
+  const providerScopeKey = taskCenter?.scopeKey ?? null;
+  const useProviderData = Boolean(!injectedService && providerScopeKey);
+  const taskCenterRefreshRef = useRef(taskCenter?.refresh);
+  useEffect(() => {
+    taskCenterRefreshRef.current = taskCenter?.refresh;
+  }, [taskCenter?.refresh]);
   const fallbackService = useMemo(
     () => injectedService ?? createGlobalTasksService(),
     [injectedService],
@@ -180,9 +183,9 @@ export function StudioTasksPageScreen({
   );
 
   useEffect(() => {
-    if (useProviderData && taskCenter) {
+    if (useProviderData && providerScopeKey) {
       const timer = globalThis.setTimeout(() => {
-        void taskCenter.refresh();
+        void taskCenterRefreshRef.current?.();
       }, 0);
       return () => globalThis.clearTimeout(timer);
     }
@@ -237,7 +240,7 @@ export function StudioTasksPageScreen({
         window.removeEventListener("viread:android-resume", handleSync);
       }
     };
-  }, [fallbackService, taskCenter, useProviderData]);
+  }, [fallbackService, providerScopeKey, useProviderData]);
 
   const tasks: readonly GlobalTaskItem[] = useMemo(
     () =>
@@ -393,7 +396,7 @@ export function StudioTasksPageScreen({
   return (
     <section
       aria-labelledby="studio-tasks-heading"
-      className="mx-auto flex w-full max-w-[1160px] flex-col gap-5 px-4 py-6 sm:px-6"
+      className="mx-auto flex w-full max-w-[1160px] flex-col gap-5 pb-6 sm:px-6 sm:py-6"
       data-testid="studio-tasks-page"
     >
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -423,7 +426,7 @@ export function StudioTasksPageScreen({
             {viewMode === "admin" ? "Về kho sách quản trị" : "Về sách của tôi"}
           </Link>
           <Button
-            className="min-h-11 w-auto px-4 text-xs"
+            className="min-h-11 w-auto px-4 py-2 text-xs"
             disabled={isRefreshing}
             fullWidth={false}
             isLoading={isRefreshing}
@@ -500,7 +503,7 @@ export function StudioTasksPageScreen({
       <Card className="flex flex-col gap-3 bg-white p-4">
         <div
           aria-label="Lọc tác vụ theo trạng thái"
-          className="flex flex-wrap gap-2"
+          className="no-scrollbar flex flex-nowrap gap-2 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible sm:pb-0"
           role="group"
         >
           {statusFilterOptions.map((option) => {
@@ -509,7 +512,7 @@ export function StudioTasksPageScreen({
               <button
                 aria-pressed={selected}
                 className={cn(
-                  "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  "inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
                   selected
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -536,17 +539,19 @@ export function StudioTasksPageScreen({
 
         <div
           aria-label="Lọc tác vụ theo vai trò"
-          className="flex flex-wrap items-center gap-2 border-t border-border pt-3"
+          className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto border-t border-border pt-3 sm:flex-wrap sm:overflow-visible"
           role="group"
         >
-          <span className="text-xs font-semibold text-muted">Vai trò:</span>
+          <span className="shrink-0 text-xs font-semibold text-muted">
+            Vai trò:
+          </span>
           {roleFilterOptions.map((option) => {
             const selected = roleFilter === option.value;
             return (
               <button
                 aria-pressed={selected}
                 className={cn(
-                  "inline-flex min-h-11 items-center rounded-control border px-3 text-xs font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  "inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-control border px-3 text-xs font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
                   selected
                     ? "border-primary bg-sky text-primary-hover"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -771,7 +776,7 @@ export function StudioTasksPageScreen({
                     task.status === "PARTIAL_SUCCESS" ||
                     task.status === "WAITING_FOR_REVIEW") ? (
                     <Link
-                      className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-bold text-white transition-colors hover:bg-primary-hover"
+                      className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-bold text-white transition-colors hover:bg-primary-hover sm:ms-auto sm:w-auto"
                       href={task.result_href}
                     >
                       Xem kết quả

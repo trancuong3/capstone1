@@ -43,6 +43,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
@@ -363,6 +364,7 @@ function renderStars(count: number, ariaLabel: string) {
 
 export function PictureDescriptionScreen() {
   const t = useTranslations("entertainment");
+  const isMobile = useIsMobileViewport();
   const defaultGameError = t("pictureDescription.defaultError");
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
@@ -449,6 +451,22 @@ export function PictureDescriptionScreen() {
   useEffect(() => {
     sessionIdRef.current = session?.session_id ?? null;
   }, [session?.session_id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("viread:immersive-mode", {
+        detail: { active: isMobile && session !== null },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: false },
+        }),
+      );
+    };
+  }, [isMobile, session]);
 
   useEffect(() => {
     if (!uploadPreviewUrl) return;
@@ -1237,7 +1255,7 @@ export function PictureDescriptionScreen() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>{t("pictureDescription.childLoadError")}</span>
             <Button
-              className="w-auto"
+              fullWidth={false}
               onClick={retryChild}
               size="compact"
               variant="secondary"
@@ -1293,10 +1311,24 @@ export function PictureDescriptionScreen() {
       ).length
     : 0;
 
+  const handleExitSessionToPicker = () => {
+    stopSpeechPlayback();
+    abortActiveVoiceCapture({ preserveDraft: false });
+    sessionIdRef.current = null;
+    setShowHints(false);
+    setShowSampleSentences(false);
+    setActiveFollowUpQuestion(null);
+    setPracticeTab("PRACTICE");
+    setSession(null);
+    setSelectedAttemptId(null);
+    setActionError(null);
+    setEvaluateError(null);
+  };
+
   return (
     <section
       className={cn(
-        "mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8",
+        "mx-auto flex w-full max-w-[1130px] flex-col gap-4 pb-4 sm:gap-6 sm:pb-8",
         reducedMotion && "motion-reduce",
       )}
       data-calm-sound={calmSound ? "true" : "false"}
@@ -1308,65 +1340,100 @@ export function PictureDescriptionScreen() {
         backHref="/entertainment"
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link
-            className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
-            href="/entertainment"
-          >
-            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
-            {t("pictureDescription.backLink")}
-          </Link>
-          <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
+      {isMobile ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
+          <h1 className="min-w-0 text-xl font-extrabold text-ink">
             {t("pictureDescription.heading")}
           </h1>
-          <p className="text-body text-muted">{t("pictureDescription.lead")}</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            aria-pressed={!calmSound}
-            className="min-h-11"
-            onClick={toggleCalmSound}
-            size="compact"
-            type="button"
-            variant="quiet"
-          >
-            {calmSound ? (
-              <Volume2 aria-hidden="true" className="size-4" />
-            ) : (
-              <VolumeX aria-hidden="true" className="size-4" />
-            )}
-            {calmSound ? t("hub.calmSound") : t("hub.soundMuted")}
-          </Button>
-          {session ? (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
-              onClick={() => {
-                stopSpeechPlayback();
-                abortActiveVoiceCapture({ preserveDraft: false });
-                sessionIdRef.current = null;
-                setShowHints(false);
-                setShowSampleSentences(false);
-                setActiveFollowUpQuestion(null);
-                setPracticeTab("PRACTICE");
-                setSession(null);
-                setSelectedAttemptId(null);
-                setActionError(null);
-                setEvaluateError(null);
-              }}
-              size="compact"
+              aria-pressed={!calmSound}
+              fullWidth={false}
+              onClick={toggleCalmSound}
+              size="touch"
               type="button"
-              variant="secondary"
+              variant="quiet"
+            >
+              {calmSound ? (
+                <Volume2 aria-hidden="true" className="size-4" />
+              ) : (
+                <VolumeX aria-hidden="true" className="size-4" />
+              )}
+              {calmSound ? t("hub.calmSound") : t("hub.soundMuted")}
+            </Button>
+            {session ? (
+              <Button
+                fullWidth={false}
+                onClick={handleExitSessionToPicker}
+                size="touch"
+                type="button"
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+                {t("pictureDescription.chooseAnotherPicture")}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <Link
+              className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+              href="/entertainment"
             >
               <ArrowLeft
                 aria-hidden="true"
                 className="viread-rtl-flip size-4"
               />
-              {t("pictureDescription.chooseAnotherPicture")}
+              {t("pictureDescription.backLink")}
+            </Link>
+            <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
+              {t("pictureDescription.heading")}
+            </h1>
+            <p className="text-body text-muted">
+              {t("pictureDescription.lead")}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              aria-pressed={!calmSound}
+              className="min-h-11"
+              fullWidth={false}
+              onClick={toggleCalmSound}
+              size="compact"
+              type="button"
+              variant="quiet"
+            >
+              {calmSound ? (
+                <Volume2 aria-hidden="true" className="size-4" />
+              ) : (
+                <VolumeX aria-hidden="true" className="size-4" />
+              )}
+              {calmSound ? t("hub.calmSound") : t("hub.soundMuted")}
             </Button>
-          ) : null}
+            {session ? (
+              <Button
+                fullWidth={false}
+                onClick={handleExitSessionToPicker}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+                {t("pictureDescription.chooseAnotherPicture")}
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
 
       {actionError ? (
         <StatusMessage tone="error">{actionError}</StatusMessage>
@@ -1456,7 +1523,7 @@ export function PictureDescriptionScreen() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span>{catalogState.message}</span>
                     <Button
-                      className="w-auto"
+                      fullWidth={false}
                       onClick={() => {
                         setCatalogState({ status: "loading" });
                         setCatalogRefreshKey((value) => value + 1);
@@ -1872,11 +1939,11 @@ export function PictureDescriptionScreen() {
       ) : null}
 
       {session && !isAnalyzing ? (
-        <div className="grid items-start gap-6 lg:grid-cols-[1fr_1.15fr]">
+        <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-[1fr_1.15fr]">
           {/* Picture Frame */}
-          <div className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold text-primary">
                   {t("pictureDescription.sourceGradeBadge", {
                     source: sourceLabel(session.source_type, t),
@@ -1884,7 +1951,7 @@ export function PictureDescriptionScreen() {
                   })}
                 </span>
                 <h2
-                  className="viread-learning-content mt-2 text-xl font-extrabold text-ink"
+                  className="viread-learning-content mt-1.5 text-lg font-extrabold text-ink sm:mt-2 sm:text-xl"
                   dir="ltr"
                   lang="vi"
                 >
@@ -1913,12 +1980,12 @@ export function PictureDescriptionScreen() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 alt={session.scene_title}
-                className="max-h-[420px] w-full object-contain"
+                className="max-h-52 w-full object-contain sm:max-h-[420px]"
                 src={session.image_url}
               />
             </div>
 
-            <div className="rounded-control bg-sky/25 p-3.5">
+            <div className="rounded-control bg-sky/25 p-2.5 sm:p-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
                   {isLowerGrade
@@ -1928,7 +1995,7 @@ export function PictureDescriptionScreen() {
                 {isUpperGrade ? (
                   <button
                     aria-expanded={showGradeHintChips}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-primary shadow-2xs transition-colors hover:bg-sky"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-primary shadow-2xs transition-colors hover:bg-sky sm:min-h-9 sm:px-2.5"
                     data-testid="toggle-grade-hint-chips"
                     onClick={() => setShowGradeHintChips((value) => !value)}
                     type="button"
@@ -1950,11 +2017,11 @@ export function PictureDescriptionScreen() {
 
               {showGradeHintChips ? (
                 <div
-                  className="mt-2 space-y-2.5"
+                  className="mt-2 space-y-2 sm:space-y-2.5"
                   data-testid="grade-hint-chips"
                 >
                   {isLowerGrade ? (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-primary/20 bg-white px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-primary/20 bg-white px-2.5 py-2 sm:px-3">
                       <div className="flex flex-wrap gap-1.5">
                         {GRADE_1_2_VISUAL_HINT_CHIPS.map((chip) => (
                           <span
@@ -1970,13 +2037,14 @@ export function PictureDescriptionScreen() {
                       </div>
                       <Button
                         disabled={!calmSound}
+                        fullWidth={false}
                         onClick={() =>
                           void speakVietnamese(
                             t(activeModeSpec.audioHintKey),
                             `mode-audio:${teachingMode}`,
                           )
                         }
-                        size="compact"
+                        size={isMobile ? "touch" : "compact"}
                         type="button"
                         variant="secondary"
                       >
@@ -1994,10 +2062,10 @@ export function PictureDescriptionScreen() {
                       </Button>
                     </div>
                   ) : null}
-                  <ol className="grid gap-2 sm:grid-cols-3">
+                  <ol className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     {STORYTELLING_STEPS.map((item) => (
                       <li
-                        className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
+                        className="rounded-control bg-white/90 p-2 text-[11px] leading-tight shadow-2xs sm:p-2.5 sm:text-xs sm:leading-normal"
                         key={item.step}
                       >
                         <span className="font-extrabold text-primary">
@@ -2008,7 +2076,9 @@ export function PictureDescriptionScreen() {
                         <span className="font-bold text-ink">
                           {t(item.titleKey)}
                         </span>
-                        <p className="mt-0.5 text-muted">{t(item.detailKey)}</p>
+                        <p className="mt-0.5 hidden text-muted sm:block">
+                          {t(item.detailKey)}
+                        </p>
                       </li>
                     ))}
                   </ol>
@@ -2024,7 +2094,7 @@ export function PictureDescriptionScreen() {
           </div>
 
           {/* Interactive Recording + Optional Collapsed Hints + Evaluation Column */}
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-4 sm:gap-5">
             <div
               aria-label={t("pictureDescription.modeTabsAria")}
               className="flex flex-wrap gap-2 rounded-card border border-border bg-white p-2 shadow-sm"
@@ -2033,7 +2103,7 @@ export function PictureDescriptionScreen() {
               <button
                 aria-selected={practiceTab === "PRACTICE"}
                 className={
-                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                  "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                   (practiceTab === "PRACTICE"
                     ? "bg-primary text-white shadow-sm"
                     : "bg-sky/40 text-ink hover:bg-sky")
@@ -2049,7 +2119,7 @@ export function PictureDescriptionScreen() {
               <button
                 aria-selected={practiceTab === "RESULT"}
                 className={
-                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 " +
+                  "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 " +
                   (practiceTab === "RESULT"
                     ? "bg-primary text-white shadow-sm"
                     : "bg-sky/40 text-ink hover:bg-sky")
@@ -2096,13 +2166,14 @@ export function PictureDescriptionScreen() {
                     </p>
                     <Button
                       disabled={!calmSound}
+                      fullWidth={false}
                       onClick={() =>
                         void speakVietnamese(
                           t(activeModeSpec.audioHintKey),
                           `mode-cue:${teachingMode}`,
                         )
                       }
-                      size="compact"
+                      size={isMobile ? "touch" : "compact"}
                       type="button"
                       variant="secondary"
                     >
@@ -2131,7 +2202,7 @@ export function PictureDescriptionScreen() {
                         <button
                           aria-pressed={active}
                           className={
-                            "min-h-9 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                            "min-h-11 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-9 sm:py-1.5 " +
                             (active
                               ? "border-primary bg-primary text-white shadow-2xs"
                               : "border-border bg-sky/30 text-ink hover:border-primary hover:bg-sky")
@@ -2171,7 +2242,7 @@ export function PictureDescriptionScreen() {
                           return (
                             <button
                               className={
-                                "viread-learning-content inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors " +
+                                "viread-learning-content inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors " +
                                 (used
                                   ? "border-success-ink/40 bg-success-surface text-success-ink"
                                   : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100")
@@ -2221,13 +2292,14 @@ export function PictureDescriptionScreen() {
                       </p>
                       <Button
                         disabled={!calmSound}
+                        fullWidth={false}
                         onClick={() =>
                           void speakVietnamese(
                             activeFollowUpQuestion,
                             "practice-followup",
                           )
                         }
-                        size="compact"
+                        size={isMobile ? "touch" : "compact"}
                         type="button"
                         variant="secondary"
                       >
@@ -2303,8 +2375,9 @@ export function PictureDescriptionScreen() {
                             disabled={
                               isRecordingVoice || isTranscribing || isEvaluating
                             }
+                            fullWidth={false}
                             onClick={handleClearDraft}
-                            size="compact"
+                            size={isMobile ? "touch" : "compact"}
                             type="button"
                             variant="secondary"
                           >
@@ -2313,13 +2386,14 @@ export function PictureDescriptionScreen() {
                           </Button>
                           <Button
                             disabled={isRecordingVoice || isTranscribing}
+                            fullWidth={false}
                             onClick={() =>
                               void speakVietnamese(
                                 descriptionText,
                                 "draft-description",
                               )
                             }
-                            size="compact"
+                            size={isMobile ? "touch" : "compact"}
                             type="button"
                             variant="secondary"
                           >
@@ -2347,8 +2421,9 @@ export function PictureDescriptionScreen() {
                       {!isRecordingVoice ? (
                         <Button
                           disabled={isTranscribing || isEvaluating}
+                          fullWidth={false}
                           onClick={() => void startVoiceRecording()}
-                          size="compact"
+                          size={isMobile ? "touch" : "compact"}
                           type="button"
                           variant="secondary"
                         >
@@ -2357,8 +2432,9 @@ export function PictureDescriptionScreen() {
                         </Button>
                       ) : (
                         <Button
+                          fullWidth={false}
                           onClick={() => void stopVoiceRecording()}
-                          size="compact"
+                          size={isMobile ? "touch" : "compact"}
                           type="button"
                           variant="destructive"
                         >
@@ -2494,6 +2570,7 @@ export function PictureDescriptionScreen() {
                           <span>{evaluateError}</span>
                           <Button
                             disabled={isEvaluating || !descriptionText.trim()}
+                            fullWidth={false}
                             onClick={() => void handleEvaluate()}
                             size="compact"
                             type="button"
@@ -2532,6 +2609,7 @@ export function PictureDescriptionScreen() {
                         isTranscribing ||
                         !descriptionText.trim()
                       }
+                      fullWidth={isMobile}
                       onClick={() => void handleEvaluate()}
                       type="button"
                     >
@@ -2565,8 +2643,9 @@ export function PictureDescriptionScreen() {
                     </div>
                     <Button
                       aria-expanded={showHints}
+                      fullWidth={false}
                       onClick={() => setShowHints((value) => !value)}
-                      size="compact"
+                      size={isMobile ? "touch" : "compact"}
                       type="button"
                       variant="secondary"
                     >
@@ -2591,13 +2670,14 @@ export function PictureDescriptionScreen() {
                           {t("pictureDescription.guidingQuestionsTitle")}
                         </p>
                         <Button
+                          fullWidth={false}
                           onClick={() =>
                             void speakVietnamese(
                               session.guide.guiding_questions.join(" "),
                               "guide",
                             )
                           }
-                          size="compact"
+                          size={isMobile ? "touch" : "compact"}
                           type="button"
                           variant="secondary"
                         >
@@ -2651,7 +2731,7 @@ export function PictureDescriptionScreen() {
                             return (
                               <button
                                 className={
-                                  "viread-learning-content inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                                  "viread-learning-content inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                                   (active
                                     ? "border-primary bg-primary text-white"
                                     : used
@@ -2705,10 +2785,11 @@ export function PictureDescriptionScreen() {
                               selectedVocabWord,
                             ) ? (
                               <Button
+                                fullWidth={false}
                                 onClick={() =>
                                   handleInsertVocabWord(selectedVocabWord)
                                 }
-                                size="compact"
+                                size={isMobile ? "touch" : "compact"}
                                 type="button"
                                 variant="secondary"
                               >
@@ -2728,7 +2809,7 @@ export function PictureDescriptionScreen() {
                         ) : (
                           <>
                             <button
-                              className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+                              className="inline-flex min-h-11 items-center gap-2 py-2 text-sm font-extrabold text-primary hover:underline"
                               onClick={() =>
                                 setShowSampleSentences((value) => !value)
                               }
@@ -2765,13 +2846,14 @@ export function PictureDescriptionScreen() {
                                         “{sentence}”
                                       </span>
                                       <Button
+                                        fullWidth={false}
                                         onClick={() =>
                                           void speakVietnamese(
                                             sentence,
                                             `sample-sentence:${idx}`,
                                           )
                                         }
-                                        size="compact"
+                                        size={isMobile ? "touch" : "compact"}
                                         type="button"
                                         variant="secondary"
                                       >
@@ -2818,7 +2900,7 @@ export function PictureDescriptionScreen() {
                         <button
                           aria-pressed={isSelected}
                           className={
-                            "rounded-full px-3 py-1 text-xs font-extrabold transition-colors " +
+                            "min-h-11 rounded-full px-3.5 py-2 text-xs font-extrabold transition-colors " +
                             (isSelected
                               ? "bg-primary text-white shadow-2xs"
                               : "bg-sky/40 text-ink hover:bg-sky")
@@ -2882,13 +2964,14 @@ export function PictureDescriptionScreen() {
                     ) : null}
                   </div>
                   <Button
+                    fullWidth={false}
                     onClick={() =>
                       void speakVietnamese(
                         `${activeAttempt.feedback.praise_message} ${activeAttempt.feedback.improvement_tip}`,
                         `feedback:${activeAttempt.attempt_id}`,
                       )
                     }
-                    size="compact"
+                    size={isMobile ? "touch" : "compact"}
                     type="button"
                     variant="secondary"
                   >
@@ -2916,6 +2999,7 @@ export function PictureDescriptionScreen() {
                         </span>
                         <Button
                           disabled={isEvaluating}
+                          fullWidth={false}
                           onClick={() =>
                             void handleEvaluate(
                               activeAttempt.transcript_text,
@@ -2923,7 +3007,7 @@ export function PictureDescriptionScreen() {
                               { allowDuplicate: true },
                             )
                           }
-                          size="compact"
+                          size={isMobile ? "touch" : "compact"}
                           type="button"
                           variant="secondary"
                         >
@@ -3057,13 +3141,14 @@ export function PictureDescriptionScreen() {
                                 “{sentence}”
                               </span>
                               <Button
+                                fullWidth={false}
                                 onClick={() =>
                                   void speakVietnamese(
                                     sentence,
                                     `upgraded:${activeAttempt.attempt_id}:${index}`,
                                   )
                                 }
-                                size="compact"
+                                size={isMobile ? "touch" : "compact"}
                                 type="button"
                                 variant="secondary"
                               >
@@ -3122,7 +3207,7 @@ export function PictureDescriptionScreen() {
                         {activeAttempt.feedback.vocabulary_highlights.map(
                           (word) => (
                             <button
-                              className="viread-learning-content inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
+                              className="viread-learning-content inline-flex min-h-11 items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3.5 py-2 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
                               dir="ltr"
                               key={word}
                               lang="vi"
@@ -3170,13 +3255,14 @@ export function PictureDescriptionScreen() {
                       </div>
                       <Button
                         disabled={!calmSound}
+                        fullWidth={false}
                         onClick={() =>
                           void speakVietnamese(
                             activeAttempt.feedback.next_prompt_question ?? "",
                             `followup:${activeAttempt.attempt_id}`,
                           )
                         }
-                        size="compact"
+                        size={isMobile ? "touch" : "compact"}
                         type="button"
                         variant="secondary"
                       >
@@ -3196,6 +3282,7 @@ export function PictureDescriptionScreen() {
                     </p>
                     <div className="mt-3">
                       <Button
+                        fullWidth={false}
                         onClick={() => {
                           stopSpeechPlayback();
                           setActiveFollowUpQuestion(
@@ -3206,7 +3293,7 @@ export function PictureDescriptionScreen() {
                           setVoiceMessage(null);
                           setPracticeTab("PRACTICE");
                         }}
-                        size="compact"
+                        size={isMobile ? "touch" : "compact"}
                         type="button"
                         variant="secondary"
                       >
@@ -3218,6 +3305,7 @@ export function PictureDescriptionScreen() {
 
                 <div className="mt-4 flex flex-wrap justify-end gap-2.5">
                   <Button
+                    fullWidth={false}
                     onClick={() => {
                       stopSpeechPlayback();
                       setDescriptionText(activeAttempt.transcript_text);
@@ -3225,7 +3313,7 @@ export function PictureDescriptionScreen() {
                       setVoiceMessage(null);
                       setPracticeTab("PRACTICE");
                     }}
-                    size="compact"
+                    size={isMobile ? "touch" : "compact"}
                     type="button"
                     variant="secondary"
                   >
@@ -3233,6 +3321,7 @@ export function PictureDescriptionScreen() {
                     {t("pictureDescription.editPreviousDraft")}
                   </Button>
                   <Button
+                    fullWidth={false}
                     onClick={() => {
                       stopSpeechPlayback();
                       setDescriptionText("");
@@ -3240,7 +3329,7 @@ export function PictureDescriptionScreen() {
                       setVoiceMessage(null);
                       setPracticeTab("PRACTICE");
                     }}
-                    size="compact"
+                    size={isMobile ? "touch" : "compact"}
                     type="button"
                   >
                     <RefreshCw aria-hidden="true" className="size-4" />

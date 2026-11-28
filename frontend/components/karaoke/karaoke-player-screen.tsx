@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KaraokeChildBoundary } from "@/components/karaoke/karaoke-child-boundary";
 import {
@@ -10,6 +12,7 @@ import { useKaraokeService } from "@/components/karaoke/karaoke-services-provide
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useKaraokePlayer } from "@/hooks/use-karaoke-player";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
@@ -28,12 +31,36 @@ export function KaraokePlayerScreen({
   songId: string;
   expectedVersionId?: string;
 }) {
+  const isMobile = useIsMobileViewport();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: isMobile },
+        }),
+      );
+    });
+    return () => {
+      cancelled = true;
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: false },
+        }),
+      );
+    };
+  }, [isMobile]);
+
   return (
     <KaraokeChildBoundary>
       {(child) => (
         <Song
           key={`${child.id}:${child.grade}:${songId}:${expectedVersionId ?? "latest"}`}
           child={child}
+          isMobile={isMobile}
           songId={songId}
           expectedVersionId={expectedVersionId}
         />
@@ -44,10 +71,12 @@ export function KaraokePlayerScreen({
 
 function Song({
   child,
+  isMobile,
   songId,
   expectedVersionId,
 }: {
   child: ChildProfileDTO;
+  isMobile: boolean;
   songId: string;
   expectedVersionId?: string;
 }) {
@@ -57,13 +86,48 @@ function Song({
     attempt: 0,
   });
   return (
-    <section className="mx-auto grid w-full max-w-[960px] gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <SelectedChildIdentity child={child} />
-        <ButtonLink href="/karaoke" variant="secondary" className="sm:w-auto">
-          {t("karaoke.playerScreen.backToLibrary")}
-        </ButtonLink>
-      </div>
+    <section
+      className={
+        isMobile
+          ? "mx-auto grid w-full max-w-[960px] gap-3.5"
+          : "mx-auto grid w-full max-w-[960px] gap-6"
+      }
+    >
+      {isMobile ? (
+        <div className="flex min-h-12 items-center justify-between gap-2">
+          <ButtonLink
+            className="border border-border shadow-xs"
+            fullWidth={false}
+            href="/karaoke"
+            size="touch"
+            variant="quiet"
+          >
+            <ArrowLeft
+              aria-hidden="true"
+              className="viread-rtl-flip size-4 shrink-0"
+            />
+            {t("karaoke.playerScreen.backToLibrary")}
+          </ButtonLink>
+          <Link
+            className="inline-flex min-h-11 max-w-[152px] shrink-0 items-center truncate rounded-full border border-border bg-sky/80 px-3 text-xs font-bold text-primary-hover focus-visible:outline-3 focus-visible:outline-primary"
+            href="/dashboard?focus=child-selection"
+          >
+            <span className="truncate">
+              {t("hub.childOptionLabel", {
+                alias: child.alias,
+                grade: child.grade,
+              })}
+            </span>
+          </Link>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <SelectedChildIdentity child={child} />
+          <ButtonLink fullWidth={false} href="/karaoke" variant="secondary">
+            {t("karaoke.playerScreen.backToLibrary")}
+          </ButtonLink>
+        </div>
+      )}
       <Playback
         key={`${request.version ?? "latest"}:${request.attempt}`}
         child={child}
@@ -212,7 +276,8 @@ function Playback({
       >
         {state.message}
         <Button
-          className="mt-3 sm:w-auto"
+          className="mt-3"
+          fullWidth={false}
           variant="secondary"
           onClick={() =>
             onRefresh(state.conflict ? undefined : expectedVersionId)

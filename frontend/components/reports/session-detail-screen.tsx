@@ -7,6 +7,8 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
+import { MobileSessionDetail } from "@/components/reports/mobile-session-detail";
 import { SessionEventList } from "@/components/reports/session-event-list";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -44,6 +46,7 @@ export function SessionDetailScreen({
 }) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const isMobile = useIsMobileViewport();
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -372,148 +375,232 @@ export function SessionDetailScreen({
     </section>
   );
 
-  return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 max-w-3xl space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
-            >
-              {stateLabel}
-            </span>
-            {rangeIsPartial ? (
-              <span className="inline-flex items-center rounded-control border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
-                {t("sessions.detail.partialCompleteBadge")}
-              </span>
-            ) : null}
-          </div>
-          <h1 className="book-title text-3xl text-ink sm:text-[38px]">
-            {pageTitle}
-          </h1>
-          <p className="text-base font-bold text-ink">
-            <span className="viread-learning-content" dir="ltr" lang="vi">
-              {state.book.title}
-            </span>
-            <span className="font-semibold text-muted">
-              {" "}
-              · {state.child.alias}
-            </span>
-          </p>
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
-            <div className="flex gap-1.5">
-              <dt>{t("sessions.detail.startedLabel")}</dt>
-              <dd className="tabular-nums text-ink">
-                {formatSessionDateTime(detail.started_at)}
-              </dd>
-            </div>
-            <div className="flex gap-1.5">
-              <dt>{t("sessions.detail.endedLabel")}</dt>
-              <dd className="tabular-nums text-ink">
-                {detail.ended_at === null
-                  ? t("sessions.detail.endedMissing")
-                  : formatSessionDateTime(detail.ended_at)}
-              </dd>
-            </div>
-          </dl>
-        </div>
+  const readingReportsSlot = <SessionReadingReports sessionId={sessionId} />;
 
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <ButtonLink
-            className="sm:w-auto"
-            href={returnHref}
-            variant="secondary"
-          >
-            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
-            {t("sessions.detail.historyLink")}
-          </ButtonLink>
-        </div>
-      </header>
-
-      {rangeIsPartial ? (
-        <StatusMessage
-          title={t("sessions.detail.partialRangeTitle")}
-          tone="info"
-        >
-          {t("sessions.detail.partialRangeDesc", {
-            total: detail.selected_range_pages ?? 0,
-            completed: detail.pages_completed ?? 0,
-          })}
-        </StatusMessage>
-      ) : null}
-
-      {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
-        <StatusMessage
-          title={t("sessions.detail.incompleteDataTitle")}
-          tone="warning"
-        >
-          {t("sessions.detail.inProgressDesc")}
-        </StatusMessage>
-      ) : null}
-
-      {detail.state === "FINISHED" && detail.ended_at === null ? (
+  const eventsSlot = (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xl font-extrabold text-ink">
+        {t("sessions.detail.eventsTitle")}
+      </h2>
+      {availability.events === "unsupported" ||
+      availability.events === "partial" ? (
         <StatusMessage tone="info">
-          {t("sessions.detail.missingEndTimeDesc")}
+          {t("sessions.detail.eventsUnsupportedNotice", {
+            scope:
+              availability.events === "partial"
+                ? t("sessions.detail.eventsPartialScope")
+                : t("sessions.detail.eventsFormatScope"),
+          })}
         </StatusMessage>
       ) : null}
+      {detail.events.length > 0 || availability.events === "absent" ? (
+        <>
+          <SessionEventList
+            events={detail.events.slice(
+              (eventsPage - 1) * EVENTS_PAGE_SIZE,
+              eventsPage * EVENTS_PAGE_SIZE,
+            )}
+          />
+          <PaginationBar
+            ariaLabel={t("sessions.detail.eventsPaginationAria")}
+            compact
+            itemLabel={t("sessions.detail.eventsPaginationItem")}
+            onPageChange={setEventsPage}
+            page={eventsPage}
+            pageSize={EVENTS_PAGE_SIZE}
+            total={detail.events.length}
+          />
+        </>
+      ) : null}
+    </section>
+  );
 
-      <section
-        aria-labelledby="session-overview-heading"
-        className="rounded-card border border-border bg-white"
-      >
-        <div className="border-b border-border px-4 py-3.5 sm:px-6">
-          <h2
-            className="text-lg font-extrabold text-ink"
-            id="session-overview-heading"
-          >
-            {t("sessions.detail.summaryTitle")}
-          </h2>
-        </div>
-
-        {availability.fluency === "unsupported" ||
-        availability.fluency === "partial" ? (
-          <div className="px-4 pt-4 sm:px-6">
-            <StatusMessage tone="info">
-              {t("sessions.detail.summaryPartialDesc")}
-            </StatusMessage>
-          </div>
-        ) : null}
-
-        <dl className="grid grid-cols-2 sm:grid-cols-3">
-          {summaryItems.map(({ label, value, isMissing }, index) => {
-            const cellBorders = [
-              "border-border p-3.5 sm:px-6 sm:py-4",
-              index % 2 === 0 ? "border-e sm:border-e-0" : "",
-              index >= 2 ? "border-t" : "",
-              index === 2 ? "sm:border-t-0" : "",
-              index >= 3 ? "sm:border-t" : "",
-              index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <div className={cellBorders} key={label}>
-                <dt className="text-xs font-bold text-muted">{label}</dt>
-                <dd
-                  className={
-                    isMissing
-                      ? "mt-1 text-sm font-semibold text-muted"
-                      : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
-                  }
+  return (
+    <section
+      className={
+        isMobile
+          ? "flex w-full flex-col gap-4 pb-2"
+          : "mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4"
+      }
+    >
+      {isMobile ? (
+        <MobileSessionDetail
+          bookTitle={state.book.title}
+          childAlias={state.child.alias}
+          endedAtIsNull={detail.ended_at === null}
+          endedAtLabel={
+            detail.ended_at === null
+              ? t("sessions.detail.endedMissing")
+              : formatSessionDateTime(detail.ended_at)
+          }
+          fluencyPartialOrUnsupported={
+            availability.fluency === "unsupported" ||
+            availability.fluency === "partial"
+          }
+          pageTitle={pageTitle}
+          pagesCompleted={detail.pages_completed}
+          rangeIsPartial={rangeIsPartial}
+          returnHref={returnHref}
+          selectedRangePages={detail.selected_range_pages}
+          sessionState={detail.state}
+          startedAtLabel={formatSessionDateTime(detail.started_at)}
+          stateBadgeClassName={statePresentation.badgeClassName}
+          stateLabel={stateLabel}
+          summaryItems={summaryItems}
+        />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
+            <div className="min-w-0 max-w-3xl space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
                 >
-                  {value}
-                </dd>
+                  {stateLabel}
+                </span>
+                {rangeIsPartial ? (
+                  <span className="inline-flex items-center rounded-control border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
+                    {t("sessions.detail.partialCompleteBadge")}
+                  </span>
+                ) : null}
               </div>
-            );
-          })}
-        </dl>
-      </section>
+              <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+                {pageTitle}
+              </h1>
+              <p className="text-base font-bold text-ink">
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {state.book.title}
+                </span>
+                <span className="font-semibold text-muted">
+                  {" "}
+                  · {state.child.alias}
+                </span>
+              </p>
+              <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
+                <div className="flex gap-1.5">
+                  <dt>{t("sessions.detail.startedLabel")}</dt>
+                  <dd className="tabular-nums text-ink">
+                    {formatSessionDateTime(detail.started_at)}
+                  </dd>
+                </div>
+                <div className="flex gap-1.5">
+                  <dt>{t("sessions.detail.endedLabel")}</dt>
+                  <dd className="tabular-nums text-ink">
+                    {detail.ended_at === null
+                      ? t("sessions.detail.endedMissing")
+                      : formatSessionDateTime(detail.ended_at)}
+                  </dd>
+                </div>
+              </dl>
+            </div>
 
-      <SessionReadingReports sessionId={sessionId} />
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <ButtonLink
+                className="sm:w-auto"
+                href={returnHref}
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+                {t("sessions.detail.historyLink")}
+              </ButtonLink>
+            </div>
+          </header>
+
+          {rangeIsPartial ? (
+            <StatusMessage
+              title={t("sessions.detail.partialRangeTitle")}
+              tone="info"
+            >
+              {t("sessions.detail.partialRangeDesc", {
+                total: detail.selected_range_pages ?? 0,
+                completed: detail.pages_completed ?? 0,
+              })}
+            </StatusMessage>
+          ) : null}
+
+          {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
+            <StatusMessage
+              title={t("sessions.detail.incompleteDataTitle")}
+              tone="warning"
+            >
+              {t("sessions.detail.inProgressDesc")}
+            </StatusMessage>
+          ) : null}
+
+          {detail.state === "FINISHED" && detail.ended_at === null ? (
+            <StatusMessage tone="info">
+              {t("sessions.detail.missingEndTimeDesc")}
+            </StatusMessage>
+          ) : null}
+
+          <section
+            aria-labelledby="session-overview-heading"
+            className="rounded-card border border-border bg-white"
+          >
+            <div className="border-b border-border px-4 py-3.5 sm:px-6">
+              <h2
+                className="text-lg font-extrabold text-ink"
+                id="session-overview-heading"
+              >
+                {t("sessions.detail.summaryTitle")}
+              </h2>
+            </div>
+
+            {availability.fluency === "unsupported" ||
+            availability.fluency === "partial" ? (
+              <div className="px-4 pt-4 sm:px-6">
+                <StatusMessage tone="info">
+                  {t("sessions.detail.summaryPartialDesc")}
+                </StatusMessage>
+              </div>
+            ) : null}
+
+            <dl className="grid grid-cols-2 sm:grid-cols-3">
+              {summaryItems.map(({ label, value, isMissing }, index) => {
+                const cellBorders = [
+                  "border-border p-3.5 sm:px-6 sm:py-4",
+                  index % 2 === 0 ? "border-e sm:border-e-0" : "",
+                  index >= 2 ? "border-t" : "",
+                  index === 2 ? "sm:border-t-0" : "",
+                  index >= 3 ? "sm:border-t" : "",
+                  index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <div className={cellBorders} key={label}>
+                    <dt className="text-xs font-bold text-muted">{label}</dt>
+                    <dd
+                      className={
+                        isMissing
+                          ? "mt-1 text-sm font-semibold text-muted"
+                          : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
+                      }
+                    >
+                      {value}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </section>
+        </div>
+      )}
+
+      {readingReportsSlot}
 
       {showComprehensionSectionDirectly ? comprehensionSection : null}
 
-      <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
+      <details
+        className={
+          isMobile
+            ? "group rounded-3xl border border-border bg-white p-4 shadow-2xs"
+            : "group rounded-card border border-border bg-white p-4 sm:p-6"
+        }
+      >
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
           <span>{t("sessions.detail.otherInfoTitle")}</span>
           <ChevronDown
@@ -521,42 +608,14 @@ export function SessionDetailScreen({
             className="size-4 shrink-0 transition-transform group-open:rotate-180"
           />
         </summary>
-        <div className="mt-4 flex flex-col gap-5 border-t border-border pt-4">
-          <section className="flex flex-col gap-3">
-            <h2 className="text-xl font-extrabold text-ink">
-              {t("sessions.detail.eventsTitle")}
-            </h2>
-            {availability.events === "unsupported" ||
-            availability.events === "partial" ? (
-              <StatusMessage tone="info">
-                {t("sessions.detail.eventsUnsupportedNotice", {
-                  scope:
-                    availability.events === "partial"
-                      ? t("sessions.detail.eventsPartialScope")
-                      : t("sessions.detail.eventsFormatScope"),
-                })}
-              </StatusMessage>
-            ) : null}
-            {detail.events.length > 0 || availability.events === "absent" ? (
-              <>
-                <SessionEventList
-                  events={detail.events.slice(
-                    (eventsPage - 1) * EVENTS_PAGE_SIZE,
-                    eventsPage * EVENTS_PAGE_SIZE,
-                  )}
-                />
-                <PaginationBar
-                  ariaLabel={t("sessions.detail.eventsPaginationAria")}
-                  compact
-                  itemLabel={t("sessions.detail.eventsPaginationItem")}
-                  onPageChange={setEventsPage}
-                  page={eventsPage}
-                  pageSize={EVENTS_PAGE_SIZE}
-                  total={detail.events.length}
-                />
-              </>
-            ) : null}
-          </section>
+        <div
+          className={
+            isMobile
+              ? "mt-3.5 flex flex-col gap-4 border-t border-border pt-3.5"
+              : "mt-4 flex flex-col gap-5 border-t border-border pt-4"
+          }
+        >
+          {eventsSlot}
 
           {!showComprehensionSectionDirectly ? comprehensionSection : null}
         </div>

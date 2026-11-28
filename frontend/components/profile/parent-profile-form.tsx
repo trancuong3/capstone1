@@ -247,7 +247,7 @@ export function ParentProfileForm({
         selectedFile={selectedAvatarFile}
       />
       {errors.avatar ? (
-        <p className="-mt-4 text-sm text-danger" role="alert">
+        <p className="mt-1 text-sm text-danger" role="alert">
           {errors.avatar}
         </p>
       ) : null}
@@ -312,7 +312,7 @@ export function ParentProfileForm({
         </p>
       </div>
       <details>
-        <summary className="cursor-pointer text-sm font-semibold text-primary">
+        <summary className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-control px-1 text-sm font-semibold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary">
           {t("parent.profile.accountDetailsSummary")}
         </summary>
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">

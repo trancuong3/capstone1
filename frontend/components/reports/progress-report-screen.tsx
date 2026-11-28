@@ -1,17 +1,19 @@
 "use client";
 
-import { ArrowRight, History, RefreshCw } from "lucide-react";
+import { ArrowRight, ChevronDown, History, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
   type MetricCardDelta,
 } from "@/components/reports/metric-card";
+import { MobileProgressReport } from "@/components/reports/mobile-progress-report";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
@@ -165,6 +167,7 @@ function ProgressReportContent({
 }: Props) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const isMobile = useIsMobileViewport();
   const { childService, reportService } = useReportServices();
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
@@ -477,384 +480,427 @@ function ProgressReportContent({
     : [];
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
-      <ReportPageHeader
-        eyebrow={t("overview.eyebrow", {
-          alias: child.alias,
-          grade: child.grade,
-        })}
-        title={t("overview.childTitle", { alias: child.alias })}
-        description={t("overview.childSubtitle")}
-        action={
-          <ButtonLink
-            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
-            href={`/sessions?childId=${encodeURIComponent(child.id)}`}
-            variant="secondary"
-          >
-            <History aria-hidden="true" className="size-4" />
-            {t("overview.readingHistoryAction")}
-          </ButtonLink>
-        }
-      />
-
-      <ProgressReportFilters
-        childrenProfiles={children}
-        childId={child.id}
-        periods={periods.items}
-        selectedPeriod={selected}
-        hasMore={periods.next_cursor !== null}
-        loadingMore={loadingMore}
-        onLoadMore={() => void loadMore()}
-      />
-
-      {state.periodsError ? (
-        <StatusMessage tone="error" title={t("overview.periodListErrorTitle")}>
-          {t("overview.periodListErrorDesc")}
-        </StatusMessage>
-      ) : null}
-
-      {state.reportStatus === "empty" ? (
-        <EmptyState
-          title={
-            selected
-              ? t("overview.noPeriodReportTitle")
-              : t("overview.noSavedReportTitle")
+    <section
+      className={
+        isMobile
+          ? "flex w-full flex-col gap-4 pb-2"
+          : "mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-2 sm:gap-5 sm:pb-4"
+      }
+    >
+      {isMobile ? (
+        <MobileProgressReport
+          child={child}
+          childrenProfiles={children}
+          loadingMore={loadingMore}
+          metricItems={
+            report
+              ? localizedMetrics.map((metric) => ({
+                  metric,
+                  delta: metricDeltaFor(report, metric.id, t),
+                }))
+              : []
           }
-          description={t("overview.noReportDescription")}
+          onLoadMore={() => void loadMore()}
+          onToggleAllDifficultWords={() =>
+            setShowAllDifficultWords((current) => !current)
+          }
+          periods={periods}
+          periodsError={state.periodsError}
+          practiceStatusStyles={PRACTICE_STATUS_KEYS}
+          report={report}
+          reportStatus={state.reportStatus}
+          retryButton={retryButton}
+          selectedPeriod={selected}
+          showAllDifficultWords={showAllDifficultWords}
+          visibleDifficultWords={visibleDifficultWords}
         />
-      ) : null}
-
-      {state.reportStatus === "unavailable" ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-extrabold text-ink">
-            {t("overview.pendingReportTitle")}
-          </h2>
-          <StatusMessage>{t("overview.pendingReportDesc")}</StatusMessage>
-        </section>
-      ) : null}
-
-      {state.reportStatus === "error" ? (
-        <StatusMessage tone="error" title={t("overview.loadErrorTitle")}>
-          {t("overview.loadErrorDescription")}
-        </StatusMessage>
-      ) : null}
-
-      {state.periodsError ||
-      state.reportStatus === "error" ||
-      state.reportStatus === "unavailable"
-        ? retryButton
-        : null}
-
-      {report ? (
+      ) : (
         <div className="flex flex-col gap-3.5 sm:gap-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-1.5 text-xs text-muted sm:gap-2 sm:text-sm">
-            <p className="font-semibold text-ink">
-              {t("overview.periodBannerRange", {
-                start: report.period_start,
-                end: report.period_end,
-              })}
-            </p>
-            <p className="text-xs">
-              {t("overview.periodGeneratedAt", {
-                dateTime: formatDateTime(report.generated_at, {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                  timeZone: REPORT_TIMEZONE,
-                }),
-              })}
-            </p>
-          </div>
-
-          {report.data_status !== "complete" ? (
-            <StatusMessage
-              title={
-                report.data_status === "unsupported"
-                  ? t("overview.unsupportedFormatTitle")
-                  : t("overview.partialDataTitle")
-              }
-            >
-              {t("overview.partialDataDesc")}
-            </StatusMessage>
-          ) : null}
-
-          {report.assessment_coverage &&
-          report.assessment_coverage.assessed_sessions <
-            report.assessment_coverage.total_sessions ? (
-            <StatusMessage tone="info">
-              {t("overview.assessmentCoverageNote", {
-                covered: report.assessment_coverage.assessed_sessions,
-                total: report.assessment_coverage.total_sessions,
-              })}
-            </StatusMessage>
-          ) : null}
-
-          <div className="report-metrics grid grid-cols-2 overflow-hidden rounded-card border border-border bg-white lg:grid-cols-4">
-            {localizedMetrics.map((metric, index) => (
-              <div
-                className={[
-                  "min-w-0 border-border",
-                  index % 2 === 0 ? "border-e" : "",
-                  index >= 2 ? "border-t lg:border-t-0" : "",
-                  index < 3 ? "lg:border-e" : "lg:border-e-0",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                key={metric.id}
-              >
-                <MetricCard
-                  delta={metricDeltaFor(report, metric.id, t)}
-                  metric={metric}
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="grid items-stretch gap-3.5 sm:gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-            <ProgressChart report={report} />
-
-            <section
-              aria-labelledby="comparison-title"
-              className="rounded-card border border-border bg-white p-3.5 sm:p-6"
-            >
-              <h2
-                className="text-lg font-extrabold text-ink sm:text-xl"
-                id="comparison-title"
-              >
-                {t("overview.comparisonTitle")}
-              </h2>
-              {report.availability.comparison === "available" &&
-              report.previous_period &&
-              report.trend_deltas ? (
-                <>
-                  <p className="mt-1 text-sm text-muted">
-                    {t("overview.comparisonSubtitle")}
-                  </p>
-                  <dl className="mt-4 divide-y divide-border">
-                    {[
-                      {
-                        label: t("overview.deltaCompletedSessionsLabel"),
-                        value: report.trend_deltas.completed_sessions,
-                        key: "overview.deltaSessions",
-                      },
-                      {
-                        label: t("overview.deltaReadingTimeLabel"),
-                        value:
-                          report.trend_deltas.reading_duration_ms === null
-                            ? null
-                            : report.trend_deltas.reading_duration_ms / 60000,
-                        key: "overview.deltaMinutes",
-                      },
-                      {
-                        label: t("overview.deltaComprehensionLabel"),
-                        value: report.trend_deltas.comprehension_accuracy,
-                        key: "overview.deltaPoints",
-                      },
-                    ].map((row) => (
-                      <div
-                        className="flex items-baseline justify-between gap-4 py-3 first:pt-0 last:pb-0"
-                        key={row.label}
-                      >
-                        <dt className="text-sm font-semibold text-muted">
-                          {row.label}
-                        </dt>
-                        <dd className="text-base font-extrabold tabular-nums text-ink">
-                          {typeof row.value !== "number"
-                            ? t("overview.notEnoughData")
-                            : t(row.key, {
-                                value: `${row.value > 0 ? "+" : ""}${Number(row.value.toFixed(2))}`,
-                              })}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </>
-              ) : (
-                <StatusMessage
-                  className="mt-4"
-                  title={t("overview.comparisonUnavailableTitle")}
-                >
-                  {t("overview.comparisonUnavailableDesc")}
-                </StatusMessage>
-              )}
-            </section>
-          </div>
-
-          <ReadingAssessmentSummary
-            assessment={report.assessment}
-            scopeLabel={`${report.period_start} → ${report.period_end}`}
-          />
-
-          <section className="rounded-card border border-border bg-white p-3.5 sm:p-6">
-            <div className="flex flex-col justify-between gap-2.5 sm:flex-row sm:items-end sm:gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-ink sm:text-xl">
-                  {t("overview.difficultWordsTitle")}
-                </h2>
-                <p className="mt-0.5 text-xs text-muted sm:text-sm">
-                  {t("overview.difficultWordsSubtitle")}
-                </p>
-              </div>
+          <ReportPageHeader
+            eyebrow={t("overview.eyebrow", {
+              alias: child.alias,
+              grade: child.grade,
+            })}
+            title={t("overview.childTitle", { alias: child.alias })}
+            description={t("overview.childSubtitle")}
+            action={
               <ButtonLink
-                className="min-h-10 sm:min-h-12 sm:w-auto"
-                href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+                fullWidth={false}
+                href={`/sessions?childId=${encodeURIComponent(child.id)}`}
+                size="touch"
                 variant="secondary"
               >
-                {t("overview.openDifficultWordsAction")}
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-4"
-                />
+                <History aria-hidden="true" className="size-4" />
+                {t("overview.readingHistoryAction")}
               </ButtonLink>
-            </div>
+            }
+          />
 
-            {report.availability.difficult_words !== "available" ? (
-              <StatusMessage className="mt-4">
-                {t("overview.difficultWordsPartialNotice")}
-              </StatusMessage>
-            ) : null}
+          <ProgressReportFilters
+            childrenProfiles={children}
+            childId={child.id}
+            periods={periods.items}
+            selectedPeriod={selected}
+            hasMore={periods.next_cursor !== null}
+            loadingMore={loadingMore}
+            onLoadMore={() => void loadMore()}
+          />
 
-            {report.difficult_words?.length ? (
-              <>
-                <p className="mt-3 text-xs font-bold text-muted">
-                  {t("overview.difficultWordsTotalSummary", {
-                    count: report.difficult_words.length,
-                  })}
-                </p>
-                <ul className="mt-3 divide-y divide-border rounded-control border border-border">
-                  {visibleDifficultWords.map((word, index) => {
-                    const statusStyle = word.practice_status
-                      ? PRACTICE_STATUS_KEYS[word.practice_status]
-                      : null;
-                    const noteParts: string[] = [];
-                    if (word.session_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordSessions", {
-                          count: word.session_count,
-                        }),
-                      );
-                    }
-                    if ((word.mispronunciation_count ?? 0) > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordMispronounced", {
-                          count: word.mispronunciation_count ?? 0,
-                        }),
-                      );
-                    }
-                    if (word.omission_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordOmitted", {
-                          count: word.omission_count,
-                        }),
-                      );
-                    }
-                    if (word.repetition_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordRepeated", {
-                          count: word.repetition_count,
-                        }),
-                      );
-                    }
+          {state.periodsError ? (
+            <StatusMessage
+              tone="error"
+              title={t("overview.periodListErrorTitle")}
+            >
+              {t("overview.periodListErrorDesc")}
+            </StatusMessage>
+          ) : null}
 
-                    return (
-                      <li
-                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3"
-                        key={`${word.normalized_word}-${index}`}
-                      >
-                        <div className="min-w-0">
-                          <span
-                            className="viread-learning-content text-base font-extrabold text-ink"
-                            dir="ltr"
-                            lang="vi"
-                          >
-                            {word.display_text}
-                          </span>
-                          {noteParts.length > 0 ? (
-                            <span className="ms-2 text-xs text-muted">
-                              {noteParts.join(" · ")}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold tabular-nums text-muted">
-                            {t("overview.difficultWordScore", {
-                              score: word.difficulty_score,
-                            })}
-                          </span>
-                          {statusStyle ? (
-                            <span
-                              className={`rounded-control px-2 py-0.5 text-xs font-bold ${statusStyle.className}`}
-                            >
-                              {t(statusStyle.key)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {report.difficult_words.length > 8 ? (
-                  <Button
-                    className="mt-3"
-                    fullWidth={false}
-                    onClick={() =>
-                      setShowAllDifficultWords((current) => !current)
-                    }
-                    type="button"
-                    variant="quiet"
-                  >
-                    {showAllDifficultWords
-                      ? t("overview.collapseList")
-                      : t("overview.viewAllWords", {
-                          count: report.difficult_words.length,
-                        })}
-                  </Button>
-                ) : null}
-              </>
-            ) : report.availability.difficult_words === "available" ? (
-              <p className="mt-4 text-sm text-muted">
-                {t("overview.noDifficultWordsInPeriod")}
-              </p>
-            ) : null}
+          {state.reportStatus === "empty" ? (
+            <EmptyState
+              title={
+                selected
+                  ? t("overview.noPeriodReportTitle")
+                  : t("overview.noSavedReportTitle")
+              }
+              description={t("overview.noReportDescription")}
+            />
+          ) : null}
 
-            <p className="mt-3 text-xs text-muted">
-              {t("overview.difficultWordsWindowNote")}
-            </p>
-          </section>
-
-          {report.legacy ? (
-            <section className="rounded-card border border-border bg-cream/60 p-3.5 sm:p-6">
-              <h2 className="text-lg font-extrabold text-ink">
-                {t("overview.legacyMetricsTitle")}
+          {state.reportStatus === "unavailable" ? (
+            <section className="flex flex-col gap-4">
+              <h2 className="text-2xl font-extrabold text-ink">
+                {t("overview.pendingReportTitle")}
               </h2>
-              <p className="mt-1 text-sm text-muted">
-                {t("overview.legacyMetricsSubtitle")}
-              </p>
-              <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-                {report.legacy.total_books !== null ? (
-                  <div>
-                    <dt className="text-xs font-semibold text-muted">
-                      {t("overview.legacyTotalBooks")}
-                    </dt>
-                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
-                      {report.legacy.total_books}
-                    </dd>
-                  </div>
-                ) : null}
-                {report.legacy.avg_fluency !== null ? (
-                  <div>
-                    <dt className="text-xs font-semibold text-muted">
-                      {t("overview.legacyAvgFluency")}
-                    </dt>
-                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
-                      {report.legacy.avg_fluency}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
+              <StatusMessage>{t("overview.pendingReportDesc")}</StatusMessage>
             </section>
           ) : null}
+
+          {state.reportStatus === "error" ? (
+            <StatusMessage tone="error" title={t("overview.loadErrorTitle")}>
+              {t("overview.loadErrorDescription")}
+            </StatusMessage>
+          ) : null}
+
+          {state.periodsError ||
+          state.reportStatus === "error" ||
+          state.reportStatus === "unavailable"
+            ? retryButton
+            : null}
+
+          {report ? (
+            <div className="flex flex-col gap-3.5 sm:gap-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-1.5 text-xs text-muted sm:gap-2 sm:text-sm">
+                <p className="font-semibold text-ink">
+                  {t("overview.periodBannerRange", {
+                    start: report.period_start,
+                    end: report.period_end,
+                  })}
+                </p>
+                <p className="text-xs">
+                  {t("overview.periodGeneratedAt", {
+                    dateTime: formatDateTime(report.generated_at, {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                      timeZone: REPORT_TIMEZONE,
+                    }),
+                  })}
+                </p>
+              </div>
+
+              {report.data_status !== "complete" ? (
+                <StatusMessage
+                  title={
+                    report.data_status === "unsupported"
+                      ? t("overview.unsupportedFormatTitle")
+                      : t("overview.partialDataTitle")
+                  }
+                >
+                  {t("overview.partialDataDesc")}
+                </StatusMessage>
+              ) : null}
+
+              {report.assessment_coverage &&
+              report.assessment_coverage.assessed_sessions <
+                report.assessment_coverage.total_sessions ? (
+                <StatusMessage tone="info">
+                  {t("overview.assessmentCoverageNote", {
+                    covered: report.assessment_coverage.assessed_sessions,
+                    total: report.assessment_coverage.total_sessions,
+                  })}
+                </StatusMessage>
+              ) : null}
+
+              <div className="report-metrics grid grid-cols-2 overflow-hidden rounded-card border border-border bg-white lg:grid-cols-4">
+                {localizedMetrics.map((metric, index) => (
+                  <div
+                    className={[
+                      "min-w-0 border-border",
+                      index % 2 === 0 ? "border-e" : "",
+                      index >= 2 ? "border-t lg:border-t-0" : "",
+                      index < 3 ? "lg:border-e" : "lg:border-e-0",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={metric.id}
+                  >
+                    <MetricCard
+                      delta={metricDeltaFor(report, metric.id, t)}
+                      metric={metric}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid items-stretch gap-3.5 sm:gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+                <ProgressChart report={report} />
+
+                <section
+                  aria-labelledby="comparison-title"
+                  className="rounded-card border border-border bg-white p-3.5 sm:p-6"
+                >
+                  <h2
+                    className="text-lg font-extrabold text-ink sm:text-xl"
+                    id="comparison-title"
+                  >
+                    {t("overview.comparisonTitle")}
+                  </h2>
+                  {report.availability.comparison === "available" &&
+                  report.previous_period &&
+                  report.trend_deltas ? (
+                    <>
+                      <p className="mt-1 text-sm text-muted">
+                        {t("overview.comparisonSubtitle")}
+                      </p>
+                      <dl className="mt-4 divide-y divide-border">
+                        {[
+                          {
+                            label: t("overview.deltaCompletedSessionsLabel"),
+                            value: report.trend_deltas.completed_sessions,
+                            key: "overview.deltaSessions",
+                          },
+                          {
+                            label: t("overview.deltaReadingTimeLabel"),
+                            value:
+                              report.trend_deltas.reading_duration_ms === null
+                                ? null
+                                : report.trend_deltas.reading_duration_ms /
+                                  60000,
+                            key: "overview.deltaMinutes",
+                          },
+                          {
+                            label: t("overview.deltaComprehensionLabel"),
+                            value: report.trend_deltas.comprehension_accuracy,
+                            key: "overview.deltaPoints",
+                          },
+                        ].map((row) => (
+                          <div
+                            className="flex items-baseline justify-between gap-4 py-3 first:pt-0 last:pb-0"
+                            key={row.label}
+                          >
+                            <dt className="text-sm font-semibold text-muted">
+                              {row.label}
+                            </dt>
+                            <dd className="text-base font-extrabold tabular-nums text-ink">
+                              {typeof row.value !== "number"
+                                ? t("overview.notEnoughData")
+                                : t(row.key, {
+                                    value: `${row.value > 0 ? "+" : ""}${Number(row.value.toFixed(2))}`,
+                                  })}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </>
+                  ) : (
+                    <StatusMessage
+                      className="mt-4"
+                      title={t("overview.comparisonUnavailableTitle")}
+                    >
+                      {t("overview.comparisonUnavailableDesc")}
+                    </StatusMessage>
+                  )}
+                </section>
+              </div>
+
+              <ReadingAssessmentSummary
+                assessment={report.assessment}
+                scopeLabel={`${report.period_start} → ${report.period_end}`}
+              />
+
+              <section className="rounded-card border border-border bg-white p-3.5 sm:p-6">
+                <div className="flex flex-col justify-between gap-2.5 sm:flex-row sm:items-end sm:gap-3">
+                  <div>
+                    <h2 className="text-lg font-extrabold text-ink sm:text-xl">
+                      {t("overview.difficultWordsTitle")}
+                    </h2>
+                    <p className="mt-0.5 text-xs text-muted sm:text-sm">
+                      {t("overview.difficultWordsSubtitle")}
+                    </p>
+                  </div>
+                  <ButtonLink
+                    className="sm:w-auto"
+                    href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+                    size="touch"
+                    variant="secondary"
+                  >
+                    {t("overview.openDifficultWordsAction")}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="viread-rtl-flip size-4"
+                    />
+                  </ButtonLink>
+                </div>
+
+                {report.availability.difficult_words !== "available" ? (
+                  <StatusMessage className="mt-4">
+                    {t("overview.difficultWordsPartialNotice")}
+                  </StatusMessage>
+                ) : null}
+
+                {report.difficult_words?.length ? (
+                  <>
+                    <p className="mt-3 text-xs font-bold text-muted">
+                      {t("overview.difficultWordsTotalSummary", {
+                        count: report.difficult_words.length,
+                      })}
+                    </p>
+                    <ul className="mt-3 divide-y divide-border rounded-control border border-border">
+                      {visibleDifficultWords.map((word, index) => {
+                        const statusStyle = word.practice_status
+                          ? PRACTICE_STATUS_KEYS[word.practice_status]
+                          : null;
+                        const noteParts: string[] = [];
+                        if (word.session_count > 0) {
+                          noteParts.push(
+                            t("overview.difficultWordSessions", {
+                              count: word.session_count,
+                            }),
+                          );
+                        }
+                        if ((word.mispronunciation_count ?? 0) > 0) {
+                          noteParts.push(
+                            t("overview.difficultWordMispronounced", {
+                              count: word.mispronunciation_count ?? 0,
+                            }),
+                          );
+                        }
+                        if (word.omission_count > 0) {
+                          noteParts.push(
+                            t("overview.difficultWordOmitted", {
+                              count: word.omission_count,
+                            }),
+                          );
+                        }
+                        if (word.repetition_count > 0) {
+                          noteParts.push(
+                            t("overview.difficultWordRepeated", {
+                              count: word.repetition_count,
+                            }),
+                          );
+                        }
+
+                        return (
+                          <li
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3"
+                            key={`${word.normalized_word}-${index}`}
+                          >
+                            <div className="min-w-0">
+                              <span
+                                className="viread-learning-content text-base font-extrabold text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {word.display_text}
+                              </span>
+                              {noteParts.length > 0 ? (
+                                <span className="ms-2 text-xs text-muted">
+                                  {noteParts.join(" · ")}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold tabular-nums text-muted">
+                                {t("overview.difficultWordScore", {
+                                  score: word.difficulty_score,
+                                })}
+                              </span>
+                              {statusStyle ? (
+                                <span
+                                  className={`rounded-control px-2 py-0.5 text-xs font-bold ${statusStyle.className}`}
+                                >
+                                  {t(statusStyle.key)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {report.difficult_words.length > 8 ? (
+                      <Button
+                        className="mt-3"
+                        fullWidth={false}
+                        onClick={() =>
+                          setShowAllDifficultWords((current) => !current)
+                        }
+                        type="button"
+                        variant="quiet"
+                      >
+                        {showAllDifficultWords
+                          ? t("overview.collapseList")
+                          : t("overview.viewAllWords", {
+                              count: report.difficult_words.length,
+                            })}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : report.availability.difficult_words === "available" ? (
+                  <p className="mt-4 text-sm text-muted">
+                    {t("overview.noDifficultWordsInPeriod")}
+                  </p>
+                ) : null}
+
+                <p className="mt-3 text-xs text-muted">
+                  {t("overview.difficultWordsWindowNote")}
+                </p>
+              </section>
+
+              {report.legacy ? (
+                <section className="rounded-card border border-border bg-cream/60 p-3.5 sm:p-6">
+                  <h2 className="text-lg font-extrabold text-ink">
+                    {t("overview.legacyMetricsTitle")}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    {t("overview.legacyMetricsSubtitle")}
+                  </p>
+                  <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {report.legacy.total_books !== null ? (
+                      <div>
+                        <dt className="text-xs font-semibold text-muted">
+                          {t("overview.legacyTotalBooks")}
+                        </dt>
+                        <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
+                          {report.legacy.total_books}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {report.legacy.avg_fluency !== null ? (
+                      <div>
+                        <dt className="text-xs font-semibold text-muted">
+                          {t("overview.legacyAvgFluency")}
+                        </dt>
+                        <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
+                          {report.legacy.avg_fluency}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                </section>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      )}
 
       <ChildProgressAssessmentCard
         childId={child.id}
@@ -862,9 +908,27 @@ function ProgressReportContent({
         showReadingAssessment={!report?.assessment}
       />
 
-      <details className="rounded-card border border-border bg-white p-3.5 sm:p-6">
-        <summary className="flex min-h-10 cursor-pointer items-center font-bold text-primary">
-          {t("overview.entertainmentSummaryHeading")}
+      <details
+        className={
+          isMobile
+            ? "group rounded-3xl border border-border bg-white p-4 shadow-2xs"
+            : "rounded-card border border-border bg-white p-3.5 sm:p-6"
+        }
+      >
+        <summary
+          className={
+            isMobile
+              ? "flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-bold text-primary"
+              : "flex min-h-11 cursor-pointer items-center font-bold text-primary"
+          }
+        >
+          <span>{t("overview.entertainmentSummaryHeading")}</span>
+          {isMobile ? (
+            <ChevronDown
+              aria-hidden="true"
+              className="size-4 shrink-0 transition-transform group-open:rotate-180"
+            />
+          ) : null}
         </summary>
         <div className="mt-4">
           <EntertainmentLearningSummary

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { ParentBookReportsScreen } from "@/components/books/parent-book-reports-screen";
+import { BookReportsView } from "@/components/reports/book-reports-view";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { getServerI18n } from "@/lib/i18n/server";
 import { viMessages } from "@/messages/vi";
@@ -18,5 +18,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function BookReportsPage() {
-  return <ParentBookReportsScreen />;
+  return <BookReportsView />;
 }

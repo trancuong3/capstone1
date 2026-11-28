@@ -99,7 +99,8 @@ export function VerifiedBookPicker({
           title={t("readingManagement.bookPicker.loadErrorTitle")}
         >
           <Button
-            className="mt-2 w-auto!"
+            className="mt-2"
+            fullWidth={false}
             size="compact"
             variant="secondary"
             onClick={onReload}
@@ -122,7 +123,7 @@ export function VerifiedBookPicker({
               className="pointer-events-none absolute start-3 top-3 size-4 text-muted"
             />
             <input
-              className="min-h-10 w-full rounded-control border border-border bg-cream py-2 ps-9 pe-3 text-sm text-ink"
+              className="min-h-11 w-full rounded-control border border-border bg-cream py-2 ps-9 pe-3 text-base text-ink sm:text-sm"
               type="search"
               placeholder={t("readingManagement.bookPicker.searchPlaceholder")}
               value={query}
@@ -201,7 +202,7 @@ export function VerifiedBookPicker({
                           aria-label={`${text} ${book.title}`}
                           disabled={busy}
                           onClick={() => onToggle(book.id, type)}
-                          className={`inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-semibold hover:bg-sky disabled:opacity-55 ${selected ? "bg-sky text-primary" : "text-ink"}`}
+                          className={`inline-flex min-h-11 items-center gap-1 rounded-control px-2.5 text-sm font-semibold hover:bg-sky disabled:opacity-55 sm:min-h-9 sm:px-2 ${selected ? "bg-sky text-primary" : "text-ink"}`}
                         >
                           <Icon
                             aria-hidden="true"
@@ -217,7 +218,7 @@ export function VerifiedBookPicker({
                       title: book.title,
                     })}
                     href={`/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(childId)}`}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-bold text-primary hover:bg-sky"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-control px-2.5 text-sm font-bold text-primary hover:bg-sky sm:min-h-9 sm:px-2"
                   >
                     {t("readingManagement.bookPicker.openBook")}{" "}
                     <ArrowUpRight

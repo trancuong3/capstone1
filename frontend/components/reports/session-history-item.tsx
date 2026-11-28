@@ -12,12 +12,14 @@ interface SessionHistoryItemProps {
   readonly item: SessionHistoryItemViewModelUI;
   readonly page?: number;
   readonly showChildAlias?: boolean;
+  readonly variant?: "desktop-row" | "mobile-card";
 }
 
 export function SessionHistoryItem({
   item,
   page = 1,
   showChildAlias = false,
+  variant = "desktop-row",
 }: SessionHistoryItemProps) {
   const { formatDateTime, formatTime } = useI18n();
   const t = useTranslations("reports");
@@ -48,9 +50,16 @@ export function SessionHistoryItem({
       : t("sessions.durationMinutesSeconds", { minutes, seconds });
   })();
   const href = `/sessions/${item.session.id}?childId=${encodeURIComponent(item.child.id)}&page=${page}`;
+  const isMobileCard = variant === "mobile-card";
 
   return (
-    <article className="history-entry group relative transition-colors hover:bg-cream/80 focus-within:bg-cream/80">
+    <article
+      className={
+        isMobileCard
+          ? "group relative rounded-2xl border border-border bg-white p-4 shadow-2xs transition-colors hover:bg-cream/80 focus-within:bg-cream/80"
+          : "history-entry group relative transition-colors hover:bg-cream/80 focus-within:bg-cream/80"
+      }
+    >
       <div className="flex items-center justify-between gap-3 sm:gap-5">
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
@@ -98,10 +107,14 @@ export function SessionHistoryItem({
         </div>
 
         <Link
-          className="inline-flex min-h-12 shrink-0 items-center gap-1 rounded-control px-3 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
+          className={
+            isMobileCard
+              ? "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control px-2.5 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
+              : "inline-flex min-h-12 min-w-11 shrink-0 items-center gap-1 rounded-control px-3 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
+          }
           href={href}
         >
-          <span className="sr-only sm:not-sr-only">
+          <span className={isMobileCard ? "sr-only" : "sr-only sm:not-sr-only"}>
             {t("sessions.item.viewDetail")}
           </span>
           <ChevronRight

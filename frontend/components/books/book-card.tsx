@@ -4,6 +4,7 @@ import { Bookmark, Heart } from "lucide-react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { ButtonLink } from "@/components/common/button";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useTranslations } from "@/hooks/use-i18n";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
@@ -48,6 +49,102 @@ export function BookCard({
   collectionBusy = false,
 }: BookCardProps) {
   const t = useTranslations("books");
+  const isMobile = useIsMobileViewport();
+
+  if (isMobile) {
+    return (
+      <article className="flex min-w-0 flex-col gap-3.5 rounded-card border border-border bg-white p-4 shadow-xs">
+        <div className="flex items-start gap-3.5">
+          <BookCover
+            book={book}
+            className="shrink-0 rounded-card border border-border/60"
+            showTitle={false}
+            size="medium"
+          />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {book.visibility_scope === "PARENT_PRIVATE" ? (
+              <span className="inline-flex w-fit items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+                {t("card.privateFamilyBadge")}
+              </span>
+            ) : null}
+            <h2
+              className="book-title viread-learning-content line-clamp-3 break-words text-lg font-extrabold leading-snug text-ink"
+              dir="ltr"
+              lang="vi"
+            >
+              {book.title}
+            </h2>
+            <p className="line-clamp-2 text-sm leading-relaxed text-muted">
+              {book.author ? (
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {book.author}
+                </span>
+              ) : (
+                t("card.authorPending")
+              )}{" "}
+              · {formatGradeRange(book, t)}
+            </p>
+          </div>
+        </div>
+        <div className="flex w-full items-center gap-2 border-t border-border/60 pt-3">
+          <ButtonLink
+            aria-label={t("card.readBookAria", { title: book.title })}
+            className="min-w-0 flex-1"
+            fullWidth={false}
+            href={`/books/${encodeURIComponent(book.id)}`}
+            size="touch"
+          >
+            {t("card.viewBook")}
+          </ButtonLink>
+          {onToggleCollection ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
+                const saved = savedTypes.includes(type);
+                const label =
+                  type === "FAVORITE"
+                    ? t("card.favorite")
+                    : t("card.wantToRead");
+                const ariaLabel =
+                  type === "FAVORITE"
+                    ? saved
+                      ? t("card.removeFavoriteAria", { title: book.title })
+                      : t("card.addFavoriteAria", { title: book.title })
+                    : saved
+                      ? t("card.removeReadingListAria", { title: book.title })
+                      : t("card.addReadingListAria", { title: book.title });
+                const Icon = type === "FAVORITE" ? Heart : Bookmark;
+                return (
+                  <button
+                    aria-label={ariaLabel}
+                    aria-pressed={saved}
+                    className={cn(
+                      "flex size-11 shrink-0 items-center justify-center rounded-control transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      saved
+                        ? "bg-sky text-primary"
+                        : "border border-border bg-white text-ink hover:bg-canvas",
+                    )}
+                    disabled={collectionBusy}
+                    key={type}
+                    onClick={() => onToggleCollection(type)}
+                    type="button"
+                  >
+                    <Icon
+                      aria-hidden="true"
+                      className={cn("size-5 shrink-0", saved && "fill-current")}
+                    />
+                    <span className="sr-only">
+                      {saved ? "✓ " : ""}
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </article>
+    );
+  }
 
   return (
     <article className="catalog-volume group flex h-full min-w-0 flex-row items-stretch gap-3 rounded-card border border-border bg-white p-2.5 sm:flex-col sm:items-start sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">

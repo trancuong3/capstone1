@@ -13,6 +13,7 @@ import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -73,6 +74,7 @@ function ReportCard({
   pageCache,
   onSelectPageIndex,
   activeIndex,
+  isMobile,
 }: {
   readonly group: SessionPageReportGroup;
   readonly activeReport: SavedReadingReport;
@@ -90,6 +92,7 @@ function ReportCard({
   readonly pageCache: ReadonlyMap<string, PageLoadEntry>;
   readonly onSelectPageIndex: (index: number) => void;
   readonly activeIndex: number;
+  readonly isMobile: boolean;
 }) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
@@ -175,7 +178,7 @@ function ReportCard({
                       page: pageNum,
                     })}
                     className={cn(
-                      "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "bg-primary text-white"
                         : "border border-border bg-white text-ink hover:bg-canvas",
@@ -208,7 +211,13 @@ function ReportCard({
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(290px,1fr)]">
         <div className="flex flex-col gap-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+          <div
+            className={
+              isMobile
+                ? "rounded-2xl border border-border bg-cream p-2"
+                : "rounded-card border border-border bg-cream p-3 sm:p-5"
+            }
+          >
             {pageEntry.status === "loading" ? (
               <div
                 aria-busy="true"
@@ -220,7 +229,11 @@ function ReportCard({
               </div>
             ) : resolvedPage ? (
               <article
-                className="relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[280px] sm:p-6"
+                className={
+                  isMobile
+                    ? "relative mx-auto flex min-h-[200px] w-full flex-col rounded-control bg-[#fffdfa] p-2.5"
+                    : "relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[280px] sm:p-6"
+                }
                 data-page-id={resolvedPage.page_id}
                 data-page-revision-id={resolvedPage.page_revision_id}
               >
@@ -367,7 +380,7 @@ function ReportCard({
 
       {group.additionalReports.length > 0 ? (
         <details className="group rounded-control border border-border bg-canvas/60 px-4 py-3">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
             <span>
               {t("sessions.readingReports.otherComparisonsTitle", {
                 count: group.additionalReports.length,
@@ -416,14 +429,14 @@ function ReportCard({
                     </div>
                     {entryTranscript ? (
                       <p
-                        className="viread-learning-content mt-1 truncate text-xs text-muted"
+                        className="viread-learning-content mt-1 line-clamp-2 break-words text-xs text-muted"
                         dir="ltr"
                         lang="vi"
                       >
                         {entryTranscript}
                       </p>
                     ) : (
-                      <p className="mt-1 truncate text-xs text-muted">
+                      <p className="mt-1 line-clamp-2 break-words text-xs text-muted">
                         {t("sessions.readingReports.noTranscript")}
                       </p>
                     )}
@@ -431,9 +444,9 @@ function ReportCard({
                   <div className="flex flex-wrap items-center gap-2">
                     {!selected ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
                         fullWidth={false}
                         onClick={() => onSelectReport(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="secondary"
                       >
@@ -446,11 +459,11 @@ function ReportCard({
                       </span>
                     ) : onRequestDelete ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
                         disabled={deletingId !== null}
                         fullWidth={false}
                         isLoading={deletingId === entry.report_id}
                         onClick={() => onRequestDelete(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="destructive"
                       >
@@ -479,6 +492,7 @@ export function SessionReadingReports({
   readonly allowDelete?: boolean;
 }) {
   const t = useTranslations("reports");
+  const isMobile = useIsMobileViewport();
   const [requestKey, setRequestKey] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedReportIdByGroup, setSelectedReportIdByGroup] = useState<
@@ -654,7 +668,11 @@ export function SessionReadingReports({
   return (
     <section
       aria-labelledby="session-reading-reports-title"
-      className="flex flex-col gap-5 rounded-card border border-border bg-white p-4 sm:p-6"
+      className={
+        isMobile
+          ? "flex flex-col gap-4 rounded-3xl border border-border bg-white p-3.5 shadow-2xs"
+          : "flex flex-col gap-5 rounded-card border border-border bg-white p-4 sm:p-6"
+      }
       data-testid="session-primary-reading-report"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -666,9 +684,9 @@ export function SessionReadingReports({
         </h2>
         {state.status !== "loading" && state.status !== "empty" ? (
           <Button
-            className="min-h-10 px-3 py-1.5 text-xs"
             fullWidth={false}
             onClick={() => setRequestKey((key) => key + 1)}
+            size="admin"
             variant="quiet"
           >
             <RefreshCw aria-hidden="true" className="size-3.5" />
@@ -739,6 +757,7 @@ export function SessionReadingReports({
             deletingId={deletingId}
             group={activeGroup}
             groups={groups}
+            isMobile={isMobile}
             onNext={() => {
               setSelectedIndex((index) =>
                 Math.min(index + 1, groups.length - 1),
@@ -782,10 +801,10 @@ export function SessionReadingReports({
         closeOnBackdropClick={deletingId === null}
         closeOnEscape={deletingId === null}
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
             <Button
+              className="w-full sm:w-auto"
               disabled={deletingId !== null}
-              fullWidth={false}
               onClick={() => setPendingDeleteId(null)}
               type="button"
               variant="secondary"
@@ -793,8 +812,8 @@ export function SessionReadingReports({
               {t("sessions.readingReports.cancel")}
             </Button>
             <Button
+              className="w-full sm:w-auto"
               disabled={deletingId !== null}
-              fullWidth={false}
               isLoading={deletingId !== null}
               onClick={() => void confirmDeleteReport()}
               type="button"

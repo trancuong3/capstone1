@@ -66,5 +66,36 @@ describe("Modal", () => {
     expect(dialog.className).toContain("max-h-[88dvh]");
     expect(dialog.className).toContain("sm:rounded-card");
     expect(footer?.className).toContain("env(safe-area-inset-bottom)");
+
+    const closeButton = screen.getByRole("button", { name: "Đóng hộp thoại" });
+    expect(closeButton.className).toContain("size-11");
+    expect(closeButton.className).toContain("sm:size-12");
+    expect(closeButton.className).not.toContain("!");
+  });
+
+  it("supports mobilePresentation='dialog' opt-out without drag handle and applies safe-area bottom padding when footer is omitted", () => {
+    const { container } = render(
+      <Modal
+        isOpen
+        maxWidth="sm"
+        mobilePresentation="dialog"
+        onClose={vi.fn()}
+        title="Thông báo khẩn"
+      >
+        <p>Nội dung ngắn</p>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Thông báo khẩn" });
+    const backdrop = dialog.parentElement as HTMLElement;
+    const body = dialog.querySelector<HTMLElement>(".overflow-y-auto");
+
+    expect(backdrop.className).toContain("items-center");
+    expect(backdrop.className).not.toContain("items-end");
+    expect(dialog.className).toContain("rounded-card");
+    expect(dialog.className).toContain("max-w-[480px]");
+    expect(dialog.className).not.toContain("rounded-t-[20px]");
+    expect(container.querySelector(".w-10.rounded-full")).toBeNull();
+    expect(body?.className).toContain("env(safe-area-inset-bottom)");
   });
 });

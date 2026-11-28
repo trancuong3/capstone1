@@ -159,47 +159,55 @@ function WeeklyChart({
           {t("overview.assessmentCard.weeklyChartHint")}
         </span>
       </div>
-      <div
-        aria-hidden="true"
-        className="flex h-40 items-end gap-2 border-b border-border pt-2 sm:gap-4"
-      >
-        {weekly.map((week) => {
-          const barHeight =
-            week.minutes > 0
-              ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
-              : 3;
-          return (
-            <div
-              className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
-              key={week.week_start}
-            >
-              <span className="mb-1 text-xs font-bold tabular-nums text-primary">
-                {week.accuracy_pct === null
-                  ? "–"
-                  : `${Math.round(week.accuracy_pct)}%`}
-              </span>
+      <div className="overflow-x-auto pb-1">
+        <div
+          aria-hidden="true"
+          className={cn(
+            "flex h-40 w-full items-end gap-2 border-b border-border pt-2 sm:gap-4",
+            weekly.length > 5 && "min-w-max",
+          )}
+        >
+          {weekly.map((week) => {
+            const barHeight =
+              week.minutes > 0
+                ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
+                : 3;
+            return (
               <div
                 className={cn(
-                  "mx-auto w-full max-w-12 rounded-t-control",
-                  week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                  "flex h-full flex-1 flex-col justify-end text-center",
+                  weekly.length > 5 ? "min-w-11 shrink-0" : "min-w-0",
                 )}
-                style={{ height: `${barHeight}px` }}
-                title={t("overview.assessmentCard.weekBarTitle", {
-                  minutes: week.minutes,
-                  sessions: week.sessions,
-                })}
-              />
-              <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
-                {t("overview.assessmentCard.weekBarShort", {
-                  minutes: week.minutes,
-                })}
-              </span>
-              <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
-                {shortDate(week.week_start)}
-              </span>
-            </div>
-          );
-        })}
+                key={week.week_start}
+              >
+                <span className="mb-1 text-xs font-bold tabular-nums text-primary">
+                  {week.accuracy_pct === null
+                    ? "–"
+                    : `${Math.round(week.accuracy_pct)}%`}
+                </span>
+                <div
+                  className={cn(
+                    "mx-auto w-full max-w-12 rounded-t-control",
+                    week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                  )}
+                  style={{ height: `${barHeight}px` }}
+                  title={t("overview.assessmentCard.weekBarTitle", {
+                    minutes: week.minutes,
+                    sessions: week.sessions,
+                  })}
+                />
+                <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
+                  {t("overview.assessmentCard.weekBarShort", {
+                    minutes: week.minutes,
+                  })}
+                </span>
+                <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
+                  {shortDate(week.week_start)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
       <ul className="sr-only">
         {weekly.map((week) => (
@@ -326,7 +334,7 @@ export function ChildProgressAssessmentCard({
   return (
     <section
       aria-labelledby="ai-progress-title"
-      className="rounded-card border border-border bg-white p-5 sm:p-6"
+      className="rounded-card border border-border bg-white p-4 sm:p-6"
     >
       <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
@@ -353,7 +361,7 @@ export function ChildProgressAssessmentCard({
             <button
               aria-checked={days === option}
               className={cn(
-                "min-h-10 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                "min-h-11 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
                 days === option
                   ? "bg-primary text-white"
                   : "text-ink hover:bg-white",
@@ -529,7 +537,7 @@ function AssessmentBody({
           </span>
           {data.data_status === "OK" ? (
             <Button
-              className="min-h-11 w-auto px-3.5 text-sm"
+              className="min-h-11 w-auto px-3.5 py-2 text-sm"
               disabled={view.ai === "writing"}
               isLoading={view.ai === "writing"}
               onClick={onRefresh}

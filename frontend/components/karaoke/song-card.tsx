@@ -5,15 +5,17 @@ import { Music2 } from "lucide-react";
 import { useState } from "react";
 import { Card } from "@/components/common/card";
 import { ButtonLink } from "@/components/common/button";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokeSongCard } from "@/lib/api/karaoke-service";
 import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 
 export function SongCard({ song }: { song: KaraokeSongCard }) {
   const t = useTranslations("entertainment");
+  const isMobile = useIsMobileViewport();
   const [coverFailed, setCoverFailed] = useState(false);
   return (
-    <Card className="song-cover h-full">
+    <Card className={isMobile ? "h-full shadow-sm" : "song-cover h-full"}>
       {song.cover_url && !coverFailed ? (
         <Image
           src={song.cover_url}
@@ -30,7 +32,11 @@ export function SongCard({ song }: { song: KaraokeSongCard }) {
         </div>
       )}
       <h2
-        className="viread-learning-content break-words text-2xl font-extrabold"
+        className={
+          isMobile
+            ? "viread-learning-content break-words text-xl font-extrabold leading-snug text-ink"
+            : "viread-learning-content break-words text-2xl font-extrabold"
+        }
         dir="ltr"
         lang="vi"
       >

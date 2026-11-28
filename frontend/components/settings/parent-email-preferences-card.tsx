@@ -113,25 +113,30 @@ function ToggleRow({
 }) {
   const id = useId();
   return (
-    <div className="flex items-start gap-3 rounded-control border border-border bg-white px-4 py-3">
-      <input
-        aria-checked={checked}
-        aria-describedby={`${id}-desc`}
-        checked={checked}
-        className="mt-1 size-5 shrink-0 accent-primary"
-        disabled={disabled}
-        id={id}
-        onChange={(event) => onChange(event.target.checked)}
-        role="switch"
-        type="checkbox"
-      />
-      <label className="min-w-0 flex-1" htmlFor={id}>
+    <label
+      className="flex min-h-11 cursor-pointer items-start gap-3 rounded-control border border-border bg-white px-4 py-3"
+      htmlFor={id}
+    >
+      <span className="-m-2.5 inline-flex size-11 shrink-0 items-center justify-center">
+        <input
+          aria-checked={checked}
+          aria-describedby={`${id}-desc`}
+          checked={checked}
+          className="size-5 accent-primary"
+          disabled={disabled}
+          id={id}
+          onChange={(event) => onChange(event.target.checked)}
+          role="switch"
+          type="checkbox"
+        />
+      </span>
+      <span className="min-w-0 flex-1">
         <span className="block text-body font-bold text-ink">{label}</span>
         <span className="block text-sm text-muted" id={`${id}-desc`}>
           {description}
         </span>
-      </label>
-    </div>
+      </span>
+    </label>
   );
 }
 
@@ -249,7 +254,7 @@ export function ParentEmailPreferencesCard({
           <Bell aria-hidden="true" className="size-5" />
         </div>
         <div>
-          <h2 className="text-2xl font-extrabold text-ink">
+          <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
             Thông báo Email cho phụ huynh
           </h2>
           <p className="text-sm text-muted">
@@ -348,7 +353,7 @@ export function ParentEmailPreferencesCard({
                 Ngày gửi báo cáo tuần
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="min-h-11 w-full bg-transparent text-body font-semibold text-ink outline-none"
                 disabled={isSaving || !draft.weekly_digest_enabled}
                 onChange={(event) =>
                   setDraft({
@@ -371,7 +376,7 @@ export function ParentEmailPreferencesCard({
                 Nhắc khi bé nghỉ đọc sau
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="min-h-11 w-full bg-transparent text-body font-semibold text-ink outline-none"
                 disabled={isSaving || !draft.inactivity_alert_enabled}
                 onChange={(event) =>
                   setDraft({
@@ -397,7 +402,7 @@ export function ParentEmailPreferencesCard({
                 Trần chống spam mỗi tuần
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="min-h-11 w-full bg-transparent text-body font-semibold text-ink outline-none"
                 disabled={isSaving}
                 onChange={(event) =>
                   setDraft({
@@ -423,7 +428,7 @@ export function ParentEmailPreferencesCard({
                 Khung giờ yên tĩnh
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="min-h-11 w-full bg-transparent text-body font-semibold text-ink outline-none"
                 disabled={isSaving}
                 onChange={(event) => {
                   const [startStr, endStr] = event.target.value.split("-");
@@ -520,7 +525,9 @@ export function ParentEmailPreferencesCard({
                             {CATEGORY_LABELS[item.category]}
                           </span>
                           <span className="mx-1.5 text-muted">·</span>
-                          <span className="text-muted">{item.subject}</span>
+                          <span className="break-words text-muted">
+                            {item.subject}
+                          </span>
                         </div>
                         {timestamp ? (
                           <div className="text-xs text-muted">{timestamp}</div>

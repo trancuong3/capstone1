@@ -30,6 +30,7 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
@@ -38,6 +39,7 @@ const REPORTS_PER_PAGE = 5;
 export default function ReadingReportPage() {
   const t = useTranslations("reports");
   const { formatDateTime } = useI18n();
+  const isMobile = useIsMobileViewport();
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId;
 
@@ -140,11 +142,21 @@ export default function ReadingReportPage() {
   }, [reloadKey, sessionId, t]);
 
   const reportHeading = (
-    <header className="flex flex-col justify-between gap-3 border-b border-border pb-5 sm:flex-row sm:items-end">
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-4">
+    <header
+      className={
+        isMobile
+          ? "flex flex-col gap-2.5"
+          : "flex flex-col justify-between gap-3 border-b border-border pb-5 sm:flex-row sm:items-end"
+      }
+    >
+      <div className={isMobile ? "space-y-2" : "space-y-1"}>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <Link
-            className="family-inline-link min-h-0"
+            className={
+              isMobile
+                ? "inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-white px-3.5 text-sm font-bold text-primary transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                : "family-inline-link"
+            }
             href={`/sessions/${encodeURIComponent(sessionId)}`}
           >
             <ArrowLeft
@@ -155,13 +167,17 @@ export default function ReadingReportPage() {
             {t("sessions.readingReports.backToDetail")}
           </Link>
           <Link
-            className="text-sm font-semibold text-muted hover:text-primary"
+            className={
+              isMobile
+                ? "inline-flex min-h-11 items-center rounded-full border border-border bg-white px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-sky hover:text-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                : "inline-flex min-h-11 items-center text-sm font-semibold text-muted hover:text-primary"
+            }
             href="/sessions"
           >
             {t("sessions.title")}
           </Link>
         </div>
-        <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+        <h1 className="book-title text-[26px] leading-tight text-ink sm:text-[38px]">
           {t("sessions.readingReports.pageHeading")}
         </h1>
       </div>
@@ -248,7 +264,11 @@ export default function ReadingReportPage() {
 
   return (
     <section
-      className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4"
+      className={
+        isMobile
+          ? "mx-auto flex w-full max-w-[1120px] flex-col gap-4 pb-2"
+          : "mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4"
+      }
       data-testid="standalone-session-report"
     >
       {reportHeading}
@@ -299,7 +319,7 @@ export default function ReadingReportPage() {
                   page: idx + 1,
                 })}
                 className={cn(
-                  "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
+                  "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
                   idx === safeGroupIndex
                     ? "bg-primary text-white"
                     : "border border-border bg-white text-ink hover:bg-canvas",
@@ -465,10 +485,10 @@ export default function ReadingReportPage() {
         closeOnBackdropClick={deletingId === null}
         closeOnEscape={deletingId === null}
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
             <Button
+              className="w-full sm:w-auto"
               disabled={deletingId !== null}
-              fullWidth={false}
               onClick={() => setPendingDeleteId(null)}
               type="button"
               variant="secondary"
@@ -476,8 +496,8 @@ export default function ReadingReportPage() {
               {t("sessions.readingReports.cancel")}
             </Button>
             <Button
+              className="w-full sm:w-auto"
               disabled={deletingId !== null}
-              fullWidth={false}
               isLoading={deletingId !== null}
               onClick={() => void confirmDeleteReport()}
               type="button"

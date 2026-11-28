@@ -241,7 +241,7 @@ export function MobileBottomNav({
                   <Link
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-control px-1 py-1.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-control px-1 py-1.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       active ? "text-primary-hover" : "text-primary",
                     )}
                     href={href}
@@ -259,7 +259,7 @@ export function MobileBottomNav({
                     >
                       <Icon className="size-5" strokeWidth={2.1} />
                     </span>
-                    <span className="truncate leading-tight">
+                    <span className="max-w-full truncate leading-tight">
                       {resolvedLabel}
                     </span>
                   </Link>
@@ -270,7 +270,7 @@ export function MobileBottomNav({
                 <Link
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex min-h-12 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    "flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                     active ? "text-primary-hover" : "text-muted hover:text-ink",
                   )}
                   href={href}
@@ -286,7 +286,7 @@ export function MobileBottomNav({
                   >
                     <Icon className="size-5" strokeWidth={active ? 2.2 : 1.9} />
                   </span>
-                  <span className="truncate leading-tight">
+                  <span className="max-w-full truncate leading-tight">
                     {resolvedLabel}
                   </span>
                 </Link>
@@ -299,7 +299,7 @@ export function MobileBottomNav({
             aria-expanded={isMoreOpen}
             aria-haspopup="dialog"
             className={cn(
-              "flex min-h-12 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+              "flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
               isMoreOpen || isMoreRouteActive
                 ? "text-primary-hover"
                 : "text-muted hover:text-ink",
@@ -325,7 +325,7 @@ export function MobileBottomNav({
                 strokeWidth={isMoreOpen || isMoreRouteActive ? 2.2 : 1.9}
               />
             </span>
-            <span className="truncate leading-tight">
+            <span className="max-w-full truncate leading-tight">
               {t("navigation.parent.moreButton")}
             </span>
           </button>

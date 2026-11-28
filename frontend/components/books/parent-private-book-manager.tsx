@@ -38,9 +38,11 @@ import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contrib
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
@@ -359,6 +361,7 @@ function ParentPrivateBookManagerContent({
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
   const { formatNumber } = useI18n();
   const t = useTranslations("books");
+  const isMobile = useIsMobileViewport();
   const service = useParentPrivateBookService();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1020,7 +1023,7 @@ function ParentPrivateBookManagerContent({
     return (
       <section
         aria-busy="true"
-        className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-5 sm:px-8 sm:py-8"
+        className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 pb-6 sm:gap-5 sm:px-8 sm:py-8"
       >
         <Skeleton className="h-12 w-72 rounded-card" />
         <Skeleton className="h-44 w-full rounded-card" />
@@ -1031,7 +1034,7 @@ function ParentPrivateBookManagerContent({
 
   if (notFound) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 py-2 pb-6 sm:px-8 sm:py-10">
         <EmptyState
           action={
             <ButtonLink
@@ -1055,12 +1058,12 @@ function ParentPrivateBookManagerContent({
 
   if (loadError || !detail) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 py-2 pb-6 sm:px-8 sm:py-10">
         <StatusMessage title={t("privateManager.loadErrorTitle")} tone="error">
           {loadError ?? t("privateManager.loadDataFallback")}
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start"
+          className="w-full sm:w-auto sm:self-start"
           onClick={() => void loadDetail(false)}
           variant="secondary"
         >
@@ -1126,12 +1129,233 @@ function ParentPrivateBookManagerContent({
     safeCommittedPage * COMMITTED_PAGES_PAGE_SIZE,
   );
 
+  const editingCommittedPage =
+    committedPages.find((page) => page.page_id === editingPageId) ?? null;
+  const confirmDeleteCommittedPage =
+    committedPages.find((page) => page.page_id === confirmDeletePageId) ?? null;
+  const illustrationStudioPage =
+    committedPages.find((page) => page.page_id === illustrationStudioPageId) ??
+    null;
+
+  const editBookFormElement = (
+    <form
+      aria-label={t("privateManager.editInfoAria")}
+      className={
+        isMobile
+          ? "flex flex-col gap-3 text-xs"
+          : "flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-4 text-xs"
+      }
+      onSubmit={(event) => void handleSaveBookEdit(event)}
+    >
+      <p className="rounded-control border border-amber-200 bg-amber-50 p-3 font-bold text-amber-950">
+        {t("privateManager.editInfoRecheckNotice")}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.titleLabel")}
+          <input
+            aria-label={t("myBooks.editTitleAria")}
+            className="viread-learning-content min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-sm"
+            dir="ltr"
+            lang="vi"
+            onChange={(event) => setEditBookTitle(event.target.value)}
+            required
+            type="text"
+            value={editBookTitle}
+          />
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editAuthorLabel")}
+          <input
+            aria-label={t("myBooks.editAuthorAria")}
+            className="viread-learning-content min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-sm"
+            dir="ltr"
+            lang="vi"
+            onChange={(event) => setEditBookAuthor(event.target.value)}
+            type="text"
+            value={editBookAuthor}
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editMinGradeLabel")}
+          <select
+            aria-label={t("myBooks.editMinGradeAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-sm"
+            onChange={(event) =>
+              setEditBookMinGrade(Number(event.target.value))
+            }
+            value={editBookMinGrade}
+          >
+            {CHILD_GRADES.map((grade) => (
+              <option key={grade} value={grade}>
+                {t("card.gradeSingle", { grade })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editMaxGradeLabel")}
+          <select
+            aria-label={t("myBooks.editMaxGradeAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-sm"
+            onChange={(event) =>
+              setEditBookMaxGrade(Number(event.target.value))
+            }
+            value={editBookMaxGrade}
+          >
+            {CHILD_GRADES.map((grade) => (
+              <option key={grade} value={grade}>
+                {t("card.gradeSingle", { grade })}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("privateManager.editSourceLabel")}
+          <select
+            aria-label={t("privateManager.editSourceAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-xs"
+            onChange={(event) =>
+              setEditBookSourceType(event.target.value as SourceUsageType)
+            }
+            value={editBookSourceType}
+          >
+            {SOURCE_USAGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {t(`sourceUsage.${opt.value}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editSourceNoteLabel")}
+          <input
+            aria-label={t("privateManager.editSourceNoteAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-xs"
+            onChange={(event) => setEditBookSourceNote(event.target.value)}
+            type="text"
+            value={editBookSourceNote}
+          />
+        </label>
+      </div>
+      <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:flex-wrap">
+        <Button
+          className="min-h-11 w-full px-3 py-2 text-xs sm:min-h-10 sm:w-auto"
+          onClick={() => setShowEditBookForm(false)}
+          type="button"
+          variant="secondary"
+        >
+          {t("reportDialog.cancel")}
+        </Button>
+        <Button
+          className="min-h-11 w-full px-4 py-2 text-xs sm:min-h-10 sm:w-auto"
+          isLoading={busyKey === "book:edit"}
+          type="submit"
+        >
+          {t("myBooks.saveAndRecheckAll")}
+        </Button>
+      </div>
+    </form>
+  );
+
+  function renderCommittedPageEditForm(page: ParentPrivatePageDTO) {
+    return (
+      <div
+        className={
+          isMobile
+            ? "flex flex-col gap-3 text-xs"
+            : "flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs"
+        }
+      >
+        <p className="rounded-control border border-amber-200 bg-amber-50 p-2.5 font-bold text-amber-950">
+          {t("privateManager.editCommittedRecheckNote")}
+        </p>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("privateManager.committedPageNumberLabel")}
+          <input
+            aria-label={t("privateManager.committedPageNumberAria", {
+              page: page.page_number,
+            })}
+            className="min-h-11 w-32 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-9 sm:w-28 sm:text-xs"
+            min={1}
+            onChange={(event) =>
+              setEditPageNumber(Math.max(1, Number(event.target.value) || 1))
+            }
+            type="number"
+            value={editPageNumber}
+          />
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("privateManager.committedPageTextLabel")}
+          <textarea
+            aria-label={t("privateManager.committedPageTextAria", {
+              page: page.page_number,
+            })}
+            className="viread-learning-content min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-base text-ink sm:p-2 sm:text-xs"
+            dir="ltr"
+            lang="vi"
+            onChange={(event) => setEditPageText(event.target.value)}
+            value={editPageText}
+          />
+        </label>
+        <select
+          aria-label={t("privateManager.committedSourceAria", {
+            page: page.page_number,
+          })}
+          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-9 sm:px-2 sm:text-xs"
+          onChange={(event) =>
+            setEditPageSourceType(event.target.value as SourceUsageType)
+          }
+          value={editPageSourceType}
+        >
+          {SOURCE_USAGE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {t(`sourceUsage.${opt.value}`)}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label={t("privateManager.committedSourceNoteAria", {
+            page: page.page_number,
+          })}
+          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-9 sm:text-xs"
+          onChange={(event) => setEditPageSourceNote(event.target.value)}
+          placeholder={t("privateManager.sourceNoteShortPlaceholder")}
+          type="text"
+          value={editPageSourceNote}
+        />
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
+          <Button
+            className="min-h-11 w-full px-3 py-2 text-xs sm:min-h-9 sm:w-auto"
+            onClick={() => setEditingPageId(null)}
+            type="button"
+            variant="secondary"
+          >
+            {t("reportDialog.cancel")}
+          </Button>
+          <Button
+            className="min-h-11 w-full px-3 py-2 text-xs sm:min-h-9 sm:w-auto"
+            isLoading={busyKey === `page-edit:${page.page_id}`}
+            onClick={() => void handleSaveCommittedPageEdit(page)}
+            type="button"
+          >
+            {t("privateManager.saveAndRecheckAction")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 pb-6 sm:gap-6 sm:px-8 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
         <Link
           href={backHref}
-          className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
+          className="inline-flex min-h-11 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
         >
           <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
           {t("privateManager.backLink")}
@@ -1139,7 +1363,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+            className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
             fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
@@ -1150,7 +1374,7 @@ function ParentPrivateBookManagerContent({
           {book.readable_for_children && !isSuspended ? (
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
-              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+              className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
               fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
@@ -1158,7 +1382,7 @@ function ParentPrivateBookManagerContent({
             </ButtonLink>
           ) : (
             <Button
-              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+              className="min-h-11 w-auto px-3.5 py-2 text-xs sm:min-h-12 sm:px-4 sm:py-2 sm:text-button"
               disabled
               fullWidth={false}
               type="button"
@@ -1170,8 +1394,8 @@ function ParentPrivateBookManagerContent({
         </div>
       </div>
 
-      <header className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+      <header className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm sm:gap-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
           <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
             <BookCover
               author={book.author}
@@ -1228,16 +1452,16 @@ function ParentPrivateBookManagerContent({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
             <Link
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:px-3"
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 py-2 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
               href="/studio/tasks"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />
               Trung tâm tác vụ
             </Link>
             <Button
-              className="min-h-10 w-auto px-2.5 text-xs sm:min-h-11 sm:px-3"
+              className="min-h-11 w-full px-3 py-2 text-xs sm:w-auto"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowEditBookForm(false);
@@ -1251,7 +1475,7 @@ function ParentPrivateBookManagerContent({
               {showCoverStudio ? "Đóng ảnh bìa" : "Đổi ảnh bìa"}
             </Button>
             <Button
-              className="min-h-10 w-auto px-2.5 text-xs sm:px-3"
+              className="min-h-11 w-full px-3 py-2 text-xs sm:w-auto"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1269,7 +1493,7 @@ function ParentPrivateBookManagerContent({
             </Button>
             <button
               aria-label={t("myBooks.deleteBookAria", { title: book.title })}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1285,174 +1509,131 @@ function ParentPrivateBookManagerContent({
         </div>
 
         {showCoverStudio ? (
-          <BookCoverStudio
-            actorRole="parent"
-            author={book.author}
-            autoLoad
-            bookId={book.id}
-            bookTitle={book.title}
-            initialCoverSourceType={activeCoverAsset?.source_type ?? null}
-            initialCoverUrl={activeCoverAsset?.media_url ?? null}
-            maxGrade={book.max_grade}
-            minGrade={book.min_grade}
-            onCoverUpdated={(asset) => {
-              setActiveCoverAsset(asset);
-            }}
-          />
+          isMobile ? (
+            <Modal
+              isOpen
+              maxWidth="lg"
+              mobilePresentation="sheet"
+              onClose={() => setShowCoverStudio(false)}
+              title="Đổi ảnh bìa"
+              tone="paper"
+            >
+              <BookCoverStudio
+                actorRole="parent"
+                author={book.author}
+                autoLoad
+                bookId={book.id}
+                bookTitle={book.title}
+                initialCoverSourceType={activeCoverAsset?.source_type ?? null}
+                initialCoverUrl={activeCoverAsset?.media_url ?? null}
+                maxGrade={book.max_grade}
+                minGrade={book.min_grade}
+                onCoverUpdated={(asset) => {
+                  setActiveCoverAsset(asset);
+                }}
+              />
+            </Modal>
+          ) : (
+            <BookCoverStudio
+              actorRole="parent"
+              author={book.author}
+              autoLoad
+              bookId={book.id}
+              bookTitle={book.title}
+              initialCoverSourceType={activeCoverAsset?.source_type ?? null}
+              initialCoverUrl={activeCoverAsset?.media_url ?? null}
+              maxGrade={book.max_grade}
+              minGrade={book.min_grade}
+              onCoverUpdated={(asset) => {
+                setActiveCoverAsset(asset);
+              }}
+            />
+          )
         ) : null}
 
         {showEditBookForm ? (
-          <form
-            aria-label={t("privateManager.editInfoAria")}
-            className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-4 text-xs"
-            onSubmit={(event) => void handleSaveBookEdit(event)}
-          >
-            <p className="font-bold text-amber-950">
-              {t("privateManager.editInfoRecheckNotice")}
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("myBooks.titleLabel")}
-                <input
-                  aria-label={t("myBooks.editTitleAria")}
-                  className="viread-learning-content min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
-                  dir="ltr"
-                  lang="vi"
-                  onChange={(event) => setEditBookTitle(event.target.value)}
-                  required
-                  type="text"
-                  value={editBookTitle}
-                />
-              </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("myBooks.editAuthorLabel")}
-                <input
-                  aria-label={t("myBooks.editAuthorAria")}
-                  className="viread-learning-content min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
-                  dir="ltr"
-                  lang="vi"
-                  onChange={(event) => setEditBookAuthor(event.target.value)}
-                  type="text"
-                  value={editBookAuthor}
-                />
-              </label>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("myBooks.editMinGradeLabel")}
-                <select
-                  aria-label={t("myBooks.editMinGradeAria")}
-                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
-                  onChange={(event) =>
-                    setEditBookMinGrade(Number(event.target.value))
-                  }
-                  value={editBookMinGrade}
-                >
-                  {CHILD_GRADES.map((grade) => (
-                    <option key={grade} value={grade}>
-                      {t("card.gradeSingle", { grade })}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("myBooks.editMaxGradeLabel")}
-                <select
-                  aria-label={t("myBooks.editMaxGradeAria")}
-                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
-                  onChange={(event) =>
-                    setEditBookMaxGrade(Number(event.target.value))
-                  }
-                  value={editBookMaxGrade}
-                >
-                  {CHILD_GRADES.map((grade) => (
-                    <option key={grade} value={grade}>
-                      {t("card.gradeSingle", { grade })}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("privateManager.editSourceLabel")}
-                <select
-                  aria-label={t("privateManager.editSourceAria")}
-                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                  onChange={(event) =>
-                    setEditBookSourceType(event.target.value as SourceUsageType)
-                  }
-                  value={editBookSourceType}
-                >
-                  {SOURCE_USAGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {t(`sourceUsage.${opt.value}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
-                {t("myBooks.editSourceNoteLabel")}
-                <input
-                  aria-label={t("privateManager.editSourceNoteAria")}
-                  className="min-h-10 rounded-control border border-border bg-white px-3 text-xs text-ink"
-                  onChange={(event) =>
-                    setEditBookSourceNote(event.target.value)
-                  }
-                  type="text"
-                  value={editBookSourceNote}
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button
-                className="min-h-10 w-auto px-4 text-xs"
-                isLoading={busyKey === "book:edit"}
-                type="submit"
-              >
-                {t("myBooks.saveAndRecheckAll")}
-              </Button>
-              <Button
-                className="min-h-10 w-auto px-3 text-xs"
-                onClick={() => setShowEditBookForm(false)}
-                type="button"
-                variant="secondary"
-              >
-                {t("reportDialog.cancel")}
-              </Button>
-            </div>
-          </form>
+          isMobile ? (
+            <Modal
+              isOpen
+              mobilePresentation="sheet"
+              onClose={() => setShowEditBookForm(false)}
+              title={t("privateManager.editInfoAria")}
+              tone="paper"
+            >
+              {editBookFormElement}
+            </Modal>
+          ) : (
+            editBookFormElement
+          )
         ) : null}
 
         {confirmDeleteBook ? (
-          <div
-            role="alertdialog"
-            aria-label={t("myBooks.deleteDialogAria", { title: book.title })}
-            className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950"
-          >
-            <p className="font-bold">
-              {t("myBooks.deleteDialogTitle", { title: book.title })}
-            </p>
-            <p>{t("privateManager.deleteBookConfirmBody")}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="min-h-10 w-auto bg-rose-700 px-4 text-xs text-white hover:bg-rose-800"
-                isLoading={busyKey === "book:delete"}
-                onClick={() => void handleDeleteBook()}
-                type="button"
-              >
-                {t("privateManager.confirmDeleteBook")}
-              </Button>
-              <Button
-                className="min-h-10 w-auto px-3 text-xs"
-                onClick={() => setConfirmDeleteBook(false)}
-                type="button"
-                variant="secondary"
-              >
-                {t("reportDialog.cancel")}
-              </Button>
+          isMobile ? (
+            <Modal
+              footer={
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                  <Button
+                    className="w-full sm:w-auto"
+                    onClick={() => setConfirmDeleteBook(false)}
+                    size="touch"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {t("reportDialog.cancel")}
+                  </Button>
+                  <Button
+                    className="w-full sm:w-auto"
+                    isLoading={busyKey === "book:delete"}
+                    onClick={() => void handleDeleteBook()}
+                    size="touch"
+                    type="button"
+                    variant="destructive"
+                  >
+                    {t("privateManager.confirmDeleteBook")}
+                  </Button>
+                </div>
+              }
+              isOpen
+              mobilePresentation="sheet"
+              onClose={() => setConfirmDeleteBook(false)}
+              role="alertdialog"
+              title={t("myBooks.deleteDialogTitle", { title: book.title })}
+              tone="paper"
+            >
+              <p className="text-sm text-ink">
+                {t("privateManager.deleteBookConfirmBody")}
+              </p>
+            </Modal>
+          ) : (
+            <div
+              role="alertdialog"
+              aria-label={t("myBooks.deleteDialogAria", { title: book.title })}
+              className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950"
+            >
+              <p className="font-bold">
+                {t("myBooks.deleteDialogTitle", { title: book.title })}
+              </p>
+              <p>{t("privateManager.deleteBookConfirmBody")}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="min-h-10 w-auto bg-rose-700 px-4 py-2 text-xs text-white hover:bg-rose-800"
+                  isLoading={busyKey === "book:delete"}
+                  onClick={() => void handleDeleteBook()}
+                  type="button"
+                >
+                  {t("privateManager.confirmDeleteBook")}
+                </Button>
+                <Button
+                  className="min-h-10 w-auto px-3 py-2 text-xs"
+                  onClick={() => setConfirmDeleteBook(false)}
+                  type="button"
+                  variant="secondary"
+                >
+                  {t("reportDialog.cancel")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )
         ) : null}
       </header>
 
@@ -1602,7 +1783,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-3">
           <Button
-            className="sm:w-auto"
+            className="w-full sm:w-auto"
             disabled={!selectedFile || isSuspended}
             isLoading={uploading}
             type="submit"
@@ -1698,7 +1879,7 @@ function ParentPrivateBookManagerContent({
                   <button
                     key={pill.key}
                     aria-pressed={isSelected}
-                    className={`min-h-10 shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold transition-colors sm:min-h-9 sm:py-1 ${
+                    className={`min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3.5 py-2 text-xs font-bold transition-colors sm:min-h-9 sm:px-3 sm:py-1 ${
                       isSelected
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-canvas text-ink hover:bg-sky/50"
@@ -1715,53 +1896,111 @@ function ParentPrivateBookManagerContent({
               })}
             </div>
             {activeSubmissions.length > 1 ? (
-              <div
-                aria-label={t("privateManager.overviewAria")}
-                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
-              >
-                {activeSubmissions.map((sub, index) => {
-                  const isChipQueuedOffline =
-                    ocrWorkerOffline &&
-                    sub.workflow_status === "CHECKING" &&
-                    sub.ocr_status === "PENDING";
-                  const chipStyle = isChipQueuedOffline
-                    ? "border-amber-300 bg-amber-50 text-amber-950"
-                    : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                      "border-border bg-canvas text-ink");
-                  const chipLabel = isChipQueuedOffline
-                    ? t("privateManager.queuedWaitingWorkerBadge")
-                    : sub.workflow_status_label;
-                  return (
-                    <button
-                      key={`map-${sub.id}`}
-                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
-                      onClick={() => {
-                        setStatusFilter("ALL");
-                        setSubmissionsPage(
-                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
-                        );
-                        requestAnimationFrame(() => {
-                          const target = document.querySelector(
-                            `[data-submission-id="${sub.id}"]`,
+              isMobile ? (
+                <details className="border-t border-border pt-2">
+                  <summary className="flex min-h-11 cursor-pointer items-center justify-between text-xs font-bold text-ink">
+                    <span>{t("privateManager.overviewAria")}</span>
+                    <span className="rounded-full bg-canvas px-2 py-0.5 text-[11px] font-semibold text-muted">
+                      {activeSubmissions.length}
+                    </span>
+                  </summary>
+                  <div
+                    aria-label={t("privateManager.overviewAria")}
+                    className="flex flex-wrap gap-1.5 pt-2"
+                  >
+                    {activeSubmissions.map((sub, index) => {
+                      const isChipQueuedOffline =
+                        ocrWorkerOffline &&
+                        sub.workflow_status === "CHECKING" &&
+                        sub.ocr_status === "PENDING";
+                      const chipStyle = isChipQueuedOffline
+                        ? "border-amber-300 bg-amber-50 text-amber-950"
+                        : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                          "border-border bg-canvas text-ink");
+                      const chipLabel = isChipQueuedOffline
+                        ? t("privateManager.queuedWaitingWorkerBadge")
+                        : sub.workflow_status_label;
+                      return (
+                        <button
+                          key={`map-${sub.id}`}
+                          className={`inline-flex min-h-11 items-center gap-1 rounded-control border px-3 py-1.5 text-[11px] font-bold ${chipStyle}`}
+                          onClick={() => {
+                            setStatusFilter("ALL");
+                            setSubmissionsPage(
+                              Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
+                            );
+                            requestAnimationFrame(() => {
+                              const target = document.querySelector(
+                                `[data-submission-id="${sub.id}"]`,
+                              );
+                              target?.scrollIntoView?.({
+                                behavior: "smooth",
+                                block: "nearest",
+                              });
+                            });
+                          }}
+                          title={t("privateManager.overviewChipTitle", {
+                            page: sub.source_page_number,
+                            status: chipLabel,
+                          })}
+                          type="button"
+                        >
+                          <span>Tr.{sub.source_page_number}</span>
+                          <span className="font-normal">· {chipLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </details>
+              ) : (
+                <div
+                  aria-label={t("privateManager.overviewAria")}
+                  className="flex flex-wrap gap-1.5 border-t border-border pt-3"
+                >
+                  {activeSubmissions.map((sub, index) => {
+                    const isChipQueuedOffline =
+                      ocrWorkerOffline &&
+                      sub.workflow_status === "CHECKING" &&
+                      sub.ocr_status === "PENDING";
+                    const chipStyle = isChipQueuedOffline
+                      ? "border-amber-300 bg-amber-50 text-amber-950"
+                      : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                        "border-border bg-canvas text-ink");
+                    const chipLabel = isChipQueuedOffline
+                      ? t("privateManager.queuedWaitingWorkerBadge")
+                      : sub.workflow_status_label;
+                    return (
+                      <button
+                        key={`map-${sub.id}`}
+                        className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
+                        onClick={() => {
+                          setStatusFilter("ALL");
+                          setSubmissionsPage(
+                            Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
                           );
-                          target?.scrollIntoView?.({
-                            behavior: "smooth",
-                            block: "nearest",
+                          requestAnimationFrame(() => {
+                            const target = document.querySelector(
+                              `[data-submission-id="${sub.id}"]`,
+                            );
+                            target?.scrollIntoView?.({
+                              behavior: "smooth",
+                              block: "nearest",
+                            });
                           });
-                        });
-                      }}
-                      title={t("privateManager.overviewChipTitle", {
-                        page: sub.source_page_number,
-                        status: chipLabel,
-                      })}
-                      type="button"
-                    >
-                      <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">· {chipLabel}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                        }}
+                        title={t("privateManager.overviewChipTitle", {
+                          page: sub.source_page_number,
+                          status: chipLabel,
+                        })}
+                        type="button"
+                      >
+                        <span>Tr.{sub.source_page_number}</span>
+                        <span className="font-normal">· {chipLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             ) : null}
 
             {workerFailureCount > 0 || submissionCounts.CHECKING > 0 ? (
@@ -1915,7 +2154,7 @@ function ParentPrivateBookManagerContent({
                               aria-label={t("privateManager.cancelPageAria", {
                                 page: sub.source_page_number,
                               })}
-                              className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border px-2.5 text-xs font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                              className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border px-3 text-xs font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 sm:min-h-9 sm:px-2.5"
                               disabled={isSubBusy}
                               onClick={() => void handleCancelSubmission(sub)}
                               type="button"
@@ -2089,7 +2328,7 @@ function ParentPrivateBookManagerContent({
                                 </span>
                               ) : (
                                 <Button
-                                  className="min-h-9 w-auto px-3 text-xs"
+                                  className="min-h-11 w-full px-3.5 py-2 text-xs sm:min-h-9 sm:w-auto sm:px-3"
                                   disabled={isSubBusy}
                                   onClick={() => void handleAcceptSpelling(sub)}
                                   type="button"
@@ -2172,7 +2411,7 @@ function ParentPrivateBookManagerContent({
                               aria-label={t(
                                 "privateManager.editSubmissionTextAria",
                               )}
-                              className="viread-learning-content mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                              className="viread-learning-content mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-sm"
                               dir="ltr"
                               lang="vi"
                               onChange={(event) =>
@@ -2185,7 +2424,7 @@ function ParentPrivateBookManagerContent({
                                 aria-label={t(
                                   "privateManager.editSubmissionSourceAria",
                                 )}
-                                className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-10 sm:text-xs"
                                 onChange={(event) =>
                                   setEditSourceType(
                                     event.target.value as SourceUsageType,
@@ -2203,7 +2442,7 @@ function ParentPrivateBookManagerContent({
                                 aria-label={t(
                                   "privateManager.editSubmissionSourceNoteAria",
                                 )}
-                                className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-10 sm:text-xs"
                                 onChange={(event) =>
                                   setEditSourceNote(event.target.value)
                                 }
@@ -2213,22 +2452,22 @@ function ParentPrivateBookManagerContent({
                                 value={editSourceNote}
                               />
                             </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
                               <Button
-                                className="min-h-10 w-auto px-4 text-xs"
-                                isLoading={busyKey === `edit:${sub.id}`}
-                                onClick={() => void handleSaveEdit(sub)}
-                                type="button"
-                              >
-                                {t("privateManager.saveNewVersionAction")}
-                              </Button>
-                              <Button
-                                className="min-h-10 w-auto px-3 text-xs"
+                                className="min-h-11 w-full px-3 py-2 text-xs sm:min-h-10 sm:w-auto"
                                 onClick={() => setEditingSubId(null)}
                                 type="button"
                                 variant="secondary"
                               >
                                 {t("privateManager.closeAction")}
+                              </Button>
+                              <Button
+                                className="min-h-11 w-full px-4 py-2 text-xs sm:min-h-10 sm:w-auto"
+                                isLoading={busyKey === `edit:${sub.id}`}
+                                onClick={() => void handleSaveEdit(sub)}
+                                type="button"
+                              >
+                                {t("privateManager.saveNewVersionAction")}
                               </Button>
                             </div>
                           </div>
@@ -2249,7 +2488,7 @@ function ParentPrivateBookManagerContent({
                                   aria-label={t(
                                     "privateManager.submitAdminSourceAria",
                                   )}
-                                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-10 sm:text-xs"
                                   onChange={(event) =>
                                     setReviewSourceType(
                                       event.target.value as SourceUsageType,
@@ -2270,7 +2509,7 @@ function ParentPrivateBookManagerContent({
                                   aria-label={t(
                                     "privateManager.submitAdminSourceNoteAria",
                                   )}
-                                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:min-h-10 sm:text-xs"
                                   onChange={(event) =>
                                     setReviewSourceNote(event.target.value)
                                   }
@@ -2287,7 +2526,7 @@ function ParentPrivateBookManagerContent({
                                 aria-label={t(
                                   "privateManager.submitAdminMessageAria",
                                 )}
-                                className="min-h-20 rounded-control border border-border bg-white p-2 text-xs text-ink"
+                                className="min-h-20 rounded-control border border-border bg-white p-2.5 text-base text-ink sm:p-2 sm:text-xs"
                                 onChange={(event) =>
                                   setReviewRequestNote(event.target.value)
                                 }
@@ -2297,9 +2536,17 @@ function ParentPrivateBookManagerContent({
                                 value={reviewRequestNote}
                               />
                             </label>
-                            <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
                               <Button
-                                className="min-h-10 w-auto px-4 text-xs"
+                                className="min-h-11 w-full px-3 py-2 text-xs sm:min-h-10 sm:w-auto"
+                                onClick={() => setReviewFormSubId(null)}
+                                type="button"
+                                variant="secondary"
+                              >
+                                {t("reportDialog.cancel")}
+                              </Button>
+                              <Button
+                                className="min-h-11 w-full px-4 py-2 text-xs sm:min-h-10 sm:w-auto"
                                 isLoading={busyKey === `review:${sub.id}`}
                                 onClick={() =>
                                   void handleRequestAdminReview(sub)
@@ -2308,14 +2555,6 @@ function ParentPrivateBookManagerContent({
                               >
                                 <Send aria-hidden="true" className="size-3.5" />
                                 {t("privateManager.confirmSendAdmin")}
-                              </Button>
-                              <Button
-                                className="min-h-10 w-auto px-3 text-xs"
-                                onClick={() => setReviewFormSubId(null)}
-                                type="button"
-                                variant="secondary"
-                              >
-                                {t("reportDialog.cancel")}
                               </Button>
                             </div>
                           </div>
@@ -2326,7 +2565,7 @@ function ParentPrivateBookManagerContent({
                           {/* Add Page to Book — STRICTLY LOCKED unless can_add_to_book */}
                           {sub.workflow_status !== "ADDED_TO_BOOK" ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11 w-full px-4 py-2 text-sm sm:w-auto"
                               disabled={
                                 !sub.can_add_to_book || isSubBusy || isSuspended
                               }
@@ -2341,7 +2580,7 @@ function ParentPrivateBookManagerContent({
                               {t("privateManager.commitPageAction")}
                             </Button>
                           ) : (
-                            <span className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
+                            <span className="inline-flex min-h-11 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
                               <CheckCircle2
                                 aria-hidden="true"
                                 className="size-4"
@@ -2353,7 +2592,7 @@ function ParentPrivateBookManagerContent({
                           {/* Escalate to Admin */}
                           {sub.can_request_admin_review && !isReviewFormOpen ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11 w-full px-4 py-2 text-sm sm:w-auto"
                               disabled={isSubBusy || isSuspended}
                               onClick={() => {
                                 setReviewFormSubId(sub.id);
@@ -2372,7 +2611,7 @@ function ParentPrivateBookManagerContent({
                           {/* Stage-preserving Retry */}
                           {sub.can_retry ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11 w-full px-4 py-2 text-sm sm:w-auto"
                               disabled={isSubBusy || isSuspended}
                               isLoading={busyKey === `retry:${sub.id}`}
                               onClick={() => void handleRetry(sub)}
@@ -2392,7 +2631,7 @@ function ParentPrivateBookManagerContent({
                           !isSuspended ? (
                             <>
                               <Button
-                                className="min-h-10 w-auto px-3 text-xs"
+                                className="min-h-11 w-full px-3 py-2 text-xs sm:w-auto"
                                 disabled={isSubBusy}
                                 onClick={() => {
                                   setEditingSubId(sub.id);
@@ -2410,7 +2649,7 @@ function ParentPrivateBookManagerContent({
                                 {t("privateManager.editContentAction")}
                               </Button>
 
-                              <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink hover:bg-canvas">
+                              <label className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink hover:bg-canvas sm:w-auto">
                                 <Upload
                                   aria-hidden="true"
                                   className="size-3.5"
@@ -2530,7 +2769,7 @@ function ParentPrivateBookManagerContent({
                       </p>
                     ) : null}
 
-                    <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5 sm:gap-2">
+                    <div className="mt-auto grid grid-cols-2 gap-2 border-t border-border pt-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:pt-2.5">
                       {!isSuspended ? (
                         <>
                           <button
@@ -2538,7 +2777,7 @@ function ParentPrivateBookManagerContent({
                               "privateManager.editCommittedPageAria",
                               { page: page.page_number },
                             )}
-                            className="inline-flex min-h-10 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50 sm:min-h-9"
+                            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50 sm:min-h-9"
                             disabled={isPageBusy || busyKey !== null}
                             onClick={() =>
                               isEditingPage
@@ -2550,7 +2789,7 @@ function ParentPrivateBookManagerContent({
                             <Pencil aria-hidden="true" className="size-3.5" />
                             {t("privateManager.editPageAction")}
                           </button>
-                          <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-9">
+                          <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-9">
                             <Upload aria-hidden="true" className="size-3.5" />
                             {t("privateManager.replaceImageAction")}
                             <input
@@ -2578,7 +2817,7 @@ function ParentPrivateBookManagerContent({
                       ) : null}
                       <button
                         aria-label={`Mở tranh minh họa trang ${page.page_number}`}
-                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-primary/30 bg-sky/50 px-2.5 text-xs font-semibold text-primary-hover hover:bg-sky disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-primary/30 bg-sky/50 px-2.5 text-xs font-semibold text-primary-hover hover:bg-sky disabled:opacity-50"
                         disabled={isSuspended || isPageBusy || busyKey !== null}
                         onClick={() => {
                           setSmartOcrPageId(null);
@@ -2613,7 +2852,7 @@ function ParentPrivateBookManagerContent({
                           "privateManager.deleteCommittedPageAria",
                           { page: page.page_number },
                         )}
-                        className="inline-flex min-h-10 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 sm:min-h-9"
+                        className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 sm:min-h-9"
                         disabled={isPageBusy || busyKey !== null}
                         onClick={() => {
                           setEditingPageId(null);
@@ -2628,7 +2867,7 @@ function ParentPrivateBookManagerContent({
                       </button>
                     </div>
 
-                    {isIllustrationStudioOpen ? (
+                    {!isMobile && isIllustrationStudioOpen ? (
                       <div className="pt-1">
                         <PageIllustrationStudio
                           actorRole="parent"
@@ -2656,102 +2895,11 @@ function ParentPrivateBookManagerContent({
                       </div>
                     ) : null}
 
-                    {isEditingPage ? (
-                      <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">
-                        <p className="font-bold text-amber-950">
-                          {t("privateManager.editCommittedRecheckNote")}
-                        </p>
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
-                          {t("privateManager.committedPageNumberLabel")}
-                          <input
-                            aria-label={t(
-                              "privateManager.committedPageNumberAria",
-                              { page: page.page_number },
-                            )}
-                            className="min-h-9 w-28 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                            min={1}
-                            onChange={(event) =>
-                              setEditPageNumber(
-                                Math.max(1, Number(event.target.value) || 1),
-                              )
-                            }
-                            type="number"
-                            value={editPageNumber}
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
-                          {t("privateManager.committedPageTextLabel")}
-                          <textarea
-                            aria-label={t(
-                              "privateManager.committedPageTextAria",
-                              { page: page.page_number },
-                            )}
-                            className="viread-learning-content min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
-                            dir="ltr"
-                            lang="vi"
-                            onChange={(event) =>
-                              setEditPageText(event.target.value)
-                            }
-                            value={editPageText}
-                          />
-                        </label>
-                        <select
-                          aria-label={t("privateManager.committedSourceAria", {
-                            page: page.page_number,
-                          })}
-                          className="min-h-9 rounded-control border border-border bg-white px-2 text-xs text-ink"
-                          onChange={(event) =>
-                            setEditPageSourceType(
-                              event.target.value as SourceUsageType,
-                            )
-                          }
-                          value={editPageSourceType}
-                        >
-                          {SOURCE_USAGE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {t(`sourceUsage.${opt.value}`)}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          aria-label={t(
-                            "privateManager.committedSourceNoteAria",
-                            { page: page.page_number },
-                          )}
-                          className="min-h-9 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                          onChange={(event) =>
-                            setEditPageSourceNote(event.target.value)
-                          }
-                          placeholder={t(
-                            "privateManager.sourceNoteShortPlaceholder",
-                          )}
-                          type="text"
-                          value={editPageSourceNote}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            className="min-h-9 w-auto px-3 text-xs"
-                            isLoading={busyKey === `page-edit:${page.page_id}`}
-                            onClick={() =>
-                              void handleSaveCommittedPageEdit(page)
-                            }
-                            type="button"
-                          >
-                            {t("privateManager.saveAndRecheckAction")}
-                          </Button>
-                          <Button
-                            className="min-h-9 w-auto px-3 text-xs"
-                            onClick={() => setEditingPageId(null)}
-                            type="button"
-                            variant="secondary"
-                          >
-                            {t("reportDialog.cancel")}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
+                    {!isMobile && isEditingPage
+                      ? renderCommittedPageEditForm(page)
+                      : null}
 
-                    {isConfirmingDelete ? (
+                    {!isMobile && isConfirmingDelete ? (
                       <div
                         role="alertdialog"
                         aria-label={t(
@@ -2768,7 +2916,7 @@ function ParentPrivateBookManagerContent({
                         <p>{t("privateManager.deleteCommittedDialogBody")}</p>
                         <div className="flex flex-wrap gap-2">
                           <Button
-                            className="min-h-9 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                            className="min-h-9 w-auto bg-rose-700 px-3 py-2 text-xs text-white hover:bg-rose-800"
                             isLoading={
                               busyKey === `page-delete:${page.page_id}`
                             }
@@ -2778,7 +2926,7 @@ function ParentPrivateBookManagerContent({
                             {t("myBooks.confirmDelete")}
                           </Button>
                           <Button
-                            className="min-h-9 w-auto px-3 text-xs"
+                            className="min-h-9 w-auto px-3 py-2 text-xs"
                             onClick={() => setConfirmDeletePageId(null)}
                             type="button"
                             variant="secondary"
@@ -2792,6 +2940,88 @@ function ParentPrivateBookManagerContent({
                 );
               })}
             </div>
+            {isMobile && illustrationStudioPage ? (
+              <Modal
+                isOpen
+                maxWidth="lg"
+                mobilePresentation="sheet"
+                onClose={() => setIllustrationStudioPageId(null)}
+                title={`Tranh minh họa · ${t("privateManager.pageNumberHeading", { page: illustrationStudioPage.page_number })}`}
+                tone="paper"
+              >
+                <PageIllustrationStudio
+                  actorRole="parent"
+                  autoLoad
+                  bookId={book.id}
+                  canonicalText={
+                    illustrationStudioPage.verified_text ||
+                    illustrationStudioPage.verified_text_preview
+                  }
+                  compact
+                  pageId={illustrationStudioPage.page_id}
+                  pageNumber={illustrationStudioPage.page_number}
+                />
+              </Modal>
+            ) : null}
+            {isMobile && editingCommittedPage ? (
+              <Modal
+                isOpen
+                mobilePresentation="sheet"
+                onClose={() => setEditingPageId(null)}
+                title={t("privateManager.editCommittedPageAria", {
+                  page: editingCommittedPage.page_number,
+                })}
+                tone="paper"
+              >
+                {renderCommittedPageEditForm(editingCommittedPage)}
+              </Modal>
+            ) : null}
+            {isMobile && confirmDeleteCommittedPage ? (
+              <Modal
+                footer={
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                    <Button
+                      className="w-full sm:w-auto"
+                      onClick={() => setConfirmDeletePageId(null)}
+                      size="touch"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {t("reportDialog.cancel")}
+                    </Button>
+                    <Button
+                      className="w-full sm:w-auto"
+                      isLoading={
+                        busyKey ===
+                        `page-delete:${confirmDeleteCommittedPage.page_id}`
+                      }
+                      onClick={() =>
+                        void handleDeleteCommittedPage(
+                          confirmDeleteCommittedPage,
+                        )
+                      }
+                      size="touch"
+                      type="button"
+                      variant="destructive"
+                    >
+                      {t("myBooks.confirmDelete")}
+                    </Button>
+                  </div>
+                }
+                isOpen
+                mobilePresentation="sheet"
+                onClose={() => setConfirmDeletePageId(null)}
+                role="alertdialog"
+                title={t("privateManager.deleteCommittedDialogTitle", {
+                  page: confirmDeleteCommittedPage.page_number,
+                })}
+                tone="paper"
+              >
+                <p className="text-sm text-ink">
+                  {t("privateManager.deleteCommittedDialogBody")}
+                </p>
+              </Modal>
+            ) : null}
             <PaginationBar
               ariaLabel={t("privateManager.committedPaginationAria")}
               compact

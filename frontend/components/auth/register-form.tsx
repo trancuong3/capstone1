@@ -142,7 +142,7 @@ export function RegisterForm({
 
   return (
     <form
-      className="flex w-full flex-col gap-4 sm:gap-6"
+      className="flex w-full flex-col gap-5 sm:gap-6"
       noValidate
       onSubmit={onSubmit}
     >
@@ -174,7 +174,7 @@ export function RegisterForm({
                 : t("auth.passwordToggle.show")
             }
             aria-pressed={showPassword}
-            className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            className="-me-1 inline-flex size-11 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
             onClick={() => setShowPassword((prev) => !prev)}
             type="button"
           >

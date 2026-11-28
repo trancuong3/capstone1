@@ -55,35 +55,47 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             <LanguageSelector variant="compact" />
           </div>
         ) : (
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-3">
             <nav
               aria-label={tNav("accountMenu.accountNavAria")}
               className="flex shrink-0 items-center gap-2 sm:gap-3"
             >
-              <ButtonLink
-                aria-current={isLoginActive ? "page" : undefined}
-                href="/login"
-                size="compact"
-                variant={isLoginActive ? "primary" : "quiet"}
-                className={cn(
-                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
-                  !isLoginActive && "border border-border",
-                )}
+              <span
+                className={isLoginActive ? "hidden sm:inline-flex" : undefined}
               >
-                {tAuth("login.submit")}
-              </ButtonLink>
-              <ButtonLink
-                aria-current={isRegisterActive ? "page" : undefined}
-                href="/register"
-                size="compact"
-                variant={isLoginActive ? "quiet" : "primary"}
-                className={cn(
-                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
-                  isLoginActive && "border border-border",
-                )}
+                <ButtonLink
+                  aria-current={isLoginActive ? "page" : undefined}
+                  fullWidth={false}
+                  href="/login"
+                  size="compact"
+                  variant={isLoginActive ? "primary" : "quiet"}
+                  className={cn(
+                    "min-h-11 whitespace-nowrap px-3 py-2 text-sm leading-5 sm:min-h-12 sm:min-w-32 sm:px-4 sm:py-2.5 sm:text-label",
+                    !isLoginActive && "border border-border",
+                  )}
+                >
+                  {tAuth("login.submit")}
+                </ButtonLink>
+              </span>
+              <span
+                className={
+                  isRegisterActive ? "hidden sm:inline-flex" : undefined
+                }
               >
-                {tAuth("register.submit")}
-              </ButtonLink>
+                <ButtonLink
+                  aria-current={isRegisterActive ? "page" : undefined}
+                  fullWidth={false}
+                  href="/register"
+                  size="compact"
+                  variant={isLoginActive ? "quiet" : "primary"}
+                  className={cn(
+                    "min-h-11 whitespace-nowrap px-3 py-2 text-sm leading-5 sm:min-h-12 sm:min-w-32 sm:px-4 sm:py-2.5 sm:text-label",
+                    isLoginActive && "border border-border",
+                  )}
+                >
+                  {tAuth("register.submit")}
+                </ButtonLink>
+              </span>
             </nav>
             <LanguageSelector variant="compact" />
           </div>

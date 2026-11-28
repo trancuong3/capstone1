@@ -8,6 +8,7 @@ import type { BookDetailDTO } from "@/types/book";
 import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ChildProfileDTO } from "@/types/child";
 import { BookCover } from "@/components/books/book-cover";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
 import {
   ReadingCompanionBubble,
@@ -99,6 +100,10 @@ interface ReadingLayoutProps {
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
   topBar?: ReactNode;
+  /** Single-row mobile (< 768px) top bar replacing desktop header + topBar. */
+  mobileTopBar?: ReactNode;
+  /** Non-blocking feedback banner docked cleanly above reading controls. */
+  feedbackBanner?: ReactNode;
 }
 
 export function ReadingLayout({
@@ -164,10 +169,13 @@ export function ReadingLayout({
   onReadingModeChange,
   previewSnapshot,
   topBar,
+  mobileTopBar,
+  feedbackBanner,
 }: ReadingLayoutProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tc = useTranslations("child");
+  const isMobile = useIsMobileViewport();
   const [internalReadingMode, setInternalReadingMode] =
     useState<ReadingDisplayMode | null>(null);
   const activeReadingMode =
@@ -188,84 +196,152 @@ export function ReadingLayout({
     Boolean(latestTranscript);
   const hasFeedbackPanel =
     hasStatusBanner ||
+    Boolean(feedbackBanner) ||
     Boolean(sentenceReinforcementPanel) ||
     Boolean(phonicsPanel) ||
     Boolean(!retryMode && companionBubble);
 
   return (
     <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-2.5 pt-1 sm:gap-3 sm:px-6 sm:pt-3">
-      <header className="flex h-10 shrink-0 flex-nowrap items-center gap-1.5 sm:h-auto sm:gap-3">
-        <div className="flex shrink-0 items-center">
-          <Link
-            aria-label={t("layout.exitAria")}
-            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:min-w-12 sm:gap-2 sm:px-3 sm:text-label"
-            href={exitHref}
-            onClick={
-              onExit
-                ? (event) => {
-                    event.preventDefault();
-                    onExit();
-                  }
-                : undefined
-            }
-          >
-            <ArrowLeft
-              aria-hidden="true"
-              className="viread-rtl-flip size-5 shrink-0 sm:size-5"
-            />
-            <span className="hidden sm:inline">{t("layout.back")}</span>
-          </Link>
-        </div>
-        <div className="me-auto min-w-0">
-          {child && (
-            <p className="truncate text-xs font-bold text-primary sm:text-sm">
-              {child.alias} ·{" "}
-              {tc("switcher.gradeLabel", { grade: child.grade })}
-            </p>
-          )}
-          {!topBar && progressLabel && (
-            <p className="truncate text-[11px] tabular-nums text-muted sm:text-sm">
-              {progressLabel}
-            </p>
-          )}
-        </div>
-        {onSpellWord && (currentWordText || page.words.length > 0) ? (
-          <button
-            type="button"
-            aria-label={t("layout.phonicsAria")}
-            onClick={onSpellWord}
-            disabled={controlsDisabled}
-            className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-sm"
-          >
-            <Volume2 aria-hidden="true" className="size-4 shrink-0" />
-            <span>
-              <span className="hidden sm:inline">
-                {t("layout.phonicsPrefix")}
-              </span>
-              {t("layout.phonicsLabel")}
-            </span>
-          </button>
-        ) : null}
-        <button
-          type="button"
-          aria-label={t("layout.tutorAria")}
-          onClick={onHelp}
-          disabled={controlsDisabled || retryMode}
-          className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:min-w-11 sm:gap-2 sm:px-3 sm:text-sm"
+      {isMobile ? (
+        <header
+          data-reading-topbar="true"
+          className="flex min-h-12 shrink-0 flex-nowrap items-center gap-0.5 border-b border-border/70 pb-1"
         >
-          <CircleHelp
-            aria-hidden="true"
-            className="size-4.5 shrink-0 sm:size-5"
-          />
-          <span>{t("layout.tutorLabel")}</span>
-        </button>
-      </header>
+          {mobileTopBar ?? (
+            <>
+              <Link
+                aria-label={t("layout.exitAria")}
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky"
+                href={exitHref}
+                onClick={
+                  onExit
+                    ? (event) => {
+                        event.preventDefault();
+                        onExit();
+                      }
+                    : undefined
+                }
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5 shrink-0"
+                />
+              </Link>
+              <div className="min-w-0 flex-1 px-1">
+                {child ? (
+                  <p className="truncate text-xs font-bold text-primary">
+                    {child.alias} ·{" "}
+                    {tc("switcher.gradeLabel", { grade: child.grade })}
+                  </p>
+                ) : null}
+                {progressLabel ? (
+                  <p className="truncate text-[11px] tabular-nums text-muted">
+                    {progressLabel}
+                  </p>
+                ) : null}
+              </div>
+              {onSpellWord && (currentWordText || page.words.length > 0) ? (
+                <button
+                  type="button"
+                  aria-label={t("layout.phonicsAria")}
+                  onClick={onSpellWord}
+                  disabled={controlsDisabled}
+                  className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2.5 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55"
+                >
+                  <Volume2 aria-hidden="true" className="size-4 shrink-0" />
+                  <span>{t("layout.phonicsLabel")}</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                aria-label={t("layout.tutorAria")}
+                onClick={onHelp}
+                disabled={controlsDisabled || retryMode}
+                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2.5 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55"
+              >
+                <CircleHelp aria-hidden="true" className="size-4.5 shrink-0" />
+                <span>{t("layout.tutorLabel")}</span>
+              </button>
+            </>
+          )}
+        </header>
+      ) : (
+        <>
+          <header className="flex h-10 shrink-0 flex-nowrap items-center gap-1.5 sm:h-auto sm:gap-3">
+            <div className="flex shrink-0 items-center">
+              <Link
+                aria-label={t("layout.exitAria")}
+                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:min-w-12 sm:gap-2 sm:px-3 sm:text-label"
+                href={exitHref}
+                onClick={
+                  onExit
+                    ? (event) => {
+                        event.preventDefault();
+                        onExit();
+                      }
+                    : undefined
+                }
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5 shrink-0 sm:size-5"
+                />
+                <span className="hidden sm:inline">{t("layout.back")}</span>
+              </Link>
+            </div>
+            <div className="me-auto min-w-0">
+              {child && (
+                <p className="truncate text-xs font-bold text-primary sm:text-sm">
+                  {child.alias} ·{" "}
+                  {tc("switcher.gradeLabel", { grade: child.grade })}
+                </p>
+              )}
+              {!topBar && progressLabel && (
+                <p className="truncate text-[11px] tabular-nums text-muted sm:text-sm">
+                  {progressLabel}
+                </p>
+              )}
+            </div>
+            {onSpellWord && (currentWordText || page.words.length > 0) ? (
+              <button
+                type="button"
+                aria-label={t("layout.phonicsAria")}
+                onClick={onSpellWord}
+                disabled={controlsDisabled}
+                className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-sm"
+              >
+                <Volume2 aria-hidden="true" className="size-4 shrink-0" />
+                <span>
+                  <span className="hidden sm:inline">
+                    {t("layout.phonicsPrefix")}
+                  </span>
+                  {t("layout.phonicsLabel")}
+                </span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              aria-label={t("layout.tutorAria")}
+              onClick={onHelp}
+              disabled={controlsDisabled || retryMode}
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:min-w-11 sm:gap-2 sm:px-3 sm:text-sm"
+            >
+              <CircleHelp
+                aria-hidden="true"
+                className="size-4.5 shrink-0 sm:size-5"
+              />
+              <span>{t("layout.tutorLabel")}</span>
+            </button>
+          </header>
 
-      {topBar ? (
-        <div data-reading-topbar="true" className="shrink-0">
-          {topBar}
-        </div>
-      ) : null}
+          {topBar ? (
+            <div data-reading-topbar="true" className="shrink-0">
+              {topBar}
+            </div>
+          ) : null}
+        </>
+      )}
 
       <section
         aria-label={t("layout.bookPageAria")}
@@ -276,6 +352,7 @@ export function ReadingLayout({
           illustrationUrl={page.illustration_url ?? null}
           illustrationTextFree={pageHasVerifiedIllustration}
           initialReadingMode={resolvedInitialReadingMode}
+          omitHeaderOnMobile={isMobile}
           readingMode={activeReadingMode}
           onReadingModeChange={handleReadingModeChange}
           illustration={
@@ -317,7 +394,7 @@ export function ReadingLayout({
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1 max-h-[14dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
+            className="mx-auto mb-1 max-h-[24dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
@@ -476,7 +553,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onToggleSamplePause}
-                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
+                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:px-3 sm:text-sm"
                     >
                       {isSamplePaused
                         ? t("layout.resumeSample")
@@ -487,7 +564,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadSample}
-                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
+                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:px-3 sm:text-sm"
                     >
                       {t("layout.stopSample")}
                     </button>
@@ -581,6 +658,12 @@ export function ReadingLayout({
                 isSpeaking={isCompanionSpeaking}
                 state={companionBubble}
               />
+            ) : null}
+
+            {feedbackBanner ? (
+              <div className="mx-auto w-full max-w-[1008px]">
+                {feedbackBanner}
+              </div>
             ) : null}
           </div>
         ) : null}

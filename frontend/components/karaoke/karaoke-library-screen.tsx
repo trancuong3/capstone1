@@ -10,6 +10,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
   karaokeParentErrorMessage,
@@ -26,13 +27,14 @@ export function KaraokeLibraryScreen() {
 }
 function Library({ child }: { child: ChildProfileDTO }) {
   const t = useTranslations("entertainment");
+  const isMobile = useIsMobileViewport();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
   return (
-    <section className="mx-auto grid w-full max-w-[1280px] gap-3.5 pb-24 sm:gap-6 sm:pb-4">
+    <section className="mx-auto grid w-full max-w-[1280px] gap-4 pb-4 sm:gap-6 sm:pb-4">
       <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-extrabold sm:mt-2 sm:text-heading">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-extrabold text-ink sm:mt-2 sm:text-heading">
             {t("karaoke.library.heading", { alias: child.alias })}
           </h1>
           <p className="mt-1 text-sm text-muted sm:mt-3 sm:text-body">
@@ -40,16 +42,18 @@ function Library({ child }: { child: ChildProfileDTO }) {
           </p>
         </div>
         <ButtonLink
+          className="shrink-0"
+          fullWidth={false}
           href="/dashboard"
+          size={isMobile ? "touch" : "compact"}
           variant="secondary"
-          className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
         >
           {t("karaoke.library.backToDashboard")}
         </ButtonLink>
       </div>
       <SelectedChildIdentity child={child} />
       <form
-        className="flex flex-wrap items-end gap-2.5 sm:gap-3"
+        className="flex flex-col gap-2.5 rounded-card border border-border bg-white p-3.5 shadow-xs sm:flex-row sm:items-end sm:gap-3 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none"
         onSubmit={(event) => {
           event.preventDefault();
           setQuery({
@@ -69,7 +73,8 @@ function Library({ child }: { child: ChildProfileDTO }) {
           />
         </label>
         <Button
-          className="min-h-11 sm:min-h-12 sm:w-auto"
+          fullWidth={isMobile}
+          size={isMobile ? "touch" : "compact"}
           type="submit"
           variant="secondary"
         >
@@ -135,7 +140,8 @@ function Catalog({
       <StatusMessage tone="error" title={t("karaoke.library.loadErrorTitle")}>
         {state.message}
         <Button
-          className="mt-3 sm:w-auto"
+          className="mt-3"
+          fullWidth={false}
           variant="secondary"
           onClick={onRetry}
         >

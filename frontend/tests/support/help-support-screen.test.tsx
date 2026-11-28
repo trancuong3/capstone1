@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HelpSupportScreen } from "@/components/support/help-support-screen";
 import {
@@ -26,6 +26,10 @@ vi.mock("@/lib/api/support-service", () => ({
 describe("HelpSupportScreen", () => {
   beforeEach(() => {
     submitFeedbackMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("prefills the parent's email and clears the message after an accepted submission", async () => {
@@ -113,5 +117,63 @@ describe("HelpSupportScreen", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("điền tiêu đề");
     expect(submitFeedbackMock).not.toHaveBeenCalled();
+  });
+
+  it("renders mobile support layout on < 768px with >= 44px FAQ summaries and focuses feedback editor", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: () => true,
+      })),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Trợ giúp & hỗ trợ" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "vireadforyou@gmail.com" }).className,
+    ).toContain("min-h-11");
+
+    const summaries = container.querySelectorAll("summary");
+    expect(summaries.length).toBeGreaterThan(0);
+    for (const summary of summaries) {
+      expect(summary.className).toContain("min-h-11");
+    }
+
+    await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
+
+    const feedbackHeading = await screen.findByRole("heading", {
+      name: "Gửi phản hồi",
+    });
+    expect(feedbackHeading).toHaveFocus();
+    expect(
+      screen.getByRole("combobox", { name: "Loại yêu cầu" }).className,
+    ).toContain("min-h-11");
+    expect(
+      screen.getByRole("textbox", { name: "Tiêu đề" }).className,
+    ).toContain("min-h-11");
+    expect(
+      screen.getByRole("textbox", { name: "Email liên hệ" }).className,
+    ).toContain("min-h-11");
+    expect(
+      screen.getByRole("button", { name: "Quay lại" }).className,
+    ).toContain("min-h-11");
+
+    await user.click(screen.getByRole("button", { name: "Quay lại" }));
+    expect(
+      await screen.findByRole("heading", { name: "Câu hỏi thường gặp" }),
+    ).toBeInTheDocument();
   });
 });

@@ -1,17 +1,25 @@
 "use client";
 
 import { ArrowLeft, Mic, RefreshCw, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
-import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
+import { MobileDifficultWordsList } from "@/components/reports/mobile-difficult-words-list";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
@@ -52,6 +60,9 @@ export function DifficultWordsScreen({
   readonly requestedPracticeWord?: string;
 }) {
   const t = useTranslations("difficultWords");
+  const isMobile = useIsMobileViewport();
+  const periodSelectId = useId();
+  const statusSelectId = useId();
   const { childService, difficultWordService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
@@ -375,30 +386,30 @@ export function DifficultWordsScreen({
       </div>
     );
 
-  return (
-    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
-      <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
-        <ReportPageHeader
-          action={
-            <ButtonLink
-              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
-              href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
-              variant="secondary"
-            >
-              <ArrowLeft
-                aria-hidden="true"
-                className="viread-rtl-flip size-4 sm:size-5"
-              />
-              {t("screen.backToReports")}
-            </ButtonLink>
-          }
-          description={t("screen.headerDescription", { days: periodDays })}
-          eyebrow={t("screen.eyebrow")}
-          title={t("screen.headerTitle", { alias: state.child.alias })}
-        />
-      </div>
-
-      {selectedPracticeWord ? (
+  if (selectedPracticeWord) {
+    return (
+      <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 pb-6 sm:gap-5 sm:pb-4">
+        <div className="hidden sm:block">
+          <ReportPageHeader
+            action={
+              <ButtonLink
+                fullWidth={false}
+                href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+                size="touch"
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4 sm:size-5"
+                />
+                {t("screen.backToReports")}
+              </ButtonLink>
+            }
+            description={t("screen.headerDescription", { days: periodDays })}
+            eyebrow={t("screen.eyebrow")}
+            title={t("screen.headerTitle", { alias: state.child.alias })}
+          />
+        </div>
         <DifficultWordPracticePanel
           autoStart={activeAutoStart}
           visitedWords={
@@ -424,216 +435,218 @@ export function DifficultWordsScreen({
           word={selectedPracticeWord}
           words={practiceQueueWords}
         />
+      </section>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <MobileDifficultWordsList
+        bookGroupPage={bookGroupPage}
+        bookGroups={bookGroups}
+        bookGroupsPageSize={BOOK_GROUPS_PAGE_SIZE}
+        child={state.child}
+        childrenProfiles={state.children}
+        filteredWords={filteredWords}
+        firstPendingGlobalWord={firstPendingGlobalWord}
+        onBookGroupPageChange={setBookGroupPage}
+        onOpenPracticeSession={openPracticeSession}
+        onPeriodDaysChange={setPeriodDays}
+        onStatusFilterChange={(next) => {
+          setStatusFilter(next);
+          setBookGroupPage(1);
+        }}
+        periodDays={periodDays}
+        statusFilter={statusFilter}
+        summaryStats={summaryStats}
+        words={state.words}
+      />
+    );
+  }
+
+  return (
+    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-3.5 pb-2 sm:gap-5 sm:pb-4">
+      <ReportPageHeader
+        action={
+          <ButtonLink
+            fullWidth={false}
+            href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+            size="touch"
+            variant="secondary"
+          >
+            <ArrowLeft
+              aria-hidden="true"
+              className="viread-rtl-flip size-4 sm:size-5"
+            />
+            {t("screen.backToReports")}
+          </ButtonLink>
+        }
+        description={t("screen.headerDescription", { days: periodDays })}
+        eyebrow={t("screen.eyebrow")}
+        title={t("screen.headerTitle", { alias: state.child.alias })}
+      />
+
+      <div className="grid w-full grid-cols-1 gap-3 rounded-card border border-border bg-white p-3.5 sm:grid-cols-3 sm:gap-4 sm:rounded-[24px] sm:p-5">
+        <div className="min-w-0 sm:col-span-1">
+          <ChildSelector
+            childrenProfiles={state.children}
+            clearQueryKeys={["word"]}
+            selectedChildId={state.child.id}
+          />
+        </div>
+
+        <div className="min-w-0">
+          <label
+            className="mb-1.5 block text-xs font-bold text-muted"
+            htmlFor={periodSelectId}
+          >
+            {t("screen.periodLabel")}
+          </label>
+          <select
+            aria-label={t("screen.periodAria")}
+            className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            id={periodSelectId}
+            onChange={(event) => {
+              const parsed = Number.parseInt(event.target.value, 10);
+              if (Number.isSafeInteger(parsed) && parsed > 0) {
+                setPeriodDays(parsed);
+              }
+            }}
+            value={String(periodDays)}
+          >
+            <option value="30">{t("screen.periodOption", { days: 30 })}</option>
+            <option value="90">{t("screen.periodOption", { days: 90 })}</option>
+            <option value="180">
+              {t("screen.periodOption", { days: 180 })}
+            </option>
+          </select>
+        </div>
+
+        <div className="min-w-0">
+          <label
+            className="mb-1.5 block text-xs font-bold text-muted"
+            htmlFor={statusSelectId}
+          >
+            {t("screen.statusFilterLabel")}
+          </label>
+          <select
+            aria-label={t("screen.statusFilterAria")}
+            className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            id={statusSelectId}
+            onChange={(event) => {
+              setStatusFilter(event.target.value as StatusFilterValue);
+              setBookGroupPage(1);
+            }}
+            value={statusFilter}
+          >
+            <option value="ALL">{t("screen.statusAll")}</option>
+            <option value="NOT_PRACTICED">
+              {t("screen.statusNotPracticed")}
+            </option>
+            <option value="IN_PROGRESS">{t("screen.statusInProgress")}</option>
+            <option value="NEEDS_MORE_PRACTICE">
+              {t("screen.statusNeedsMore")}
+            </option>
+            <option value="COMPLETED">{t("screen.statusCompleted")}</option>
+          </select>
+        </div>
+      </div>
+
+      {state.words.length > 0 ? (
+        <div className="flex flex-col justify-between gap-3 rounded-card border border-border bg-gradient-to-r from-sky/55 to-cream p-4 sm:flex-row sm:items-center sm:gap-4 sm:rounded-[24px] sm:p-5">
+          <div className="flex flex-col gap-1">
+            <div className="inline-flex items-center gap-2 text-xs font-extrabold text-primary sm:text-sm">
+              <Sparkles aria-hidden="true" className="size-4" />
+              {t("screen.progressTitle", { alias: state.child.alias })}
+            </div>
+            <p className="text-base font-extrabold text-ink sm:text-lg">
+              {t("screen.progressCount", {
+                completed: summaryStats.completed,
+                total: summaryStats.total,
+                percent: summaryStats.percent,
+              })}
+            </p>
+            <p className="text-xs text-muted">{t("screen.progressHint")}</p>
+          </div>
+          {firstPendingGlobalWord ? (
+            <Button
+              className="min-h-11 shrink-0 rounded-2xl px-4 py-2 text-sm font-extrabold sm:min-h-12 sm:w-auto sm:px-6 sm:text-base"
+              onClick={() =>
+                openPracticeSession(
+                  firstPendingGlobalWord.normalized_word,
+                  null,
+                  true,
+                )
+              }
+            >
+              <Mic aria-hidden="true" className="size-5" />
+              {summaryStats.remaining > 0
+                ? t("screen.practiceRemainingAction", {
+                    count: summaryStats.remaining,
+                  })
+                : t("screen.reviewCompletedAction")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {state.words.length === 0 ? (
+        <EmptyState
+          action={
+            <ButtonLink
+              href={`/books?childId=${encodeURIComponent(state.child.id)}`}
+            >
+              {t("screen.continueReadingAction")}
+            </ButtonLink>
+          }
+          description={t("screen.emptyDescription")}
+          icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
+          title={t("screen.emptyTitle")}
+        />
+      ) : filteredWords.length === 0 ? (
+        <EmptyState
+          action={
+            <Button
+              className="sm:w-auto sm:px-6"
+              onClick={() => setStatusFilter("ALL")}
+              variant="secondary"
+            >
+              {t("screen.viewAllWords", { count: state.words.length })}
+            </Button>
+          }
+          description={t("screen.emptyFilterDescription")}
+          icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
+          title={t("screen.emptyFilterTitle")}
+        />
       ) : (
         <>
-          <div className="grid w-full grid-cols-1 gap-2.5 rounded-card border border-[#DCE8E4] bg-white p-3 sm:grid-cols-3 sm:gap-4 sm:rounded-[24px] sm:p-5">
-            <div className="min-w-0 sm:col-span-1">
-              <ChildSelector
-                childrenProfiles={state.children}
-                clearQueryKeys={["word"]}
-                selectedChildId={state.child.id}
-              />
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-2 sm:hidden">
-              <div
-                aria-label={t("screen.quickFilterAria")}
-                className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                role="group"
-              >
-                {(
-                  [
-                    { value: "ALL", key: "screen.quickAll" },
-                    { value: "NOT_PRACTICED", key: "screen.quickNotPracticed" },
-                    { value: "IN_PROGRESS", key: "screen.quickInProgress" },
-                    {
-                      value: "NEEDS_MORE_PRACTICE",
-                      key: "screen.quickNeedsMore",
-                    },
-                    { value: "COMPLETED", key: "screen.quickCompleted" },
-                  ] as const
-                ).map((pill) => {
-                  const active = statusFilter === pill.value;
-                  return (
-                    <button
-                      aria-pressed={active}
-                      className={`min-h-10 shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-extrabold transition-colors ${
-                        active
-                          ? "border-primary bg-primary text-white"
-                          : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"
-                      }`}
-                      key={pill.value}
-                      onClick={() => {
-                        setStatusFilter(pill.value);
-                        setBookGroupPage(1);
-                      }}
-                      type="button"
-                    >
-                      {t(pill.key)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <SelectField
-              aria-label={t("screen.periodAria")}
-              label={t("screen.periodLabel")}
-              onChange={(event) => {
-                const parsed = Number.parseInt(event.target.value, 10);
-                if (Number.isSafeInteger(parsed) && parsed > 0) {
-                  setPeriodDays(parsed);
-                }
-              }}
-              value={String(periodDays)}
-            >
-              <option value="30">
-                {t("screen.periodOption", { days: 30 })}
-              </option>
-              <option value="90">
-                {t("screen.periodOption", { days: 90 })}
-              </option>
-              <option value="180">
-                {t("screen.periodOption", { days: 180 })}
-              </option>
-            </SelectField>
-
-            <div className="hidden sm:contents">
-              <SelectField
-                aria-label={t("screen.statusFilterAria")}
-                label={t("screen.statusFilterLabel")}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as StatusFilterValue);
-                  setBookGroupPage(1);
-                }}
-                value={statusFilter}
-              >
-                <option value="ALL">{t("screen.statusAll")}</option>
-                <option value="NOT_PRACTICED">
-                  {t("screen.statusNotPracticed")}
-                </option>
-                <option value="IN_PROGRESS">
-                  {t("screen.statusInProgress")}
-                </option>
-                <option value="NEEDS_MORE_PRACTICE">
-                  {t("screen.statusNeedsMore")}
-                </option>
-                <option value="COMPLETED">{t("screen.statusCompleted")}</option>
-              </SelectField>
-            </div>
-          </div>
-
-          {state.words.length > 0 ? (
-            <div className="flex flex-col justify-between gap-3 rounded-card border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-3.5 sm:flex-row sm:items-center sm:gap-4 sm:rounded-[24px] sm:p-5">
-              <div className="flex flex-col gap-1">
-                <div className="inline-flex items-center gap-2 text-xs font-extrabold text-[#0E6D76] sm:text-sm">
-                  <Sparkles aria-hidden="true" className="size-4" />
-                  {t("screen.progressTitle", { alias: state.child.alias })}
-                </div>
-                <p className="text-base font-extrabold text-[#213C42] sm:text-lg">
-                  {t("screen.progressCount", {
-                    completed: summaryStats.completed,
-                    total: summaryStats.total,
-                    percent: summaryStats.percent,
-                  })}
-                </p>
-                <p className="text-xs text-[#526970]">
-                  {t("screen.progressHint")}
-                </p>
-              </div>
-              {firstPendingGlobalWord ? (
-                <Button
-                  className="min-h-11 shrink-0 rounded-2xl px-4 text-sm font-extrabold sm:min-h-12 sm:w-auto sm:px-6 sm:text-base"
-                  onClick={() =>
-                    openPracticeSession(
-                      firstPendingGlobalWord.normalized_word,
-                      null,
-                      true,
-                    )
+          <div className="grid grid-cols-1 gap-3.5 sm:gap-5 lg:grid-cols-2">
+            {bookGroups
+              .slice(
+                (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,
+                bookGroupPage * BOOK_GROUPS_PAGE_SIZE,
+              )
+              .map((group) => (
+                <DifficultWordBookCard
+                  group={group}
+                  key={group.key}
+                  onSelectWord={(target) =>
+                    openPracticeSession(target.normalized_word, group.key, true)
                   }
-                >
-                  <Mic aria-hidden="true" className="size-5" />
-                  {summaryStats.remaining > 0
-                    ? t("screen.practiceRemainingAction", {
-                        count: summaryStats.remaining,
-                      })
-                    : t("screen.reviewCompletedAction")}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {state.words.length === 0 ? (
-            <EmptyState
-              action={
-                <ButtonLink
-                  href={`/books?childId=${encodeURIComponent(state.child.id)}`}
-                >
-                  {t("screen.continueReadingAction")}
-                </ButtonLink>
-              }
-              description={t("screen.emptyDescription")}
-              icon={
-                <Volume2 aria-hidden="true" className="size-10 text-primary" />
-              }
-              title={t("screen.emptyTitle")}
-            />
-          ) : filteredWords.length === 0 ? (
-            <EmptyState
-              action={
-                <Button
-                  className="sm:w-auto sm:px-6"
-                  onClick={() => setStatusFilter("ALL")}
-                  variant="secondary"
-                >
-                  {t("screen.viewAllWords", { count: state.words.length })}
-                </Button>
-              }
-              description={t("screen.emptyFilterDescription")}
-              icon={
-                <Volume2 aria-hidden="true" className="size-10 text-primary" />
-              }
-              title={t("screen.emptyFilterTitle")}
-            />
-          ) : (
-            <>
-              <div className="grid grid-cols-1 gap-3.5 sm:gap-5 lg:grid-cols-2">
-                {bookGroups
-                  .slice(
-                    (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,
-                    bookGroupPage * BOOK_GROUPS_PAGE_SIZE,
-                  )
-                  .map((group) => (
-                    <DifficultWordBookCard
-                      group={group}
-                      key={group.key}
-                      onSelectWord={(target) =>
-                        openPracticeSession(
-                          target.normalized_word,
-                          group.key,
-                          true,
-                        )
-                      }
-                      onStartBookPractice={(target) =>
-                        openPracticeSession(
-                          target.normalized_word,
-                          group.key,
-                          true,
-                        )
-                      }
-                    />
-                  ))}
-              </div>
-              <PaginationBar
-                ariaLabel={t("screen.paginationAria")}
-                itemLabel={t("screen.paginationItemLabel")}
-                onPageChange={setBookGroupPage}
-                page={bookGroupPage}
-                pageSize={BOOK_GROUPS_PAGE_SIZE}
-                total={bookGroups.length}
-              />
-            </>
-          )}
+                  onStartBookPractice={(target) =>
+                    openPracticeSession(target.normalized_word, group.key, true)
+                  }
+                />
+              ))}
+          </div>
+          <PaginationBar
+            ariaLabel={t("screen.paginationAria")}
+            itemLabel={t("screen.paginationItemLabel")}
+            onPageChange={setBookGroupPage}
+            page={bookGroupPage}
+            pageSize={BOOK_GROUPS_PAGE_SIZE}
+            total={bookGroups.length}
+          />
         </>
       )}
     </section>

@@ -24,6 +24,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import {
   getEntertainmentPreferences,
@@ -173,6 +174,7 @@ export interface MemoryGameScreenProps {
 
 export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
+  const isMobile = useIsMobileViewport();
   const defaultErrorMessage = t("memoryGame.defaultError");
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
@@ -209,6 +211,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   // Active session & stage progression
   const [stage, setStage] = useState<GameStage>("SETUP");
   const [session, setSession] = useState<MemorySessionDTO | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("viread:immersive-mode", {
+        detail: { active: isMobile && stage !== "SETUP" },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: false },
+        }),
+      );
+    };
+  }, [isMobile, stage]);
   const [isStarting, setIsStarting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -803,10 +821,24 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const displayCreativeScore =
     session?.best_creative_score ?? creativeEvaluation?.creative_score ?? 0;
 
+  const memorySteps = [
+    ["SETUP", t("memoryGame.steps.setup")],
+    ["OBSERVE", t("memoryGame.steps.observe")],
+    ["RECALL", t("memoryGame.steps.recall")],
+    ["REVEAL", t("memoryGame.steps.reveal")],
+    ["CREATIVE", t("memoryGame.steps.creative")],
+    ["SUMMARY", t("memoryGame.steps.summary")],
+  ] as const;
+  const activeStepIndex = Math.max(
+    0,
+    memorySteps.findIndex(([stepKey]) => stepKey === stage),
+  );
+  const activeStepEntry = memorySteps[activeStepIndex] ?? memorySteps[0];
+
   return (
     <section
       className={cn(
-        "mx-auto flex w-full max-w-[1060px] flex-col gap-5 pb-10",
+        "mx-auto flex w-full max-w-[1060px] flex-col gap-3.5 pb-4 sm:gap-5 sm:pb-10",
         reducedMotion && "motion-reduce",
       )}
       data-calm-sound={calmSound ? "true" : "false"}
@@ -821,25 +853,21 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       />
 
       {/* Top navigation & child header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-        <div className="flex flex-col gap-1">
-          <Link className="family-inline-link w-fit" href="/entertainment">
-            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
-            {t("memoryGame.backToEntertainment")}
-          </Link>
-          <h1 className="book-title flex items-center gap-2.5 text-3xl text-ink sm:text-4xl">
-            <Brain aria-hidden="true" className="size-8 text-primary" />
-            {t("memoryGame.heading")}
+      {isMobile ? (
+        <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
+          <h1 className="book-title flex min-w-0 items-center gap-2 text-xl text-ink">
+            <Brain
+              aria-hidden="true"
+              className="size-6 shrink-0 text-primary"
+            />
+            <span className="truncate">{t("memoryGame.heading")}</span>
           </h1>
-          <p className="text-body text-muted">{t("memoryGame.lead")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
           <Button
             aria-pressed={!calmSound}
-            className="min-h-11"
+            className="shrink-0"
             fullWidth={false}
             onClick={toggleCalmSound}
-            size="compact"
+            size="touch"
             type="button"
             variant="quiet"
           >
@@ -851,39 +879,97 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             {calmSound ? t("memoryGame.calmSound") : t("memoryGame.soundMuted")}
           </Button>
         </div>
-      </div>
-
-      {/* Stage progress pills */}
-      <nav
-        aria-label={t("memoryGame.stepsNavAria")}
-        className="flex flex-wrap items-center gap-2"
-      >
-        {(
-          [
-            ["SETUP", t("memoryGame.steps.setup")],
-            ["OBSERVE", t("memoryGame.steps.observe")],
-            ["RECALL", t("memoryGame.steps.recall")],
-            ["REVEAL", t("memoryGame.steps.reveal")],
-            ["CREATIVE", t("memoryGame.steps.creative")],
-            ["SUMMARY", t("memoryGame.steps.summary")],
-          ] as const
-        ).map(([stepKey, label]) => {
-          const isCurrent = stage === stepKey;
-          return (
-            <span
-              key={stepKey}
-              aria-current={isCurrent ? "step" : undefined}
-              className={`rounded-full px-3 py-1 text-sm font-bold transition-colors ${
-                isCurrent
-                  ? "bg-primary text-white"
-                  : "bg-cream text-muted border border-border"
-              }`}
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <div className="flex flex-col gap-1">
+            <Link className="family-inline-link w-fit" href="/entertainment">
+              <ArrowLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+              {t("memoryGame.backToEntertainment")}
+            </Link>
+            <h1 className="book-title flex items-center gap-2.5 text-3xl text-ink sm:text-4xl">
+              <Brain aria-hidden="true" className="size-8 text-primary" />
+              {t("memoryGame.heading")}
+            </h1>
+            <p className="text-body text-muted">{t("memoryGame.lead")}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              aria-pressed={!calmSound}
+              className="min-h-11"
+              fullWidth={false}
+              onClick={toggleCalmSound}
+              size="compact"
+              type="button"
+              variant="quiet"
             >
-              {label}
+              {calmSound ? (
+                <Volume2 aria-hidden="true" className="size-4" />
+              ) : (
+                <VolumeX aria-hidden="true" className="size-4" />
+              )}
+              {calmSound
+                ? t("memoryGame.calmSound")
+                : t("memoryGame.soundMuted")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Stage progress indicator */}
+      {isMobile ? (
+        <nav
+          aria-label={t("memoryGame.stepsNavAria")}
+          className="flex flex-col gap-1.5"
+        >
+          <div className="flex items-center justify-between gap-2 text-xs font-extrabold">
+            <span
+              aria-current="step"
+              className="truncate rounded-full bg-primary px-3 py-1 text-white"
+            >
+              {activeStepEntry[1]}
             </span>
-          );
-        })}
-      </nav>
+            <span className="shrink-0 tabular-nums text-muted">
+              {activeStepIndex + 1}/{memorySteps.length}
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            className="h-1.5 w-full overflow-hidden rounded-full bg-sky"
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width]"
+              style={{
+                width: `${((activeStepIndex + 1) / memorySteps.length) * 100}%`,
+              }}
+            />
+          </div>
+        </nav>
+      ) : (
+        <nav
+          aria-label={t("memoryGame.stepsNavAria")}
+          className="flex flex-wrap items-center gap-2"
+        >
+          {memorySteps.map(([stepKey, label]) => {
+            const isCurrent = stage === stepKey;
+            return (
+              <span
+                key={stepKey}
+                aria-current={isCurrent ? "step" : undefined}
+                className={`rounded-full px-3 py-1 text-sm font-bold transition-colors ${
+                  isCurrent
+                    ? "bg-primary text-white"
+                    : "border border-border bg-cream text-muted"
+                }`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </nav>
+      )}
 
       {actionError ? (
         <StatusMessage tone="error">{actionError}</StatusMessage>
@@ -1010,7 +1096,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     <button
                       key={opt.mode}
                       aria-pressed={isActive}
-                      className={`flex flex-col items-start rounded-control border px-3 py-2.5 text-start transition-colors ${
+                      className={`flex min-h-11 flex-col items-start rounded-control border px-3 py-2.5 text-start transition-colors ${
                         isActive
                           ? "border-primary bg-primary text-white"
                           : "border-border bg-cream text-ink hover:bg-sky"
@@ -1041,7 +1127,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 <h2 className="mb-3 text-lg font-extrabold text-ink">
                   {t("memoryGame.recallModeHeading")}
                 </h2>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {(
                     [
                       [
@@ -1061,7 +1147,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       <button
                         key={modeValue}
                         aria-pressed={active}
-                        className={`flex flex-col items-start gap-1 rounded-control border p-3 text-start transition-colors ${
+                        className={`flex min-h-11 flex-col items-start gap-1 rounded-control border p-3 text-start transition-colors ${
                           active
                             ? "border-primary bg-sky text-ink"
                             : "border-border bg-cream text-ink hover:bg-sky/50"
@@ -1080,8 +1166,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2.5 border-t border-border pt-3">
-                <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-ink">
+              <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-ink">
                   <input
                     checked={showObservationGuide}
                     className="size-5 accent-primary"
@@ -1090,7 +1176,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   />
                   {t("memoryGame.showObservationGuideLabel")}
                 </label>
-                <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-ink">
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-ink">
                   <input
                     checked={showColorCues}
                     className="size-5 accent-primary"
@@ -1171,8 +1257,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
       {/* ===================== STAGE B: OBSERVE ===================== */}
       {stage === "OBSERVE" && session ? (
-        <div className="flex flex-col gap-4" data-testid="observe-stage">
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-border bg-white p-4">
+        <div
+          className="flex flex-col gap-3 sm:gap-4"
+          data-testid="observe-stage"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white p-3 sm:gap-4 sm:p-4">
             <div className="flex items-center gap-3">
               {session.timer_mode === "UNLIMITED" ||
               session.timer_seconds === null ? (
@@ -1314,16 +1403,16 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             </div>
           ) : (
             <div
-              className="flex flex-col items-center justify-center gap-3 rounded-card border-2 border-dashed border-primary/40 bg-sky/45 px-6 py-10 text-center"
+              className="flex flex-col items-center justify-center gap-3 rounded-card border-2 border-dashed border-primary/40 bg-sky/45 px-4 py-5 text-center sm:px-6 sm:py-10"
               data-testid="scene-hidden-curtain"
             >
-              <div className="grid size-16 place-items-center rounded-full bg-white text-primary shadow-xs">
-                <EyeOff aria-hidden="true" className="size-8" />
+              <div className="grid size-12 place-items-center rounded-full bg-white text-primary shadow-xs sm:size-16">
+                <EyeOff aria-hidden="true" className="size-6 sm:size-8" />
               </div>
-              <h2 className="text-2xl font-extrabold text-ink">
+              <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
                 {t("memoryGame.curtainTitle")}
               </h2>
-              <p className="max-w-xl text-body text-muted">
+              <p className="max-w-xl text-sm leading-6 text-muted sm:text-body">
                 {t("memoryGame.curtainPromptPrefix")}{" "}
                 <strong className="viread-learning-content" dir="ltr" lang="vi">
                   “{session.theme_name_vi}”
@@ -1336,7 +1425,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   fullWidth={false}
                   isLoading={isLoadingHint}
                   onClick={() => void handleRequestHint()}
-                  size="compact"
+                  size={isMobile ? "touch" : "compact"}
                   variant="secondary"
                 >
                   <Lightbulb aria-hidden="true" className="size-4" />
@@ -1346,7 +1435,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   data-testid="supported-peek-btn"
                   fullWidth={false}
                   onClick={() => void handleSupportedPeek()}
-                  size="compact"
+                  size={isMobile ? "touch" : "compact"}
                   variant="quiet"
                 >
                   <Eye aria-hidden="true" className="size-4" />
@@ -1364,7 +1453,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                           }),
                         )
                   }
-                  size="compact"
+                  size={isMobile ? "touch" : "compact"}
                   variant="quiet"
                 >
                   {isSpeakingPrompt ? (
@@ -1598,7 +1687,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 </span>
               </span>
               <button
-                className="text-xs font-extrabold text-primary underline"
+                className="inline-flex min-h-11 items-center px-2 text-xs font-extrabold text-primary underline"
                 onClick={() => setFocusedObjectId(null)}
                 type="button"
               >
@@ -1624,7 +1713,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   {matchedFacts.map((fact) => (
                     <button
                       key={fact.object_id}
-                      className={`viread-learning-content rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
+                      className={`viread-learning-content min-h-11 rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
                         focusedObjectId === fact.object_id
                           ? "border-emerald-700 bg-emerald-600 text-white"
                           : "border-emerald-300 bg-success-surface text-success-ink hover:bg-emerald-100"
@@ -1657,7 +1746,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   {missedFacts.map((fact) => (
                     <button
                       key={fact.object_id}
-                      className={`viread-learning-content rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
+                      className={`viread-learning-content min-h-11 rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
                         focusedObjectId === fact.object_id
                           ? "border-amber-700 bg-amber-600 text-white"
                           : "border-amber-300 bg-warning-surface text-warning hover:bg-amber-100"
@@ -1785,9 +1874,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               value={creativeText}
             />
 
-            <div className="flex flex-wrap justify-between gap-3">
+            <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-between sm:gap-3">
               <Button
-                fullWidth={false}
+                fullWidth={isMobile}
                 onClick={() => setStage("REVEAL")}
                 size="compact"
                 variant="quiet"
@@ -1796,7 +1885,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               </Button>
               <Button
                 data-testid="submit-creative-btn"
-                fullWidth={false}
+                fullWidth={isMobile}
                 isLoading={isSubmitting}
                 onClick={() => void handleSubmitCreative()}
               >

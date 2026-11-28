@@ -425,7 +425,11 @@ export function ReadingPreparationScreen({
         <StatusMessage title={tc("verification.errorTitle")} tone="error">
           {tc("verification.errorBody")}
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           {tc("verification.retry")}
         </Button>
@@ -464,7 +468,11 @@ export function ReadingPreparationScreen({
             ? t("preparation.bookUnavailableDesc")
             : t("preparation.bookNotFoundDesc")}
         </StatusMessage>
-        <ButtonLink className="sm:max-w-72" href="/books" variant="secondary">
+        <ButtonLink
+          className="w-full sm:max-w-72"
+          href="/books"
+          variant="secondary"
+        >
           <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />
           {t("preparation.backToLibrary")}
         </ButtonLink>
@@ -479,7 +487,7 @@ export function ReadingPreparationScreen({
           {t("preparation.loadErrorBody")}
         </StatusMessage>
         <Button
-          className="sm:w-auto"
+          className="w-full sm:w-auto"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -505,7 +513,7 @@ export function ReadingPreparationScreen({
     !data.explicitPageInvalid;
 
   return (
-    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-3 px-3.5 py-3 pb-24 sm:gap-4 sm:px-0 sm:py-0 sm:pb-0">
+    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-4 sm:gap-5">
       <header className="flex flex-col gap-1 sm:gap-2">
         <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
           {t("preparation.heading")}
@@ -515,9 +523,9 @@ export function ReadingPreparationScreen({
         </p>
       </header>
 
-      <article className="flex items-start gap-3 rounded-card border border-border bg-white p-3 sm:items-center sm:gap-4 sm:p-4">
+      <article className="flex items-start gap-3 rounded-2xl border border-border bg-white p-3.5 shadow-xs sm:items-center sm:gap-4 sm:rounded-card sm:p-4 sm:shadow-none">
         <BookCover book={data.book} size="small" showTitle={false} />
-        <div className="flex min-w-0 flex-col gap-1 sm:gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-1 sm:gap-1.5">
           <div>
             <h2
               className="viread-learning-content break-words text-base font-extrabold text-ink sm:text-xl"
@@ -573,7 +581,7 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-border bg-white p-3.5 sm:p-5"
+        className="rounded-2xl border border-border bg-white p-4 shadow-xs sm:rounded-card sm:p-5 sm:shadow-none"
       >
         <h2
           className="flex items-center gap-2 text-base font-extrabold text-ink sm:text-lg"
@@ -598,7 +606,7 @@ export function ReadingPreparationScreen({
           </p>
         </div>
         <Button
-          className="mt-3 min-h-11 text-sm sm:w-auto sm:text-button"
+          className="mt-3 min-h-12 w-full text-sm sm:w-auto sm:text-button"
           disabled={isVerifying || isStarting}
           isLoading={isVerifying}
           onClick={() => void handleVerifyMicrophone()}
@@ -618,7 +626,7 @@ export function ReadingPreparationScreen({
 
       <div className="fixed inset-x-0 bottom-0 z-[45] flex flex-row-reverse items-center gap-2 border-t border-border bg-white/95 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(35,62,64,0.08)] backdrop-blur-sm sm:static sm:z-auto sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
         <Button
-          className="min-h-12 flex-1 sm:w-auto sm:flex-none"
+          className="min-h-12 min-w-0 flex-1 sm:w-auto sm:flex-none"
           disabled={!canStart}
           isLoading={isStarting}
           onClick={() => void handleStartReading()}
@@ -628,7 +636,8 @@ export function ReadingPreparationScreen({
             : t("preparation.startReading")}
         </Button>
         <ButtonLink
-          className="min-h-12 w-auto shrink-0 border border-border px-3 text-sm sm:order-first sm:border-0 sm:px-4 sm:text-button"
+          className="min-h-12 min-w-0 max-w-[46%] border border-border px-3 text-center text-sm leading-tight sm:order-first sm:w-auto sm:max-w-none sm:shrink-0 sm:border-0 sm:px-4 sm:text-button"
+          fullWidth={false}
           href={detailHref}
           variant="quiet"
         >

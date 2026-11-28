@@ -76,7 +76,7 @@ export function MobileMoreSheet({
       <section
         aria-labelledby={`${id}-title`}
         aria-modal="true"
-        className="relative z-10 w-full rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+        className="relative z-10 max-h-[85dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
         id={id}
         role="dialog"
       >

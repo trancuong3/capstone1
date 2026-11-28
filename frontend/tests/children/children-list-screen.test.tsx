@@ -100,4 +100,36 @@ describe("ChildrenListScreen with real API responses", () => {
       await screen.findByRole("heading", { name: "Chưa có hồ sơ bé" }),
     ).toBeInTheDocument();
   });
+
+  it("renders single-mounted mobile layout without redundant pb-24 on < 768px", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: () => true,
+      })),
+    );
+    apiFetchFixture.mockResolvedValueOnce(Response.json([childFixture]));
+
+    const { container } = renderChildren();
+
+    expect(await screen.findByText(childFixture.alias)).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { name: "Hồ sơ của các bé" }),
+    ).toHaveLength(1);
+
+    const createLinks = screen.getAllByRole("link", { name: "Tạo hồ sơ bé" });
+    expect(createLinks).toHaveLength(1);
+    expect(createLinks[0]).toHaveAttribute("href", "/children/new");
+    expect(createLinks[0]?.className).toContain("min-h-12");
+
+    const section = container.querySelector("section");
+    expect(section?.className).not.toContain("pb-24");
+  });
 });

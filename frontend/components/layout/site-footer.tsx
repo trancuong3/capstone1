@@ -39,7 +39,14 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
         className,
       )}
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 py-6 sm:px-8 xl:px-16">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[1440px] px-4 sm:px-8 xl:px-16",
+          isParent || isAdmin
+            ? "flex-col gap-4 py-6"
+            : "flex-row flex-wrap items-center justify-between gap-2 py-3 sm:flex-col sm:items-start sm:gap-4 sm:py-6",
+        )}
+      >
         <ViReadLogo
           ariaLabel={
             isParent
@@ -110,7 +117,14 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
           <p className="text-sm text-muted">{tCommon("footer.adminNotice")}</p>
         ) : null}
         <p
-          className={cn("text-sm leading-[1.4] text-muted", isParent && "mt-4")}
+          className={cn(
+            "leading-[1.4] text-muted",
+            isParent
+              ? "mt-4 text-sm"
+              : isAdmin
+                ? "text-sm"
+                : "text-xs sm:text-sm",
+          )}
         >
           {isAdmin
             ? tCommon("footer.adminCopyright", { year: 2026 })

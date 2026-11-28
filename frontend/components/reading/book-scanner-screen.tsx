@@ -912,7 +912,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         <StatusMessage title={tc("verification.errorTitle")} tone="error">
           {tc("verification.errorBody")}
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           {tc("verification.retry")}
         </Button>
@@ -929,7 +933,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         cameraStarted ? "max-w-[1120px]" : "max-w-[960px]",
       )}
     >
-      <header className="border-b border-border pb-4 sm:pb-5">
+      <header className="border-b border-border pb-3.5 sm:pb-5">
         <div>
           <p className="text-label font-semibold text-muted">
             {child.alias} · {tc("switcher.gradeLabel", { grade: child.grade })}
@@ -937,7 +941,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           <h1 className="mt-1 text-2xl font-extrabold text-ink sm:text-heading">
             {t("scanner.heading")}
           </h1>
-          <p className="mt-2 max-w-[720px] text-sm leading-6 text-muted sm:text-body sm:leading-7">
+          <p className="mt-1.5 max-w-[720px] text-sm leading-6 text-muted sm:mt-2 sm:text-body sm:leading-7">
             {t("scanner.guide")}
           </p>
         </div>
@@ -983,7 +987,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           </StatusMessage>
           <div className="flex flex-wrap gap-2">
             <Button
-              className="min-h-11 sm:w-auto"
+              className="min-h-11 w-full sm:w-auto"
               onClick={() => {
                 setOcrWorkerStatus("checking");
                 setOcrCheckNonce((n) => n + 1);
@@ -1024,7 +1028,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </div>
           </div>
           <Button
-            className="min-h-12 sm:w-auto sm:self-start"
+            className="min-h-12 w-full sm:w-auto sm:self-start"
             onClick={handleCancelOcr}
             variant="secondary"
           >
@@ -1135,7 +1139,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           </div>
           <div className="flex flex-wrap gap-2.5">
             <Button
-              className="min-h-12 sm:w-auto"
+              className="min-h-12 w-full sm:w-auto"
               data-testid="check-queued-ocr-now"
               disabled={checkingQueueNow}
               onClick={handleCheckQueuedNow}
@@ -1149,7 +1153,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </Button>
             {!ocrState.workerOnline ? (
               <Button
-                className="min-h-12 sm:w-auto"
+                className="min-h-12 w-full sm:w-auto"
                 data-testid="scan-another-while-queued"
                 onClick={() => fileInputRef.current?.click()}
                 variant="secondary"
@@ -1159,7 +1163,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </Button>
             ) : null}
             <Button
-              className="min-h-12 sm:w-auto"
+              className="min-h-12 w-full sm:w-auto"
               data-testid="cancel-queued-ocr-job"
               onClick={handleCancelOcr}
               variant="secondary"
@@ -1204,7 +1208,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                         ) : null}
                       </div>
                       <button
-                        className="inline-flex min-h-8 items-center gap-1 rounded-control border border-border px-2.5 font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border px-3 font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 sm:min-h-9 sm:px-2.5"
                         onClick={() =>
                           handleCancelSpecificQueuedJob(item.job_id)
                         }
@@ -1228,7 +1232,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           </StatusMessage>
           <div className="flex flex-wrap gap-3">
             {ocrState.authExpired ? (
-              <ButtonLink className="min-h-12 sm:w-auto" href="/login">
+              <ButtonLink className="min-h-12 w-full sm:w-auto" href="/login">
                 {t("scanner.relogin")}
               </ButtonLink>
             ) : null}
@@ -1237,7 +1241,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             ocrState.file &&
             ocrState.idempotencyKey ? (
               <Button
-                className="min-h-12 sm:w-auto"
+                className="min-h-12 w-full sm:w-auto"
                 onClick={() =>
                   void runLocalOcrUpload(
                     ocrState.file!,
@@ -1251,7 +1255,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </Button>
             ) : null}
             <Button
-              className="min-h-12 sm:w-auto"
+              className="min-h-12 w-full sm:w-auto"
               onClick={handleCancelOcr}
               variant="secondary"
             >
@@ -1378,16 +1382,16 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           onPickDeviceImage={() => fileInputRef.current?.click()}
         />
       ) : (
-        <div className="flex min-h-[340px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-5 text-center sm:min-h-[380px] sm:p-6">
+        <div className="flex flex-col items-center justify-center gap-3.5 rounded-card bg-desk p-4 text-center sm:min-h-[380px] sm:gap-4 sm:p-6">
           <Camera
             aria-hidden="true"
-            className="size-12 text-primary sm:size-14"
+            className="size-10 text-primary sm:size-14"
           />
           <div>
             <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
               {t("scanner.cameraOffTitle")}
             </h2>
-            <p className="mt-3 max-w-[620px] text-sm text-muted sm:mt-4 sm:text-body">
+            <p className="mt-2 max-w-[620px] text-sm text-muted sm:mt-4 sm:text-body">
               {t("scanner.cameraOffBody")}
             </p>
           </div>

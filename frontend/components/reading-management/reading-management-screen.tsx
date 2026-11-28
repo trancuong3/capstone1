@@ -22,6 +22,7 @@ import { InformationField } from "@/components/common/information-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { VerifiedBookPicker } from "./verified-book-picker";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
@@ -67,11 +68,11 @@ const weekdayOptions = [
   { key: "sun", value: 6 },
 ] as const;
 const inputClass =
-  "min-h-12 min-w-0 w-full rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
+  "min-h-12 min-w-0 w-full rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-label";
 const labelClass =
   "flex min-w-0 flex-col gap-1 text-label font-semibold text-ink";
 const actionClass =
-  "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control px-2.5 py-1.5 text-sm font-semibold sm:gap-2 sm:px-3 sm:py-2 sm:text-label";
+  "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control px-2.5 py-1.5 text-sm font-semibold sm:gap-2 sm:px-3 sm:py-2 sm:text-label";
 
 function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -95,6 +96,7 @@ interface Props {
 export function ReadingManagementScreen({ requestedChildId }: Props) {
   const { formatTime } = useI18n();
   const t = useTranslations("reports");
+  const isMobile = useIsMobileViewport();
   const childService = useChildService();
   const bookService = useBookService();
   const service = useReadingManagementService();
@@ -918,9 +920,26 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       </section>
     );
 
+  const compactRowButtonClass = isMobile ? "" : "min-h-8 px-2.5 py-1 text-xs";
+  const addSectionButtonClass = isMobile
+    ? "shrink-0"
+    : "min-h-9 shrink-0 px-3 py-1.5 text-xs";
+
   return (
-    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-4 sm:pb-4">
-      <header className="flex flex-wrap items-center justify-between gap-2.5 max-sm:pb-3! sm:items-end sm:gap-5">
+    <section
+      className={
+        isMobile
+          ? "mx-auto flex w-full max-w-[1120px] flex-col gap-4 pb-6"
+          : "reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-4 pb-4"
+      }
+    >
+      <header
+        className={
+          isMobile
+            ? "flex flex-wrap items-center justify-between gap-2.5 border-b border-border pb-3.5"
+            : "flex flex-wrap items-end justify-between gap-5"
+        }
+      >
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
             {t("readingManagement.heading")}
@@ -931,8 +950,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </div>
         <Button
           onClick={() => setReloadKey((value) => value + 1)}
-          size="compact"
-          className="min-h-10! px-3! py-1.5! text-xs! sm:w-auto sm:px-4! sm:py-2! sm:text-sm!"
+          size={isMobile ? "touch" : "admin"}
           fullWidth={false}
           variant="secondary"
           disabled={isReadingDataLoading || !childId}
@@ -950,7 +968,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           {t("readingManagement.childProfileLabel")}
           <select
             id="management-child"
-            className="min-h-6 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-11 w-full min-w-0 bg-white text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:min-h-6 sm:text-body"
             value={childId}
             onChange={(event) => handleSelectChild(event.target.value)}
           >
@@ -965,7 +983,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           </select>
         </label>
         {selectedChild ? (
-          <dl>
+          <dl className="hidden sm:block">
             <InformationField label={t("readingManagement.viewingLabel")}>
               {selectedChild.alias} ·{" "}
               {t("readingManagement.bookPicker.gradeSingle", {
@@ -1056,8 +1074,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             ))}
           </section>
 
-          <details className="rounded-control border border-border bg-white px-3.5 py-2.5 shadow-xs transition hover:border-primary/40 sm:px-4 sm:py-3">
-            <summary className="flex min-h-10 cursor-pointer items-center font-bold text-primary">
+          <details className="rounded-control border border-border bg-white px-3.5 py-2 shadow-xs transition hover:border-primary/40 sm:px-4 sm:py-3">
+            <summary className="flex min-h-11 cursor-pointer items-center font-bold text-primary">
               {t("readingManagement.todayTitle", {
                 childName: t("readingManagement.todayDefaultChild"),
               })}
@@ -1101,9 +1119,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </div>
                   <Button
                     fullWidth={false}
-                    size="compact"
+                    size={isMobile ? "touch" : "admin"}
                     variant="secondary"
-                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
+                    className={addSectionButtonClass}
                     onClick={() => {
                       setEditingPlanId("");
                       setActiveForm("plan");
@@ -1191,9 +1209,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white ${compactRowButtonClass}`}
                                 onClick={() => {
                                   setActiveForm("plan");
                                   setEditingPlanId(plan.id);
@@ -1211,9 +1229,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               {plan.status === "ACTIVE" ? (
                                 <Button
                                   variant="quiet"
-                                  size="compact"
+                                  size={isMobile ? "touch" : "admin"}
                                   fullWidth={false}
-                                  className="min-h-10! w-auto! border border-border bg-cream px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                  className={`border border-border bg-cream ${compactRowButtonClass}`}
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "PAUSED")
@@ -1224,9 +1242,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               ) : (
                                 <Button
                                   variant="secondary"
-                                  size="compact"
+                                  size={isMobile ? "touch" : "admin"}
                                   fullWidth={false}
-                                  className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                  className={compactRowButtonClass || undefined}
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "ACTIVE")
@@ -1237,9 +1255,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               )}
                               <Button
                                 variant="secondary"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                className={compactRowButtonClass || undefined}
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "COMPLETED")
@@ -1253,9 +1271,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </Button>
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-muted sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white text-muted ${compactRowButtonClass}`}
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "ENDED")
@@ -1351,7 +1369,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           setCollectionFilter(tab.key);
                           setCollectionsPage(1);
                         }}
-                        className={`inline-flex min-h-10 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-xs font-bold transition sm:min-h-8 ${
+                        className={`inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-xs font-bold transition sm:min-h-8 sm:px-3 ${
                           collectionFilter === tab.key
                             ? "border-primary bg-sky text-primary-hover"
                             : "border-border bg-white text-ink hover:bg-canvas"
@@ -1403,7 +1421,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
                             {entry.book.lifecycle_status === "ACTIVE" ? (
                               <Link
-                                className="inline-flex min-h-10 items-center rounded-control px-2.5 text-xs font-bold text-primary hover:bg-sky hover:underline sm:min-h-8 sm:px-2"
+                                className="inline-flex min-h-11 items-center rounded-control px-3 text-xs font-bold text-primary hover:bg-sky hover:underline sm:min-h-8 sm:px-2"
                                 href={`/books/${encodeURIComponent(entry.book_id)}?childId=${encodeURIComponent(childId)}`}
                               >
                                 {t("readingManagement.openBook")}
@@ -1411,9 +1429,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             ) : null}
                             <Button
                               variant="quiet"
-                              size="compact"
+                              size={isMobile ? "touch" : "admin"}
                               fullWidth={false}
-                              className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-primary sm:min-h-8! sm:px-2.5!"
+                              className={`border border-border bg-white text-primary ${compactRowButtonClass}`}
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void toggleCollection(
@@ -1488,9 +1506,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </div>
                   <Button
                     fullWidth={false}
-                    size="compact"
+                    size={isMobile ? "touch" : "admin"}
                     variant="secondary"
-                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
+                    className={addSectionButtonClass}
                     onClick={() => setActiveForm("goal")}
                   >
                     {t("readingManagement.addGoal")}
@@ -1562,7 +1580,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 aria-label={t(
                                   "readingManagement.newTargetValueAria",
                                 )}
-                                className="min-h-10 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary sm:min-h-9"
+                                className="min-h-11 w-28 rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:min-h-9 sm:text-sm"
                                 type="number"
                                 min={1}
                                 value={editingTarget}
@@ -1572,8 +1590,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               />
                               <Button
                                 fullWidth={false}
-                                size="compact"
-                                className="min-h-10! w-auto! px-3! py-1.5! text-xs! sm:min-h-9!"
+                                size={isMobile ? "touch" : "admin"}
+                                className={
+                                  isMobile
+                                    ? undefined
+                                    : "min-h-9 px-3 py-1.5 text-xs"
+                                }
                                 onClick={() => void saveEditedGoal(goal)}
                                 disabled={Boolean(busyKey)}
                               >
@@ -1581,8 +1603,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </Button>
                               <Button
                                 fullWidth={false}
-                                size="compact"
-                                className="min-h-10! w-auto! px-3! py-1.5! text-xs! sm:min-h-9!"
+                                size={isMobile ? "touch" : "admin"}
+                                className={
+                                  isMobile
+                                    ? undefined
+                                    : "min-h-9 px-3 py-1.5 text-xs"
+                                }
                                 variant="secondary"
                                 onClick={() => setEditingGoalId("")}
                               >
@@ -1595,9 +1621,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white ${compactRowButtonClass}`}
                                 onClick={() => {
                                   setEditingGoalId(goal.id);
                                   setEditingTarget(String(goal.target_value));
@@ -1608,9 +1634,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               {goal.status === "ACTIVE" ? (
                                 <Button
                                   variant="quiet"
-                                  size="compact"
+                                  size={isMobile ? "touch" : "admin"}
                                   fullWidth={false}
-                                  className="min-h-10! w-auto! border border-border bg-cream px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                  className={`border border-border bg-cream ${compactRowButtonClass}`}
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "PAUSED")
@@ -1621,9 +1647,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               ) : (
                                 <Button
                                   variant="secondary"
-                                  size="compact"
+                                  size={isMobile ? "touch" : "admin"}
                                   fullWidth={false}
-                                  className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                  className={compactRowButtonClass || undefined}
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "ACTIVE")
@@ -1634,9 +1660,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               )}
                               <Button
                                 variant="secondary"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                className={compactRowButtonClass || undefined}
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transition(goal, "COMPLETED")
@@ -1646,9 +1672,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </Button>
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-muted sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white text-muted ${compactRowButtonClass}`}
                                 disabled={Boolean(busyKey)}
                                 onClick={() => void transition(goal, "ENDED")}
                               >
@@ -1704,9 +1730,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </div>
                   <Button
                     fullWidth={false}
-                    size="compact"
+                    size={isMobile ? "touch" : "admin"}
                     variant="secondary"
-                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
+                    className={addSectionButtonClass}
                     onClick={() => {
                       setEditingReminderId("");
                       setActiveForm("reminder");
@@ -1756,9 +1782,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             ) : null}
                             <Button
                               variant="secondary"
-                              size="compact"
+                              size={isMobile ? "touch" : "admin"}
                               fullWidth={false}
-                              className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                              className={compactRowButtonClass || undefined}
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void runAction(
@@ -1807,7 +1833,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <article
                             key={reminder.id}
                             data-reminder-id={reminder.id}
-                            className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2 transition-colors hover:bg-white/70"
+                            className={
+                              isMobile
+                                ? "flex min-w-0 flex-col gap-2.5 px-3.5 py-3 transition-colors hover:bg-white/70"
+                                : "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2 transition-colors hover:bg-white/70"
+                            }
                           >
                             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                               <h3 className="flex items-center gap-1.5 text-sm font-extrabold tabular-nums text-ink">
@@ -1835,8 +1865,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 {shortSchedule}
                               </span>
                             </div>
-                            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                              <label className="inline-flex min-h-10 shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink sm:min-h-8">
+                            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-1.5">
+                              <label className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink sm:min-h-8">
                                 <input
                                   type="checkbox"
                                   className="size-4 accent-primary"
@@ -1863,9 +1893,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </label>
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white ${compactRowButtonClass}`}
                                 onClick={() => {
                                   setEditingReminderId(reminder.id);
                                   setActiveForm("reminder");
@@ -1881,9 +1911,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </Button>
                               <Button
                                 variant="quiet"
-                                size="compact"
+                                size={isMobile ? "touch" : "admin"}
                                 fullWidth={false}
-                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-danger sm:min-h-8! sm:px-2.5!"
+                                className={`border border-border bg-white text-danger ${compactRowButtonClass}`}
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void (

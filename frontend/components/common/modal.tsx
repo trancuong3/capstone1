@@ -16,16 +16,28 @@ import { cn } from "@/lib/utils/cn";
 
 export interface ModalProps {
   children: ReactNode;
+  className?: string;
   closeOnBackdropClick?: boolean;
   closeOnEscape?: boolean;
   footer?: ReactNode;
   isOpen: boolean;
+  maxWidth?: "sm" | "md" | "lg";
+  mobilePresentation?: "sheet" | "dialog";
   onClose: () => void;
   role?: "dialog" | "alertdialog";
   showCloseButton?: boolean;
   title: string;
   tone?: "cream" | "paper";
 }
+
+const maxWidthClassNames: Record<
+  NonNullable<ModalProps["maxWidth"]>,
+  string
+> = {
+  sm: "max-w-[480px]",
+  md: "max-w-[640px]",
+  lg: "max-w-[820px]",
+};
 
 let activeModalLocks = 0;
 let previousBodyOverflow: string | null = null;
@@ -50,10 +62,13 @@ function unlockBodyScroll() {
 
 export function Modal({
   children,
+  className,
   closeOnBackdropClick = false,
   closeOnEscape = true,
   footer,
   isOpen,
+  maxWidth = "md",
+  mobilePresentation = "sheet",
   onClose,
   role = "dialog",
   showCloseButton = true,
@@ -141,10 +156,14 @@ export function Modal({
   }
 
   const surfaceClass = tone === "paper" ? "bg-white" : "bg-cream";
+  const isSheet = mobilePresentation === "sheet";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 p-0 sm:items-center sm:p-4"
+      className={cn(
+        "fixed inset-0 z-50 flex justify-center overflow-hidden overscroll-contain bg-ink/35",
+        isSheet ? "items-end p-0 sm:items-center sm:p-4" : "items-center p-4",
+      )}
       data-modal-backdrop="true"
       onClick={(event) => {
         if (closeOnBackdropClick && event.target === event.currentTarget) {
@@ -156,18 +175,25 @@ export function Modal({
         aria-labelledby={titleId}
         aria-modal="true"
         className={cn(
-          "flex max-h-[88dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[20px] rounded-b-none shadow-xl outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-card",
+          "flex w-full flex-col overflow-hidden shadow-xl outline-none",
+          isSheet
+            ? "max-h-[88dvh] rounded-t-[20px] rounded-b-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-card"
+            : "max-h-[calc(100dvh-2rem)] rounded-card",
+          maxWidthClassNames[maxWidth],
           surfaceClass,
+          className,
         )}
         onKeyDown={handleKeyDown}
         ref={dialogRef}
         role={role}
         tabIndex={-1}
       >
-        <div
-          aria-hidden="true"
-          className="mx-auto mt-2.5 h-1.5 w-10 shrink-0 rounded-full bg-border sm:hidden"
-        />
+        {isSheet ? (
+          <div
+            aria-hidden="true"
+            className="mx-auto mt-2.5 h-1.5 w-10 shrink-0 rounded-full bg-border sm:hidden"
+          />
+        ) : null}
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-4 py-3 sm:items-start sm:gap-4 sm:px-8 sm:py-6">
           <h2
             className={cn(
@@ -183,16 +209,23 @@ export function Modal({
           {showCloseButton ? (
             <Button
               aria-label={tA11y("closeDialog")}
-              className="size-11! shrink-0 p-0! sm:size-12!"
-              fullWidth={false}
+              className="shrink-0"
               onClick={onClose}
+              size="icon"
               variant="quiet"
             >
               <X aria-hidden="true" className="size-6" />
             </Button>
           ) : null}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 sm:px-8 sm:py-6">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-8 sm:py-6",
+            footer
+              ? "py-3.5"
+              : "pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]",
+          )}
+        >
           {children}
         </div>
         {footer ? (

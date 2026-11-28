@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
+import { READING_DOCK_BUTTON_CLASS } from "@/components/reading/reading-controls";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
@@ -79,6 +80,7 @@ type LoadState =
   | { status: "error" };
 
 interface ReadingVoiceSettingsProps {
+  buttonClassName?: string;
   disabled?: boolean;
   isPreviewing?: boolean;
   fallbackNotice?: string | null;
@@ -149,6 +151,7 @@ function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
 }
 
 export function ReadingVoiceSettings({
+  buttonClassName,
   disabled = false,
   isPreviewing = false,
   fallbackNotice = null,
@@ -433,7 +436,7 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button"
+        className={buttonClassName ?? READING_DOCK_BUTTON_CLASS}
         disabled={disabled}
         onClick={open}
         size="compact"
@@ -441,9 +444,9 @@ export function ReadingVoiceSettings({
       >
         <SlidersHorizontal
           aria-hidden="true"
-          className="size-5 shrink-0 lg:size-6"
+          className="size-4.5 shrink-0 sm:size-5 @4xl:size-6"
         />
-        <span className="max-w-full text-center whitespace-normal break-words">
+        <span className="max-w-full text-center whitespace-normal break-words [overflow-wrap:anywhere] [@media(max-height:520px)]:whitespace-normal! [@media(max-height:520px)]:overflow-visible! [@media(max-height:520px)]:[text-overflow:clip]!">
           {t("settings.buttonLabel")}
         </span>
       </Button>
@@ -453,7 +456,7 @@ export function ReadingVoiceSettings({
           <div className="space-y-2">
             <footer className="flex flex-wrap items-center justify-end gap-2">
               <Button
-                className="w-auto!"
+                fullWidth={false}
                 size="compact"
                 onClick={() => change({ voiceId: null })}
                 variant="quiet"
@@ -461,7 +464,7 @@ export function ReadingVoiceSettings({
                 {t("settings.useDefaultVoice")}
               </Button>
               <Button
-                className="w-auto!"
+                fullWidth={false}
                 size="compact"
                 onClick={() => {
                   const generation = ++previewGenerationRef.current;
@@ -594,7 +597,7 @@ export function ReadingVoiceSettings({
                   <button
                     aria-pressed={active}
                     className={cn(
-                      "rounded-control border-2 px-3 py-1.5 text-label font-semibold transition",
+                      "min-h-11 rounded-control border-2 px-3 py-1.5 text-label font-semibold transition",
                       active
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:border-primary hover:bg-cream",
@@ -630,7 +633,7 @@ export function ReadingVoiceSettings({
                     <button
                       aria-pressed={active}
                       className={cn(
-                        "rounded-control border px-2.5 py-1.5 text-xs font-bold transition",
+                        "min-h-11 rounded-control border px-2.5 py-1.5 text-xs font-bold transition",
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-border bg-white text-ink hover:border-primary",
@@ -901,7 +904,7 @@ export function ReadingVoiceSettings({
               <button
                 aria-pressed={policy.providerMode === "local_only"}
                 className={cn(
-                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
+                  "min-h-11 rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
                   policy.providerMode === "local_only"
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-cream/60 text-ink hover:border-primary",
@@ -932,7 +935,7 @@ export function ReadingVoiceSettings({
                   policy.providerMode === "local_with_google_fallback"
                 }
                 className={cn(
-                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
+                  "min-h-11 rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
                   policy.providerMode === "local_with_google_fallback"
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-cream/60 text-ink hover:border-primary",
@@ -965,8 +968,8 @@ export function ReadingVoiceSettings({
             </div>
 
             {policy.providerMode === "local_with_google_fallback" ? (
-              <div className="space-y-2 rounded-lg bg-cream/70 p-2.5 text-xs">
-                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+              <div className="space-y-1.5 rounded-lg bg-cream/70 p-2.5 text-xs">
+                <label className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-medium text-ink">
                   <span>{t("settings.googleSttFallback")}</span>
                   <input
                     checked={policy.allowGoogleSttFallback}
@@ -979,7 +982,7 @@ export function ReadingVoiceSettings({
                     type="checkbox"
                   />
                 </label>
-                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+                <label className="flex min-h-11 cursor-pointer items-center justify-between gap-2 font-medium text-ink">
                   <span>{t("settings.googleTtsFallback")}</span>
                   <input
                     checked={policy.allowGoogleTtsFallback}

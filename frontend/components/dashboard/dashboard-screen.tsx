@@ -9,7 +9,6 @@ import {
   Plus,
   RefreshCw,
   UsersRound,
-  Volume2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -20,6 +19,8 @@ import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { MobileDashboard } from "@/components/dashboard/mobile-dashboard";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useAppStore } from "@/components/providers/app-store-provider";
 import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
@@ -49,6 +50,7 @@ type DashboardState =
 
 export function DashboardScreen() {
   const { t } = useI18n();
+  const isMobile = useIsMobileViewport();
   const { push, replace } = useRouter();
   const searchParams = useSearchParams();
   const profileService = useProfileService();
@@ -213,7 +215,7 @@ export function DashboardScreen() {
           {t("auth.errors.generic")}
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="w-full px-4 py-2.5 sm:w-auto sm:self-start sm:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -231,31 +233,50 @@ export function DashboardScreen() {
     state.status === "ready" && selectedChild
       ? (state.latestSessionsByChild[selectedChild.id] ?? null)
       : null;
+  const summarySource =
+    state.status === "ready" ? state.summarySource : undefined;
+
+  const handleSelectChild = (child: ChildProfileDTO) => {
+    selectChild(child.id);
+    setValidatedSelectedChild(child);
+    setSelectionPrompt(false);
+    if (searchParams.toString()) replace("/dashboard");
+  };
+
+  if (isMobile) {
+    return (
+      <MobileDashboard
+        profiles={children}
+        selectedChild={selectedChild}
+        latestSessionForSelected={latestSessionForSelected}
+        summarySource={summarySource}
+        isLoading={isLoading}
+        selectionRequired={selectionRequired}
+        invalidSelection={invalidSelection}
+        selectionSectionRef={selectionSectionRef}
+        onSelectChild={handleSelectChild}
+        onReadingAction={handleReadingAction}
+      />
+    );
+  }
 
   return (
-    <section className="family-dashboard max-sm:pb-6">
-      <header className="family-title max-sm:mb-3! max-sm:items-center! max-sm:gap-2!">
-        <h1 className="book-title max-sm:text-xl!">
-          {t("parent.dashboard.familyTitle")}
-        </h1>
-        <Link
-          href="/children"
-          className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
-        >
+    <section className="family-dashboard">
+      <header className="family-title">
+        <h1 className="book-title">{t("parent.dashboard.familyTitle")}</h1>
+        <Link href="/children" className="family-inline-link min-h-12">
           <UsersRound aria-hidden="true" size={16} />{" "}
           {t("parent.dashboard.manageProfiles")}
         </Link>
       </header>
-      <div className="family-spread max-sm:gap-3!">
+      <div className="family-spread">
         <FamilyReadingDesk
           key={selectedChild?.id ?? "family"}
           child={selectedChild}
           hasProfiles={children.length > 0}
           isLoadingProfiles={isLoading}
           latestSession={latestSessionForSelected}
-          summarySource={
-            state.status === "ready" ? state.summarySource : undefined
-          }
+          summarySource={summarySource}
           onChooseBook={() => handleReadingAction("/books")}
         />
         <section
@@ -265,18 +286,15 @@ export function DashboardScreen() {
           aria-labelledby="child-selection-title"
           aria-busy={isLoading ? "true" : undefined}
           className={
-            "family-profiles order-1 max-sm:gap-2! sm:order-2" +
+            "family-profiles order-1 sm:order-2" +
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2 id="child-selection-title" className="max-sm:text-base!">
+          <h2 id="child-selection-title">
             {t("parent.dashboard.selectChildHeading")}
           </h2>
           {selectionRequired && children.length > 0 ? (
-            <p
-              role="status"
-              className="family-selection-notice max-sm:text-xs!"
-            >
+            <p role="status" className="family-selection-notice">
               {invalidSelection
                 ? t("parent.dashboard.invalidSelectionNotice")
                 : t("parent.dashboard.missingSelectionNotice")}
@@ -284,42 +302,37 @@ export function DashboardScreen() {
           ) : null}
           {isLoading ? (
             <div
-              className="family-profile-list max-sm:gap-2!"
+              className="family-profile-list"
               aria-label={t("parent.dashboard.loadingChildrenAria")}
             >
               <span className="sr-only" role="status">
                 {t("common.states.loading")}
               </span>
-              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
-              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
+              <Skeleton className="h-[68px] w-full rounded-control" />
+              <Skeleton className="h-[68px] w-full rounded-control" />
             </div>
           ) : children.length ? (
             <>
-              <div className="family-profile-list max-sm:gap-2! [&>button]:max-sm:min-h-[56px]! [&>button]:max-sm:px-3! [&>button]:max-sm:py-2!">
+              <div className="family-profile-list">
                 {children.map((child) => (
                   <ChildProfileCard
                     key={child.id}
                     child={child}
                     selected={selectedChild?.id === child.id}
-                    onSelect={() => {
-                      selectChild(child.id);
-                      setValidatedSelectedChild(child);
-                      setSelectionPrompt(false);
-                      if (searchParams.toString()) replace("/dashboard");
-                    }}
+                    onSelect={() => handleSelectChild(child)}
                   />
                 ))}
               </div>
               <Link
                 href="/children/new"
-                className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
+                className="family-inline-link min-h-12"
               >
                 <Plus aria-hidden="true" size={16} />{" "}
                 {t("parent.dashboard.createChildLink")}
               </Link>
             </>
           ) : (
-            <p className="text-sm text-muted sm:text-body">
+            <p className="text-body text-muted">
               {t("parent.dashboard.emptyChildrenDescription")}
             </p>
           )}
@@ -329,10 +342,10 @@ export function DashboardScreen() {
       {!isLoading && children.length > 0 ? (
         <section
           aria-labelledby="reading-actions-title"
-          className="family-tools max-sm:mt-4!"
+          className="family-tools"
         >
-          <div className="family-tools-heading max-sm:items-center! max-sm:pb-2!">
-            <h2 id="reading-actions-title" className="max-sm:text-base!">
+          <div className="family-tools-heading">
+            <h2 id="reading-actions-title">
               {t("parent.dashboard.readingActionsTitle")}
             </h2>
             <Link
@@ -341,55 +354,38 @@ export function DashboardScreen() {
                   ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
                   : "/sessions"
               }
-              className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
+              className="family-inline-link min-h-12"
             >
               <History aria-hidden="true" size={16} />{" "}
               {t("parent.dashboard.readingHistoryLink")}
             </Link>
           </div>
-          <div className="family-tool-list max-sm:mt-2.5! max-sm:grid! max-sm:grid-cols-2! max-sm:gap-2.5!">
+          <div className="family-tool-list">
             <button
               type="button"
               aria-label={t("parent.dashboard.scanBookTitle")}
-              className="order-1 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
               onClick={() => handleReadingAction("/book-scanner")}
             >
               <Camera aria-hidden="true" />
               <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.scanBookTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.scanBookDesc")}
-                </small>
+                <strong>{t("parent.dashboard.scanBookTitle")}</strong>
+                <small>{t("parent.dashboard.scanBookDesc")}</small>
               </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
-              />
+              <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
             </button>
             <button
               type="button"
               aria-label={t("parent.dashboard.entertainmentTitle")}
-              className="order-4 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
               onClick={() => handleReadingAction("/entertainment")}
             >
               <Music2 aria-hidden="true" />
               <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.entertainmentTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.entertainmentDesc")}
-                </small>
+                <strong>{t("parent.dashboard.entertainmentTitle")}</strong>
+                <small>{t("parent.dashboard.entertainmentDesc")}</small>
               </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
-              />
+              <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
             </button>
             <Link
-              className="order-2 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
               href={
                 selectedChild
                   ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
@@ -398,35 +394,10 @@ export function DashboardScreen() {
             >
               <BarChart3 aria-hidden="true" />
               <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.progressTitle")}
-                </strong>
-                <small className="max-sm:hidden!">
-                  {t("parent.dashboard.progressDesc")}
-                </small>
+                <strong>{t("parent.dashboard.progressTitle")}</strong>
+                <small>{t("parent.dashboard.progressDesc")}</small>
               </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                className="viread-rtl-flip max-sm:hidden!"
-              />
-            </Link>
-            <Link
-              className="order-3 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:hidden!"
-              href={
-                selectedChild
-                  ? `/reports/difficult-words?childId=${encodeURIComponent(selectedChild.id)}`
-                  : "/reports/difficult-words"
-              }
-            >
-              <Volume2
-                aria-hidden="true"
-                className="bg-warning-surface! text-warning!"
-              />
-              <span className="min-w-0">
-                <strong className="max-sm:text-sm! max-sm:leading-snug!">
-                  {t("parent.dashboard.difficultWordsLink")}
-                </strong>
-              </span>
+              <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
             </Link>
           </div>
         </section>

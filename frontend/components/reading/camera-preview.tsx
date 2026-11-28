@@ -498,7 +498,7 @@ export function CameraPreview({
         >
           <p className="font-semibold">{ocrUnavailableBanner}</p>
           <Button
-            className="min-h-10 sm:w-auto"
+            className="min-h-11 w-full sm:w-auto"
             disabled={!cameraReady || isScanning}
             onClick={() => {
               consecutiveErrorCountRef.current = 0;

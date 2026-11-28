@@ -31,7 +31,7 @@ export function ReportPageHeader({
         ) : null}
       </div>
       {action ? (
-        <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto sm:gap-3">
+        <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto sm:gap-3 max-sm:[&>a]:min-h-11 max-sm:[&>button]:min-h-11">
           {action}
         </div>
       ) : null}

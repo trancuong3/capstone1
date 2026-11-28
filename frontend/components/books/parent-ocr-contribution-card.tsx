@@ -82,7 +82,7 @@ export function ParentOcrContributionCard({
   return (
     <section
       aria-label={t("ocrContribution.cardAria", { title: bookTitle })}
-      className="flex flex-col gap-3 rounded-card border border-border bg-white p-5 shadow-sm"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm sm:p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2.5">
@@ -192,7 +192,7 @@ export function ParentOcrContributionCard({
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className="min-h-10 w-auto px-4 text-xs"
+              className="min-h-11 w-full px-4 py-2 text-xs sm:w-auto"
               disabled={disabled || busy}
               onClick={() => void handleDisable()}
               type="button"
@@ -207,19 +207,19 @@ export function ParentOcrContributionCard({
       ) : (
         <div className="flex flex-col gap-3 rounded-control border border-border bg-surface-subtle p-4 text-xs text-ink">
           <p>{t("ocrContribution.disabledExplainer")}</p>
-          <label className="flex cursor-pointer items-start gap-2.5 font-semibold text-ink">
+          <label className="flex min-h-11 cursor-pointer items-start gap-2.5 py-1.5 font-semibold text-ink">
             <input
               checked={rightsChecked}
-              className="mt-0.5 size-4 rounded border-border accent-primary"
+              className="mt-0.5 size-5 shrink-0 rounded border-border accent-primary"
               disabled={disabled || busy}
               onChange={(event) => setRightsChecked(event.target.checked)}
               type="checkbox"
             />
             <span>{t("ocrContribution.consentCheckbox")}</span>
           </label>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <Button
-              className="min-h-10 w-auto px-4 text-xs"
+              className="min-h-11 w-full px-4 py-2 text-xs sm:w-auto"
               disabled={disabled || busy || !rightsChecked}
               onClick={() => void handleEnable()}
               type="button"

@@ -460,7 +460,7 @@ export function PageIllustrationStudio({
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className="min-h-11 w-auto px-3.5 text-xs"
+              className="min-h-11 w-auto px-3.5 py-2 text-xs"
               data-testid="extract-illustration-btn"
               disabled={busyAction !== null}
               fullWidth={false}
@@ -475,7 +475,7 @@ export function PageIllustrationStudio({
 
             {asset && asset.moderation_status !== "APPROVED" ? (
               <Button
-                className="min-h-11 w-auto px-3.5 text-xs"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs"
                 data-testid="approve-illustration-btn"
                 disabled={busyAction !== null || !asset.text_free_verified}
                 fullWidth={false}
@@ -496,7 +496,7 @@ export function PageIllustrationStudio({
 
             {asset && asset.moderation_status !== "REJECTED" ? (
               <Button
-                className="min-h-11 w-auto px-3.5 text-xs"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs"
                 data-testid="reject-illustration-btn"
                 disabled={busyAction !== null}
                 fullWidth={false}
@@ -512,7 +512,7 @@ export function PageIllustrationStudio({
 
             {asset && asset.moderation_status === "REJECTED" ? (
               <Button
-                className="min-h-11 w-auto px-3.5 text-xs"
+                className="min-h-11 w-auto px-3.5 py-2 text-xs"
                 data-testid="restore-illustration-btn"
                 disabled={busyAction !== null}
                 fullWidth={false}
@@ -553,7 +553,7 @@ export function PageIllustrationStudio({
             >
               <input
                 aria-label="Gợi ý cảnh cho tranh minh họa AI"
-                className="min-h-11 w-full min-w-0 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink placeholder:text-muted"
+                className="min-h-11 w-full min-w-0 flex-1 rounded-control border border-border bg-white px-3 text-base text-ink placeholder:text-muted sm:text-xs"
                 onChange={(event) => setPromptHint(event.target.value)}
                 placeholder="Gợi ý khung cảnh cho bé (không chứa chữ viết)…"
                 type="text"
@@ -561,12 +561,11 @@ export function PageIllustrationStudio({
               />
               <Button
                 className={cn(
-                  "min-h-11 shrink-0 px-3.5 text-xs",
+                  "min-h-11 shrink-0 px-3.5 py-2 text-xs",
                   compact ? "w-full" : "w-full xl:w-auto",
                 )}
                 data-testid="generate-illustration-btn"
                 disabled={busyAction !== null}
-                fullWidth={false}
                 isLoading={busyAction === "generate"}
                 onClick={() => void handleGenerateAi()}
                 type="button"

@@ -47,6 +47,51 @@ describe("Button & ButtonLink width resolution", () => {
       screen.getByRole("link", { name: "Mở sách" }).className,
     ).not.toContain("w-full");
   });
+
+  it("supports touch, icon, and mobile-safe admin button sizes without colliding base classes", () => {
+    render(
+      <>
+        <Button className="sm:max-w-60">Tiếp tục</Button>
+        <Button size="touch" fullWidth={false}>
+          Lọc
+        </Button>
+        <Button aria-label="Đóng" size="icon">
+          X
+        </Button>
+        <Button size="admin">Quản trị</Button>
+        <Button className="min-h-9 px-2 text-xs" fullWidth={false}>
+          Ghi đè
+        </Button>
+      </>,
+    );
+
+    const formBtn = screen.getByRole("button", { name: "Tiếp tục" });
+    expect(formBtn.className).toContain("w-full");
+    expect(formBtn.className).toContain("min-h-14");
+
+    const touchBtn = screen.getByRole("button", { name: "Lọc" });
+    expect(touchBtn.className).toContain("min-h-11");
+    expect(touchBtn.className).toContain("px-3.5");
+    expect(touchBtn.className).not.toContain("min-h-14");
+
+    const iconBtn = screen.getByRole("button", { name: "Đóng" });
+    expect(iconBtn.className).toContain("size-11");
+    expect(iconBtn.className).toContain("sm:size-12");
+    expect(iconBtn.className).toContain("p-0");
+    expect(iconBtn.className).not.toContain("w-full");
+
+    const adminBtn = screen.getByRole("button", { name: "Quản trị" });
+    expect(adminBtn.className).toContain("min-h-11");
+    expect(adminBtn.className).toContain("sm:min-h-10");
+
+    const overrideBtn = screen.getByRole("button", { name: "Ghi đè" });
+    expect(overrideBtn.className).toContain("min-h-9");
+    expect(overrideBtn.className).toContain("px-2");
+    expect(overrideBtn.className).toContain("text-xs");
+    expect(overrideBtn.className).not.toContain("min-h-14");
+    expect(overrideBtn.className).not.toContain("px-4");
+    expect(overrideBtn.className).not.toContain("text-button");
+  });
 });
 
 describe("PaginationBar", () => {
@@ -154,6 +199,26 @@ describe("PaginationBar", () => {
       />,
     );
     expect(screen.getByText("Trang 12 / 12")).toBeInTheDocument();
+  });
+
+  it("keeps >=44px mobile touch targets even in compact mode without class collisions", () => {
+    render(
+      <PaginationBar
+        compact
+        itemLabel="bài"
+        onPageChange={vi.fn()}
+        page={1}
+        pageSize={5}
+        total={15}
+      />,
+    );
+
+    const prevButton = screen.getByRole("button", { name: /Trước/ });
+    const nextButton = screen.getByRole("button", { name: /Tiếp/ });
+    expect(prevButton.className).toContain("min-h-11");
+    expect(prevButton.className).toContain("sm:min-h-10");
+    expect(prevButton.className).not.toContain("min-h-14");
+    expect(nextButton.className).toContain("min-h-11");
   });
 });
 

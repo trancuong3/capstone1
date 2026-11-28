@@ -27,6 +27,7 @@ const toneIcons: Record<StatusTone, LucideIcon> = {
 
 interface StatusMessageProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
+  compact?: boolean;
   title?: string;
   tone?: StatusTone;
 }
@@ -34,6 +35,7 @@ interface StatusMessageProps extends HTMLAttributes<HTMLDivElement> {
 export function StatusMessage({
   children,
   className,
+  compact = false,
   title,
   tone = "info",
   ...props
@@ -45,7 +47,8 @@ export function StatusMessage({
     <div
       aria-live={tone === "error" ? "assertive" : "polite"}
       className={cn(
-        "flex w-full items-start gap-3 rounded-control p-4",
+        "flex w-full items-start rounded-control",
+        compact ? "gap-2.5 p-3" : "gap-3 p-4",
         toneClasses[tone],
         className,
       )}

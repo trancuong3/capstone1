@@ -181,4 +181,27 @@ describe("ParentEmailPreferencesCard", () => {
       await screen.findByText(/Đã gửi email thử nghiệm đến địa chỉ email/i),
     ).toBeInTheDocument();
   });
+
+  it("enforces >= 44px touch targets on toggle rows and select controls", async () => {
+    render(<ParentEmailPreferencesCard emailVerified={true} />);
+
+    const weekdaySelect = await screen.findByLabelText("Ngày gửi báo cáo tuần");
+    const inactivitySelect = screen.getByLabelText(/Nhắc khi bé nghỉ đọc sau/i);
+    const capSelect = screen.getByLabelText("Trần chống spam mỗi tuần");
+    const quietSelect = screen.getByLabelText(/Khung giờ yên tĩnh/i);
+
+    for (const selectEl of [
+      weekdaySelect,
+      inactivitySelect,
+      capSelect,
+      quietSelect,
+    ]) {
+      expect(selectEl.className).toContain("min-h-11");
+    }
+
+    const digestSwitch = screen.getByRole("switch", {
+      name: /Báo cáo tiến độ học hàng tuần/i,
+    });
+    expect(digestSwitch.closest("label")?.className).toContain("min-h-11");
+  });
 });

@@ -124,6 +124,9 @@ function isSafeImageSrc(url: string | null | undefined): string | null {
   return null;
 }
 
+const explicitWidthClassPattern = /(?:^|\s)(?:(?:sm|md|lg|xl):)?w-\S+/;
+const explicitHeightClassPattern = /(?:^|\s)(?:(?:sm|md|lg|xl):)?h-\S+/;
+
 export interface BookCoverProps {
   book: BookListItemDTO;
   className?: string;
@@ -224,6 +227,10 @@ export function BookCover({
   const displayGrade = formatBookGrade(book, grade);
   const monogram = buildVietnameseMonogram(displayTitle);
   const compact = size !== "default";
+  const hasExplicitWidth =
+    Boolean(className) && explicitWidthClassPattern.test(className ?? "");
+  const hasExplicitHeight =
+    Boolean(className) && explicitHeightClassPattern.test(className ?? "");
   const coverDimensions =
     size === "small"
       ? { width: 56, height: 80 }
@@ -251,7 +258,9 @@ export function BookCover({
       return (
         <div
           className={cn(
-            "relative h-[205px] w-full overflow-hidden rounded-control bg-cream",
+            "relative overflow-hidden rounded-control bg-cream",
+            !hasExplicitHeight && "h-[205px]",
+            !hasExplicitWidth && "w-full",
             className,
           )}
           data-cover-source={effectiveSource}
@@ -279,8 +288,9 @@ export function BookCover({
     return (
       <div
         className={cn(
-          "relative flex w-full flex-col overflow-hidden rounded-card border border-border bg-cream",
-          compact ? "shrink-0" : "h-[260px]",
+          "relative flex flex-col overflow-hidden rounded-card border border-border bg-cream",
+          !hasExplicitWidth && "w-full",
+          compact ? "shrink-0" : !hasExplicitHeight && "h-[260px]",
           className,
         )}
         data-cover-source={effectiveSource}
@@ -319,7 +329,9 @@ export function BookCover({
       <div
         aria-hidden="true"
         className={cn(
-          "relative flex h-[205px] w-full overflow-hidden rounded-control border border-black/5 shadow-xs",
+          "relative flex overflow-hidden rounded-control border border-black/5 shadow-xs",
+          !hasExplicitHeight && "h-[205px]",
+          !hasExplicitWidth && "w-full",
           className,
         )}
         data-cover-palette={palette.id}
@@ -378,8 +390,9 @@ export function BookCover({
   return (
     <div
       className={cn(
-        "relative flex w-full overflow-hidden rounded-card border border-black/5 shadow-xs",
-        compact ? "shrink-0" : "h-[260px]",
+        "relative flex overflow-hidden rounded-card border border-black/5 shadow-xs",
+        !hasExplicitWidth && "w-full",
+        compact ? "shrink-0" : !hasExplicitHeight && "h-[260px]",
         className,
       )}
       data-cover-palette={palette.id}

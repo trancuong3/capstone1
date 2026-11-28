@@ -180,4 +180,60 @@ describe("AccountSettingsScreen", () => {
       "Mật khẩu đã được cập nhật",
     );
   });
+
+  it("renders mobile view without .settings-sheet, preserves >= 44px links, and focuses mobile password editor heading", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: () => true,
+      })),
+    );
+
+    const user = userEvent.setup();
+    const authService = createAuthServiceFixture();
+    authService.getCurrentUser.mockResolvedValue({
+      ...authSessionFixture.user,
+      providers: ["email"],
+    });
+
+    const { container } = render(
+      withAuthFixture(<AccountSettingsScreen />, authService, {
+        session: authSessionFixture,
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Cài đặt tài khoản" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".settings-sheet")).toBeNull();
+    expect(container.querySelector("section")?.className).not.toContain(
+      "pb-24",
+    );
+    expect(
+      screen.getByRole("link", { name: "Mở hồ sơ phụ huynh" }).className,
+    ).toContain("min-h-11");
+
+    await user.click(screen.getByRole("button", { name: "Đổi mật khẩu" }));
+
+    const passwordHeading = await screen.findByRole("heading", {
+      name: "Đổi mật khẩu",
+    });
+    expect(passwordHeading).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Quay lại" }).className,
+    ).toContain("min-h-11");
+    expect(screen.getByRole("button", { name: "Hủy" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+    expect(
+      await screen.findByRole("heading", { name: "Cài đặt tài khoản" }),
+    ).toBeInTheDocument();
+  });
 });

@@ -4,7 +4,6 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { ButtonSizeProvider } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -18,9 +17,9 @@ export function AuthShell({ children }: AuthShellProps) {
   return (
     <div className="account-spread flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 items-start justify-center px-3 max-sm:py-3! sm:min-h-[640px] sm:items-center sm:px-12 sm:py-12">
+      <main className="flex w-full min-w-0 flex-1 items-start justify-center px-5 pt-6 pb-8 sm:min-h-[640px] sm:items-center sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
-          <div className="account-spread-inner grid w-full max-w-[560px] lg:max-w-[1088px] items-stretch overflow-hidden rounded-card border border-border bg-white lg:grid-cols-[1.1fr_1fr]">
+          <div className="account-spread-inner grid w-full max-w-[560px] items-stretch sm:overflow-hidden sm:rounded-card sm:border sm:border-border sm:bg-white lg:max-w-[1088px] lg:grid-cols-[1.1fr_1fr]">
             <div
               aria-hidden="true"
               className="relative hidden overflow-hidden bg-cream lg:block"
@@ -33,7 +32,7 @@ export function AuthShell({ children }: AuthShellProps) {
                 className="object-cover object-[41%_center]"
               />
             </div>
-            <div className="mx-auto flex w-full max-w-[560px] flex-col justify-center [&>div]:rounded-none [&>div]:border-0 [&>div]:gap-3 [&>div]:p-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:gap-4 [&>div]:sm:px-8 [&>div]:sm:py-6">
+            <div className="mx-auto flex w-full max-w-[560px] flex-col justify-center">
               {children}
             </div>
           </div>
@@ -50,10 +49,10 @@ export function AuthLoadingState() {
 
   return (
     <AuthShell>
-      <Card
+      <div
         aria-busy="true"
         aria-label={tA11y("loadingContent")}
-        className="border border-border bg-white"
+        className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6"
       >
         <span className="sr-only" role="status">
           {tCommon("states.loading")}
@@ -64,7 +63,7 @@ export function AuthLoadingState() {
         <Skeleton className="h-16 w-full" />
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-12 w-full" />
-      </Card>
+      </div>
     </AuthShell>
   );
 }

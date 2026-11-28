@@ -44,6 +44,7 @@ interface BookPageViewerProps extends PageWordEvidence {
   initialReadingMode?: ReadingDisplayMode;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
+  omitHeaderOnMobile?: boolean;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
@@ -133,7 +134,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
       ].includes(state) ? (
         <span
           aria-hidden="true"
-          className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
+          className="pointer-events-none absolute -right-0.5 -top-2 rounded-full bg-white px-1 text-[10px] leading-tight font-semibold text-ink"
         >
           {state === "preview-correct"
             ? "·"
@@ -569,247 +570,241 @@ function PageSurface(
               : "none"
       }
     >
-      <header className="reader-bookplate">
-        <div className="flex min-w-0 flex-1 items-center justify-between gap-2 sm:block sm:w-full">
-          <p className="reader-folio sr-only sm:not-sr-only">
-            {t("progress.pageLabel", { page: formatNumber(page.page_number) })}
-          </p>
-          <h1
-            className="book-title viread-learning-content min-w-0 flex-1 truncate text-sm font-extrabold sm:line-clamp-none sm:whitespace-normal sm:break-words sm:text-3xl"
-            dir="ltr"
-            lang="vi"
-          >
-            {props.title ?? t("pageViewer.defaultBookTitle")}
-          </h1>
-          <div
-            aria-label={t("pageViewer.readingModeSwitcherAria")}
-            className="inline-flex shrink-0 flex-nowrap items-center gap-1 sm:mt-2 sm:flex-wrap sm:gap-1.5"
-            data-testid="reading-mode-switcher"
-            role="tablist"
-          >
-            {canShowIllustratedMode ? (
-              <button
-                aria-selected={effectiveReadingMode === "ILLUSTRATED"}
-                className={cn(
-                  "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
-                  effectiveReadingMode === "ILLUSTRATED"
-                    ? "border-primary bg-primary text-white shadow-xs"
-                    : "border-border bg-white text-ink hover:bg-canvas",
-                )}
-                onClick={() => handleSelectReadingMode("ILLUSTRATED")}
-                role="tab"
-                title={t("pageViewer.readingModeIllustratedTitle")}
-                type="button"
+      {props.omitHeaderOnMobile ? (
+        <h1 className="sr-only">
+          {props.title ?? t("pageViewer.defaultBookTitle")}
+        </h1>
+      ) : (
+        <div className="hidden sm:contents">
+          <header className="reader-bookplate">
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-2 sm:block sm:w-full">
+              <p className="reader-folio sr-only sm:not-sr-only">
+                {t("progress.pageLabel", {
+                  page: formatNumber(page.page_number),
+                })}
+              </p>
+              <h1
+                className="book-title viread-learning-content min-w-0 flex-1 truncate text-sm font-extrabold sm:line-clamp-none sm:whitespace-normal sm:break-words sm:text-3xl"
+                dir="ltr"
+                lang="vi"
               >
-                <ImageIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                {t("pageViewer.readingModeIllustrated")}
-              </button>
-            ) : null}
-            <button
-              aria-selected={effectiveReadingMode === "TEXT"}
-              className={cn(
-                "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
-                effectiveReadingMode === "TEXT"
-                  ? "border-primary bg-primary text-white shadow-xs"
-                  : "border-border bg-white text-ink hover:bg-canvas",
-              )}
-              onClick={() => handleSelectReadingMode("TEXT")}
-              role="tab"
-              title={t("pageViewer.readingModeTextTitle")}
-              type="button"
-            >
-              <BookOpen aria-hidden="true" className="size-3.5 shrink-0" />
-              {t("pageViewer.readingModeText")}
-            </button>
-            {activeImageUrl ? (
-              <button
-                aria-selected={effectiveReadingMode === "ORIGINAL"}
-                className={cn(
-                  "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
-                  effectiveReadingMode === "ORIGINAL"
-                    ? "border-primary bg-primary text-white shadow-xs"
-                    : "border-border bg-white text-ink hover:bg-canvas",
-                )}
-                onClick={() => handleSelectReadingMode("ORIGINAL")}
-                role="tab"
-                title={t("pageViewer.readingModeOriginalTitle")}
-                type="button"
-              >
-                <Eye aria-hidden="true" className="size-3.5 shrink-0" />
-                {t("pageViewer.readingModeOriginal")}
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {props.illustration ? (
-          <span className="hidden sm:contents">{props.illustration}</span>
-        ) : null}
-      </header>
-      <div
-        ref={rootRef}
-        className="reader-leaf w-full min-w-0 px-3 py-2.5 sm:px-6 sm:py-5"
-        data-reading-scroll-container="true"
-        data-auto-follow={isDetached ? "paused" : "active"}
-        tabIndex={0}
-      >
-        {shouldLoadOriginalSource && source && image !== "failed" ? (
-          <Image
-            key={source}
-            alt=""
-            aria-hidden="true"
-            data-page-image-probe="true"
-            src={source}
-            width={Math.max(1, page.width)}
-            height={Math.max(1, page.height)}
-            className="hidden"
-            loading="eager"
-            unoptimized
-            onLoad={(event) => {
-              const target = event.currentTarget;
-              setImage({
-                width: target.naturalWidth,
-                height: target.naturalHeight,
-              });
-            }}
-            onError={handleImageLoadError}
-          />
-        ) : null}
-
-        {effectiveReadingMode === "ILLUSTRATED" ? (
-          <div className="flex flex-col gap-4" data-reading-panel="illustrated">
-            {resolvedIllustrationSrc ? (
-              <figure
-                className="overflow-hidden rounded-card border border-border/80 bg-cream/70 p-2 shadow-xs"
-                data-testid="storybook-illustration-card"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  alt={t("pageViewer.illustrationAlt", {
-                    page: formatNumber(page.page_number),
-                  })}
-                  className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
-                  onError={() => {
-                    if (illustrationNeedsAuth && safeIllustrationUrl) {
-                      setIllustrationAuthState({
-                        src: safeIllustrationUrl,
-                        blobUrl: null,
-                        failed: true,
-                      });
-                    } else if (safeIllustrationUrl) {
-                      setFailedDirectIllustration(safeIllustrationUrl);
-                    }
-                  }}
-                  src={resolvedIllustrationSrc}
-                />
-              </figure>
-            ) : (
+                {props.title ?? t("pageViewer.defaultBookTitle")}
+              </h1>
               <div
-                aria-busy="true"
-                className="h-44 w-full animate-pulse rounded-card bg-cream"
-                data-testid="storybook-illustration-loading"
+                aria-label={t("pageViewer.readingModeSwitcherAria")}
+                className="inline-flex shrink-0 flex-nowrap items-center gap-1 sm:mt-2 sm:flex-wrap sm:gap-1.5"
+                data-testid="reading-mode-switcher"
+                role="tablist"
+              >
+                {canShowIllustratedMode ? (
+                  <button
+                    aria-selected={effectiveReadingMode === "ILLUSTRATED"}
+                    className={cn(
+                      "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                      effectiveReadingMode === "ILLUSTRATED"
+                        ? "border-primary bg-primary text-white shadow-xs"
+                        : "border-border bg-white text-ink hover:bg-canvas",
+                    )}
+                    onClick={() => handleSelectReadingMode("ILLUSTRATED")}
+                    role="tab"
+                    title={t("pageViewer.readingModeIllustratedTitle")}
+                    type="button"
+                  >
+                    <ImageIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
+                    {t("pageViewer.readingModeIllustrated")}
+                  </button>
+                ) : null}
+                <button
+                  aria-selected={effectiveReadingMode === "TEXT"}
+                  className={cn(
+                    "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                    effectiveReadingMode === "TEXT"
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:bg-canvas",
+                  )}
+                  onClick={() => handleSelectReadingMode("TEXT")}
+                  role="tab"
+                  title={t("pageViewer.readingModeTextTitle")}
+                  type="button"
+                >
+                  <BookOpen aria-hidden="true" className="size-3.5 shrink-0" />
+                  {t("pageViewer.readingModeText")}
+                </button>
+                {activeImageUrl ? (
+                  <button
+                    aria-selected={effectiveReadingMode === "ORIGINAL"}
+                    className={cn(
+                      "inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs",
+                      effectiveReadingMode === "ORIGINAL"
+                        ? "border-primary bg-primary text-white shadow-xs"
+                        : "border-border bg-white text-ink hover:bg-canvas",
+                    )}
+                    onClick={() => handleSelectReadingMode("ORIGINAL")}
+                    role="tab"
+                    title={t("pageViewer.readingModeOriginalTitle")}
+                    type="button"
+                  >
+                    <Eye aria-hidden="true" className="size-3.5 shrink-0" />
+                    {t("pageViewer.readingModeOriginal")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {props.illustration ? (
+              <span className="hidden sm:contents">{props.illustration}</span>
+            ) : null}
+          </header>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col sm:h-full">
+        <div
+          ref={rootRef}
+          className="reader-leaf w-full min-w-0 px-3 py-2.5 sm:px-6 sm:py-5"
+          data-reading-scroll-container="true"
+          data-auto-follow={isDetached ? "paused" : "active"}
+          tabIndex={0}
+        >
+          {shouldLoadOriginalSource && source && image !== "failed" ? (
+            <Image
+              key={source}
+              alt=""
+              aria-hidden="true"
+              data-page-image-probe="true"
+              src={source}
+              width={Math.max(1, page.width)}
+              height={Math.max(1, page.height)}
+              className="hidden"
+              loading="eager"
+              unoptimized
+              onLoad={(event) => {
+                const target = event.currentTarget;
+                setImage({
+                  width: target.naturalWidth,
+                  height: target.naturalHeight,
+                });
+              }}
+              onError={handleImageLoadError}
+            />
+          ) : null}
+
+          {effectiveReadingMode === "ILLUSTRATED" ? (
+            <div
+              className="flex flex-col gap-4"
+              data-reading-panel="illustrated"
+            >
+              {resolvedIllustrationSrc ? (
+                <figure
+                  className="overflow-hidden rounded-card border border-border/80 bg-cream/70 p-2 shadow-xs"
+                  data-testid="storybook-illustration-card"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    alt={t("pageViewer.illustrationAlt", {
+                      page: formatNumber(page.page_number),
+                    })}
+                    className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                    onError={() => {
+                      if (illustrationNeedsAuth && safeIllustrationUrl) {
+                        setIllustrationAuthState({
+                          src: safeIllustrationUrl,
+                          blobUrl: null,
+                          failed: true,
+                        });
+                      } else if (safeIllustrationUrl) {
+                        setFailedDirectIllustration(safeIllustrationUrl);
+                      }
+                    }}
+                    src={resolvedIllustrationSrc}
+                  />
+                </figure>
+              ) : (
+                <div
+                  aria-busy="true"
+                  className="h-44 w-full animate-pulse rounded-card bg-cream"
+                  data-testid="storybook-illustration-loading"
+                />
+              )}
+              <BookPageContent
+                {...props}
+                onWordClick={handleSelectWord}
+                registerWordNode={registerTextNode}
+                scrollContainerRef={rootRef}
               />
-            )}
+            </div>
+          ) : effectiveReadingMode === "TEXT" ? (
             <BookPageContent
               {...props}
               onWordClick={handleSelectWord}
               registerWordNode={registerTextNode}
               scrollContainerRef={rootRef}
             />
-          </div>
-        ) : effectiveReadingMode === "TEXT" ? (
-          <BookPageContent
-            {...props}
-            onWordClick={handleSelectWord}
-            registerWordNode={registerTextNode}
-            scrollContainerRef={rootRef}
-          />
-        ) : overlay && rect && source ? (
-          <div
-            className="viread-learning-content relative mt-1 w-full overflow-hidden"
-            dir="ltr"
-            lang="vi"
-            style={{ height: frame.height }}
-            data-reading-panel="image"
-          >
-            <Image
-              src={source}
-              alt={t("pageViewer.pageImageAlt", { page: page.page_number })}
-              fill
-              unoptimized
-              className="object-contain"
-              sizes="(max-width: 768px) 100vw, 1008px"
-              onError={handleImageLoadError}
-            />
+          ) : overlay && rect && source ? (
             <div
-              className="absolute"
-              data-image-overlay="true"
-              style={{
-                left: rect.left,
-                top: rect.top,
-                width: rect.width,
-                height: rect.height,
-              }}
+              className="viread-learning-content relative mt-1 w-full overflow-hidden"
+              dir="ltr"
+              lang="vi"
+              style={{ height: frame.height }}
+              data-reading-panel="image"
             >
-              {page.words.map((word, index) => {
-                const pState = stateFor(word, index);
-                const stateLabel =
-                  pState === "assisted" && isMalePersona
-                    ? t("wordStates.assistedMale")
-                    : t(`wordStates.${pState}`);
-                return (
-                  <MemoOverlayWordButton
-                    key={word.word_id}
-                    word={word}
-                    pageRevisionId={page.page_revision_id}
-                    state={pState}
-                    stateLabel={stateLabel}
-                    isCurrent={word.word_id === activeId}
-                    onSelectWord={handleSelectWord}
-                    registerNode={registerOverlayNode}
-                  />
-                );
-              })}
+              <Image
+                src={source}
+                alt={t("pageViewer.pageImageAlt", { page: page.page_number })}
+                fill
+                unoptimized
+                className="object-contain"
+                sizes="(max-width: 768px) 100vw, 1008px"
+                onError={handleImageLoadError}
+              />
+              <div
+                className="absolute"
+                data-image-overlay="true"
+                style={{
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                  height: rect.height,
+                }}
+              >
+                {page.words.map((word, index) => {
+                  const pState = stateFor(word, index);
+                  const stateLabel =
+                    pState === "assisted" && isMalePersona
+                      ? t("wordStates.assistedMale")
+                      : t(`wordStates.${pState}`);
+                  return (
+                    <MemoOverlayWordButton
+                      key={word.word_id}
+                      word={word}
+                      pageRevisionId={page.page_revision_id}
+                      state={pState}
+                      stateLabel={stateLabel}
+                      isCurrent={word.word_id === activeId}
+                      onSelectWord={handleSelectWord}
+                      registerNode={registerOverlayNode}
+                    />
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ) : (
-          <>
-            {source && image !== "failed" ? (
-              (isV2Explicit || hasUserSelectedMode) &&
-              effectiveReadingMode === "ORIGINAL" ? (
-                <div
-                  className="mb-3 rounded-control border border-border bg-white/80 p-2"
-                  data-testid="original-page-reference-panel"
-                >
-                  <p className="mb-1.5 text-xs font-semibold text-muted">
-                    {t("pageViewer.originalReferenceHeading")}
-                  </p>
-                  <Image
-                    src={source}
-                    alt={t("pageViewer.originalReferenceAlt", {
-                      page: formatNumber(page.page_number),
-                    })}
-                    width={Math.max(1, page.width)}
-                    height={Math.max(1, page.height)}
-                    unoptimized
-                    className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
-                    onError={handleImageLoadError}
-                  />
-                </div>
-              ) : (
-                <details
-                  onToggle={(event) =>
-                    setReferenceOpen(event.currentTarget.open)
-                  }
-                  className="mb-2 hidden rounded-control border border-border bg-white/70 p-1.5 sm:block"
-                >
-                  <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
-                    {t("pageViewer.viewPageImage")}
-                  </summary>
-                  {referenceOpen ? (
+          ) : (
+            <>
+              {source && image !== "failed" ? (
+                (isV2Explicit || hasUserSelectedMode) &&
+                effectiveReadingMode === "ORIGINAL" ? (
+                  <div
+                    className="mb-3 rounded-control border border-border bg-white/80 p-2"
+                    data-testid="original-page-reference-panel"
+                  >
+                    <p className="mb-1.5 text-xs font-semibold text-muted">
+                      {t("pageViewer.originalReferenceHeading")}
+                    </p>
                     <Image
                       src={source}
-                      alt={t("pageViewer.referencePageAlt", {
-                        page: page.page_number,
+                      alt={t("pageViewer.originalReferenceAlt", {
+                        page: formatNumber(page.page_number),
                       })}
                       width={Math.max(1, page.width)}
                       height={Math.max(1, page.height)}
@@ -817,25 +812,49 @@ function PageSurface(
                       className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
                       onError={handleImageLoadError}
                     />
-                  ) : null}
-                </details>
-              )
-            ) : null}
-            <BookPageContent
-              {...props}
-              onWordClick={handleSelectWord}
-              registerWordNode={registerTextNode}
-              scrollContainerRef={rootRef}
-            />
-          </>
-        )}
+                  </div>
+                ) : (
+                  <details
+                    onToggle={(event) =>
+                      setReferenceOpen(event.currentTarget.open)
+                    }
+                    className="mb-2 block rounded-control border border-border bg-white/70 p-1.5"
+                  >
+                    <summary className="flex min-h-11 cursor-pointer items-center px-2 py-2.5 text-sm font-semibold text-primary">
+                      {t("pageViewer.viewPageImage")}
+                    </summary>
+                    {referenceOpen ? (
+                      <Image
+                        src={source}
+                        alt={t("pageViewer.referencePageAlt", {
+                          page: page.page_number,
+                        })}
+                        width={Math.max(1, page.width)}
+                        height={Math.max(1, page.height)}
+                        unoptimized
+                        className="mx-auto h-auto max-h-[30dvh] w-auto max-w-full object-contain sm:max-h-[42dvh]"
+                        onError={handleImageLoadError}
+                      />
+                    ) : null}
+                  </details>
+                )
+              ) : null}
+              <BookPageContent
+                {...props}
+                onWordClick={handleSelectWord}
+                registerWordNode={registerTextNode}
+                scrollContainerRef={rootRef}
+              />
+            </>
+          )}
+        </div>
         {isDetached && activeId ? (
-          <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end overflow-visible">
+          <div className="flex shrink-0 justify-end border-t border-border/60 bg-cream/95 px-3 py-1.5 sm:px-6">
             <button
               type="button"
               data-testid="resume-auto-follow-btn"
               onClick={resumeAutoFollow}
-              className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
               {t("pageViewer.scrollToCurrentWord")}

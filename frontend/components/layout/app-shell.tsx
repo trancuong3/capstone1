@@ -216,6 +216,7 @@ export function AppShell({ children }: AppShellProps) {
     pathname === "/children/new" &&
     (availableChildren.length === 0 || isFromRegister);
   const normalizedPathname = normalizeRoutePath(pathname);
+  const isReadingPrepRoute = normalizedPathname === "/reading-preparation";
   const isBookCatalogRoute = normalizedPathname === "/books";
   const isBookRoute =
     isBookCatalogRoute || normalizedPathname.startsWith("/books/");
@@ -519,7 +520,7 @@ export function AppShell({ children }: AppShellProps) {
         </a>
         <header
           className={cn(
-            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
+            "parent-topbar relative shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:sticky sm:top-0 sm:z-30 sm:px-6 xl:static xl:bg-white xl:px-8",
             isMobileImmersive && "hidden xl:block",
           )}
         >
@@ -556,7 +557,7 @@ export function AppShell({ children }: AppShellProps) {
                                 })
                               : t("navigation.childSwitcher.openAria")
                           }
-                          className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          className="inline-flex min-h-12 min-w-0 max-w-[min(148px,40vw)] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:max-w-[200px]"
                           onClick={() =>
                             setChildSwitcherOpenForPath((current) =>
                               current === pathname ? null : pathname,
@@ -641,7 +642,7 @@ export function AppShell({ children }: AppShellProps) {
                       </>
                     ) : (
                       <Link
-                        className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        className="inline-flex min-h-12 min-w-0 max-w-[min(148px,40vw)] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:max-w-[200px]"
                         href="/dashboard?focus=child-selection"
                       >
                         <span className="truncate">
@@ -943,7 +944,13 @@ export function AppShell({ children }: AppShellProps) {
         <SiteFooter className="hidden lg:block" variant="parent" />
 
         {!isChildOnboarding && !isMobileImmersive ? (
-          <MobileBottomNav pathname={pathname} />
+          isReadingPrepRoute ? (
+            <div className="hidden sm:block">
+              <MobileBottomNav pathname={pathname} />
+            </div>
+          ) : (
+            <MobileBottomNav pathname={pathname} />
+          )
         ) : null}
       </div>
     </AiTaskCenterProvider>

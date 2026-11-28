@@ -8,6 +8,8 @@ import { Card } from "@/components/common/card";
 import { FormPage } from "@/components/common/form-page";
 import { PageHeader } from "@/components/common/page-header";
 import { StatusMessage } from "@/components/common/status-message";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
+import { MobileHelpSupport } from "@/components/support/mobile-help-support";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import {
@@ -43,6 +45,7 @@ export function HelpSupportScreen() {
   const { t, formatNumber } = useI18n();
   const authService = useAuthService();
   const supportService = useMemo(() => createSupportService(), []);
+  const isMobile = useIsMobileViewport();
   const [category, setCategory] =
     useState<SupportFeedbackCategory>("technical_issue");
   const [subject, setSubject] = useState("");
@@ -132,6 +135,33 @@ export function HelpSupportScreen() {
             ? (errorState.rawMessage ?? t("parent.support.submitError"))
             : null;
 
+  if (isMobile) {
+    return (
+      <MobileHelpSupport
+        category={category}
+        categoryValues={categoryValues}
+        contactEmail={contactEmail}
+        errorMessage={errorMessage}
+        faqStructure={faqStructure}
+        isSubmitting={isSubmitting}
+        isSuccess={isSuccess}
+        message={message}
+        onBackFromFeedback={() => setShowFeedbackEditor(false)}
+        onCategoryChange={setCategory}
+        onContactEmailChange={(value) => {
+          setHasEditedEmail(true);
+          setContactEmail(value);
+        }}
+        onMessageChange={setMessage}
+        onOpenFeedbackEditor={() => setShowFeedbackEditor(true)}
+        onSubjectChange={setSubject}
+        onSubmit={(event) => void handleSubmit(event)}
+        showFeedbackEditor={showFeedbackEditor}
+        subject={subject}
+      />
+    );
+  }
+
   if (showFeedbackEditor)
     return (
       <FormPage
@@ -161,7 +191,7 @@ export function HelpSupportScreen() {
               {t("parent.support.categoryLabel")}
             </label>
             <select
-              className="min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              className="min-h-11 w-full min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
               id="support-category"
               onChange={(event) =>
                 setCategory(event.target.value as SupportFeedbackCategory)
@@ -184,7 +214,7 @@ export function HelpSupportScreen() {
               {t("parent.support.subjectLabel")}
             </label>
             <input
-              className="min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              className="min-h-11 w-full min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
               id="support-subject"
               maxLength={120}
               onChange={(event) => setSubject(event.target.value)}
@@ -233,7 +263,7 @@ export function HelpSupportScreen() {
             </label>
             <input
               autoComplete="email"
-              className="min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              className="min-h-11 w-full min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
               id="support-contact-email"
               maxLength={254}
               onChange={(event) => {
@@ -297,7 +327,7 @@ export function HelpSupportScreen() {
             <div className="flex flex-col gap-1">
               {group.items.map((itemKey) => (
                 <details className="group py-1" key={itemKey}>
-                  <summary className="flex cursor-pointer list-none items-center gap-3 rounded-control py-2 text-start text-body text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-control py-2 text-start text-body text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
                     <span>
                       {t(`parent.support.faq.${group.key}.q${itemKey}`)}
                     </span>

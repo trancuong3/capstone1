@@ -56,7 +56,7 @@ export function KaraokeScoreCard({
   return (
     <section
       aria-label={t("karaoke.score.regionAria")}
-      className="mx-auto grid w-full max-w-lg gap-3 rounded-card bg-white p-5 text-center shadow-sm"
+      className="mx-auto grid w-full max-w-lg gap-3 rounded-card bg-white p-4 text-center shadow-sm sm:p-5"
     >
       {points !== null && (
         <div className="grid gap-1">
@@ -159,7 +159,7 @@ export function KaraokeScoreCard({
       )}
       {onPractice && score.lineScores.length > 1 && (
         <details className="text-start">
-          <summary className="cursor-pointer py-2 font-bold">
+          <summary className="flex min-h-11 cursor-pointer items-center font-bold">
             {t("karaoke.score.viewLinesSummary")}
           </summary>
           <ol className="grid max-h-72 gap-2 overflow-y-auto">

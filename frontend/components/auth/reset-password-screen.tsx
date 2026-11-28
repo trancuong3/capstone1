@@ -6,7 +6,6 @@ import { useState } from "react";
 import { AuthLoadingState, AuthShell } from "@/components/auth/auth-shell";
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 import { ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -52,12 +51,12 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
   if (isSuccessful) {
     return (
       <AuthShell>
-        <Card className="border border-border" tone="success">
+        <div className="flex w-full flex-col gap-4 rounded-card border border-border bg-success-surface p-5 sm:rounded-none sm:border-0 sm:px-8 sm:py-6">
           <div>
-            <p className="text-sm font-semibold text-success-ink">
+            <p className="inline-flex w-fit items-center rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-success-ink sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold">
               {tAuth("accountEyebrow")}
             </p>
-            <h1 className="mt-2 text-heading font-extrabold text-success-ink">
+            <h1 className="mt-2.5 text-heading font-extrabold text-success-ink sm:mt-2">
               {tAuth("resetPassword.successTitle")}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
@@ -68,7 +67,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
             {tAuth("login.submit")}
             <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
           </ButtonLink>
-        </Card>
+        </div>
       </AuthShell>
     );
   }
@@ -78,12 +77,12 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
     return (
       <AuthShell>
-        <Card className="border border-border bg-white">
+        <div className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6">
           <div>
-            <p className="text-sm font-semibold text-primary">
+            <p className="inline-flex w-fit items-center rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold sm:text-primary">
               {tAuth("securityEyebrow")}
             </p>
-            <h1 className="mt-2 text-heading font-extrabold text-ink">
+            <h1 className="mt-2.5 text-heading font-extrabold text-ink sm:mt-2">
               {isExpired
                 ? tAuth("resetPassword.expiredTitle")
                 : tAuth("resetPassword.invalidTitle")}
@@ -104,19 +103,19 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
           <ButtonLink href="/login" variant="quiet">
             {tAuth("forgotPassword.backToLogin")}
           </ButtonLink>
-        </Card>
+        </div>
       </AuthShell>
     );
   }
 
   return (
     <AuthShell>
-      <Card className="border border-border bg-white">
+      <div className="flex w-full flex-col gap-5 sm:gap-4 sm:px-8 sm:py-6">
         <div>
-          <p className="text-sm font-semibold text-primary">
+          <p className="inline-flex w-fit items-center rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm sm:font-semibold sm:text-primary">
             {tAuth("securityEyebrow")}
           </p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
+          <h1 className="mt-2.5 text-heading font-extrabold text-ink sm:mt-2">
             {tAuth("resetPassword.heading")}
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">
@@ -128,7 +127,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
           onSuccess={() => setIsSuccessful(true)}
           scenario={scenario}
         />
-      </Card>
+      </div>
     </AuthShell>
   );
 }

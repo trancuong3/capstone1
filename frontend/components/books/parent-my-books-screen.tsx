@@ -23,10 +23,12 @@ import {
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useIsMobileViewport } from "@/components/dashboard/use-is-mobile-viewport";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
@@ -97,6 +99,7 @@ function ParentMyBooksContent({
   initialPage: number;
 }) {
   const t = useTranslations("books");
+  const isMobile = useIsMobileViewport();
   const service = useParentPrivateBookService();
   const router = useRouter();
   const requestIdRef = useRef(0);
@@ -356,26 +359,265 @@ function ParentMyBooksContent({
     }
   }
 
+  const editingBook =
+    books.find((candidate) => candidate.id === editingBookId) ?? null;
+  const confirmDeleteBook =
+    books.find((candidate) => candidate.id === confirmDeleteBookId) ?? null;
+
+  const createBookForm = (
+    <form
+      aria-label={t("myBooks.createFormAria")}
+      className={
+        isMobile
+          ? "flex flex-col gap-4"
+          : "flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+      }
+      onSubmit={(event) => void handleCreateBook(event)}
+    >
+      {!isMobile ? (
+        <h2 className="text-xl font-extrabold text-ink">
+          {t("myBooks.createFormTitle")}
+        </h2>
+      ) : null}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TextField
+          label={t("myBooks.titleLabel")}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder={t("myBooks.titlePlaceholder")}
+          required
+          value={title}
+        />
+        <TextField
+          label={t("myBooks.authorLabel")}
+          onChange={(event) => setAuthor(event.target.value)}
+          placeholder={t("myBooks.authorPlaceholder")}
+          value={author}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          {t("myBooks.minGradeLabel")}
+          <select
+            aria-label={t("myBooks.minGradeLabel")}
+            className="min-h-12 rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
+            onChange={(event) => setMinGrade(Number(event.target.value))}
+            value={minGrade}
+          >
+            {CHILD_GRADES.map((grade) => (
+              <option key={grade} value={grade}>
+                {t("card.gradeSingle", { grade })}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          {t("myBooks.maxGradeLabel")}
+          <select
+            aria-label={t("myBooks.maxGradeLabel")}
+            className="min-h-12 rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-body"
+            onChange={(event) => setMaxGrade(Number(event.target.value))}
+            value={maxGrade}
+          >
+            {CHILD_GRADES.map((grade) => (
+              <option key={grade} value={grade}>
+                {t("card.gradeSingle", { grade })}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          {t("myBooks.sourceUsageLabel")}
+          <select
+            aria-label={t("myBooks.sourceUsageLabel")}
+            className="min-h-12 rounded-control border border-border bg-white px-3 text-base text-ink focus-visible:outline-3 focus-visible:outline-primary sm:text-sm"
+            onChange={(event) =>
+              setSourceType(event.target.value as SourceUsageType)
+            }
+            value={sourceType}
+          >
+            {SOURCE_USAGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {t(`sourceUsage.${opt.value}`, undefined, opt.label)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <TextField
+          label={t("myBooks.sourceNoteLabel")}
+          onChange={(event) => setSourceNote(event.target.value)}
+          placeholder={t("myBooks.sourceNotePlaceholder")}
+          value={sourceNote}
+        />
+      </div>
+
+      <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:flex-wrap sm:gap-3">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={() => setShowCreateForm(false)}
+          size={isMobile ? "touch" : "compact"}
+          type="button"
+          variant="secondary"
+        >
+          {t("reportDialog.cancel")}
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
+          isLoading={creating}
+          size={isMobile ? "touch" : "compact"}
+          type="submit"
+        >
+          {creating ? t("myBooks.creating") : t("myBooks.saveAndAddPages")}
+        </Button>
+      </div>
+    </form>
+  );
+
+  function renderEditBookForm(book: ParentPrivateBookSummaryDTO) {
+    return (
+      <form
+        aria-label={t("myBooks.editFormAria", {
+          title: book.title,
+        })}
+        className={
+          isMobile
+            ? "flex flex-col gap-3 text-xs"
+            : "flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3.5 text-xs"
+        }
+        onSubmit={(event) => void handleSaveBookEdit(event, book)}
+      >
+        <p className="rounded-control border border-amber-200 bg-amber-50 p-3 font-bold text-amber-950">
+          {t("myBooks.editRecheckNotice")}
+        </p>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.titleLabel")}
+          <input
+            aria-label={t("myBooks.editTitleAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-sm"
+            onChange={(event) => setEditTitle(event.target.value)}
+            required
+            type="text"
+            value={editTitle}
+          />
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editAuthorLabel")}
+          <input
+            aria-label={t("myBooks.editAuthorAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-sm"
+            onChange={(event) => setEditAuthor(event.target.value)}
+            type="text"
+            value={editAuthor}
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 font-semibold text-ink">
+            {t("myBooks.editMinGradeLabel")}
+            <select
+              aria-label={t("myBooks.editMinGradeAria")}
+              className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-xs"
+              onChange={(event) => setEditMinGrade(Number(event.target.value))}
+              value={editMinGrade}
+            >
+              {CHILD_GRADES.map((grade) => (
+                <option key={grade} value={grade}>
+                  {t("card.gradeSingle", { grade })}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 font-semibold text-ink">
+            {t("myBooks.editMaxGradeLabel")}
+            <select
+              aria-label={t("myBooks.editMaxGradeAria")}
+              className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-xs"
+              onChange={(event) => setEditMaxGrade(Number(event.target.value))}
+              value={editMaxGrade}
+            >
+              {CHILD_GRADES.map((grade) => (
+                <option key={grade} value={grade}>
+                  {t("card.gradeSingle", { grade })}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editSourceLabel")}
+          <select
+            aria-label={t("myBooks.editSourceAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-2.5 text-base text-ink sm:text-xs"
+            onChange={(event) =>
+              setEditSourceType(event.target.value as SourceUsageType)
+            }
+            value={editSourceType}
+          >
+            {SOURCE_USAGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {t(`sourceUsage.${opt.value}`, undefined, opt.label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 font-semibold text-ink">
+          {t("myBooks.editSourceNoteLabel")}
+          <input
+            aria-label={t("myBooks.editSourceNoteAria")}
+            className="min-h-11 rounded-control border border-border bg-white px-3 text-base text-ink sm:text-xs"
+            onChange={(event) => setEditSourceNote(event.target.value)}
+            type="text"
+            value={editSourceNote}
+          />
+        </label>
+        <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:flex-wrap">
+          <Button
+            className="w-full sm:w-auto"
+            onClick={() => setEditingBookId(null)}
+            size="touch"
+            type="button"
+            variant="secondary"
+          >
+            {t("reportDialog.cancel")}
+          </Button>
+          <Button
+            className="w-full sm:w-auto"
+            isLoading={savingBookId === book.id}
+            size="touch"
+            type="submit"
+          >
+            {t("myBooks.saveAndRecheckAll")}
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-6 sm:px-8 sm:py-8">
-      <header className="flex flex-col gap-3 border-b border-border pb-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:pb-5">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 pb-6 sm:gap-6 sm:px-8 sm:py-8">
+      <header className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:pb-5">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary sm:text-xs">
             {t("myBooks.eyebrow")}
           </p>
-          <h1 className="book-title mt-0.5 text-xl text-ink sm:mt-1 sm:text-4xl">
+          <h1 className="book-title mt-0.5 text-2xl text-ink sm:mt-1 sm:text-4xl">
             {t("myBooks.title")}
           </h1>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted sm:mt-2 sm:text-body sm:leading-6">
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted sm:mt-2 sm:text-body sm:leading-6">
             {t("myBooks.headingSubtitle")}
           </p>
         </div>
 
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
           <Button
-            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+            className={isMobile ? "min-w-0 flex-1" : undefined}
             fullWidth={false}
             onClick={() => void loadBooks()}
+            size={isMobile ? "touch" : "compact"}
             variant="secondary"
             disabled={loading || fetching}
           >
@@ -383,9 +625,10 @@ function ParentMyBooksContent({
             {t("myBooks.reload")}
           </Button>
           <Button
-            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+            className={isMobile ? "min-w-0 flex-1" : undefined}
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
+            size={isMobile ? "touch" : "compact"}
           >
             <Plus aria-hidden="true" className="size-4" />
             {showCreateForm
@@ -397,7 +640,7 @@ function ParentMyBooksContent({
 
       <div
         role="note"
-        className="flex items-start gap-2.5 rounded-card border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-950 sm:gap-3 sm:p-4 sm:text-sm"
+        className="flex items-start gap-2.5 rounded-card border border-emerald-200 bg-emerald-50/70 p-3.5 text-xs text-emerald-950 sm:gap-3 sm:p-4 sm:text-sm"
       >
         <Lock
           aria-hidden="true"
@@ -424,105 +667,69 @@ function ParentMyBooksContent({
       ) : null}
 
       {showCreateForm ? (
-        <form
-          aria-label={t("myBooks.createFormAria")}
-          className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
-          onSubmit={(event) => void handleCreateBook(event)}
+        isMobile ? (
+          <Modal
+            isOpen
+            mobilePresentation="sheet"
+            onClose={() => setShowCreateForm(false)}
+            title={t("myBooks.createFormTitle")}
+            tone="paper"
+          >
+            {createBookForm}
+          </Modal>
+        ) : (
+          createBookForm
+        )
+      ) : null}
+
+      {isMobile && editingBook ? (
+        <Modal
+          isOpen
+          mobilePresentation="sheet"
+          onClose={() => setEditingBookId(null)}
+          title={t("myBooks.editBookAria", { title: editingBook.title })}
+          tone="paper"
         >
-          <h2 className="text-xl font-extrabold text-ink">
-            {t("myBooks.createFormTitle")}
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label={t("myBooks.titleLabel")}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder={t("myBooks.titlePlaceholder")}
-              required
-              value={title}
-            />
-            <TextField
-              label={t("myBooks.authorLabel")}
-              onChange={(event) => setAuthor(event.target.value)}
-              placeholder={t("myBooks.authorPlaceholder")}
-              value={author}
-            />
-          </div>
+          {renderEditBookForm(editingBook)}
+        </Modal>
+      ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              {t("myBooks.minGradeLabel")}
-              <select
-                aria-label={t("myBooks.minGradeLabel")}
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                onChange={(event) => setMinGrade(Number(event.target.value))}
-                value={minGrade}
+      {isMobile && confirmDeleteBook ? (
+        <Modal
+          footer={
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => setConfirmDeleteBookId(null)}
+                size="touch"
+                type="button"
+                variant="secondary"
               >
-                {CHILD_GRADES.map((grade) => (
-                  <option key={grade} value={grade}>
-                    {t("card.gradeSingle", { grade })}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              {t("myBooks.maxGradeLabel")}
-              <select
-                aria-label={t("myBooks.maxGradeLabel")}
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                onChange={(event) => setMaxGrade(Number(event.target.value))}
-                value={maxGrade}
+                {t("reportDialog.cancel")}
+              </Button>
+              <Button
+                className="w-full sm:w-auto"
+                isLoading={deletingBookId === confirmDeleteBook.id}
+                onClick={() => void handleDeleteBook(confirmDeleteBook)}
+                size="touch"
+                type="button"
+                variant="destructive"
               >
-                {CHILD_GRADES.map((grade) => (
-                  <option key={grade} value={grade}>
-                    {t("card.gradeSingle", { grade })}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              {t("myBooks.sourceUsageLabel")}
-              <select
-                aria-label={t("myBooks.sourceUsageLabel")}
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                onChange={(event) =>
-                  setSourceType(event.target.value as SourceUsageType)
-                }
-                value={sourceType}
-              >
-                {SOURCE_USAGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {t(`sourceUsage.${opt.value}`, undefined, opt.label)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <TextField
-              label={t("myBooks.sourceNoteLabel")}
-              onChange={(event) => setSourceNote(event.target.value)}
-              placeholder={t("myBooks.sourceNotePlaceholder")}
-              value={sourceNote}
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-3 pt-2">
-            <Button className="sm:w-auto" isLoading={creating} type="submit">
-              {creating ? t("myBooks.creating") : t("myBooks.saveAndAddPages")}
-            </Button>
-            <Button
-              className="sm:w-auto"
-              onClick={() => setShowCreateForm(false)}
-              type="button"
-              variant="secondary"
-            >
-              {t("reportDialog.cancel")}
-            </Button>
-          </div>
-        </form>
+                {t("myBooks.confirmDelete")}
+              </Button>
+            </div>
+          }
+          isOpen
+          mobilePresentation="sheet"
+          onClose={() => setConfirmDeleteBookId(null)}
+          role="alertdialog"
+          title={t("myBooks.deleteDialogTitle", {
+            title: confirmDeleteBook.title,
+          })}
+          tone="paper"
+        >
+          <p className="text-sm text-ink">{t("myBooks.deleteDialogBody")}</p>
+        </Modal>
       ) : null}
 
       {loading ? (
@@ -541,8 +748,9 @@ function ParentMyBooksContent({
             {loadError}
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start"
+            className="w-full sm:w-auto sm:self-start"
             onClick={() => void loadBooks()}
+            size={isMobile ? "touch" : "compact"}
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-4" />
@@ -669,7 +877,7 @@ function ParentMyBooksContent({
                     </p>
                   ) : null}
 
-                  <dl className="grid grid-cols-4 gap-1.5 rounded-control bg-canvas p-2 text-center text-[11px] sm:grid-cols-2 sm:gap-2 sm:p-3 sm:text-start sm:text-xs">
+                  <dl className="grid grid-cols-2 gap-2.5 rounded-control bg-canvas p-3 text-start text-xs sm:gap-2">
                     <div className="min-w-0">
                       <dt className="truncate text-muted">
                         {t("myBooks.statCommitted")}
@@ -706,10 +914,10 @@ function ParentMyBooksContent({
                     </div>
                   </dl>
 
-                  <div className="mt-auto flex flex-col gap-1.5 pt-1 sm:gap-2 sm:pt-2">
+                  <div className="mt-auto flex flex-col gap-2 pt-1 sm:pt-2">
                     <ButtonLink
                       href={detailHref}
-                      className="min-h-10 text-sm sm:min-h-11"
+                      size={isMobile ? "touch" : "compact"}
                     >
                       {t("myBooks.manageAndAddPages")}
                     </ButtonLink>
@@ -717,7 +925,7 @@ function ParentMyBooksContent({
                     {book.readable_for_children && !isSuspended ? (
                       <Link
                         href={`/books/${encodeURIComponent(book.id)}`}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-primary bg-sky px-3 text-sm font-bold text-primary-hover hover:bg-primary/10"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-primary bg-sky px-3 text-sm font-bold text-primary-hover hover:bg-primary/10"
                       >
                         <BookOpen aria-hidden="true" className="size-4" />
                         {t("myBooks.openReadWithChild")}
@@ -725,7 +933,7 @@ function ParentMyBooksContent({
                     ) : (
                       <span
                         aria-disabled="true"
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-canvas px-3 text-xs font-semibold text-muted"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border bg-canvas px-3 text-xs font-semibold text-muted"
                       >
                         {t("myBooks.notOpenReadYet")}
                       </span>
@@ -736,7 +944,7 @@ function ParentMyBooksContent({
                         aria-label={t("myBooks.editBookAria", {
                           title: book.title,
                         })}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           isSuspended ||
                           savingBookId === book.id ||
@@ -756,7 +964,7 @@ function ParentMyBooksContent({
                         aria-label={t("myBooks.deleteBookAria", {
                           title: book.title,
                         })}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           savingBookId === book.id || deletingBookId === book.id
                         }
@@ -774,134 +982,11 @@ function ParentMyBooksContent({
                     </div>
                   </div>
 
-                  {editingBookId === book.id ? (
-                    <form
-                      aria-label={t("myBooks.editFormAria", {
-                        title: book.title,
-                      })}
-                      className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3.5 text-xs"
-                      onSubmit={(event) => void handleSaveBookEdit(event, book)}
-                    >
-                      <p className="font-bold text-amber-950">
-                        {t("myBooks.editRecheckNotice")}
-                      </p>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        {t("myBooks.titleLabel")}
-                        <input
-                          aria-label={t("myBooks.editTitleAria")}
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
-                          onChange={(event) => setEditTitle(event.target.value)}
-                          required
-                          type="text"
-                          value={editTitle}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        {t("myBooks.editAuthorLabel")}
-                        <input
-                          aria-label={t("myBooks.editAuthorAria")}
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
-                          onChange={(event) =>
-                            setEditAuthor(event.target.value)
-                          }
-                          type="text"
-                          value={editAuthor}
-                        />
-                      </label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
-                          {t("myBooks.editMinGradeLabel")}
-                          <select
-                            aria-label={t("myBooks.editMinGradeAria")}
-                            className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
-                            onChange={(event) =>
-                              setEditMinGrade(Number(event.target.value))
-                            }
-                            value={editMinGrade}
-                          >
-                            {CHILD_GRADES.map((grade) => (
-                              <option key={grade} value={grade}>
-                                {t("card.gradeSingle", { grade })}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
-                          {t("myBooks.editMaxGradeLabel")}
-                          <select
-                            aria-label={t("myBooks.editMaxGradeAria")}
-                            className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
-                            onChange={(event) =>
-                              setEditMaxGrade(Number(event.target.value))
-                            }
-                            value={editMaxGrade}
-                          >
-                            {CHILD_GRADES.map((grade) => (
-                              <option key={grade} value={grade}>
-                                {t("card.gradeSingle", { grade })}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        {t("myBooks.editSourceLabel")}
-                        <select
-                          aria-label={t("myBooks.editSourceAria")}
-                          className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
-                          onChange={(event) =>
-                            setEditSourceType(
-                              event.target.value as SourceUsageType,
-                            )
-                          }
-                          value={editSourceType}
-                        >
-                          {SOURCE_USAGE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {t(
-                                `sourceUsage.${opt.value}`,
-                                undefined,
-                                opt.label,
-                              )}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        {t("myBooks.editSourceNoteLabel")}
-                        <input
-                          aria-label={t("myBooks.editSourceNoteAria")}
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                          onChange={(event) =>
-                            setEditSourceNote(event.target.value)
-                          }
-                          type="text"
-                          value={editSourceNote}
-                        />
-                      </label>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <Button
-                          className="min-h-10 w-auto px-3 text-xs"
-                          fullWidth={false}
-                          isLoading={savingBookId === book.id}
-                          type="submit"
-                        >
-                          {t("myBooks.saveAndRecheckAll")}
-                        </Button>
-                        <Button
-                          className="min-h-10 w-auto px-3 text-xs"
-                          fullWidth={false}
-                          onClick={() => setEditingBookId(null)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          {t("reportDialog.cancel")}
-                        </Button>
-                      </div>
-                    </form>
-                  ) : null}
+                  {!isMobile && editingBookId === book.id
+                    ? renderEditBookForm(book)
+                    : null}
 
-                  {confirmDeleteBookId === book.id ? (
+                  {!isMobile && confirmDeleteBookId === book.id ? (
                     <div
                       role="alertdialog"
                       aria-label={t("myBooks.deleteDialogAria", {
@@ -915,18 +1000,19 @@ function ParentMyBooksContent({
                       <p>{t("myBooks.deleteDialogBody")}</p>
                       <div className="flex flex-wrap gap-2">
                         <Button
-                          className="min-h-10 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                          className="bg-rose-700 text-white hover:bg-rose-800"
                           fullWidth={false}
                           isLoading={deletingBookId === book.id}
                           onClick={() => void handleDeleteBook(book)}
+                          size="touch"
                           type="button"
                         >
                           {t("myBooks.confirmDelete")}
                         </Button>
                         <Button
-                          className="min-h-10 w-auto px-3 text-xs"
                           fullWidth={false}
                           onClick={() => setConfirmDeleteBookId(null)}
+                          size="touch"
                           type="button"
                           variant="secondary"
                         >

@@ -100,12 +100,12 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "relative me-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-1 py-0.5 motion-reduce:transition-none sm:me-1.5 sm:px-2",
+          "relative me-1 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-1.5 py-0.5 motion-reduce:transition-none sm:me-1.5 sm:px-2",
           isCurrent || presentationState === "current"
             ? "transition-none"
             : "transition-[background-color,color,border-color,box-shadow] duration-75 ease-out",
           !readOnly &&
-            "min-h-9 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-11",
+            "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
           isCurrent &&
@@ -322,12 +322,12 @@ export function BookPageContent(props: BookPageContentProps) {
         <p className="text-body text-muted">{t("pageContent.loadingText")}</p>
       )}
       {!isManagedByParent && isDetached && activeWordId ? (
-        <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end overflow-visible">
+        <div className="mt-2 flex shrink-0 justify-end">
           <button
             type="button"
             data-testid="resume-auto-follow-btn"
             onClick={resumeAutoFollow}
-            className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
             {t("pageContent.scrollToCurrentWord")}
