@@ -675,9 +675,6 @@ function shouldSkipBackendTtsForVoice(
   const health =
     getVoiceEngineHealthForRouting() ?? getCachedVoiceEngineHealth();
   if (!health && !permanentlyUnconfigured) return false;
-  const requestedGender = resolveVoiceGender(
-    voice.requestedVoiceId ?? voice.cacheVoiceId,
-  );
   if (isElevenLabsLiveTtsUsable(health, voice)) {
     return false;
   }
@@ -692,6 +689,9 @@ function shouldSkipBackendTtsForVoice(
     // Once on-device WASM TTS is already warm for the exact locked gender and no
     // live server engine exists, skip Render HTTP completely (including COACHING/
     // CATALOG/wordSample/precomputed targets) so TTS starts in <250ms with one voice.
+    const requestedGender = resolveVoiceGender(
+      voice.requestedVoiceId ?? voice.cacheVoiceId,
+    );
     return (
       !isAndroidNativeSpeechAvailable() &&
       hasWasmVietnameseTts() &&
@@ -4748,6 +4748,13 @@ export class TtsPlayback {
                   }
                 } else {
                   if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    const servedCachedWords =
+                      !isHostedNoLiveServerTts(error) &&
+                      !isLocalOutageNoCloud &&
+                      (await tryPlayPhonicsViaCachedWordSynthesize());
+                    if (servedCachedWords) {
+                      return;
+                    }
                     this.pinSessionToDeviceTts(operation);
                     await playPhonicsViaBrowser();
                     return;

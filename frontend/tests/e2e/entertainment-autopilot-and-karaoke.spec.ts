@@ -136,8 +136,14 @@ test.describe("Entertainment Autopilot, 3-2-1 Auto-Mic & Karaoke Reference Pitch
     page,
   }) => {
     const pageErrors: string[] = [];
+    const schemaErrors: string[] = [];
     page.on("pageerror", (error) => {
       pageErrors.push(error.message);
+    });
+    page.on("console", (msg) => {
+      if (msg.text().includes("[API schema validation failed]")) {
+        schemaErrors.push(msg.text());
+      }
     });
     const context = page.context();
     await seedParentContext(context);
@@ -228,6 +234,21 @@ test.describe("Entertainment Autopilot, 3-2-1 Auto-Mic & Karaoke Reference Pitch
                 priority: 1,
               },
             ],
+          });
+        }
+        if (path === `/vocabulary/children/${CHILD_ID}/notebook`) {
+          return json({
+            child_id: CHILD_ID,
+            total: 0,
+            items: [],
+            storytelling_words: [],
+          });
+        }
+        if (path === `/dialect/children/${CHILD_ID}/profile`) {
+          return json({
+            child_id: CHILD_ID,
+            phonetic_profile: "STRICT_SGK",
+            visibility: "PARENT_PRIVATE",
           });
         }
         if (path === "/games/picture-description/catalog") {
@@ -513,5 +534,6 @@ test.describe("Entertainment Autopilot, 3-2-1 Auto-Mic & Karaoke Reference Pitch
     );
     expect(karaokeOverflow).toBe(false);
     expect(pageErrors).toEqual([]);
+    expect(schemaErrors).toEqual([]);
   });
 });

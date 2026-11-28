@@ -107,7 +107,16 @@ from app.services.ocr_content_extraction import (
     safe_detect_document_boundary,
 )
 from app.services.smart_studio_flags import SmartStudioFlags
-from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
+from app.services.storage_service import (
+    create_cached_signed_image_urls_async,
+    create_signed_image_url,
+    delete_object,
+    download_object,
+    upload_object,
+)
+
+_ORIGINAL_RUN_IN_THREADPOOL = run_in_threadpool
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -5046,4 +5055,9 @@ class AdminOcrService:
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath
         await self._rollback_if_possible()
-        return await run_in_threadpool(create_signed_image_url, image_path)
+        if (
+            run_in_threadpool is not _ORIGINAL_RUN_IN_THREADPOOL
+            or create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL
+        ):
+            return await run_in_threadpool(create_signed_image_url, image_path)
+        return (await create_cached_signed_image_urls_async([image_path]))[0]

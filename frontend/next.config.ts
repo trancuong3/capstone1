@@ -125,6 +125,9 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  images: {
+    formats: ["image/avif", "image/webp"],
+  },
   experimental: {
     optimizePackageImports: ["lucide-react"],
     ...(isPlaywrightDev

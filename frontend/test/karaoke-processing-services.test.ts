@@ -105,9 +105,37 @@ describe("karaoke processing HTTP contract", () => {
     await service.startProcessing(songId, start, controller.signal);
     expect(fetchMock.mock.calls[1][1]).toMatchObject({
       method: "POST",
-      signal: controller.signal,
+      signal: expect.any(AbortSignal),
       body: JSON.stringify(start),
     });
+
+    const abortController = new AbortController();
+    let capturedStartSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          capturedStartSignal = init?.signal ?? undefined;
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(
+                init.signal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              );
+            },
+            { once: true },
+          );
+        }),
+    );
+    const pendingStart = service.startProcessing(
+      songId,
+      start,
+      abortController.signal,
+    );
+    await vi.waitFor(() => expect(capturedStartSignal).toBeDefined());
+    abortController.abort();
+    await expect(pendingStart).rejects.toMatchObject({ name: "AbortError" });
+    expect(capturedStartSignal?.aborted).toBe(true);
   });
   it("rejects client provider/path injection before HTTP", () => {
     expect(() =>

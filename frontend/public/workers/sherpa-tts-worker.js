@@ -124,10 +124,6 @@ const loadPromisesByGender = { female: null, male: null };
 let espeakAssetsPromise = null;
 let wasmCreateChain = Promise.resolve();
 let callbackSupported = true;
-
-function getReadyGenders() {
-  return ["female", "male"].filter((g) => Boolean(ttsInstancesByGender[g]));
-}
 let loadEpoch = 0;
 const activeFetchControllers = new Set();
 const cancelledIds = new Set();
@@ -501,11 +497,14 @@ async function ensureSharedEspeakAssets(epoch, genderForProgress) {
 async function ensureTtsReadyForGender(rawGender) {
   const gender = normalizeGender(rawGender);
   if (ttsInstancesByGender[gender] && piperModule) {
+    const readyGenders = ["female", "male"].filter((g) =>
+      Boolean(ttsInstancesByGender[g]),
+    );
     return {
       piper: piperModule,
       tts: ttsInstancesByGender[gender],
       gender,
-      readyGenders: getReadyGenders(),
+      readyGenders,
     };
   }
   if (loadPromisesByGender[gender]) {
@@ -602,11 +601,14 @@ async function ensureTtsReadyForGender(rawGender) {
         throw new Error("WASM TTS init disposed");
       }
       if (ttsInstancesByGender[gender]) {
+        const readyGenders = ["female", "male"].filter((g) =>
+          Boolean(ttsInstancesByGender[g]),
+        );
         return {
           piper,
           tts: ttsInstancesByGender[gender],
           gender,
-          readyGenders: getReadyGenders(),
+          readyGenders,
         };
       }
       const FS = M.__exposeFS || M.FS;
@@ -720,12 +722,10 @@ async function ensureTtsReadyForGender(rawGender) {
       }
 
       ttsInstancesByGender[gender] = instance;
-      return {
-        piper,
-        tts: instance,
-        gender,
-        readyGenders: getReadyGenders(),
-      };
+      const readyGenders = ["female", "male"].filter((g) =>
+        Boolean(ttsInstancesByGender[g]),
+      );
+      return { piper, tts: instance, gender, readyGenders };
     } finally {
       if (releaseLock) releaseLock();
     }

@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiQuery, requestApi } from "@/lib/api/api-client";
+import {
+  apiQuery,
+  fetchAuthenticatedBlobUrl,
+  requestApi,
+  revokePrivateBlobUrl,
+} from "@/lib/api/api-client";
+import {
+  resetAllApiCachesForTests,
+  setApiReadCacheEnabled,
+} from "@/lib/api/read-cache";
 import { ServiceError } from "@/lib/api/service-error";
 
 const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
@@ -390,6 +399,113 @@ describe("real API client", () => {
         status: 0,
         retryable: true,
       });
+      const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(firstInit.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530])(
+    "retries idempotent GET once on Cloudflare/Render status %i and recovers",
+    async (status) => {
+      vi.useFakeTimers();
+      try {
+        fetchMock
+          .mockResolvedValueOnce(
+            new Response(`<html>Edge error ${status}</html>`, {
+              status,
+              headers: { "content-type": "text/html" },
+            }),
+          )
+          .mockResolvedValueOnce(
+            Response.json({ title: `Recovered ${status}` }),
+          );
+
+        const promise = requestApi("/books/", schema, undefined, {
+          bypassCache: true,
+        });
+        await vi.advanceTimersByTimeAsync(600);
+        await expect(promise).resolves.toEqual({
+          title: `Recovered ${status}`,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([401, 403, 404, 422, 429, 503])(
+    "does not retry idempotent GET on HTTP %i",
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(
+        Response.json({ detail: `status ${status}` }, { status }),
+      );
+      await expect(
+        requestApi("/books/", schema, undefined, { bypassCache: true }),
+      ).rejects.toMatchObject({ status });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("caps total elapsed time across cold-start retries within timeoutMs", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            setTimeout(() => {
+              resolve(new Response("Bad Gateway", { status: 502 }));
+            }, 500);
+          }),
+      );
+
+      const pending = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+        timeoutMs: 800,
+      }).catch((err: unknown) => err);
+
+      await vi.advanceTimersByTimeAsync(500);
+      const caught = await pending;
+      // Remaining budget (300ms) <= 600ms backoff, so no second attempt is made.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(caught).toMatchObject({ status: 502, retryable: true });
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              setTimeout(() => {
+                resolve(new Response("Gateway Timeout", { status: 524 }));
+              }, 300);
+            }),
+        )
+        .mockImplementationOnce(
+          (_input, init) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                reject(new DOMException("Aborted", "AbortError"));
+              });
+            }),
+        );
+
+      const secondPending = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+        timeoutMs: 1_200,
+      }).catch((err: unknown) => err);
+
+      await vi.advanceTimersByTimeAsync(1_200);
+      const secondCaught = await secondPending;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(secondCaught).toMatchObject({
+        code: "NETWORK_ERROR",
+        status: 0,
+        retryable: true,
+      });
+      const secondInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+      expect(secondInit.signal?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -518,6 +634,328 @@ describe("real API client", () => {
       }
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("fetchAuthenticatedBlobUrl", () => {
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => "blob:http://localhost/private-1");
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.useRealTimers();
+  });
+
+  it("attaches Bearer token, no-store/omit/error flags, and resolves private API media URLs", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(new Blob(["img-bytes"], { type: "image/png" }), {
+        status: 200,
+      }),
+    );
+
+    const blobUrl = await fetchAuthenticatedBlobUrl("/books/my-books/b1/cover");
+    expect(blobUrl).toBe("blob:http://localhost/private-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/books/my-books/b1/cover",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        headers: expect.objectContaining({
+          Authorization: "Bearer isolated-test-token",
+        }),
+      }),
+    );
+    revokePrivateBlobUrl(blobUrl);
+  });
+
+  it.each([502, 504, 520, 524, 530])(
+    "retries GET once on status %i and recovers blob URL",
+    async (status) => {
+      vi.useFakeTimers();
+      fetchMock
+        .mockResolvedValueOnce(new Response("Edge error", { status }))
+        .mockResolvedValueOnce(
+          new Response(new Blob(["ok"], { type: "image/png" }), {
+            status: 200,
+          }),
+        );
+
+      const pending = fetchAuthenticatedBlobUrl("/books/my-books/b1/page-1");
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(pending).resolves.toBe("blob:http://localhost/private-1");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("retries once on transient network error and recovers", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response(new Blob(["ok"], { type: "image/png" }), { status: 200 }),
+      );
+
+    const pending = fetchAuthenticatedBlobUrl("/books/my-books/b1/page-1");
+    await vi.advanceTimersByTimeAsync(600);
+    await expect(pending).resolves.toBe("blob:http://localhost/private-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([401, 403, 404, 422, 503])(
+    "does not retry on HTTP %i and surfaces safe Vietnamese ServiceError",
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(
+        Response.json(
+          { detail: "SELECT * FROM private_assets WHERE secret=1" },
+          { status, headers: { "x-request-id": "req-blob-err" } },
+        ),
+      );
+
+      await expect(
+        fetchAuthenticatedBlobUrl("/books/my-books/b1/page-1"),
+      ).rejects.toMatchObject({
+        status,
+        request_id: "req-blob-err",
+        retryable: status >= 500,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("invalidates cached reactive auth session on 401", async () => {
+    const reactiveGetSession = vi.fn().mockResolvedValue({
+      data: {
+        session: {
+          access_token: "reactive-token-1",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          user: { id: "parent-1" },
+        },
+      },
+      error: null,
+    });
+    const reactiveAuth = {
+      initialize: vi.fn().mockResolvedValue({ error: null }),
+      getSession: reactiveGetSession,
+      onAuthStateChange: vi.fn(),
+    };
+    const supabaseClientModule = await import("@/lib/supabase/client");
+    vi.spyOn(
+      supabaseClientModule,
+      "createBrowserSupabaseClient",
+    ).mockReturnValue({ auth: reactiveAuth } as unknown as ReturnType<
+      typeof supabaseClientModule.createBrowserSupabaseClient
+    >);
+
+    fetchMock
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(new Blob(["ok"], { type: "image/png" }), { status: 200 }),
+      );
+
+    await expect(
+      fetchAuthenticatedBlobUrl("/books/my-books/b1/page-1"),
+    ).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      status: 401,
+      retryable: false,
+    });
+    expect(reactiveGetSession).toHaveBeenCalledTimes(1);
+
+    // Next call must re-fetch session rather than reusing the invalidated token
+    await fetchAuthenticatedBlobUrl("/books/my-books/b1/page-1");
+    expect(reactiveGetSession).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
+
+  it("enforces bounded timeout and honors AbortSignal during response.blob() without creating an object URL", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+
+    const timedPending = fetchAuthenticatedBlobUrl(
+      "/books/my-books/b1/page-1",
+      undefined,
+      200,
+    ).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(timedPending).resolves.toMatchObject({
+      code: "NETWORK_ERROR",
+      status: 0,
+      retryable: true,
+    });
+
+    vi.useRealTimers();
+    const controller = new AbortController();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      blob: () =>
+        new Promise<Blob>(() => {
+          // Hang until caller aborts
+        }),
+    } as unknown as Response);
+
+    const abortPending = fetchAuthenticatedBlobUrl(
+      "/books/my-books/b1/page-1",
+      controller.signal,
+    ).catch((err: unknown) => err);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    controller.abort();
+    const abortErr = await abortPending;
+    expect((abortErr as Error).name).toBe("AbortError");
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it.each([524, 500])(
+    "bounds stalled .clone().json() on HTTP %i within timeoutMs and throws retryable NETWORK_ERROR",
+    async (status) => {
+      vi.useFakeTimers();
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status,
+        headers: new Headers(),
+        body: { cancel: () => Promise.resolve() },
+        clone: () => ({
+          json: () =>
+            new Promise(() => {
+              // Stalled response stream decoupled from fetch signal
+            }),
+        }),
+      } as unknown as Response);
+
+      const pending = requestApi("/books/", schema, undefined, {
+        timeoutMs: 300,
+      }).catch((err: unknown) => err);
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(pending).resolves.toMatchObject({
+        code: "NETWORK_ERROR",
+        status: 0,
+        retryable: true,
+      });
+      vi.useRealTimers();
+    },
+  );
+
+  it("rejects pre-aborted GET and POST calls immediately without auth, fetch, or cache invalidation", async () => {
+    setApiReadCacheEnabled(true);
+    try {
+      fetchMock.mockResolvedValueOnce(
+        Response.json({ title: "Cached Book Title" }),
+      );
+      await expect(requestApi("/books/cached", schema)).resolves.toEqual({
+        title: "Cached Book Title",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      initialize.mockClear();
+      getSession.mockClear();
+      fetchMock.mockClear();
+
+      const abortedController = new AbortController();
+      abortedController.abort();
+
+      await expect(
+        requestApi("/books/other", schema, abortedController.signal),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      await expect(
+        requestApi("/books/cached", schema, abortedController.signal, {
+          method: "POST",
+          body: { title: "Should not run" },
+        }),
+      ).rejects.toMatchObject({ name: "AbortError" });
+
+      expect(initialize).not.toHaveBeenCalled();
+      expect(getSession).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // Cached GET entry remains intact because pre-aborted POST did not invalidate cache
+      await expect(requestApi("/books/cached", schema)).resolves.toEqual({
+        title: "Cached Book Title",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      resetAllApiCachesForTests();
+    }
+  });
+
+  it("does not retry GET on structured 504 LOCAL_OCR_TIMEOUT domain error", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: { code: "LOCAL_OCR_TIMEOUT" } }, { status: 504 }),
+    );
+
+    await expect(
+      requestApi("/books/catalog", schema, undefined, { bypassCache: true }),
+    ).rejects.toMatchObject({
+      status: 504,
+      message: expect.stringContaining("Nhận diện trang sách"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("avoids unhandledRejection when signal aborts across getBrowserAccessToken microtask or in raceWithSignal", async () => {
+    const { raceWithSignal } = await import("@/lib/api/cold-start-retry");
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      // 1. Direct raceWithSignal with an already-aborted signal and rejecting promise
+      const preAborted = new AbortController();
+      preAborted.abort();
+      const rejectingInner = Promise.reject(
+        new DOMException("Aborted", "AbortError"),
+      );
+      await expect(
+        raceWithSignal(rejectingInner, preAborted.signal),
+      ).rejects.toMatchObject({ name: "AbortError" });
+
+      // 2. fetchAuthenticatedBlobUrl aborted synchronously while getBrowserAccessToken awaits microtask
+      fetchMock.mockImplementation(() =>
+        Promise.reject(new DOMException("Aborted", "AbortError")),
+      );
+      const blobController = new AbortController();
+      const blobPromise = fetchAuthenticatedBlobUrl(
+        "/books/my-books/b1/pages/p1/image",
+        blobController.signal,
+      );
+      blobController.abort();
+      await expect(blobPromise).rejects.toMatchObject({ name: "AbortError" });
+
+      // 3. requestApi aborted synchronously while getBrowserAccessToken awaits microtask
+      const reqController = new AbortController();
+      const reqPromise = requestApi(
+        "/books/abort-microtask",
+        schema,
+        reqController.signal,
+        { bypassCache: true },
+      );
+      reqController.abort();
+      await expect(reqPromise).rejects.toMatchObject({ name: "AbortError" });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
     }
   });
 });

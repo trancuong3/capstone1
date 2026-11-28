@@ -13,6 +13,7 @@ import {
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
 import {
   Component,
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -37,7 +38,6 @@ import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay
 import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
-import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -169,7 +169,6 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { StatusBanner } from "@/components/reading/status-banner";
-import { TutorMessage } from "@/components/reading/tutor-message";
 import { OfflineOutboxStatusPill } from "@/components/offline/offline-pack-controls";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
@@ -187,6 +186,67 @@ import {
   installOfflineOutboxReconnectAutoDrain,
 } from "@/lib/offline/offline-session-outbox";
 import { saveOfflineSessionDescriptor } from "@/lib/offline/reading-pack-store";
+import { useReadingServices } from "@/hooks/use-reading-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useRecordingPlayback } from "@/hooks/use-recording-playback";
+import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
+import {
+  RealtimeAlignmentEngine,
+  timingsForTranscript,
+  tokenizeRealtimeText,
+  type RealtimeAlignmentSnapshot,
+  type RealtimeWordMismatch,
+} from "@/lib/reading/realtime-alignment";
+import {
+  isImplausibleSpeechSpeed,
+  sameCaptureScope,
+  type CaptureScope,
+} from "@/lib/reading/reading-evidence-pipeline";
+import {
+  sortRetryWordRecords,
+  type RetryWordRecord,
+} from "@/lib/reading/retry-recognition";
+import { isServiceError } from "@/lib/api/service-error";
+import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
+import { createSpeechService } from "@/lib/api/speech-service";
+import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
+import { useReadingPresence } from "@/hooks/use-reading-presence";
+import type {
+  SpeechPlayOptions,
+  WordTimedPlayOptions,
+} from "@/hooks/use-speech-player";
+import { EchoGuard } from "@/lib/reading/echo-guard";
+import {
+  InteractivePromptSelector,
+  mistakeCategoryToPromptCategory,
+} from "@/lib/reading/interactive-prompts";
+import {
+  isVoiceExitSentenceReinforcement,
+  SentenceReinforcementTracker,
+  shouldEscapeToUpcomingWords,
+  type ActiveSentenceReinforcement,
+} from "@/lib/reading/sentence-reinforcement";
+import { parseVoiceIntent } from "@/lib/reading/voice-intent";
+import type { SessionPhase } from "@/lib/reading/presence-monitor";
+import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
+import type { ChildProfileDTO } from "@/types/child";
+import type {
+  ReadingCompletionSummaryUI,
+  ReadingConnectionState,
+  ReadingPageDTO,
+  ReadingPageWordDTO,
+  ReadingReconnectDemoMode,
+  ReadingSessionState,
+  ReadingSessionPageProgressDTO,
+  ReadingUiState,
+  TutorAction,
+} from "@/types/reading";
+import {
+  compareTranscript,
+  type ComparisonResult,
+} from "@/lib/api/comparison-service";
 
 type ReadingDynamicPanelKey = "question" | "complete" | "phonics" | "picker";
 
@@ -472,67 +532,217 @@ const ReadingPagePickerModal = dynamic(
     loading: (loadingProps) => <ReadingPagePickerFallback {...loadingProps} />,
   },
 );
-import { useReadingServices } from "@/hooks/use-reading-services";
-import { useSpeechPlayer } from "@/hooks/use-speech-player";
-import { useRecordingPlayback } from "@/hooks/use-recording-playback";
-import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
-import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
-import {
-  RealtimeAlignmentEngine,
-  timingsForTranscript,
-  tokenizeRealtimeText,
-  type RealtimeAlignmentSnapshot,
-  type RealtimeWordMismatch,
-} from "@/lib/reading/realtime-alignment";
-import {
-  isImplausibleSpeechSpeed,
-  sameCaptureScope,
-  type CaptureScope,
-} from "@/lib/reading/reading-evidence-pipeline";
-import {
-  sortRetryWordRecords,
-  type RetryWordRecord,
-} from "@/lib/reading/retry-recognition";
-import { isServiceError } from "@/lib/api/service-error";
-import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
-import { createSpeechService } from "@/lib/api/speech-service";
-import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
-import { useReadingPresence } from "@/hooks/use-reading-presence";
-import type {
-  SpeechPlayOptions,
-  WordTimedPlayOptions,
-} from "@/hooks/use-speech-player";
-import { EchoGuard } from "@/lib/reading/echo-guard";
-import {
-  InteractivePromptSelector,
-  mistakeCategoryToPromptCategory,
-} from "@/lib/reading/interactive-prompts";
-import {
-  isVoiceExitSentenceReinforcement,
-  SentenceReinforcementTracker,
-  shouldEscapeToUpcomingWords,
-  type ActiveSentenceReinforcement,
-} from "@/lib/reading/sentence-reinforcement";
-import { parseVoiceIntent } from "@/lib/reading/voice-intent";
-import type { SessionPhase } from "@/lib/reading/presence-monitor";
-import type { BookDetailDTO } from "@/types/book";
-import type { ReadingDisplayMode } from "@/types/book-assets";
-import type { ChildProfileDTO } from "@/types/child";
-import type {
-  ReadingCompletionSummaryUI,
-  ReadingConnectionState,
-  ReadingPageDTO,
-  ReadingPageWordDTO,
-  ReadingReconnectDemoMode,
-  ReadingSessionState,
-  ReadingSessionPageProgressDTO,
-  ReadingUiState,
-  TutorAction,
-} from "@/types/reading";
-import {
-  compareTranscript,
-  type ComparisonResult,
-} from "@/lib/api/comparison-service";
+
+const ReadingVoiceSettings = dynamic(
+  () =>
+    import("@/components/reading/reading-voice-settings").then(
+      (mod) => mod.ReadingVoiceSettings,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <span
+        aria-hidden="true"
+        className="min-h-11 rounded-control bg-cream/80 lg:min-h-14"
+      />
+    ),
+  },
+);
+
+const TutorMessage = dynamic(
+  () =>
+    import("@/components/reading/tutor-message").then(
+      (mod) => mod.TutorMessage,
+    ),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
+interface DynamicPanelErrorBoundaryProps {
+  backHref?: string;
+  backLabel?: string;
+  children: ReactNode;
+  closeLabel: string;
+  description: string;
+  onClose?: () => void;
+  resetKey?: string | number | boolean | null;
+  retryLabel: string;
+  title: string;
+  variant: "compact" | "inline" | "floating" | "fullscreen";
+}
+
+interface DynamicPanelErrorBoundaryState {
+  hasError: boolean;
+  retryKey: number;
+}
+
+class DynamicPanelErrorBoundary extends Component<
+  DynamicPanelErrorBoundaryProps,
+  DynamicPanelErrorBoundaryState
+> {
+  state: DynamicPanelErrorBoundaryState = {
+    hasError: false,
+    retryKey: 0,
+  };
+
+  static getDerivedStateFromError(): Partial<DynamicPanelErrorBoundaryState> {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: DynamicPanelErrorBoundaryProps): void {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  private handleRetry = (): void => {
+    this.setState((prev) => ({
+      hasError: false,
+      retryKey: prev.retryKey + 1,
+    }));
+  };
+
+  render(): ReactNode {
+    if (!this.state.hasError) {
+      return (
+        <Fragment key={this.state.retryKey}>{this.props.children}</Fragment>
+      );
+    }
+
+    const {
+      backHref,
+      backLabel,
+      closeLabel,
+      description,
+      onClose,
+      retryLabel,
+      title,
+      variant,
+    } = this.props;
+
+    if (variant === "compact") {
+      return (
+        <div
+          className="inline-flex min-h-11 items-center gap-2 rounded-control border border-amber-300 bg-amber-50/90 px-3 py-1.5 text-xs font-semibold text-amber-950 lg:min-h-14"
+          data-testid="dynamic-panel-fallback-compact"
+          role="status"
+        >
+          <span className="truncate">{title}</span>
+          <button
+            className="inline-flex min-h-9 shrink-0 items-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-bold text-amber-950 hover:bg-amber-100"
+            onClick={this.handleRetry}
+            type="button"
+          >
+            {retryLabel}
+          </button>
+        </div>
+      );
+    }
+
+    if (variant === "floating") {
+      return (
+        <div
+          aria-live="polite"
+          className="pointer-events-none fixed inset-x-3 bottom-32 z-40 flex justify-center sm:inset-x-auto sm:right-6 sm:bottom-28 sm:max-w-md"
+          data-testid="dynamic-panel-fallback-floating"
+          role="status"
+        >
+          <div className="pointer-events-auto w-full rounded-card border border-amber-300 bg-paper/98 p-4 shadow-lg backdrop-blur-xs">
+            <StatusMessage title={title} tone="warning">
+              {description}
+            </StatusMessage>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                className="w-auto!"
+                onClick={this.handleRetry}
+                size="compact"
+                variant="secondary"
+              >
+                {retryLabel}
+              </Button>
+              {onClose ? (
+                <Button
+                  className="w-auto!"
+                  onClick={onClose}
+                  size="compact"
+                  variant="quiet"
+                >
+                  {closeLabel}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (variant === "fullscreen") {
+      return (
+        <section
+          className="mx-auto flex min-h-dvh w-full max-w-[960px] flex-col justify-center gap-4 p-6"
+          data-testid="dynamic-panel-fallback-fullscreen"
+        >
+          <StatusMessage title={title} tone="warning">
+            {description}
+          </StatusMessage>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              className="w-auto!"
+              onClick={this.handleRetry}
+              variant="primary"
+            >
+              {retryLabel}
+            </Button>
+            {onClose ? (
+              <Button className="w-auto!" onClick={onClose} variant="secondary">
+                {closeLabel}
+              </Button>
+            ) : null}
+            {backHref && backLabel ? (
+              <ButtonLink href={backHref} variant="secondary">
+                {backLabel}
+              </ButtonLink>
+            ) : null}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <div
+        className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3"
+        data-testid="dynamic-panel-fallback-inline"
+        role="status"
+      >
+        <StatusMessage title={title} tone="warning">
+          {description}
+        </StatusMessage>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button
+            className="w-auto!"
+            onClick={this.handleRetry}
+            size="compact"
+            variant="secondary"
+          >
+            {retryLabel}
+          </Button>
+          {onClose ? (
+            <Button
+              className="w-auto!"
+              onClick={onClose}
+              size="compact"
+              variant="quiet"
+            >
+              {closeLabel}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+}
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -9860,16 +10070,25 @@ function ReadingSessionScreen({
           exitHref={detailHref}
           onExit={() => setConfirmFinish(true)}
           voiceSettings={
-            <ReadingVoiceSettings
-              childId={
-                loadState.status === "ready" ? loadState.data.child.id : null
-              }
-              disabled={isMicRecording}
-              fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
-              onPreview={handleVoicePreview}
-              onStopPreview={stopAssistantAudio}
-            />
+            <DynamicPanelErrorBoundary
+              closeLabel={tCommon("actions.close")}
+              description={t("session.openFailedDescription")}
+              resetKey={sessionId}
+              retryLabel={tCommon("actions.retry")}
+              title={tCommon("states.unavailable")}
+              variant="compact"
+            >
+              <ReadingVoiceSettings
+                childId={
+                  loadState.status === "ready" ? loadState.data.child.id : null
+                }
+                disabled={isMicRecording}
+                fallbackNotice={speechPlayer.fallbackNotice}
+                isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+                onPreview={handleVoicePreview}
+                onStopPreview={stopAssistantAudio}
+              />
+            </DynamicPanelErrorBoundary>
           }
           isCurrentWordMispronounced={Boolean(
             currentWordId && mispronouncedWordIds.has(currentWordId),
@@ -9957,10 +10176,19 @@ function ReadingSessionScreen({
           onSpellWord={handleSpellCurrentWord}
           phonicsPanel={
             activePhonicsLesson ? (
-              <ReadingSubpanelErrorBoundary
-                fallback={(err, reset) => (
-                  <ReadingPhonicsFallback error={err} onResetBoundary={reset} />
-                )}
+              <DynamicPanelErrorBoundary
+                closeLabel={tCommon("actions.close")}
+                description={t("session.openFailedDescription")}
+                onClose={() => {
+                  stopAssistantAudio();
+                  setActivePhonicsLesson(null);
+                  setActivePhonicsStepIndex(null);
+                  setPhonicsStatusHint(null);
+                }}
+                resetKey={activePhonicsLesson.wordId}
+                retryLabel={tCommon("actions.retry")}
+                title={tCommon("states.unavailable")}
+                variant="inline"
               >
                 <PhonicsLessonCard
                   activeStepIndex={activePhonicsStepIndex}
@@ -9990,7 +10218,7 @@ function ReadingSessionScreen({
                   pageId={page.page_id}
                   statusHint={phonicsStatusHint}
                 />
-              </ReadingSubpanelErrorBoundary>
+              </DynamicPanelErrorBoundary>
             ) : null
           }
           onSkipRetryWord={skipRetryWord}
@@ -10238,16 +10466,26 @@ function ReadingSessionScreen({
             }
           />
         ) : uiState === "tts-error" || tutorOpen ? (
-          <TutorMessage
-            action={tutorAction}
-            isPlaying={speechPlayer.isPlaying}
-            isRetrying={isBusy}
-            nonBlocking={uiState === "tts-error" && !tutorOpen}
+          <DynamicPanelErrorBoundary
+            closeLabel={tCommon("actions.close")}
+            description={t("session.openFailedDescription")}
             onClose={closeTutor}
-            onRetry={() => void retryTutor()}
-            ttsFailed={uiState === "tts-error"}
-            word={currentWord}
-          />
+            resetKey={`${uiState}:${tutorOpen}:${tutorAction?.action_id ?? ""}`}
+            retryLabel={tCommon("actions.retry")}
+            title={tCommon("states.unavailable")}
+            variant="floating"
+          >
+            <TutorMessage
+              action={tutorAction}
+              isPlaying={speechPlayer.isPlaying}
+              isRetrying={isBusy}
+              nonBlocking={uiState === "tts-error" && !tutorOpen}
+              onClose={closeTutor}
+              onRetry={() => void retryTutor()}
+              ttsFailed={uiState === "tts-error"}
+              word={currentWord}
+            />
+          </DynamicPanelErrorBoundary>
         ) : null}
 
         {coReadingOpen ? (

@@ -1809,11 +1809,10 @@ export function PictureDescriptionScreen({
         const serverSttUnavailable =
           isPermanentlyHostedLocalUnconfigured(routingHealth) ||
           isServerSttConfirmedUnavailable() ||
+          (wasmSupported && shouldPreferWarmWasmBatchStt()) ||
           (!cloudSttAllowed &&
             routingHealth !== null &&
-            (!routingHealth.local.available ||
-              !routingHealth.local.stt_ready)) ||
-          (wasmSupported && shouldPreferWarmWasmBatchStt());
+            (!routingHealth.local.available || !routingHealth.local.stt_ready));
         if (serverSttUnavailable && browserFallback) {
           sttTranscript = browserFallback;
         } else if (serverSttUnavailable && wasmSupported) {
@@ -2006,7 +2005,7 @@ export function PictureDescriptionScreen({
           ...(session.target_vocabulary ?? []),
           ...(session.target_words ?? []),
           ...(session.guide.target_words ?? []),
-          ...urlFocusWords,
+          ...combinedFocusWords,
         ]),
       );
       const effectiveInputMode = overrideMode ?? inputMode;
@@ -2085,7 +2084,7 @@ export function PictureDescriptionScreen({
       t,
       teacherPersona.gender,
       teachingMode,
-      urlFocusWords,
+      combinedFocusWords,
     ],
   );
 

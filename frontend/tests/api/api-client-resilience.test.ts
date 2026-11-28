@@ -62,7 +62,7 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
     clearApiReadCache();
   });
 
-  it("retries bounded idempotent GET on 502/503/504/network without re-calling Supabase auth", async () => {
+  it("retries bounded idempotent GET on 502/504/network without re-calling Supabase auth", async () => {
     vi.useFakeTimers();
     vi.stubEnv("NODE_ENV", "production");
 
@@ -72,6 +72,7 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
       .mockResolvedValueOnce(Response.json({ ok: true }));
 
     const pending = requestApi("/books/catalog", okSchema, undefined, {
+      maxRetries: 2,
       retryDelayMs: 50,
     });
 
@@ -82,32 +83,47 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
     expect(getSession).toHaveBeenCalledTimes(1);
   });
 
-  it("retries timed-out GET attempt on cold start when total deadline allows", async () => {
+  it("retries 504 gateway timeout GET on cold start and surfaces retryable timeout when attempt hits full deadline", async () => {
     vi.useFakeTimers();
     vi.stubEnv("NODE_ENV", "production");
 
     fetchMock
-      .mockImplementationOnce(
-        (_input, init) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => {
-              reject(new DOMException("Aborted", "AbortError"));
-            });
-          }),
-      )
+      .mockResolvedValueOnce(new Response("Gateway Timeout", { status: 504 }))
       .mockResolvedValueOnce(Response.json({ ok: true }));
 
     const pending = requestApi("/profiles/me", okSchema, undefined, {
       retryDelayMs: 50,
     });
 
-    await vi.advanceTimersByTimeAsync(31_000);
+    await vi.advanceTimersByTimeAsync(500);
     await expect(pending).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(getSession).toHaveBeenCalledTimes(1);
+
+    // Full attempt timeout surfaces a retryable ServiceError without hanging past deadline
+    fetchMock.mockClear();
+    fetchMock.mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+    const stalled = requestApi("/profiles/me", okSchema, undefined, {
+      timeoutMs: 500,
+      retryDelayMs: 50,
+    }).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(await stalled).toMatchObject({
+      code: "NETWORK_ERROR",
+      status: 0,
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("never retries POST/PUT/DELETE, 4xx, 500, 501, schema errors, or caller aborts", async () => {
+  it("never retries POST/PUT/DELETE, 4xx, 500, 501, 503, schema errors, or caller aborts", async () => {
     vi.stubEnv("NODE_ENV", "production");
 
     // Mutation POST must not retry on 503
@@ -121,8 +137,8 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
     ).rejects.toMatchObject({ status: 503 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // 404 / 422 / 500 / 501 must not retry
-    for (const status of [404, 422, 500, 501]) {
+    // 404 / 422 / 500 / 501 / 503 must not retry
+    for (const status of [404, 422, 500, 501, 503]) {
       fetchMock.mockClear();
       fetchMock.mockResolvedValueOnce(new Response("err", { status }));
       await expect(
@@ -143,7 +159,7 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
     vi.useFakeTimers();
     const controller = new AbortController();
     fetchMock.mockClear();
-    fetchMock.mockResolvedValueOnce(new Response("cold", { status: 503 }));
+    fetchMock.mockResolvedValueOnce(new Response("cold", { status: 502 }));
     const aborted = requestApi("/books/catalog", okSchema, controller.signal, {
       retryDelayMs: 5_000,
     }).catch((err: unknown) => err);
@@ -234,6 +250,80 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
         contact_email: "parent@example.com",
       }),
     ).rejects.toBeInstanceOf(SupportFeedbackError);
+  });
+
+  it("preserves V4.1 quick_play_href and reading_misread_words_reinforced in adaptive-learning Zod schemas", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        child_id: "child-1",
+        child_alias: "Bé An",
+        child_grade: 2,
+        mascot_greeting_vi: "Chào Bé An!",
+        natural_break_reminder_vi: "Nghỉ 5 phút nhé.",
+        today_activities_count: 1,
+        focus_difficult_words: ["mèo mướp"],
+        primary_recommendation: {
+          game_key: "PICTURE_DESCRIPTION",
+          zone_title_vi: "Kể chuyện",
+          game_title_vi: "Kể chuyện qua tranh",
+          reason_vi: "Ôn từ khó",
+          suggested_mode: "VOCABULARY",
+          suggested_difficulty: 2,
+          target_words: ["mèo mướp"],
+          href: "/entertainment/picture-description",
+          quick_play_href: "/entertainment/picture-description?autoplay=1",
+          priority: 1,
+        },
+        recommendations: [
+          {
+            game_key: "PICTURE_DESCRIPTION",
+            zone_title_vi: "Kể chuyện",
+            game_title_vi: "Kể chuyện qua tranh",
+            reason_vi: "Ôn từ khó",
+            suggested_mode: "VOCABULARY",
+            suggested_difficulty: 2,
+            target_words: ["mèo mướp"],
+            href: "/entertainment/picture-description",
+            quick_play_href: "/entertainment/picture-description?autoplay=1",
+            priority: 1,
+          },
+        ],
+      }),
+    );
+    const recs =
+      await createAdaptiveLearningService().getRecommendations("child-1");
+    expect(recs.primary_recommendation.quick_play_href).toBe(
+      "/entertainment/picture-description?autoplay=1",
+    );
+    expect(recs.recommendations[0]?.quick_play_href).toBe(
+      "/entertainment/picture-description?autoplay=1",
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        child_id: "child-1",
+        child_alias: "Bé An",
+        child_grade: 2,
+        window_days: 30,
+        is_diagnostic: false,
+        disclaimer_vi: "Không phải chẩn đoán y khoa.",
+        observed_skills_count: 1,
+        estimated_skills_count: 0,
+        unknown_skills_count: 0,
+        skills: [],
+        practiced_difficult_words: [],
+        module_activities: [],
+        karaoke_weak_segments: [],
+        home_support_tips_vi: [],
+        reading_misread_words_reinforced: 6,
+        generated_at: "2026-11-28T10:00:00Z",
+      }),
+    );
+    const analytics = await createAdaptiveLearningService().getParentAnalytics(
+      "child-1",
+      30,
+    );
+    expect(analytics.reading_misread_words_reinforced).toBe(6);
   });
 
   it("refreshes the Supabase session once on 401 and retries with the refreshed Bearer token", async () => {

@@ -187,18 +187,20 @@ export function ReadingLayout({
     activeReadingMode ??
     (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const suppressSecondaryBanners = Boolean(phonicsPanel) && !retryMode;
+  const showCompanionBubble =
+    !retryMode &&
+    !suppressSecondaryBanners &&
+    Boolean(companionBubble) &&
+    !sentenceReinforcementPanel;
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
     isPlayingSample ||
     isReadingWord ||
-    (!suppressSecondaryBanners && isMicRecording && isCurrentWordMispronounced);
-  const showCompanionBubble =
-    !retryMode &&
-    !suppressSecondaryBanners &&
-    Boolean(companionBubble) &&
-    !sentenceReinforcementPanel &&
-    !(isMicRecording && isCurrentWordMispronounced);
+    (!suppressSecondaryBanners &&
+      !showCompanionBubble &&
+      isMicRecording &&
+      isCurrentWordMispronounced);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||

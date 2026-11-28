@@ -114,7 +114,12 @@ async def _verify_optional_active_actor(
         if require_active_profile_id in overrides:
             return actor_uuid
     else:
-        actor_uuid = await asyncio.to_thread(get_current_parent_id, credentials)
+        auth_result = get_current_parent_id(credentials)
+        actor_uuid = (
+            await auth_result
+            if inspect.isawaitable(auth_result)
+            else auth_result
+        )
 
     role = await get_cached_profile_role(db, actor_uuid)
     if role not in ("parent", "admin"):
@@ -171,7 +176,10 @@ async def get_book_pages(
 ):
     """Return pages for an eligible catalog book; mint signed URLs only for verified active users."""
     from app.services import storage_service as _storage_service
-    from app.services.storage_service import create_cached_signed_image_urls
+    from app.services.storage_service import (
+        create_cached_signed_image_urls,
+        create_cached_signed_image_urls_async,
+    )
 
     verified_actor_id = await _verify_optional_active_actor(request, db)
     pages = await BookService(db).list_pages(
@@ -208,10 +216,18 @@ async def get_book_pages(
         if raw_paths_to_sign:
             try:
                 try:
-                    signed_urls = await asyncio.to_thread(
-                        create_cached_signed_image_urls,
-                        raw_paths_to_sign,
-                    )
+                    if (
+                        create_cached_signed_image_urls
+                        is not _storage_service._ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS
+                    ):
+                        signed_urls = await asyncio.to_thread(
+                            create_cached_signed_image_urls,
+                            raw_paths_to_sign,
+                        )
+                    else:
+                        signed_urls = await create_cached_signed_image_urls_async(
+                            raw_paths_to_sign,
+                        )
                 except TypeError:
                     signed_urls = await asyncio.to_thread(
                         _storage_service.create_signed_image_urls,

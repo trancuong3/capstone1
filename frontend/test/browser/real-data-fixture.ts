@@ -1444,26 +1444,27 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         generated_at: timestamp,
       });
     }
-    const warmupStoryMatch =
+    const vocabNotebookMatch =
       request.method() === "GET"
-        ? /^\/learning\/children\/([^/]+)\/warmup-story$/.exec(path)
+        ? /^\/vocabulary\/children\/([^/]+)\/notebook$/.exec(path)
         : null;
-    if (warmupStoryMatch) {
-      const targetChildId = decodeURIComponent(warmupStoryMatch[1]);
+    if (vocabNotebookMatch) {
       return respond(route, {
-        child_id: targetChildId,
-        local_date: "2026-10-08",
-        has_due_words: true,
-        target_words: ["mèo", "nắng"],
-        title_vi: "Nắng sớm bên hiên",
-        sentences: [
-          "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà.",
-          "Bé mỉm cười đọc sách cùng chú mèo ngoan.",
-        ],
-        full_text:
-          "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà. Bé mỉm cười đọc sách cùng chú mèo ngoan.",
-        source: "RULE_BASED",
-        cached: false,
+        child_id: decodeURIComponent(vocabNotebookMatch[1]),
+        total: 0,
+        items: [],
+        storytelling_words: [],
+      });
+    }
+    const dialectProfileMatch =
+      request.method() === "GET"
+        ? /^\/dialect\/children\/([^/]+)\/profile$/.exec(path)
+        : null;
+    if (dialectProfileMatch) {
+      return respond(route, {
+        child_id: decodeURIComponent(dialectProfileMatch[1]),
+        phonetic_profile: "STRICT_SGK",
+        visibility: "PARENT_PRIVATE",
       });
     }
     const phonemeGardenMatch =

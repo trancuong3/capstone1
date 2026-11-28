@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { requestApi, type RequestApiOptions } from "@/lib/api/api-client";
+import { isAbortOrTimeoutError } from "@/lib/api/cold-start-retry";
 import { ServiceError } from "@/lib/api/service-error";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { translateRuntime } from "@/lib/i18n/runtime";
@@ -15,8 +16,8 @@ import type {
 } from "@/types/profile";
 
 export interface ProfileService {
-  get(): Promise<ParentProfileDTO>;
-  getDashboardSummary(): Promise<DashboardSummaryDTO>;
+  get(signal?: AbortSignal): Promise<ParentProfileDTO>;
+  getDashboardSummary(signal?: AbortSignal): Promise<DashboardSummaryDTO>;
   update(request: ParentProfileUpdateInput): Promise<ParentProfileDTO>;
   requestEmailChange(email: string): Promise<void>;
   resendEmailChange(email: string): Promise<void>;
@@ -124,10 +125,10 @@ const fallbackChildProfileListSchema = z.array(
 async function requestProfileApi<T>(
   path: string,
   schema: ZodType<T>,
-  options?: RequestApiOptions,
+  options?: RequestApiOptions & { readonly signal?: AbortSignal },
 ): Promise<T> {
   try {
-    return await requestApi(path, schema, undefined, options);
+    return await requestApi(path, schema, options?.signal, options);
   } catch (error) {
     if (
       error instanceof ServiceError &&
@@ -323,19 +324,23 @@ function getProfileEmailRedirectUrl(): string {
 
 export function createProfileService(): ProfileService {
   return {
-    async get(): Promise<ParentProfileDTO> {
+    async get(signal?: AbortSignal): Promise<ParentProfileDTO> {
       const response = await requestProfileApi(
         "/profiles/me",
         parentProfileApiSchema,
+        { signal },
       );
       return normalizeParentProfile(response);
     },
 
-    async getDashboardSummary(): Promise<DashboardSummaryDTO> {
+    async getDashboardSummary(
+      signal?: AbortSignal,
+    ): Promise<DashboardSummaryDTO> {
       try {
         const response = await requestProfileApi(
           "/profiles/dashboard-summary",
           dashboardSummaryApiSchema,
+          { signal },
         );
         const normalizedProfile = response.profile
           ? normalizeParentProfile(response.profile)
@@ -361,9 +366,14 @@ export function createProfileService(): ProfileService {
           (error.status === 404 || error.code === "RESOURCE_NOT_FOUND")
         ) {
           const [profileResult, children] = await Promise.all([
-            requestProfileApi("/profiles/me", parentProfileApiSchema)
+            requestProfileApi("/profiles/me", parentProfileApiSchema, {
+              signal,
+            })
               .then((res) => normalizeParentProfile(res))
               .catch((profileError: unknown) => {
+                if (isAbortOrTimeoutError(profileError)) {
+                  throw profileError;
+                }
                 if (
                   profileError instanceof ServiceError &&
                   (profileError.code === "AUTH_REQUIRED" ||
@@ -376,6 +386,7 @@ export function createProfileService(): ProfileService {
             requestProfileApi(
               "/profiles/children",
               fallbackChildProfileListSchema,
+              { signal },
             ),
           ]);
           return {

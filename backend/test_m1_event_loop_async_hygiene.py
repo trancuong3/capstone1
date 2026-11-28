@@ -233,7 +233,7 @@ class AssistantActorOffloadTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 assistant_routes,
                 "get_current_parent_id",
-                side_effect=fake_get_current_parent_id,
+                fake_get_current_parent_id,
             ),
             patch.object(
                 assistant_routes,
@@ -270,7 +270,7 @@ class AssistantActorOffloadTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             assistant_routes,
             "get_current_parent_id",
-            side_effect=fake_get_current_parent_id,
+            fake_get_current_parent_id,
         ):
             actor = await assistant_routes.resolve_assistant_actor(request, creds)
 

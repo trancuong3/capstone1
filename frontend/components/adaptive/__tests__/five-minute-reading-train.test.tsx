@@ -134,7 +134,6 @@ function createMockAdaptiveService(
     getParentAnalytics: vi.fn(),
     getDailyFiveMinuteTrain,
     completeDailyFiveMinuteTrain,
-    getWarmupStory: vi.fn(),
     createMagicWordQuest: vi.fn(),
     completeMagicWordQuest: vi.fn(),
     createMagicRhythmChant: vi.fn(),

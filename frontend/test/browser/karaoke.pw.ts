@@ -223,7 +223,7 @@ async function enter(page: Page) {
     .click();
   await expect(page).toHaveURL(/\/entertainment$/);
   await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
-  await expect(page).toHaveURL(/\/karaoke$/);
+  await expect(page).toHaveURL(/\/karaoke(?:\?|$)/);
   const mobileBottomNav = page.getByTestId("mobile-bottom-nav");
   if (await mobileBottomNav.isVisible()) {
     await mobileBottomNav.getByRole("button", { name: /Thêm/ }).click();

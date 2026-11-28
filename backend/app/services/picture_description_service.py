@@ -464,12 +464,16 @@ class PictureDescriptionService:
         grade: int,
         *,
         limit: int = 12,
+        parent_id: UUID | None = None,
     ) -> list[BookPageCandidateProjection]:
         fn = getattr(self.repository, "list_book_pages_for_grade", None)
         if fn is None:
             return []
         try:
-            maybe_coro = fn(grade, limit=limit)
+            if parent_id is not None and self._supports_kwarg(fn, "parent_id"):
+                maybe_coro = fn(grade, limit=limit, parent_id=parent_id)
+            else:
+                maybe_coro = fn(grade, limit=limit)
             if not inspect.isawaitable(maybe_coro):
                 return []
             rows = await maybe_coro
@@ -608,8 +612,7 @@ class PictureDescriptionService:
                 key=lambda item: (
                     0
                     if (book_page_id is not None and item.page_id == book_page_id)
-                    or (book_id is not None and item.book_id == book_id)
-                    else 1,
+                    else (1 if (book_id is not None and item.book_id == book_id) else 2),
                     -len(item.matched_difficult_words),
                 )
             )
@@ -862,7 +865,7 @@ class PictureDescriptionService:
         auto_selected_book_page = False
 
         if resolved_source_type is None and auto_select:
-            candidates = await self._safe_book_pages_for_grade(child_grade)
+            candidates = await self._safe_book_pages_for_grade(child_grade, parent_id=actor_id)
             best_page: BookPageCandidateProjection | None = None
             best_page_hits = 0
             for row in candidates:
@@ -884,8 +887,13 @@ class PictureDescriptionService:
                 resolved_sample_key_input = best_sample.sample_key
         elif resolved_source_type == "SAMPLE" and not (resolved_sample_key_input or "").strip() and auto_select:
             resolved_sample_key_input = _best_sample_for_child(child_grade, focus_words).sample_key
-        elif resolved_source_type == "BOOK_PAGE" and resolved_book_page_id_input is None and auto_select:
-            candidates = await self._safe_book_pages_for_grade(child_grade)
+        elif (
+            resolved_source_type == "BOOK_PAGE"
+            and resolved_book_page_id_input is None
+            and book_id is None
+            and auto_select
+        ):
+            candidates = await self._safe_book_pages_for_grade(child_grade, parent_id=actor_id)
             if candidates:
                 ranked = sorted(
                     candidates,
