@@ -1,5 +1,12 @@
 export type AssistantRoleScope = "public" | "parent" | "admin";
 
+export type AssistantScopeBoundaryReason =
+  | "other_user"
+  | "admin_area"
+  | "customer_area"
+  | "guest_to_customer_area"
+  | "guest_area";
+
 export type BandwidthProfile = "low" | "medium" | "high";
 
 export type BandwidthPreference = "auto" | "low" | "high";

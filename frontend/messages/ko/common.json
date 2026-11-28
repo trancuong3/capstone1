@@ -164,7 +164,10 @@
     "childEmptyDesc": "아직 아이 프로필이 없습니다. 도서, 음성, 학습 기록을 따로 저장하려면 프로필을 만들어 주세요!",
     "childCreateBtn": "아이 프로필 만들기",
     "childPickerPrompt": "어떤 아이를 위해 이 페이지를 열까요?",
-    "quickActionGateIntro": "**{label}**을(를) 열기 전에 선택된 아이 프로필을 확인합니다."
+    "quickActionGateIntro": "**{label}**을(를) 열기 전에 선택된 아이 프로필을 확인합니다.",
+    "scopePublic": "게스트 지원",
+    "scopeParent": "학부모 지원",
+    "scopeAdmin": "관리자 지원"
   },
   "taskCenter": {
     "backgroundProcessing": "백그라운드 처리 중…",

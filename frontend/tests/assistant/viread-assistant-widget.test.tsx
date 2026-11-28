@@ -19,6 +19,13 @@ const navState = vi.hoisted(() => ({
 const sendAssistantMessageMock = vi.hoisted(() => vi.fn());
 const readAssistantChildContextMock = vi.hoisted(() => vi.fn());
 const selectChildFromAssistantMock = vi.hoisted(() => vi.fn());
+const authState = vi.hoisted(() => ({
+  userId: "91000000-0000-4000-8000-000000000001" as string | null,
+  throwOnCreate: false,
+  callback: null as
+    ((event: string, session: { user: { id: string } } | null) => void) | null,
+  unsubscribe: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navState.pathname,
@@ -27,6 +34,38 @@ vi.mock("next/navigation", () => ({
     replace: vi.fn(),
     refresh: vi.fn(),
   }),
+}));
+
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => {
+    if (authState.throwOnCreate) {
+      throw new Error("Missing Supabase config in test");
+    }
+    return {
+      auth: {
+        getSession: async () => ({
+          data: {
+            session: authState.userId
+              ? { user: { id: authState.userId } }
+              : null,
+          },
+          error: null,
+        }),
+        onAuthStateChange: (
+          cb: (event: string, session: { user: { id: string } } | null) => void,
+        ) => {
+          authState.callback = cb;
+          return {
+            data: {
+              subscription: {
+                unsubscribe: authState.unsubscribe,
+              },
+            },
+          };
+        },
+      },
+    };
+  },
 }));
 
 vi.mock("@/lib/api/assistant-service", async (importOriginal) => {
@@ -49,6 +88,7 @@ vi.mock("@/lib/assistant/child-gate", async (importOriginal) => {
 });
 
 const PARENT_ID = "91000000-0000-4000-8000-000000000001";
+const OTHER_PARENT_ID = "91000000-0000-4000-8000-000000000099";
 const CHILD_ONE: ChildProfileDTO = {
   id: "92000000-0000-4000-8000-000000000001",
   parent_id: PARENT_ID,
@@ -81,6 +121,10 @@ describe("ViReadAssistantWidget", () => {
     sendAssistantMessageMock.mockReset();
     readAssistantChildContextMock.mockReset();
     selectChildFromAssistantMock.mockReset();
+    authState.userId = PARENT_ID;
+    authState.throwOnCreate = false;
+    authState.callback = null;
+    authState.unsubscribe.mockReset();
     readAssistantChildContextMock.mockResolvedValue({
       userId: PARENT_ID,
       selectedChildId: null,
@@ -972,5 +1016,219 @@ describe("ViReadAssistantWidget", () => {
       screen.getByTestId(`viread-assistant-select-child-${CHILD_ONE.id}`),
     );
     expect(navState.routerPush).toHaveBeenCalledWith("/books");
+  });
+
+  it("renders distinct role badges, isolates Admin/Parent/Guest routes and child-picker, and handles offline Supabase config safely", async () => {
+    const user = userEvent.setup();
+
+    // 1. Guest (/login) -> badge "Hỗ trợ Khách", blocks /dashboard offers & quick actions, never touches child profiles
+    authState.throwOnCreate = true;
+    navState.pathname = "/login";
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Vui lòng đăng nhập trước khi vào trang khách hàng.",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_scope_guard",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 3,
+      cached: false,
+      role_scope: "public",
+      quick_actions: [
+        { label: "Tổng quan", href: "/dashboard" },
+        { label: "Đăng nhập", href: "/login" },
+      ],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Tổng quan",
+        href: "/dashboard",
+        requires_child_selection: true,
+      },
+    });
+
+    const { rerender } = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    expect(
+      await screen.findByTestId("viread-assistant-role-badge"),
+    ).toHaveTextContent("Hỗ trợ Khách");
+
+    const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
+    await user.type(input, "Mở dashboard phụ huynh{Enter}");
+    expect(
+      await screen.findByText(/Vui lòng đăng nhập trước/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-nav-card"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Tổng quan" }),
+    ).not.toBeInTheDocument();
+    expect(readAssistantChildContextMock).not.toHaveBeenCalled();
+
+    // 2. Admin (/admin/books) -> badge "Hỗ trợ Quản trị", blocks customer /dashboard & /books, zero child-picker
+    navState.pathname = "/admin/books";
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply: "Quản trị viên dùng Kho sách Quản trị, không mở trang phụ huynh.",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_scope_guard",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 4,
+      cached: false,
+      role_scope: "admin",
+      quick_actions: [
+        { label: "Trang phụ huynh", href: "/dashboard" },
+        { label: "Kho sách quản trị", href: "/admin/books" },
+      ],
+      suggested_prompts: [],
+      navigation_offer: {
+        label: "Mở Tổng quan phụ huynh",
+        href: "/dashboard",
+        requires_child_selection: true,
+      },
+    });
+
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("viread-assistant-role-badge")).toHaveTextContent(
+      "Hỗ trợ Quản trị",
+    );
+    // Guest history was cleared on role switch
+    expect(
+      screen.queryByText(/Vui lòng đăng nhập trước/),
+    ).not.toBeInTheDocument();
+
+    await user.type(input, "Mở dashboard khách hàng{Enter}");
+    expect(
+      await screen.findByText(/Quản trị viên dùng Kho sách Quản trị/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-nav-card"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Trang phụ huynh" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-active-child-badge"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-child-picker"),
+    ).not.toBeInTheDocument();
+    expect(readAssistantChildContextMock).not.toHaveBeenCalled();
+
+    // 3. Parent (/dashboard) -> badge "Hỗ trợ Phụ huynh", blocks /admin/* and handles off-topic ViRead-only refusal
+    navState.pathname = "/dashboard";
+    sendAssistantMessageMock.mockResolvedValueOnce({
+      reply:
+        "Trợ lý ViRead chỉ hỗ trợ các tính năng đọc sách và học tập trong ViRead.",
+      source_tier: "tier_0_kb",
+      provider_id: "viread_domain_guard",
+      model_id: "grounded-viread-kb-v1",
+      bandwidth_applied: "high",
+      latency_ms: 2,
+      cached: false,
+      role_scope: "parent",
+      quick_actions: [{ label: "Mở Kho sách", href: "/books" }],
+      suggested_prompts: [],
+    });
+
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("viread-assistant-role-badge")).toHaveTextContent(
+      "Hỗ trợ Phụ huynh",
+    );
+    await user.type(input, "Giá vàng hôm nay bao nhiêu?{Enter}");
+    expect(
+      await screen.findByText(/chỉ hỗ trợ các tính năng đọc sách/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Hỏi AI sâu hơn/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-retry-ai"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves history within same user+role, resets history on customer switch/logout, and aborts in-flight requests on role switch", async () => {
+    const user = userEvent.setup();
+    let capturedAbortSignal: AbortSignal | undefined;
+
+    sendAssistantMessageMock
+      .mockResolvedValueOnce({
+        reply: "Phản hồi riêng cho phụ huynh A.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 4,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+      })
+      .mockImplementationOnce((_payload, options) => {
+        capturedAbortSignal = options?.signal;
+        return new Promise(() => {
+          // Never resolves: simulates slow request aborted on role switch.
+        });
+      });
+
+    const { rerender } = renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    await user.type(input, "Câu hỏi của phụ huynh A{Enter}");
+    expect(
+      await screen.findByText("Phản hồi riêng cho phụ huynh A."),
+    ).toBeInTheDocument();
+
+    // Navigating /dashboard -> /books (same user, same parent role) preserves conversation!
+    navState.pathname = "/books";
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+    expect(
+      screen.getByText("Phản hồi riêng cho phụ huynh A."),
+    ).toBeInTheDocument();
+
+    // Switching customer account (PARENT_ID -> OTHER_PARENT_ID) immediately clears history!
+    await act(async () => {
+      authState.callback?.("SIGNED_IN", { user: { id: OTHER_PARENT_ID } });
+    });
+    expect(
+      screen.queryByText("Phản hồi riêng cho phụ huynh A."),
+    ).not.toBeInTheDocument();
+
+    // Start an in-flight request in parent scope, then switch to admin scope -> aborts & clears!
+    await user.type(input, "Câu hỏi đang chờ của phụ huynh B{Enter}");
+    expect(
+      await screen.findByTestId("viread-assistant-loading-card"),
+    ).toBeInTheDocument();
+    expect(capturedAbortSignal?.aborted).toBe(false);
+
+    navState.pathname = "/admin/health";
+    rerender(
+      <I18nProvider initialLocale="vi" initialMessages={viMessages}>
+        <ViReadAssistantWidget />
+      </I18nProvider>,
+    );
+
+    expect(capturedAbortSignal?.aborted).toBe(true);
+    expect(
+      screen.queryByTestId("viread-assistant-loading-card"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Câu hỏi đang chờ của phụ huynh B"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("viread-assistant-role-badge")).toHaveTextContent(
+      "Hỗ trợ Quản trị",
+    );
   });
 });

@@ -164,7 +164,10 @@
     "childEmptyDesc": "您还没有孩子档案。立即创建以分别保存专属书籍、语音和阅读进度！",
     "childCreateBtn": "创建孩子档案",
     "childPickerPrompt": "您想为哪位孩子打开此页面？",
-    "quickActionGateIntro": "打开 **{label}** 前，先确认当前选择的孩子档案。"
+    "quickActionGateIntro": "打开 **{label}** 前，先确认当前选择的孩子档案。",
+    "scopePublic": "访客支持",
+    "scopeParent": "家长支持",
+    "scopeAdmin": "管理支持"
   },
   "taskCenter": {
     "backgroundProcessing": "正在后台处理…",

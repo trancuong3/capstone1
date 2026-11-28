@@ -164,7 +164,10 @@
     "childEmptyDesc": "目前還沒有孩子檔案。立即建立以分別保存專屬書籍、語音與閱讀進度！",
     "childCreateBtn": "建立孩子檔案",
     "childPickerPrompt": "請問要為哪位孩子開啟此頁面？",
-    "quickActionGateIntro": "開啟 **{label}** 前，先確認目前選擇的孩子檔案。"
+    "quickActionGateIntro": "開啟 **{label}** 前，先確認目前選擇的孩子檔案。",
+    "scopePublic": "訪客支援",
+    "scopeParent": "家長支援",
+    "scopeAdmin": "管理支援"
   },
   "taskCenter": {
     "backgroundProcessing": "正在背景處理…",

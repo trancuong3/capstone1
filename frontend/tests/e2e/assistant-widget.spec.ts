@@ -6,6 +6,7 @@ import { authFixtureHeaders } from "./auth-fixture";
 const API_BASE = "http://127.0.0.1:8000";
 const NOW = "2026-11-27T10:00:00Z";
 const PARENT_ID = "91000000-0000-4000-8000-000000000001";
+const ADMIN_ID = "91000000-0000-4000-8000-000000000002";
 const CHILD_ID = "92000000-0000-4000-8000-000000000001";
 const CHILD_TWO_ID = "92000000-0000-4000-8000-000000000002";
 const BOOK_ID = "82000000-0000-4000-8000-000000000010";
@@ -46,19 +47,23 @@ function makeFakeJwt(sub: string, role: "admin" | "parent"): string {
   return `${header}.${payload}.synthetic-assistant-sig`;
 }
 
-async function seedParentSession(context: BrowserContext): Promise<void> {
+async function seedAuthSession(
+  context: BrowserContext,
+  userId: string,
+  role: "admin" | "parent",
+): Promise<void> {
   const sessionPayload = {
-    access_token: makeFakeJwt(PARENT_ID, "parent"),
+    access_token: makeFakeJwt(userId, role),
     token_type: "bearer",
     expires_in: 36000,
     expires_at: Math.floor(Date.now() / 1000) + 36000,
     refresh_token: "synthetic-refresh-token",
     user: {
-      id: PARENT_ID,
+      id: userId,
       aud: "authenticated",
       role: "authenticated",
-      email: "parent@viread.local",
-      user_metadata: { role: "parent" },
+      email: role === "admin" ? "admin@viread.local" : "parent@viread.local",
+      user_metadata: { role },
       app_metadata: { provider: "email" },
       created_at: NOW,
     },
@@ -81,6 +86,24 @@ async function seedParentSession(context: BrowserContext): Promise<void> {
       body: JSON.stringify(sessionPayload.user),
     }),
   );
+}
+
+async function seedParentSession(context: BrowserContext): Promise<void> {
+  await seedAuthSession(context, PARENT_ID, "parent");
+}
+
+async function openAssistantPanel(page: Page) {
+  const launcher = page.getByTestId("viread-assistant-launcher");
+  const panel = page.getByTestId("viread-assistant-panel");
+  const loading = page.getByTestId("viread-assistant-panel-loading");
+  await expect(launcher).toBeVisible();
+  await expect(async () => {
+    if (!(await panel.isVisible()) && !(await loading.isVisible())) {
+      await launcher.click();
+    }
+    await expect(panel).toBeVisible({ timeout: 2_500 });
+  }).toPass({ timeout: 20_000, intervals: [250, 500, 1_000] });
+  return panel;
 }
 
 async function installAssistantMockApi(page: Page): Promise<void> {
@@ -107,9 +130,77 @@ async function installAssistantMockApi(page: Page): Promise<void> {
     if (p === "/assistant/chat") {
       const reqBody = route.request().postDataJSON() as {
         message?: string;
+        current_path?: string;
         bandwidth_profile?: "low" | "medium" | "high";
       };
       const msg = (reqBody?.message ?? "").toLowerCase();
+      const currentPath = reqBody?.current_path ?? "/";
+      if (msg.includes("thời tiết") || msg.includes("bitcoin")) {
+        await route.fulfill(
+          json({
+            reply:
+              "Trợ lý ViRead chỉ hỗ trợ hướng dẫn đọc sách và tính năng trong ViRead nhé!",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_domain_guard",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 3,
+            cached: false,
+            role_scope: currentPath.startsWith("/admin")
+              ? "admin"
+              : currentPath === "/login"
+                ? "public"
+                : "parent",
+            quick_actions: [],
+            suggested_prompts: [],
+          }),
+        );
+        return;
+      }
+      if (currentPath.startsWith("/admin") && msg.includes("dashboard")) {
+        await route.fulfill(
+          json({
+            reply: "Quản trị viên chỉ làm việc trên khu vực /admin.",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_scope_guard",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 4,
+            cached: false,
+            role_scope: "admin",
+            quick_actions: [{ label: "Trang khách", href: "/dashboard" }],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Mở Tổng quan khách",
+              href: "/dashboard",
+              requires_child_selection: true,
+            },
+          }),
+        );
+        return;
+      }
+      if (currentPath === "/login" && msg.includes("dashboard")) {
+        await route.fulfill(
+          json({
+            reply: "Bạn cần đăng nhập trước khi vào trang khách hàng.",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_scope_guard",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 4,
+            cached: false,
+            role_scope: "public",
+            quick_actions: [{ label: "Tổng quan", href: "/dashboard" }],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Mở Tổng quan",
+              href: "/dashboard",
+              requires_child_selection: true,
+            },
+          }),
+        );
+        return;
+      }
       if (msg.includes("memory game") || msg.includes("lật thẻ")) {
         await route.fulfill(
           json({
@@ -536,9 +627,10 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     const publicContext = await browser.newContext({ viewport });
     const publicPage = await publicContext.newPage();
     await publicPage.goto("/admin/login", { waitUntil: "networkidle" });
-    await publicPage.getByTestId("viread-assistant-launcher").click();
-    const publicPanel = publicPage.getByTestId("viread-assistant-panel");
-    await expect(publicPanel).toBeVisible();
+    const publicPanel = await openAssistantPanel(publicPage);
+    await expect(
+      publicPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Khách");
     await expect(publicPanel).toContainText("Đăng nhập Quản trị");
     const adminLinks = await publicPanel.locator('a[href^="/admin/"]').count();
     expect(adminLinks).toBe(0);
@@ -554,6 +646,7 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     await installAssistantMockApi(page);
 
     await page.goto("/dashboard", { waitUntil: "networkidle" });
+    await expect(page.getByRole("button", { name: /Bé An/i })).toBeVisible();
     const launcher = page.getByTestId("viread-assistant-launcher");
     await expect(launcher).toBeVisible();
 
@@ -575,9 +668,10 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     }
 
     // Open panel -> compact size <= 360px wide x 460px tall
-    await launcher.click();
-    const panel = page.getByTestId("viread-assistant-panel");
-    await expect(panel).toBeVisible();
+    const panel = await openAssistantPanel(page);
+    await expect(panel.getByTestId("viread-assistant-role-badge")).toHaveText(
+      "Hỗ trợ Phụ huynh",
+    );
     const panelBox = await panel.boundingBox();
     expect(panelBox).not.toBeNull();
     expect(panelBox!.width).toBeLessThanOrEqual(360);
@@ -620,8 +714,8 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     await panel.getByTestId("viread-assistant-nav-yes").click();
     await page.waitForURL("**/settings");
     await page.goto("/dashboard", { waitUntil: "networkidle" });
-    await page.getByTestId("viread-assistant-launcher").click();
-    await expect(page.getByTestId("viread-assistant-panel")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Bé An/i })).toBeVisible();
+    await openAssistantPanel(page);
 
     // Hide assistant -> persists across reload -> restore via edge tab
     await page.getByTestId("viread-assistant-hide").click();
@@ -715,9 +809,7 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     await page.evaluate(() => {
       window.sessionStorage.clear();
     });
-    await page.getByTestId("viread-assistant-launcher").click();
-    const panel = page.getByTestId("viread-assistant-panel");
-    await expect(panel).toBeVisible();
+    const panel = await openAssistantPanel(page);
 
     await panel.getByLabel("Nhập câu hỏi về ViRead").fill("Mở kho sách cho bé");
     await panel.getByLabel("Gửi câu hỏi").click();
@@ -752,8 +844,7 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     });
     await page.reload({ waitUntil: "networkidle" });
 
-    await page.getByTestId("viread-assistant-launcher").click();
-    const panel2 = page.getByTestId("viread-assistant-panel");
+    const panel2 = await openAssistantPanel(page);
     await panel2
       .getByLabel("Nhập câu hỏi về ViRead")
       .fill("Bé muốn chơi Memory Game lật thẻ");
@@ -770,5 +861,110 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     expect(new URL(page.url()).pathname).toBe("/entertainment/memory-game");
 
     await context.close();
+  });
+
+  test("enforces role badges, Admin/Parent/Guest route isolation, role-switch history reset, and ViRead-only off-topic refusal", async ({
+    browser,
+  }, testInfo) => {
+    const isDesktop = testInfo.project.name === "desktop-chromium";
+    const viewport = isDesktop
+      ? { width: 1440, height: 1000 }
+      : { width: 390, height: 844 };
+
+    // 1. Guest on /login: "Hỗ trợ Khách" badge, ViRead-only off-topic refusal, blocks /dashboard
+    const guestContext = await browser.newContext({ viewport });
+    const guestPage = await guestContext.newPage();
+    await installAssistantMockApi(guestPage);
+    await guestPage.goto("/login", { waitUntil: "networkidle" });
+    const guestPanel = await openAssistantPanel(guestPage);
+    await expect(
+      guestPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Khách");
+
+    await guestPanel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Thời tiết Hà Nội hôm nay thế nào?");
+    await guestPanel.getByLabel("Gửi câu hỏi").click();
+    await expect(guestPanel).toContainText("chỉ hỗ trợ hướng dẫn đọc sách");
+
+    await guestPanel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Mở dashboard phụ huynh");
+    await guestPanel.getByLabel("Gửi câu hỏi").click();
+    await expect(guestPanel).toContainText("cần đăng nhập trước");
+    expect(await guestPanel.locator('a[href="/dashboard"]').count()).toBe(0);
+    await expect(
+      guestPanel.getByTestId("viread-assistant-nav-card"),
+    ).toHaveCount(0);
+    await guestContext.close();
+
+    // 2. Parent on /dashboard -> SPA nav to /settings preserves history; switching to /login (public) clears history
+    const parentContext = await browser.newContext({
+      viewport,
+      extraHTTPHeaders: authFixtureHeaders("parent"),
+    });
+    await seedParentSession(parentContext);
+    const parentPage = await parentContext.newPage();
+    await installAssistantMockApi(parentPage);
+    await parentPage.goto("/dashboard", { waitUntil: "networkidle" });
+    const parentPanel = await openAssistantPanel(parentPage);
+    await expect(
+      parentPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Phụ huynh");
+
+    await parentPanel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Tôi muốn đổi mật khẩu");
+    await parentPanel.getByLabel("Gửi câu hỏi").click();
+    await expect(
+      parentPanel.getByTestId("viread-assistant-nav-card"),
+    ).toBeVisible();
+    await parentPanel.getByTestId("viread-assistant-nav-yes").click();
+    await parentPage.waitForURL("**/settings");
+    await expect(
+      parentPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Phụ huynh");
+    await expect(parentPanel).toContainText("Tôi muốn đổi mật khẩu");
+
+    await parentPage.goto("/login", { waitUntil: "networkidle" });
+    const switchedPublicPanel = await openAssistantPanel(parentPage);
+    await expect(
+      switchedPublicPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Khách");
+    await expect(switchedPublicPanel).not.toContainText(
+      "Tôi muốn đổi mật khẩu",
+    );
+    await parentContext.close();
+
+    // 3. Admin on /admin/health: "Hỗ trợ Quản trị" badge, blocks customer /dashboard, never shows child-picker
+    const adminContext = await browser.newContext({
+      viewport,
+      extraHTTPHeaders: authFixtureHeaders("admin"),
+    });
+    await seedAuthSession(adminContext, ADMIN_ID, "admin");
+    const adminPage = await adminContext.newPage();
+    await installAssistantMockApi(adminPage);
+    await adminPage.goto("/admin/health", { waitUntil: "networkidle" });
+    const adminPanel = await openAssistantPanel(adminPage);
+    await expect(
+      adminPanel.getByTestId("viread-assistant-role-badge"),
+    ).toHaveText("Hỗ trợ Quản trị");
+
+    await adminPanel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Mở dashboard phụ huynh");
+    await adminPanel.getByLabel("Gửi câu hỏi").click();
+    await expect(adminPanel).toContainText("khu vực /admin");
+    expect(await adminPanel.locator('a[href="/dashboard"]').count()).toBe(0);
+    await expect(
+      adminPanel.getByTestId("viread-assistant-nav-card"),
+    ).toHaveCount(0);
+    await expect(
+      adminPanel.getByTestId("viread-assistant-active-child-badge"),
+    ).toHaveCount(0);
+    await expect(
+      adminPanel.getByTestId("viread-assistant-child-picker"),
+    ).toHaveCount(0);
+    await adminContext.close();
   });
 });
