@@ -3,6 +3,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_TEXT_MODEL,
+    read_model_env,
+    read_secret_env,
+)
+
 
 def _bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -25,13 +33,11 @@ def _int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 def _secret(name: str) -> str | None:
-    value = os.getenv(name, "").strip()
-    return value or None
+    return read_secret_env(name)
 
 
 def _model(name: str, default: str) -> str:
-    value = os.getenv(name, "").strip()
-    return value if value and len(value) <= 128 and " " not in value else default
+    return read_model_env(name, default=default)
 
 
 @dataclass(frozen=True)
@@ -42,10 +48,10 @@ class TutorQuestionConfig:
     ai_enabled: bool = True
     gemini_api_key: str | None = field(default=None, repr=False)
     groq_api_key: str | None = field(default=None, repr=False)
-    gemini_model: str = "gemini-2.5-flash-lite"
-    gemini_fallback_model: str = "gemini-2.5-flash"
-    groq_model: str = "llama-3.3-70b-versatile"
-    timeout_seconds: int = 20
+    gemini_model: str = DEFAULT_GEMINI_PRIMARY_MODEL
+    gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
+    groq_model: str = DEFAULT_GROQ_TEXT_MODEL
+    timeout_seconds: int = 12
     # Each lesson gets a random number of questions in [min, max], limited by
     # how much text the child actually read.
     min_questions: int = 5
@@ -61,12 +67,25 @@ class TutorQuestionConfig:
             ai_enabled=_bool("TUTOR_QUESTIONS_AI_ENABLED", True),
             gemini_api_key=_secret("GEMINI_API_KEY"),
             groq_api_key=_secret("GROQ_API_KEY"),
-            gemini_model=_model("TUTOR_QUESTIONS_GEMINI_MODEL", "gemini-2.5-flash-lite"),
-            gemini_fallback_model=_model(
-                "TUTOR_QUESTIONS_GEMINI_FALLBACK_MODEL", "gemini-2.5-flash"
+            gemini_model=read_model_env(
+                "TUTOR_QUESTIONS_GEMINI_MODEL",
+                "GEMINI_PRIMARY_MODEL",
+                "GEMINI_OCR_PRIMARY_MODEL",
+                default=DEFAULT_GEMINI_PRIMARY_MODEL,
             ),
-            groq_model=_model("TUTOR_QUESTIONS_GROQ_MODEL", "llama-3.3-70b-versatile"),
-            timeout_seconds=_int("TUTOR_QUESTIONS_TIMEOUT_SECONDS", 20, 1, 120),
+            gemini_fallback_model=read_model_env(
+                "TUTOR_QUESTIONS_GEMINI_FALLBACK_MODEL",
+                "GEMINI_FALLBACK_MODEL",
+                "GEMINI_OCR_FALLBACK_MODEL",
+                default=DEFAULT_GEMINI_FALLBACK_MODEL,
+            ),
+            groq_model=read_model_env(
+                "TUTOR_QUESTIONS_GROQ_MODEL",
+                "GROQ_PRIMARY_MODEL",
+                "GROQ_OCR_MODEL",
+                default=DEFAULT_GROQ_TEXT_MODEL,
+            ),
+            timeout_seconds=_int("TUTOR_QUESTIONS_TIMEOUT_SECONDS", 12, 1, 120),
             min_questions=minimum,
             max_questions=maximum,
             max_source_chars=_int("TUTOR_QUESTIONS_MAX_SOURCE_CHARS", 6000, 500, 20000),

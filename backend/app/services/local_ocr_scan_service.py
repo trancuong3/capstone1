@@ -682,7 +682,10 @@ class LocalOcrScanService:
 
         # Match extracted Vietnamese text against child-safety-approved catalog pages.
         ocr_tokens = normalize_text_tokens(ocr_text)
-        candidates = await self.repository.eligible_verified_pages(book_id=book_id)
+        candidates = await self.repository.eligible_verified_pages(
+            book_id=book_id,
+            ocr_tokens=ocr_tokens,
+        )
         best_tuple = None
         best_score = 0.0
         best_shared = 0

@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
-  getSession: vi.fn(),
-  initialize: vi.fn(),
-  fetchMock: vi.fn(),
-}));
+const { getSession, initialize, refreshSession, fetchMock } = vi.hoisted(
+  () => ({
+    getSession: vi.fn(),
+    initialize: vi.fn(),
+    refreshSession: vi.fn(),
+    fetchMock: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/supabase/client", () => ({
-  createBrowserSupabaseClient: () => ({ auth: { initialize, getSession } }),
+  createBrowserSupabaseClient: () => ({
+    auth: { initialize, getSession, refreshSession },
+  }),
 }));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "https://api.example.com",
@@ -16,6 +21,7 @@ vi.mock("@/lib/supabase/config", () => ({
 
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { requestApi } from "@/lib/api/api-client";
+import { resetBrowserAuthCache } from "@/lib/api/browser-auth";
 import {
   clearApiReadCache,
   setApiReadCacheActorScope,
@@ -31,6 +37,7 @@ const okSchema = z.object({ ok: z.boolean() });
 
 describe("requestApi cold-start resilience, 204 support, scoped cache invalidation & migrated services", () => {
   beforeEach(() => {
+    resetBrowserAuthCache();
     clearApiReadCache();
     setApiReadCacheEnabled(false);
     setApiReadCacheActorScope("parent-1");
@@ -39,11 +46,16 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
       data: { session: { access_token: "token-parent-1" } },
       error: null,
     });
+    refreshSession.mockReset().mockResolvedValue({
+      data: { session: null },
+      error: null,
+    });
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
+    resetBrowserAuthCache();
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -222,5 +234,92 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
         contact_email: "parent@example.com",
       }),
     ).rejects.toBeInstanceOf(SupportFeedbackError);
+  });
+
+  it("refreshes the Supabase session once on 401 and retries with the refreshed Bearer token", async () => {
+    refreshSession.mockResolvedValueOnce({
+      data: { session: { access_token: "refreshed-token-2" } },
+      error: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json({ detail: "expired" }, { status: 401 }),
+      )
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+
+    await expect(requestApi("/books/catalog", okSchema)).resolves.toEqual({
+      ok: true,
+    });
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer token-parent-1",
+      }),
+    });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer refreshed-token-2",
+      }),
+    });
+  });
+
+  it("rejects after a single refresh attempt when the retried request also returns 401 (no loop)", async () => {
+    refreshSession.mockResolvedValueOnce({
+      data: { session: { access_token: "refreshed-token-2" } },
+      error: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json({ detail: "expired-1" }, { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ detail: "still-invalid" }, { status: 401 }),
+      );
+
+    await expect(
+      requestApi("/profiles/me", okSchema, undefined, { bypassCache: true }),
+    ).rejects.toMatchObject({ status: 401, code: "AUTH_REQUIRED" });
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent 401 refreshes into a single refreshSession() call", async () => {
+    let resolveRefresh!: (value: {
+      data: { session: { access_token: string } };
+      error: null;
+    }) => void;
+    refreshSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    fetchMock.mockImplementation(async (_url, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      if (headers?.Authorization === "Bearer refreshed-token-shared") {
+        return Response.json({ ok: true });
+      }
+      return Response.json({ detail: "expired" }, { status: 401 });
+    });
+
+    const p1 = requestApi("/books/catalog", okSchema);
+    const p2 = requestApi("/profiles/me", okSchema);
+    const p3 = requestApi("/voice/voices", okSchema);
+
+    await vi.waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    resolveRefresh({
+      data: { session: { access_token: "refreshed-token-shared" } },
+      error: null,
+    });
+
+    await expect(Promise.all([p1, p2, p3])).resolves.toEqual([
+      { ok: true },
+      { ok: true },
+      { ok: true },
+    ]);
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 });

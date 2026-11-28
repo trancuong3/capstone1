@@ -12,6 +12,7 @@ import {
   invalidateUserCacheKey,
   readUserCacheWithStale,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO } from "@/types/profile";
 
@@ -75,6 +76,10 @@ function findFreshCachedChild(
 
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
+  const replaceRef = useRef(replace);
+  useEffect(() => {
+    replaceRef.current = replace;
+  }, [replace]);
   const authRuntime = useAuthRuntime();
   const childService = useChildService();
   const userId = authRuntime?.session?.user?.id ?? null;
@@ -132,7 +137,7 @@ export function useValidatedSelectedChild() {
           };
         }
       }
-      replace("/dashboard?focus=child-selection&reason=missing");
+      replaceRef.current("/dashboard?focus=child-selection&reason=missing");
       return () => {
         active = false;
       };
@@ -162,7 +167,7 @@ export function useValidatedSelectedChild() {
           invalidateUserCacheKey(userId, "dashboard-summary");
           invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
-          replace("/dashboard?focus=child-selection&reason=invalid");
+          replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
         setValidatedSelectedChild(child);
@@ -180,7 +185,7 @@ export function useValidatedSelectedChild() {
           invalidateUserCacheKey(userId, "dashboard-summary");
           invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
-          replace("/dashboard?focus=child-selection&reason=invalid");
+          replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
         if (!hadImmediateChild) {
@@ -195,7 +200,6 @@ export function useValidatedSelectedChild() {
     childService,
     clearSelectedChild,
     retryKey,
-    replace,
     selectChild,
     selectedChildId,
     setValidatedSelectedChild,
@@ -228,6 +232,14 @@ export function useValidatedSelectedChild() {
     }
     return { status: "loading", childId: selectedChildId };
   }, [immediateChild, selectedChildId, state, waitingForAuthInit]);
+
+  const visibleChild =
+    visibleState.status === "ready" ? visibleState.child : null;
+  useEffect(() => {
+    if (visibleChild) {
+      hydrateTeacherVoiceFromChildProfile(visibleChild);
+    }
+  }, [visibleChild]);
 
   return {
     state: visibleState,

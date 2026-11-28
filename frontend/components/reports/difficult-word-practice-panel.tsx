@@ -589,6 +589,7 @@ export function DifficultWordPracticePanel({
       pageId: primarySource?.page_id ?? null,
       pageRevisionId: primarySource?.page_revision_id ?? null,
       isPrivateBook: isPrivateBookSource,
+      bypassSessionLock: true,
     });
     return () => {
       setSpeechCacheContext?.(null);
@@ -663,6 +664,7 @@ export function DifficultWordPracticePanel({
             wordSample
               ? speechPlayer.play(adaptedText, {
                   wordSample: true,
+                  bypassSessionLock: true,
                   bookId: primarySource?.book_id ?? null,
                   pageId: primarySource?.page_id ?? null,
                   pageRevisionId: primarySource?.page_revision_id ?? null,
@@ -754,6 +756,7 @@ export function DifficultWordPracticePanel({
           await withRequestDeadline(
             () =>
               speechPlayer.playPhonicsLesson(phonicsLesson, {
+                bypassSessionLock: true,
                 bookId: primarySource?.book_id ?? null,
                 pageId: primarySource?.page_id ?? null,
                 pageRevisionId: primarySource?.page_revision_id ?? null,
@@ -1974,6 +1977,7 @@ export function DifficultWordPracticePanel({
         () =>
           speechPlayer.play(word.display_text, {
             wordSample: true,
+            bypassSessionLock: true,
             bookId: primarySource?.book_id ?? null,
             pageId: primarySource?.page_id ?? null,
             pageRevisionId: primarySource?.page_revision_id ?? null,
@@ -2109,7 +2113,13 @@ export function DifficultWordPracticePanel({
               clearTimers();
               stopBrowserRecognition();
               speechPlayer.stop();
-              return speechPlayer.play(sample, { bypassSessionLock: true });
+              return speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+              });
             }}
             onStopPreview={() => {
               flowGenerationRef.current += 1;

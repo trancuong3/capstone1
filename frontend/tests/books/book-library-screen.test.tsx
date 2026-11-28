@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
@@ -36,16 +36,26 @@ vi.mock("@/lib/supabase/config", () => ({
 beforeEach(() => installApiFetchFixture());
 afterEach(() => vi.unstubAllGlobals());
 
-function catalogResponse(input: RequestInfo | URL, empty = false) {
+const outOfGradeBookFixture = {
+  ...bookFixture,
+  id: "10000000-0000-4000-8000-000000000099",
+  title: "Sách lớp 5 nâng cao",
+  min_grade: 5,
+  max_grade: 5,
+};
+
+function catalogResponse(
+  input: RequestInfo | URL,
+  empty = false,
+  books = [bookFixture],
+) {
   const url = new URL(String(input));
   if (url.pathname === `/profiles/children/${TEST_CHILD_ID}`)
     return Response.json(childFixture);
   if (url.pathname === "/reading-management/collections")
     return Response.json([]);
   if (url.pathname === "/books/catalog")
-    return Response.json(
-      empty || url.searchParams.get("search") ? [] : [bookFixture],
-    );
+    return Response.json(empty || url.searchParams.get("search") ? [] : books);
   throw new Error("Unexpected isolated catalog route");
 }
 function renderLibrary() {
@@ -59,7 +69,9 @@ function renderLibrary() {
 }
 describe("BookLibraryScreen with real API adapters", () => {
   it("renders the selected child's catalog returned by the backend", async () => {
-    apiFetchFixture.mockImplementation(async (input) => catalogResponse(input));
+    apiFetchFixture.mockImplementation(async (input) =>
+      catalogResponse(input, false, [bookFixture, outOfGradeBookFixture]),
+    );
     renderLibrary();
     expect(
       await screen.findByRole("heading", {
@@ -70,6 +82,12 @@ describe("BookLibraryScreen with real API adapters", () => {
       await screen.findByRole("heading", { level: 2, name: bookFixture.title }),
     ).toBeInTheDocument();
     expect(
+      screen.queryByRole("heading", {
+        level: 2,
+        name: outOfGradeBookFixture.title,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByRole("link", { name: `Đọc sách ${bookFixture.title}` }),
     ).toHaveAttribute("href", `/books/${TEST_BOOK_ID}`);
     const catalogs = apiFetchFixture.mock.calls.filter(
@@ -77,15 +95,23 @@ describe("BookLibraryScreen with real API adapters", () => {
     );
     expect(catalogs.length).toBeGreaterThan(0);
     expect(
-      new URL(String(catalogs.at(-1)?.[0])).searchParams.get("grade"),
-    ).toBe(String(childFixture.grade));
+      new URL(String(catalogs.at(-1)?.[0])).searchParams.has("grade"),
+    ).toBe(false);
   });
 
-  it("offers one complete accessible grade filter and forwards its selection", async () => {
-    apiFetchFixture.mockImplementation(async (input) => catalogResponse(input));
+  it("offers one complete accessible grade filter and filters books cleanly", async () => {
+    apiFetchFixture.mockImplementation(async (input) =>
+      catalogResponse(input, false, [bookFixture, outOfGradeBookFixture]),
+    );
     const user = userEvent.setup();
     renderLibrary();
     await screen.findByRole("heading", { level: 2, name: bookFixture.title });
+    expect(
+      screen.queryByRole("heading", {
+        level: 2,
+        name: outOfGradeBookFixture.title,
+      }),
+    ).not.toBeInTheDocument();
     const filters = screen.getByRole("group", { name: "Lọc sách theo lớp" });
     expect(
       screen.getAllByRole("group", { name: "Lọc sách theo lớp" }),
@@ -105,14 +131,20 @@ describe("BookLibraryScreen with real API adapters", () => {
     const all = within(filters).getByRole("button", { name: "Tất cả" });
     await user.click(all);
     expect(all).toHaveAttribute("aria-pressed", "true");
-    await waitFor(() => {
-      const requests = apiFetchFixture.mock.calls.filter(
-        ([input]) => new URL(String(input)).pathname === "/books/catalog",
-      );
-      expect(
-        new URL(String(requests.at(-1)?.[0])).searchParams.has("grade"),
-      ).toBe(false);
-    });
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: outOfGradeBookFixture.title,
+      }),
+    ).toBeInTheDocument();
+    const requests = apiFetchFixture.mock.calls.filter(
+      ([input]) => new URL(String(input)).pathname === "/books/catalog",
+    );
+    expect(
+      requests.some(([input]) =>
+        new URL(String(input)).searchParams.has("grade"),
+      ),
+    ).toBe(false);
   });
 
   it("forwards search text and exposes a no-result recovery", async () => {

@@ -1,0 +1,261 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "632c0a2e-0671-58a2-9d53-61127b46bf74",
+      "text": "Rồng rắn lên mây",
+      "start_ms": 2353,
+      "end_ms": 4881,
+      "syllables": [
+        {
+          "id": "7eab9ac3-a502-5ecd-b236-bbaf9ef3d953",
+          "text": "Rồng",
+          "start_ms": 2353,
+          "end_ms": 2882
+        },
+        {
+          "id": "994b80ad-de07-592b-9789-5ff306405ff7",
+          "text": "rắn",
+          "start_ms": 2882,
+          "end_ms": 3411
+        },
+        {
+          "id": "1ff48ff4-bf27-563d-9051-0206df74ee4c",
+          "text": "lên",
+          "start_ms": 3411,
+          "end_ms": 3940
+        },
+        {
+          "id": "07278a4f-b355-509a-bed7-ab1be2babdcb",
+          "text": "mây",
+          "start_ms": 3940,
+          "end_ms": 4881
+        }
+      ]
+    },
+    {
+      "id": "4c27809a-4d59-5b5d-91bf-d439c673c9ba",
+      "text": "Có cây lúc lắc",
+      "start_ms": 5469,
+      "end_ms": 7997,
+      "syllables": [
+        {
+          "id": "4a1bb6dc-a530-54ae-a002-ab7d0bd0e629",
+          "text": "Có",
+          "start_ms": 5469,
+          "end_ms": 5998
+        },
+        {
+          "id": "8cb3322c-4ade-5738-bbd6-6c8b454d5162",
+          "text": "cây",
+          "start_ms": 5998,
+          "end_ms": 6527
+        },
+        {
+          "id": "c0d21cba-92c1-58ec-ae4f-31f581cfac2d",
+          "text": "lúc",
+          "start_ms": 6527,
+          "end_ms": 7056
+        },
+        {
+          "id": "74f4535b-30d5-500e-869f-a32b66034d03",
+          "text": "lắc",
+          "start_ms": 7056,
+          "end_ms": 7997
+        }
+      ]
+    },
+    {
+      "id": "5805a204-6044-533b-a33d-0d103a045b1c",
+      "text": "Hỏi thăm thầy thuốc",
+      "start_ms": 8585,
+      "end_ms": 11113,
+      "syllables": [
+        {
+          "id": "865b1ab0-85e6-5f34-a890-4070bf642848",
+          "text": "Hỏi",
+          "start_ms": 8585,
+          "end_ms": 9114
+        },
+        {
+          "id": "f1e8c6f8-39db-5120-8f1f-6451a43ee7b8",
+          "text": "thăm",
+          "start_ms": 9114,
+          "end_ms": 9643
+        },
+        {
+          "id": "bcfb026a-f6ac-5106-9c16-17b7d64593fa",
+          "text": "thầy",
+          "start_ms": 9643,
+          "end_ms": 10172
+        },
+        {
+          "id": "06480009-7f8e-55e6-989e-6afc9302339e",
+          "text": "thuốc",
+          "start_ms": 10172,
+          "end_ms": 11113
+        }
+      ]
+    },
+    {
+      "id": "9ab65f5a-9a25-5b19-a28f-44869b61eca3",
+      "text": "Có nhà hay không",
+      "start_ms": 11701,
+      "end_ms": 14229,
+      "syllables": [
+        {
+          "id": "2bc8968a-6726-5d95-9e15-83987486adf0",
+          "text": "Có",
+          "start_ms": 11701,
+          "end_ms": 12230
+        },
+        {
+          "id": "1705ed64-19e3-54c6-b1b4-7c8d89f4220d",
+          "text": "nhà",
+          "start_ms": 12230,
+          "end_ms": 12759
+        },
+        {
+          "id": "67c76281-c9bb-5ac9-9b0f-222e68059544",
+          "text": "hay",
+          "start_ms": 12759,
+          "end_ms": 13288
+        },
+        {
+          "id": "3469101c-814a-523d-9368-3b0c9ffbaddb",
+          "text": "không",
+          "start_ms": 13288,
+          "end_ms": 14229
+        }
+      ]
+    },
+    {
+      "id": "b191081d-5934-5fb2-9824-ee9d4cd6731d",
+      "text": "Bước chân nhịp nhàng",
+      "start_ms": 14817,
+      "end_ms": 17345,
+      "syllables": [
+        {
+          "id": "82ef2a2f-9fd4-5339-874d-0d2072bd7244",
+          "text": "Bước",
+          "start_ms": 14817,
+          "end_ms": 15346
+        },
+        {
+          "id": "47e44f16-3d73-59b1-b9da-771012bc1cca",
+          "text": "chân",
+          "start_ms": 15346,
+          "end_ms": 15875
+        },
+        {
+          "id": "6eab944a-ca31-535c-ab0c-4556b131d142",
+          "text": "nhịp",
+          "start_ms": 15875,
+          "end_ms": 16404
+        },
+        {
+          "id": "00a6415d-0bf3-5873-b93e-44f619bd551f",
+          "text": "nhàng",
+          "start_ms": 16404,
+          "end_ms": 17345
+        }
+      ]
+    },
+    {
+      "id": "d2b9f280-6c47-55be-b6af-9c5ea43db133",
+      "text": "Nối đuôi rộn ràng",
+      "start_ms": 17933,
+      "end_ms": 20461,
+      "syllables": [
+        {
+          "id": "eeffe9b0-0249-5521-a605-a571e51d5655",
+          "text": "Nối",
+          "start_ms": 17933,
+          "end_ms": 18462
+        },
+        {
+          "id": "d064cd82-f1c5-56f5-9635-d7e048fa6507",
+          "text": "đuôi",
+          "start_ms": 18462,
+          "end_ms": 18991
+        },
+        {
+          "id": "26797a87-b655-5dee-a1df-07bbb2310fb0",
+          "text": "rộn",
+          "start_ms": 18991,
+          "end_ms": 19520
+        },
+        {
+          "id": "a1c811a2-5302-5a60-b6d3-e0ebda3f48e1",
+          "text": "ràng",
+          "start_ms": 19520,
+          "end_ms": 20461
+        }
+      ]
+    },
+    {
+      "id": "a3dec67f-4aa7-54d7-a662-b8d9a62cfbb0",
+      "text": "Bạn bè tươi tắn",
+      "start_ms": 21049,
+      "end_ms": 23577,
+      "syllables": [
+        {
+          "id": "2274d480-6a88-5e16-9c67-1080a35da39f",
+          "text": "Bạn",
+          "start_ms": 21049,
+          "end_ms": 21578
+        },
+        {
+          "id": "209f7203-b58d-5462-ba1d-e5a56e800741",
+          "text": "bè",
+          "start_ms": 21578,
+          "end_ms": 22107
+        },
+        {
+          "id": "75898647-4be4-564a-acba-db9e4f6e8b99",
+          "text": "tươi",
+          "start_ms": 22107,
+          "end_ms": 22636
+        },
+        {
+          "id": "54a654e7-5717-5e2c-8f21-2c270194b6b6",
+          "text": "tắn",
+          "start_ms": 22636,
+          "end_ms": 23577
+        }
+      ]
+    },
+    {
+      "id": "632e08a8-ccbe-5bd3-b170-4fcc6621aef3",
+      "text": "Vui dưới nắng vàng",
+      "start_ms": 24165,
+      "end_ms": 26693,
+      "syllables": [
+        {
+          "id": "56bed290-8cc5-5169-bd8e-7f11738d1005",
+          "text": "Vui",
+          "start_ms": 24165,
+          "end_ms": 24694
+        },
+        {
+          "id": "5e0e42d1-3a69-57f0-9959-66f98d7a2475",
+          "text": "dưới",
+          "start_ms": 24694,
+          "end_ms": 25223
+        },
+        {
+          "id": "61602142-271c-5696-918d-81731161f026",
+          "text": "nắng",
+          "start_ms": 25223,
+          "end_ms": 25752
+        },
+        {
+          "id": "5e8daffe-0181-5995-a226-a90c06f61035",
+          "text": "vàng",
+          "start_ms": 25752,
+          "end_ms": 26693
+        }
+      ]
+    }
+  ]
+}

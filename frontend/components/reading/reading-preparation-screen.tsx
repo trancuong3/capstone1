@@ -26,6 +26,7 @@ import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   getVoicePreloadState,
@@ -419,6 +420,7 @@ export function ReadingPreparationScreen({
         router.replace("/dashboard?focus=child-selection&reason=change");
         return;
       }
+      hydrateTeacherVoiceFromChildProfile(currentChild);
       const session = await readingService.create({
         book_id: state.data.book.id,
         child_id: currentChild.id,
@@ -688,7 +690,13 @@ export function ReadingPreparationScreen({
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}
             onPreview={(sample) =>
-              speechPlayer.play(sample, { bypassSessionLock: true })
+              speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+              })
             }
             onStopPreview={speechPlayer.stop}
           />

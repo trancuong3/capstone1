@@ -44,6 +44,7 @@ import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-b
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -51,10 +52,6 @@ import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
-import {
-  fetchOcrWorkerHealth,
-  type OcrWorkerHealthSnapshot,
-} from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
@@ -96,50 +93,6 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   SKIPPED: "privateManager.statusLabels.SKIPPED",
   FAILED: "privateManager.statusLabels.FAILED",
 };
-
-function resolveNoticeBoxStyle(
-  workflowStatus: SubmissionWorkflowStatus,
-  findingsCount: number,
-): string {
-  if (findingsCount > 0) {
-    return "border-amber-300 bg-amber-50 text-amber-950";
-  }
-  switch (workflowStatus) {
-    case "CHECK_FAILED":
-    case "REJECTED":
-      return "border-rose-300 bg-rose-50 text-rose-950";
-    case "CHECKING":
-      return "border-sky-200 bg-sky/40 text-ink";
-    case "PASSED_READY_TO_ADD":
-    case "APPROVED_READY_TO_ADD":
-    case "ADDED_TO_BOOK":
-      return "border-emerald-300 bg-emerald-50 text-emerald-950";
-    default:
-      return "border-amber-300 bg-amber-50 text-amber-950";
-  }
-}
-
-function resolveNoticeHeadingKey(
-  workflowStatus: SubmissionWorkflowStatus,
-): string {
-  switch (workflowStatus) {
-    case "CHECK_FAILED":
-      return "privateManager.toolCheckFailedNotice";
-    case "CHECKING":
-      return "privateManager.toolCheckCheckingNotice";
-    case "PASSED_READY_TO_ADD":
-    case "APPROVED_READY_TO_ADD":
-      return "privateManager.toolCheckReadyNotice";
-    case "REJECTED":
-      return "privateManager.toolCheckRejectedNotice";
-    case "NEEDS_RECHECK":
-      return "privateManager.toolCheckRecheckNotice";
-    case "ADDED_TO_BOOK":
-      return "privateManager.toolCheckAddedNotice";
-    default:
-      return "privateManager.toolCheckAdminNotice";
-  }
-}
 
 function generateClientKey(): string {
   if (
@@ -478,6 +431,7 @@ function ParentPrivateBookManagerContent({
   const t = useTranslations("books");
   const tCommon = useTranslations("common");
   const service = useParentPrivateBookService();
+  const taskCenter = useOptionalAiTaskCenter();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detailRequestIdRef = useRef(0);
@@ -803,6 +757,8 @@ function ParentPrivateBookManagerContent({
           page: sub.source_page_number,
         }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -833,6 +789,7 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -863,6 +820,7 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -885,6 +843,7 @@ function ParentPrivateBookManagerContent({
           ? t("privateManager.retriedQueuedOfflineNotice")
           : t("privateManager.retriedNotice"),
       );
+      taskCenter?.markTaskAlertSeen(sub.id);
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -899,7 +858,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.editSubmission(bookId, sub.id, {
+      const updated = await service.editSubmission(bookId, sub.id, {
         candidate_text: editText,
         source_type: editSourceType,
         source_note: editSourceNote.trim() || null,
@@ -908,6 +867,12 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(t("privateManager.editedSubmissionNotice"));
+      taskCenter?.markTaskAlertSeen(
+        sub.id,
+        updated?.workflow_status === "CHECKING"
+          ? undefined
+          : { includeNextSync: true },
+      );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -966,6 +931,9 @@ function ParentPrivateBookManagerContent({
             })
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
+      if (updated.pending_submission_count > 0) {
+        emitStudioTasksChanged({ portal: "parent" });
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("myBooks.updateErrorFallback")));
@@ -980,6 +948,8 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.delete(bookId);
+      taskCenter?.markTargetAlertsSeen({ bookId });
+      emitStudioTasksChanged({ portal: "parent" });
       router.push(backHref);
     } catch (error) {
       setActionError(errorText(error, t("myBooks.deleteErrorFallback")));
@@ -1018,6 +988,7 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1048,6 +1019,7 @@ function ParentPrivateBookManagerContent({
               page: page.page_number,
             }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1072,6 +1044,8 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.deletedPageNotice", { page: page.page_number }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1100,6 +1074,7 @@ function ParentPrivateBookManagerContent({
           ? t("privateManager.replacedSubmissionImageQueuedOfflineNotice")
           : t("privateManager.replacedSubmissionImageNotice"),
       );
+      taskCenter?.markTaskAlertSeen(sub.id);
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1121,9 +1096,8 @@ function ParentPrivateBookManagerContent({
     try {
       await service.cancelSubmission(bookId, sub.id);
       setActionNotice(t("privateManager.cancelledSubmissionNotice"));
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
-      }
+      taskCenter?.markTaskAlertSeen(sub.id);
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(

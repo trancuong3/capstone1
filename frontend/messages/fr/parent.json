@@ -249,7 +249,12 @@
     "selectedBadge": "Actif",
     "regionLabel": "Région",
     "voiceListLabel": "Voix spécifique",
-    "voiceListAria": "Liste des voix selon l'enseignant et la région"
+    "voiceListAria": "Liste des voix selon l'enseignant et la région",
+    "policyLabel": "Mode du moteur vocal",
+    "policyAria": "Choisir le mode du moteur vocal",
+    "policyLocalOnly": "Cet appareil uniquement",
+    "policyOnlineBackup": "Cet appareil + Secours en ligne",
+    "workerOfflineHint": "Le moteur vocal local est hors ligne. Activez « Cet appareil + Secours en ligne » pour lire les phrases et jeux non précalculés."
   },
   "childModePin": {
     "lockedPill": "Mode Enfant actif",

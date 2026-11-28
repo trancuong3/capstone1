@@ -249,7 +249,12 @@
     "selectedBadge": "נבחר",
     "regionLabel": "אזור מבטא",
     "voiceListLabel": "בחירת קול",
-    "voiceListAria": "רשימת קולות לפי מורה ואזור"
+    "voiceListAria": "רשימת קולות לפי מורה ואזור",
+    "policyLabel": "מצב מנוע קול",
+    "policyAria": "בחירת מצב מנוע קול",
+    "policyLocalOnly": "מכשיר זה בלבד",
+    "policyOnlineBackup": "מכשיר זה + גיבוי מקוון",
+    "workerOfflineHint": "שירות הקול המקומי אינו פעיל כעת. הפעילו את ״מכשיר זה + גיבוי מקוון״ כדי לשמוע משפטי ספרים ומשחקים שלא נשמרו מראש."
   },
   "childModePin": {
     "lockedPill": "מצב ילדים נעול",

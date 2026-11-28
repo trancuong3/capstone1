@@ -1,0 +1,405 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "60378f62-26b5-5bdf-bab0-6e1701b494f5",
+      "text": "Vườn xuân rực rỡ muôn sắc hoa",
+      "start_ms": 2553,
+      "end_ms": 7018,
+      "syllables": [
+        {
+          "id": "845262fe-d52f-55f9-913d-eb9b06020515",
+          "text": "Vườn",
+          "start_ms": 2553,
+          "end_ms": 3127
+        },
+        {
+          "id": "f941a324-a49a-5e05-8d02-885edc2db7d6",
+          "text": "xuân",
+          "start_ms": 3127,
+          "end_ms": 3701
+        },
+        {
+          "id": "4c036861-ac5b-50e9-9cd4-d19141d2ac61",
+          "text": "rực",
+          "start_ms": 3701,
+          "end_ms": 4275
+        },
+        {
+          "id": "499560ba-1831-55d6-a6db-3779c8628379",
+          "text": "rỡ",
+          "start_ms": 4275,
+          "end_ms": 4849
+        },
+        {
+          "id": "d4ec40cf-a60b-5505-b2ee-924025b6d214",
+          "text": "muôn",
+          "start_ms": 4849,
+          "end_ms": 5423
+        },
+        {
+          "id": "c8cb53f5-e47e-5726-a41e-d897bc192949",
+          "text": "sắc",
+          "start_ms": 5423,
+          "end_ms": 5997
+        },
+        {
+          "id": "c2a777c4-05b7-5a05-a553-86a018ece4a7",
+          "text": "hoa",
+          "start_ms": 5997,
+          "end_ms": 7018
+        }
+      ]
+    },
+    {
+      "id": "89fe0889-dea0-595c-af8d-071b7ff88205",
+      "text": "Khúc khích chim ca dưới nắng hòa",
+      "start_ms": 7656,
+      "end_ms": 12121,
+      "syllables": [
+        {
+          "id": "a8a5a166-0a64-59ab-8446-3ce4202d8dac",
+          "text": "Khúc",
+          "start_ms": 7656,
+          "end_ms": 8230
+        },
+        {
+          "id": "37639cc3-09cc-5957-b861-7e8d6503bb50",
+          "text": "khích",
+          "start_ms": 8230,
+          "end_ms": 8804
+        },
+        {
+          "id": "11f5eb9c-bed6-5f28-9e4e-3a7fc051092e",
+          "text": "chim",
+          "start_ms": 8804,
+          "end_ms": 9378
+        },
+        {
+          "id": "8c5ef271-faa2-5660-a114-2307a2d117cc",
+          "text": "ca",
+          "start_ms": 9378,
+          "end_ms": 9952
+        },
+        {
+          "id": "879cde3d-fb88-5047-85fd-3a25398a3820",
+          "text": "dưới",
+          "start_ms": 9952,
+          "end_ms": 10526
+        },
+        {
+          "id": "34516d65-1bab-5a59-8d76-f66484c78964",
+          "text": "nắng",
+          "start_ms": 10526,
+          "end_ms": 11100
+        },
+        {
+          "id": "3cea5b21-c430-53bd-9835-91241330b135",
+          "text": "hòa",
+          "start_ms": 11100,
+          "end_ms": 12121
+        }
+      ]
+    },
+    {
+      "id": "b6af290c-70fb-57fc-9694-5f447b49c5ec",
+      "text": "Ríu rít bướm vàng bay lấp lánh",
+      "start_ms": 12759,
+      "end_ms": 17224,
+      "syllables": [
+        {
+          "id": "d088e1c4-67f4-5701-9bfb-953d2ff214a2",
+          "text": "Ríu",
+          "start_ms": 12759,
+          "end_ms": 13333
+        },
+        {
+          "id": "064d2711-1326-5e91-a615-fca9802cea67",
+          "text": "rít",
+          "start_ms": 13333,
+          "end_ms": 13907
+        },
+        {
+          "id": "909db53b-bcf3-51ae-86a4-4ecda02dba9d",
+          "text": "bướm",
+          "start_ms": 13907,
+          "end_ms": 14481
+        },
+        {
+          "id": "9dfe6f82-a3c7-5ba8-8512-f3afeb0ac11e",
+          "text": "vàng",
+          "start_ms": 14481,
+          "end_ms": 15055
+        },
+        {
+          "id": "3ef69cae-0f8c-5448-b020-d63998574627",
+          "text": "bay",
+          "start_ms": 15055,
+          "end_ms": 15629
+        },
+        {
+          "id": "7ed43d53-bcd3-58bd-bb97-c711b209037e",
+          "text": "lấp",
+          "start_ms": 15629,
+          "end_ms": 16203
+        },
+        {
+          "id": "5a2460e7-a29b-54ff-9045-273b101967ae",
+          "text": "lánh",
+          "start_ms": 16203,
+          "end_ms": 17224
+        }
+      ]
+    },
+    {
+      "id": "f878edcc-455f-58ab-ab71-9cdfc87f107c",
+      "text": "Lung linh giọt sương khẽ ngân nga",
+      "start_ms": 17862,
+      "end_ms": 22327,
+      "syllables": [
+        {
+          "id": "6594092f-5968-5501-a6ca-f49763dc9adc",
+          "text": "Lung",
+          "start_ms": 17862,
+          "end_ms": 18436
+        },
+        {
+          "id": "e2f75fef-7a87-5ef7-bfa0-a1e8e32bb9be",
+          "text": "linh",
+          "start_ms": 18436,
+          "end_ms": 19010
+        },
+        {
+          "id": "33c53bec-7b0c-5657-a599-4429bd92606e",
+          "text": "giọt",
+          "start_ms": 19010,
+          "end_ms": 19584
+        },
+        {
+          "id": "b9aa9b0c-09f2-5241-9548-c3a4f570e773",
+          "text": "sương",
+          "start_ms": 19584,
+          "end_ms": 20158
+        },
+        {
+          "id": "d1a0bec0-dfaa-5443-b413-5a4444332524",
+          "text": "khẽ",
+          "start_ms": 20158,
+          "end_ms": 20732
+        },
+        {
+          "id": "98b52bc8-5008-547d-b8c4-fb786a671af3",
+          "text": "ngân",
+          "start_ms": 20732,
+          "end_ms": 21306
+        },
+        {
+          "id": "ccdd302c-44bd-51c2-ae98-1f42a95b77e2",
+          "text": "nga",
+          "start_ms": 21306,
+          "end_ms": 22327
+        }
+      ]
+    },
+    {
+      "id": "59928e0e-0dea-5066-95fa-f193a808f99d",
+      "text": "Gió mát dịu dàng qua tán lá",
+      "start_ms": 22965,
+      "end_ms": 27430,
+      "syllables": [
+        {
+          "id": "1c719e84-3644-5a7f-9d29-6256155d1955",
+          "text": "Gió",
+          "start_ms": 22965,
+          "end_ms": 23539
+        },
+        {
+          "id": "ca8ad8e5-02f6-5ddd-a680-a9939242a591",
+          "text": "mát",
+          "start_ms": 23539,
+          "end_ms": 24113
+        },
+        {
+          "id": "b9a6c0a8-525c-549a-8878-31a8dfc42d35",
+          "text": "dịu",
+          "start_ms": 24113,
+          "end_ms": 24687
+        },
+        {
+          "id": "d057cca0-e57f-5ada-95ef-fb1688172bef",
+          "text": "dàng",
+          "start_ms": 24687,
+          "end_ms": 25261
+        },
+        {
+          "id": "e442a20a-65bb-5509-935d-28bd30072b73",
+          "text": "qua",
+          "start_ms": 25261,
+          "end_ms": 25835
+        },
+        {
+          "id": "d58f9a06-08b7-5a2d-b75a-e162a23550ce",
+          "text": "tán",
+          "start_ms": 25835,
+          "end_ms": 26409
+        },
+        {
+          "id": "5ce96f85-c997-5c22-9ee8-50cf94e04513",
+          "text": "lá",
+          "start_ms": 26409,
+          "end_ms": 27430
+        }
+      ]
+    },
+    {
+      "id": "b4d5525b-3b60-59e0-8007-f2a6478c8c16",
+      "text": "Mặt hồ trong trẻo ánh mây xa",
+      "start_ms": 28068,
+      "end_ms": 32533,
+      "syllables": [
+        {
+          "id": "0dba394f-08cc-5d6b-a381-8529ae4e8dc0",
+          "text": "Mặt",
+          "start_ms": 28068,
+          "end_ms": 28642
+        },
+        {
+          "id": "760be02b-5501-5af0-968f-d6a92f58a809",
+          "text": "hồ",
+          "start_ms": 28642,
+          "end_ms": 29216
+        },
+        {
+          "id": "427c542d-75fd-5729-bec8-c1ea79d2aa64",
+          "text": "trong",
+          "start_ms": 29216,
+          "end_ms": 29790
+        },
+        {
+          "id": "5f20f71c-97cd-512f-9a00-ecd70358da84",
+          "text": "trẻo",
+          "start_ms": 29790,
+          "end_ms": 30364
+        },
+        {
+          "id": "ea15e70b-a32a-556e-95fb-fd3ee4614ec9",
+          "text": "ánh",
+          "start_ms": 30364,
+          "end_ms": 30938
+        },
+        {
+          "id": "71e6e5e1-780b-5f92-b551-16a7e4eebf31",
+          "text": "mây",
+          "start_ms": 30938,
+          "end_ms": 31512
+        },
+        {
+          "id": "e33d722e-aa58-5873-a07a-f0e2bc53ed36",
+          "text": "xa",
+          "start_ms": 31512,
+          "end_ms": 32533
+        }
+      ]
+    },
+    {
+      "id": "971e7b1b-305e-5ce4-a409-9cafbd27dd1d",
+      "text": "Tuổi thơ vững chãi thêm khôn lớn",
+      "start_ms": 33171,
+      "end_ms": 37636,
+      "syllables": [
+        {
+          "id": "95159a25-5f18-5db2-bbf0-25a99da131c0",
+          "text": "Tuổi",
+          "start_ms": 33171,
+          "end_ms": 33745
+        },
+        {
+          "id": "d5df783a-e63f-5698-bc13-2753ee0da437",
+          "text": "thơ",
+          "start_ms": 33745,
+          "end_ms": 34319
+        },
+        {
+          "id": "2121cd2e-74d7-56a3-b311-391b862c91bb",
+          "text": "vững",
+          "start_ms": 34319,
+          "end_ms": 34893
+        },
+        {
+          "id": "fdd8d071-a80c-526c-bcd9-4f5461e4f796",
+          "text": "chãi",
+          "start_ms": 34893,
+          "end_ms": 35467
+        },
+        {
+          "id": "6b4d3f49-1f96-5bd4-9dbe-3ea47e458e05",
+          "text": "thêm",
+          "start_ms": 35467,
+          "end_ms": 36041
+        },
+        {
+          "id": "66a1b785-e200-561c-ba01-099788237d8b",
+          "text": "khôn",
+          "start_ms": 36041,
+          "end_ms": 36615
+        },
+        {
+          "id": "128c5186-fcce-56d9-8412-c467722b7139",
+          "text": "lớn",
+          "start_ms": 36615,
+          "end_ms": 37636
+        }
+      ]
+    },
+    {
+      "id": "b3e33652-1aa8-5a0f-a31a-3865b4e8247c",
+      "text": "Yêu tiếng Việt mình đẹp thiết tha",
+      "start_ms": 38274,
+      "end_ms": 42739,
+      "syllables": [
+        {
+          "id": "e73eb54c-7f8e-503e-b84e-40e468ea721f",
+          "text": "Yêu",
+          "start_ms": 38274,
+          "end_ms": 38848
+        },
+        {
+          "id": "b46d968f-9dc1-53c8-8f1e-9b8491c24649",
+          "text": "tiếng",
+          "start_ms": 38848,
+          "end_ms": 39422
+        },
+        {
+          "id": "a1a51cc3-8fed-5d7b-b649-e5c82bff201f",
+          "text": "Việt",
+          "start_ms": 39422,
+          "end_ms": 39996
+        },
+        {
+          "id": "0c2ad24b-2c5a-5705-a0e7-443a127bf7a9",
+          "text": "mình",
+          "start_ms": 39996,
+          "end_ms": 40570
+        },
+        {
+          "id": "be0e44a4-cd81-51df-a50b-c466edad9f78",
+          "text": "đẹp",
+          "start_ms": 40570,
+          "end_ms": 41144
+        },
+        {
+          "id": "7d708d56-0367-51bb-9f70-0f9018961936",
+          "text": "thiết",
+          "start_ms": 41144,
+          "end_ms": 41718
+        },
+        {
+          "id": "dcc951f7-1e01-5a59-a0bf-68ce00483180",
+          "text": "tha",
+          "start_ms": 41718,
+          "end_ms": 42739
+        }
+      ]
+    }
+  ]
+}

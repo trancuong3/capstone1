@@ -689,14 +689,26 @@ def compute_word_practice_progress(
 
     consecutive_correct = 0
     latest_unambiguous: str | None = None
+    has_isolated_correct_in_streak = False
     for attempt in completed:
         if attempt.AssessmentStatus == "CORRECT":
             consecutive_correct += 1
             latest_unambiguous = "CORRECT"
+            if int(getattr(attempt, "AssessmentVersion", 1) or 1) == 1:
+                has_isolated_correct_in_streak = True
         elif attempt.AssessmentStatus == "INCORRECT":
             consecutive_correct = 0
             latest_unambiguous = "INCORRECT"
+            has_isolated_correct_in_streak = False
         # UNCERTAIN, NO_CLEAR_AUDIO, ENGINE_ERROR never reset or penalize streak.
+
+    has_contextual_entertainment_only = (
+        consecutive_correct > 0
+        and not has_isolated_correct_in_streak
+    )
+    required_consecutive = (
+        2 if has_contextual_entertainment_only else REQUIRED_CONSECUTIVE_CORRECT
+    )
 
     last_attempt = completed[-1] if completed else None
     last_practiced_at = (
@@ -718,8 +730,8 @@ def compute_word_practice_progress(
     if not started_any:
         practice_status: PracticeStatusLiteral = "NOT_PRACTICED"
     elif (
-        consecutive_correct >= REQUIRED_CONSECUTIVE_CORRECT
-        and correct_count >= REQUIRED_CONSECUTIVE_CORRECT
+        consecutive_correct >= required_consecutive
+        and correct_count >= required_consecutive
         and latest_unambiguous == "CORRECT"
         and not encountered_again_after_practice
     ):
@@ -737,7 +749,7 @@ def compute_word_practice_progress(
         practice_incorrect_count=incorrect_count,
         practice_uncertain_count=uncertain_count,
         consecutive_correct_count=consecutive_correct,
-        required_consecutive_correct=REQUIRED_CONSECUTIVE_CORRECT,
+        required_consecutive_correct=required_consecutive,
         last_practiced_at=last_practiced_at,
         last_practice_status=last_practice_status,
     )

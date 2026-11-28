@@ -1,0 +1,16 @@
+{
+  "slug": "bac-kim-thang",
+  "song_id": "b33a9472-bf06-5d4d-a0b8-1b80c832f8c9",
+  "version_id": "e2fe4861-c85c-5486-b468-0320e0c914d2",
+  "title": "Bắc kim thang",
+  "author": "Đồng dao dân gian Việt Nam",
+  "min_grade": 1,
+  "max_grade": 3,
+  "bpm": 100.0,
+  "phonics_focus": "Vần ang / an & thanh hỏi",
+  "source_note": "Đồng dao dân gian truyền thống Việt Nam thuộc phạm vi công cộng (Public Domain); hòa âm thiếu nhi bởi ViRead (CC0 1.0).",
+  "usage_note": "Phát trực tuyến và luyện hát theo âm quãng mẫu trong ứng dụng học tập ViRead.",
+  "duration_ms": 42430,
+  "audio_size_bytes": 679307,
+  "audio_sha256": "e945ebdd63571b3b128bc01c5bbe44a0c3f0aaee4be1bdae3168748393dbefbb"
+}

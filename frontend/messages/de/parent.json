@@ -249,7 +249,12 @@
     "selectedBadge": "Aktiv",
     "regionLabel": "Region",
     "voiceListLabel": "Stimme auswählen",
-    "voiceListAria": "Verfügbare Stimmen nach Lehrkraft und Region"
+    "voiceListAria": "Verfügbare Stimmen nach Lehrkraft und Region",
+    "policyLabel": "Sprachmodus",
+    "policyAria": "Sprachmodus auswählen",
+    "policyLocalOnly": "Nur dieses Gerät",
+    "policyOnlineBackup": "Dieses Gerät + Online-Backup",
+    "workerOfflineHint": "Der lokale Sprachdienst ist offline. Aktivieren Sie „Dieses Gerät + Online-Backup“, damit nicht zwischengespeicherte Sätze und Spiele vorgelesen werden."
   },
   "childModePin": {
     "lockedPill": "Kinderschutz aktiv",

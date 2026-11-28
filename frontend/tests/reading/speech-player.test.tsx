@@ -2,7 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { ServiceError } from "@/lib/api/service-error";
 import {
+  lockSessionVoice,
   resetVoiceLockAndPolicyForTests,
   setVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
@@ -312,5 +314,130 @@ describe("useSpeechPlayer", () => {
       await second;
     });
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows voice_preview with bypassSessionLock=true to fall back to on-device speechSynthesis on 503 or network outage even under local_only, while blocking locked or auth/busy errors", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
+    speechSynthesisMock.speak.mockImplementation(
+      (utterance: FakeSpeechSynthesisUtterance) => {
+        queueMicrotask(() => {
+          utterance.onstart?.({} as SpeechSynthesisEvent);
+          utterance.onend?.({} as SpeechSynthesisEvent);
+        });
+      },
+    );
+
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    // 1. 503 LOCAL_TTS_UNAVAILABLE on voice_preview + bypassSessionLock: true -> speaks via OS speechSynthesis
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new ServiceError({
+        code: "TTS_UNAVAILABLE",
+        provider_code: "LOCAL_TTS_UNAVAILABLE",
+        message: "Máy trạm giọng đọc tạm nghỉ",
+        status: 503,
+        request_id: "req-503",
+        retryable: true,
+      }),
+    );
+    await act(async () => {
+      await result.current.play(
+        "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+        {
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        },
+      );
+    });
+    expect(speechSynthesisMock.speak).toHaveBeenCalledTimes(1);
+
+    // 2. status: 0 network failure ServiceError on voice_preview -> also speaks via OS speechSynthesis
+    speechSynthesisMock.speak.mockClear();
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new ServiceError({
+        code: "TTS_UNAVAILABLE",
+        message: "Chưa kết nối được dịch vụ giọng đọc",
+        status: 0,
+        request_id: "",
+        retryable: true,
+      }),
+    );
+    await act(async () => {
+      await result.current.play(
+        "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+        {
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        },
+      );
+    });
+    expect(speechSynthesisMock.speak).toHaveBeenCalledTimes(1);
+
+    // 3. Edge case: 401 auth failure or transient LOCAL_TTS_BUSY MUST NOT fall back to speechSynthesis
+    speechSynthesisMock.speak.mockClear();
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new ServiceError({
+        code: "AUTH_REQUIRED",
+        message: "Unauthorized",
+        status: 401,
+        request_id: "req-401",
+        retryable: false,
+      }),
+    );
+    await act(async () => {
+      await expect(
+        result.current.play("Chào con", {
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        }),
+      ).rejects.toThrow();
+    });
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
+
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new ServiceError({
+        code: "TTS_UNAVAILABLE",
+        provider_code: "LOCAL_TTS_BUSY",
+        message: "Busy",
+        status: 503,
+        request_id: "req-busy",
+        retryable: true,
+      }),
+    );
+    await act(async () => {
+      await expect(
+        result.current.play("Chào con", {
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        }),
+      ).rejects.toThrow();
+    });
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
+
+    // 4. Edge case: without bypassSessionLock while a reading session lock is active -> MUST NOT fall back
+    lockSessionVoice("active-reading-session-1");
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new Error("503 LOCAL_TTS_UNAVAILABLE"),
+    );
+    await act(async () => {
+      await expect(
+        result.current.play("Chào con", {
+          utteranceKind: "voice_preview",
+        }),
+      ).rejects.toThrow();
+    });
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
   });
 });

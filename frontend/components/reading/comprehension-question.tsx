@@ -470,7 +470,10 @@ export function ComprehensionQuestion({
           setFeedbackNote(
             isServiceError(error)
               ? error.message
-              : "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+              : adaptTextToTeacherPersona(
+                  "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+                  getEffectiveTeacherPersona().gender,
+                ),
           );
         }
       } finally {
@@ -497,6 +500,7 @@ export function ComprehensionQuestion({
         if (source === "voice" || canUseVoice) {
           const praise = prompts.next("quizCorrect");
           setFeedbackNote(praise);
+          setFeedbackPreserveVerbatim(false);
           setVoicePhase("reading");
           const stillCurrent = await speakGuarded(praise, gen);
           if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
@@ -626,6 +630,7 @@ export function ComprehensionQuestion({
       let encourage: string;
       let preserveVerbatim = false;
       if (storyHint) {
+        setRevealedHint(storyHint);
         preserveVerbatim = true;
         if (chosen) {
           // Adapt ONLY the framing template BEFORE interpolating story text
@@ -658,7 +663,6 @@ export function ComprehensionQuestion({
       } else {
         encourage = prompts.next("quizTryAgain");
       }
-      if (storyHint) setRevealedHint(storyHint);
       setFeedbackNote(encourage);
       setFeedbackPreserveVerbatim(preserveVerbatim);
       setVoicePhase("reading");
@@ -1432,7 +1436,11 @@ export function ComprehensionQuestion({
                     onPreview={(sample) => {
                       stopAllVoice();
                       return speechPlayer.play(sample, {
+                        coaching: true,
+                        cacheScope: "COACHING",
+                        isPrivateBook: false,
                         bypassSessionLock: true,
+                        utteranceKind: "voice_preview",
                       });
                     }}
                     onStopPreview={stopAllVoice}
