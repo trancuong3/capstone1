@@ -237,9 +237,9 @@ class AiRouterV2DefaultsAndTransportTests(unittest.IsolatedAsyncioTestCase):
             "LOCAL_IMAGE_GEN_URL": "http://127.0.0.1:8090",
         }
         specs = {p.provider_id: p for p in build_default_provider_registry(env=base_env)}
-        self.assertEqual(specs["gemini_primary"].model_id, "gemini-2.5-flash-lite")
-        self.assertEqual(specs["gemini_fallback"].model_id, "gemini-2.5-flash")
-        self.assertEqual(specs["groq_qwen"].model_id, "llama-3.3-70b-versatile")
+        self.assertEqual(specs["gemini_primary"].model_id, "gemini-3.1-flash-lite")
+        self.assertEqual(specs["gemini_fallback"].model_id, "gemini-3.5-flash-lite")
+        self.assertEqual(specs["groq_qwen"].model_id, "qwen/qwen3.8-27b")
         self.assertEqual(
             specs["cloudflare_flux"].model_id, "@cf/black-forest-labs/flux-1-schnell"
         )
