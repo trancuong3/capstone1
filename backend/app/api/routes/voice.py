@@ -241,6 +241,31 @@ def _accepts_db_kwarg(fn: Any) -> bool:
     return _accepts_kwarg(fn, "db")
 
 
+def lookup_voice_gender(candidate_voice_id: str | None) -> str | None:
+    """Resolve explicit male/female gender from local, Google, or ElevenLabs voice IDs."""
+    if not candidate_voice_id:
+        return None
+    clean = str(candidate_voice_id).strip()
+    if not clean:
+        return None
+    for item in STATIC_LOCAL_VOICES:
+        if item.get("voice_id") == clean:
+            return str(item.get("gender") or "female")
+    g_meta = GOOGLE_VOICE_BY_ID.get(clean)
+    if g_meta is not None:
+        return str(g_meta.get("gender") or "female")
+    male_elevenlabs = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+    if male_elevenlabs and clean == male_elevenlabs:
+        return "male"
+    female_elevenlabs = os.getenv("ELEVENLABS_FEMALE_VOICE_ID", "").strip()
+    if female_elevenlabs and clean == female_elevenlabs:
+        return "female"
+    lowered = clean.lower()
+    if "male" in lowered and "female" not in lowered:
+        return "male"
+    return None
+
+
 def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
     cache_hit = bool(getattr(speech_or_audio, "cache_hit", False))
     cache_scope = getattr(speech_or_audio, "cache_scope", None)
@@ -344,23 +369,9 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
-    def _lookup_voice_gender(candidate_voice_id: str | None) -> str | None:
-        if not candidate_voice_id:
-            return None
-        for item in STATIC_LOCAL_VOICES:
-            if item.get("voice_id") == candidate_voice_id:
-                return str(item.get("gender") or "female")
-        g_meta = GOOGLE_VOICE_BY_ID.get(candidate_voice_id)
-        if g_meta is not None:
-            return str(g_meta.get("gender") or "female")
-        el_male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
-        if el_male_voice_id and candidate_voice_id == el_male_voice_id:
-            return "male"
-        return None
-
     voice_gender = (
-        _lookup_voice_gender(audio.resolved_voice_id)
-        or _lookup_voice_gender(payload.voice_id)
+        lookup_voice_gender(audio.resolved_voice_id)
+        or lookup_voice_gender(payload.voice_id)
         or "female"
     )
 
@@ -436,6 +447,11 @@ async def phonics_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    response.headers["X-Voice-Gender"] = (
+        lookup_voice_gender(speech.resolved_voice_id)
+        or lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
     fallback_reason = getattr(speech, "fallback_reason", None)
     if getattr(speech, "used_fallback_voice", False) and fallback_reason:
         response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)

@@ -25,6 +25,7 @@ import {
   type AdminBadgeTone,
 } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
+import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -1721,6 +1722,9 @@ export function AdminBookContentQualityScreen({
                             {t("contentQuality.booksScan.copyrightAlertBadge")}
                           </AdminBadge>
                         ) : null}
+                        <ReadabilityBadge
+                          readability={book.assessment.readability}
+                        />
                       </div>
 
                       <h3

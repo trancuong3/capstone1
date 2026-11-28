@@ -48,6 +48,8 @@ from app.schemas.parent_private_book import (
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
     ParentSaveFromScanResponse,
+    ParentStoryweaverRequest,
+    ParentStoryweaverResponse,
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
 )
@@ -188,6 +190,28 @@ async def save_my_private_book_from_scan(
         ) from exc
     finally:
         await image.close()
+
+
+@router.post(
+    "/my-books/storyweaver",
+    response_model=ParentStoryweaverResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("parent_storyweaver", default_max=15, default_window=60.0))],
+)
+async def create_storyweaver_private_book(
+    payload: ParentStoryweaverRequest,
+    request: Request,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    from app.services.family_storyweaver_service import FamilyStoryweaverService
+
+    base_url = str(request.base_url) if hasattr(request, "base_url") else None
+    return await FamilyStoryweaverService(db).create_storyweaver_book(
+        actor_id, payload, base_url=base_url
+    )
 
 
 @router.get("/my-books/{book_id}", response_model=ParentPrivateBookDetailRead)

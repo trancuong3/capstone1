@@ -697,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "0.85倍速でゆっくり練習したいフレーズ",
     "openSongAction": "曲をひらく",
     "homeTipsTitle": "おうちでできるサポートのヒント"
+  },
+  "printCertificate": {
+    "brandTagline": "家庭読書進捗レポート",
+    "printA4Action": "A4レポート印刷",
+    "downloadCertificateAction": "認定証を保存 (.png)",
+    "certificateHeading": "読書マイルストーン認定証",
+    "certificateSubtitle": "家族とともに続けたベトナム語音読の歩みをたたえて",
+    "awardedTo": "表彰されるお子さま",
+    "progressAchievement": "{alias}さんは毎週こつこつ音読を続け、ベトナム語の語彙を広げました！",
+    "progressStatsLine": "完了セッション: {sessions} ・ 読んだ語数: {words} ・ 平均正確度: {accuracy}",
+    "sessionReaderFallback": "がんばり屋の小さな読書家",
+    "sessionAchievement": "はっきり自信をもって音読セッションをやり遂げました！",
+    "sessionStatsLine": "読んだページ: {pages} ・ 総語数: {words} ・ 最高正確度: {accuracy}",
+    "issuedOn": "発行日: {date}",
+    "encouragementFooter": "今日読んだ1ページが、家族のあたたかい学びの種になります。"
   }
 }

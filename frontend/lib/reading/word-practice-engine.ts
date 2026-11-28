@@ -20,6 +20,8 @@ import {
 } from "@/lib/reading/browser-wasm-stt";
 import {
   getVoiceEngineHealthForRouting,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -318,9 +320,12 @@ export async function evaluateRecordedShortWord({
   }
 
   const freshHealth = getVoiceEngineHealthForRouting();
+  const permanentlyUnconfigured =
+    isPermanentlyHostedLocalUnconfigured(freshHealth);
   const localSttUnavailable =
-    freshHealth !== null &&
-    (!freshHealth.local.available || !freshHealth.local.stt_ready);
+    permanentlyUnconfigured ||
+    (freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready));
   const canUseWasm = detectBrowserWasmSttSupport().supported;
   let triedWasmFirst = false;
 
@@ -352,9 +357,10 @@ export async function evaluateRecordedShortWord({
       if (wasmText) {
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: freshHealth.local.configured !== false,
+          fallbackUsed:
+            !permanentlyUnconfigured && freshHealth?.local.configured !== false,
           fallbackReason:
-            freshHealth.local.configured === false
+            permanentlyUnconfigured || freshHealth?.local.configured === false
               ? null
               : "LOCAL_STT_UNAVAILABLE",
         });
@@ -407,6 +413,7 @@ export async function evaluateRecordedShortWord({
         ? String((firstPass as { provider?: unknown }).provider).toLowerCase()
         : "";
     const skipPass2ForUnavailableOrWasm =
+      permanentlyUnconfigured ||
       localSttUnavailable ||
       triedWasmFirst ||
       firstPassProvider === "wasm" ||
@@ -469,7 +476,14 @@ export async function evaluateRecordedShortWord({
       transcript: firstText || null,
       sttDurationMs: elapsedMs(),
     };
-  } catch {
+  } catch (err) {
+    const errText =
+      typeof err === "object" && err !== null
+        ? `${String((err as { code?: unknown }).code ?? "")} ${String((err as { providerCode?: unknown }).providerCode ?? "")} ${err instanceof Error ? err.message : ""}`
+        : "";
+    if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+      markHostedLocalUnconfigured();
+    }
     if (!triedWasmFirst && canUseWasm) {
       try {
         const wasmResult = await runBoundedWasmDecode();

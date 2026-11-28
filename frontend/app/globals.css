@@ -1224,6 +1224,38 @@ html:lang(bn) {
   transform: scaleX(-1);
 }
 
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #16302b !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .parent-topbar,
+  .site-colophon,
+  .viread-no-print,
+  [data-print-hide="true"],
+  nav[aria-label] {
+    display: none !important;
+  }
+
+  .viread-print-sheet,
+  .report-metrics > *,
+  section,
+  article {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+  }
+}
+
 @keyframes avatar-menu-in {
   0% {
     opacity: 0;
@@ -1311,4 +1343,62 @@ html:lang(bn) {
 
 .avatar-menu-search:focus-visible {
   outline: none;
+}
+
+@keyframes viread-messenger-typing-in {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes viread-messenger-typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.42;
+    transform: translateY(0) scale(0.9);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-5px) scale(1.1);
+  }
+}
+
+.viread-messenger-typing-row {
+  animation: viread-messenger-typing-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.viread-messenger-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background-color: rgb(8 116 103 / 78%);
+  animation: viread-messenger-typing-dot 1.35s
+    cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform, opacity;
+}
+
+.viread-messenger-dot-1 {
+  animation-delay: 0ms;
+}
+
+.viread-messenger-dot-2 {
+  animation-delay: 180ms;
+}
+
+.viread-messenger-dot-3 {
+  animation-delay: 360ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viread-messenger-dot {
+    opacity: 0.85;
+    transform: none;
+  }
 }

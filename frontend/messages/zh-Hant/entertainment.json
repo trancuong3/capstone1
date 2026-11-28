@@ -587,7 +587,8 @@
     },
     "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
     "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
-    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!"
+    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",
+    "studioIllustrationBadge": "純淨無字插畫"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "未偵測到播放。請點擊聽句重試。",

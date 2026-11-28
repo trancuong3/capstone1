@@ -97,6 +97,11 @@ import {
 } from "@/lib/reading/voice-capture-guard";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
+import {
+  getFreshVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
+} from "@/lib/reading/voice-engine-status";
 import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
@@ -401,10 +406,15 @@ function renderStars(count: number, ariaLabel: string) {
 
 export interface PictureDescriptionScreenProps {
   readonly vocabularyService?: VocabularyNotebookService;
+  readonly initialChildId?: string;
+  readonly initialBookId?: string;
+  readonly initialPageId?: string;
 }
 
 export function PictureDescriptionScreen({
   vocabularyService,
+  initialBookId,
+  initialPageId,
 }: PictureDescriptionScreenProps = {}) {
   const tRaw = useTranslations("entertainment");
   const tCommon = useTranslations("common");
@@ -464,7 +474,9 @@ export function PictureDescriptionScreen({
     status: "loading",
   });
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<SourceTab>("SAMPLE");
+  const [activeTab, setActiveTab] = useState<SourceTab>(() =>
+    initialPageId || initialBookId ? "BOOK_PAGE" : "SAMPLE",
+  );
   const [practiceTab, setPracticeTab] = useState<PracticeTab>("PRACTICE");
   const [session, setSession] = useState<PictureSessionDTO | null>(null);
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(
@@ -940,8 +952,15 @@ export function PictureDescriptionScreen({
     const controller = new AbortController();
     let active = true;
 
+    const catalogOptions =
+      initialBookId || initialPageId
+        ? { bookId: initialBookId, bookPageId: initialPageId }
+        : undefined;
+
     void Promise.all([
-      pictureService.getCatalog(childId, controller.signal),
+      catalogOptions
+        ? pictureService.getCatalog(childId, controller.signal, catalogOptions)
+        : pictureService.getCatalog(childId, controller.signal),
       pictureService.listSessions(childId, controller.signal),
     ])
       .then(([catalog, sessions]) => {
@@ -960,7 +979,14 @@ export function PictureDescriptionScreen({
       active = false;
       controller.abort();
     };
-  }, [catalogRefreshKey, childId, defaultGameError, pictureService]);
+  }, [
+    catalogRefreshKey,
+    childId,
+    defaultGameError,
+    initialBookId,
+    initialPageId,
+    pictureService,
+  ]);
 
   const sampleSessionMap = useMemo(() => {
     const map = new Map<string, PictureSessionSummaryDTO>();
@@ -1534,7 +1560,10 @@ export function PictureDescriptionScreen({
               .filter(Boolean)
               .slice(0, 16)
           : [];
-        if (!isServerSttConfirmedUnavailable()) {
+        const localUnconfigured = isPermanentlyHostedLocalUnconfigured(
+          getFreshVoiceEngineHealth(),
+        );
+        if (!localUnconfigured && !isServerSttConfirmedUnavailable()) {
           try {
             const sttResult = await speechService.transcribe(audioBlob, {
               languageCode: "vi",
@@ -1545,6 +1574,13 @@ export function PictureDescriptionScreen({
             sttTranscript = sttResult.text?.trim() || null;
           } catch (sttError: unknown) {
             if (isStaleCapture()) return;
+            const errText =
+              typeof sttError === "object" && sttError !== null
+                ? `${String((sttError as { code?: unknown }).code ?? "")} ${String((sttError as { providerCode?: unknown }).providerCode ?? "")} ${sttError instanceof Error ? sttError.message : ""}`
+                : "";
+            if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+              markHostedLocalUnconfigured();
+            }
             if (isServiceError(sttError) && sttError.status === 503) {
               refreshVoiceHealthQuietlyAfterSttFailure();
             }
@@ -1561,6 +1597,7 @@ export function PictureDescriptionScreen({
             sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
           } catch {
             if (isStaleCapture()) return;
+            sttTranscript = null;
           }
         }
       }
@@ -2750,9 +2787,20 @@ export function PictureDescriptionScreen({
                             const hasPriorAttempt = Boolean(
                               existing && existing.attempts_count > 0,
                             );
+                            const isPinnedPage = Boolean(
+                              initialPageId && page.page_id === initialPageId,
+                            );
                             return (
                               <article
-                                className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
+                                className={cn(
+                                  "flex flex-col overflow-hidden rounded-card border bg-white shadow-sm",
+                                  isPinnedPage
+                                    ? "border-2 border-primary ring-2 ring-primary/20"
+                                    : "border-border",
+                                )}
+                                data-pinned-book-page={
+                                  isPinnedPage ? "true" : undefined
+                                }
                                 key={page.page_id}
                               >
                                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
@@ -2768,6 +2816,13 @@ export function PictureDescriptionScreen({
                                     className="h-full w-full object-cover"
                                     src={page.image_url}
                                   />
+                                  {page.has_verified_illustration ? (
+                                    <span className="absolute start-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-primary shadow-sm">
+                                      {t(
+                                        "pictureDescription.studioIllustrationBadge",
+                                      )}
+                                    </span>
+                                  ) : null}
                                   {hasPriorAttempt && existing ? (
                                     <span className="absolute end-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
                                       {t("pictureDescription.starsBadge", {

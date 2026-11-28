@@ -587,7 +587,8 @@
     },
     "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
     "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
-    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!"
+    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",
+    "studioIllustrationBadge": "글자 없는 삽화"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "반복 재생을 시작하지 못했습니다. 문장 듣기를 눌러 다시 시도하세요.",

@@ -706,7 +706,10 @@ self.onmessage = async (event) => {
         rawSumSq += v * v;
       }
       const rawRms = Math.sqrt(rawSumSq / input.length);
-      if (rawPeak <= 0.0015 || (msg.voicedDurationMs === 0 && rawRms < 0.003)) {
+      if (
+        rawPeak <= 0.0008 ||
+        (msg.voicedDurationMs === 0 && rawRms < 0.0015)
+      ) {
         self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
         return;
       }

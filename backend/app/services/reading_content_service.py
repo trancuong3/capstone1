@@ -1591,9 +1591,14 @@ class ReadingContentService:
         ill_id: UUID | None = None
         ill_storage_path: str | None = None
         illustration_text_free = False
+        extracted_page_kind: str | None = None
+        extracted_blocks_json: list[dict] | None = None
         try:
             from sqlalchemy import desc, select
-            from app.models.smart_book_studio import BookPresentationAsset
+            from app.models.smart_book_studio import (
+                BookPresentationAsset,
+                PageOcrExtraction,
+            )
 
             db_session = getattr(self.repository, "db", None)
             if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
@@ -1620,6 +1625,33 @@ class ReadingContentService:
             ill_id = None
             ill_storage_path = None
             illustration_text_free = False
+
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import PageOcrExtraction
+
+            db_session = getattr(self.repository, "db", None)
+            if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
+                async with db_session.begin_nested():
+                    ocr_ext = await db_session.scalar(
+                        select(PageOcrExtraction)
+                        .where(PageOcrExtraction.BookPageId == page_id)
+                        .order_by(
+                            desc(PageOcrExtraction.UpdatedAt),
+                            desc(PageOcrExtraction.Id),
+                        )
+                        .limit(1)
+                    )
+                    if ocr_ext is not None:
+                        raw_pk = getattr(ocr_ext, "PageKind", None)
+                        if isinstance(raw_pk, str) and raw_pk.strip():
+                            extracted_page_kind = raw_pk.strip()
+                        raw_blocks = getattr(ocr_ext, "BlocksJson", None)
+                        if isinstance(raw_blocks, list):
+                            extracted_blocks_json = raw_blocks
+        except Exception:
+            extracted_page_kind = None
+            extracted_blocks_json = None
 
         rollback = getattr(self.repository.db, "rollback", None)
         if callable(rollback):
@@ -1711,6 +1743,16 @@ class ReadingContentService:
                 if isinstance(item, int) and not isinstance(item, bool) and item >= 0
             })
 
+        para_start_lines = safe_line_indices("paragraph_start_line_indices")
+        from app.services.duet_reading import build_duet_segments_for_page
+
+        duet_segments = build_duet_segments_for_page(
+            words,
+            page_kind=extracted_page_kind,
+            blocks_json=extracted_blocks_json,
+            paragraph_start_line_indices=para_start_lines,
+        )
+
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1731,8 +1773,10 @@ class ReadingContentService:
             ),
             illustration_url=illustration_url,
             illustration_text_free=illustration_text_free,
+            page_kind=extracted_page_kind,
+            duet_segments=duet_segments,
             text=text_content,
             words=words,
-            paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),
+            paragraph_start_line_indices=para_start_lines,
             indented_line_indices=safe_line_indices("indented_line_indices"),
         )

@@ -52,11 +52,15 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
   type setSpeechPreferences,
+  getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
+import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getBrowserOnlineStatus,
   getCachedVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
   subscribeBrowserOnlineStatus,
   subscribeVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
@@ -400,6 +404,12 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
+    const targetGender = selectedOption
+      ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
+      : value.voiceId === null
+        ? "female"
+        : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
+    void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
   }
 
   function selectTeacherGender(nextGender: VoiceGender) {
@@ -448,6 +458,7 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
+    void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
   }
 
   function changeProviderPolicy(
@@ -1071,13 +1082,18 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
+            !detectBrowserWasmTtsSupport().supported &&
             !(
-              voiceHealth?.elevenlabs?.tts_configured ||
-              voiceHealth?.elevenlabs?.stt_configured
+              policy.providerMode === "local_with_google_fallback" &&
+              ((policy.allowGoogleTtsFallback &&
+                voiceHealth?.elevenlabs?.tts_configured) ||
+                (policy.allowGoogleSttFallback &&
+                  voiceHealth?.elevenlabs?.stt_configured))
             ) &&
-            (voiceHealth
-              ? !voiceHealth.local.available
-              : loadState.data.local_worker_ready === false)
+            (isPermanentlyHostedLocalUnconfigured(voiceHealth) ||
+              (voiceHealth
+                ? !voiceHealth.local.available
+                : loadState.data.local_worker_ready === false))
               ? (() => {
                   const cachedIds =
                     loadState.data.cached_voice_ids !== undefined

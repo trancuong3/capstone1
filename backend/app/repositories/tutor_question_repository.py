@@ -83,6 +83,55 @@ class TutorQuestionRepository:
         )
         return [text for (text,) in result.all()]
 
+    async def page_extractions_by_page_ids(
+        self, page_ids: list[UUID]
+    ) -> dict[UUID, tuple[str | None, list[dict]]]:
+        if not page_ids or not callable(getattr(self.db, "begin_nested", None)):
+            return {}
+        try:
+            from sqlalchemy import desc
+            from app.models.smart_book_studio import PageOcrExtraction
+
+            async with self.db.begin_nested():
+                rows = (
+                    await self.db.execute(
+                        select(PageOcrExtraction)
+                        .where(PageOcrExtraction.BookPageId.in_(page_ids))
+                        .order_by(
+                            desc(PageOcrExtraction.UpdatedAt),
+                            desc(PageOcrExtraction.Id),
+                        )
+                    )
+                ).scalars().all()
+            out: dict[UUID, tuple[str | None, list[dict]]] = {}
+            for row in rows:
+                if row.BookPageId in out:
+                    continue
+                blocks = row.BlocksJson if isinstance(row.BlocksJson, list) else []
+                out[row.BookPageId] = (
+                    str(row.PageKind) if row.PageKind else None,
+                    blocks,
+                )
+            return out
+        except Exception:
+            return {}
+
+    async def book_style_bible_context(self, book_id: UUID | None) -> dict | None:
+        if book_id is None or not callable(getattr(self.db, "begin_nested", None)):
+            return None
+        try:
+            from app.models.smart_book_studio import BookStyleBible
+
+            async with self.db.begin_nested():
+                row = await self.db.scalar(
+                    select(BookStyleBible).where(BookStyleBible.BookId == book_id)
+                )
+            if row is not None and isinstance(row.BibleJson, dict):
+                return dict(row.BibleJson)
+            return None
+        except Exception:
+            return None
+
     async def questions(self, session_id: UUID) -> list[ComprehensionQuestion]:
         result = await self.db.execute(
             select(ComprehensionQuestion)

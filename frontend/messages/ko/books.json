@@ -291,7 +291,37 @@
     "addPagesPrimary": "페이지 추가",
     "managePagesSecondary": "페이지 관리",
     "editModalTitle": "책 정보 수정",
-    "deleteModalTitle": "이 비공개 책을 삭제할까요?"
+    "deleteModalTitle": "이 비공개 책을 삭제할까요?",
+    "storyweaver": {
+      "openAction": "가족 미니북 창작소",
+      "createdNotice": "가족 미니북이 완성되어 바로 읽을 수 있어요!",
+      "modalTitle": "가족 맞춤형 베트남어 미니북 창작소",
+      "modalDescription": "아이 학년에 맞춘 3~4쪽 분량의 베트남어 미니북에 연습 단어를 자연스럽게 담아 함께 만듭니다.",
+      "stagePreparing": "어휘와 학년 맞춤 구성을 준비하는 중…",
+      "stageWeaving": "가족을 위한 베트남어 미니 동화를 엮는 중…",
+      "themeRequiredError": "이야기 주제를 2자 이상 입력해 주세요.",
+      "genericError": "지금 미니북을 만들 수 없습니다. 다시 시도해 주세요.",
+      "wordsUsedLabel": "포함된 연습 단어: {words}",
+      "readTogetherNow": "지금 아이와 함께 읽기",
+      "openBookDetail": "책 상세 보기",
+      "childLabel": "대상 자녀",
+      "gradeLabel": "목표 학년",
+      "themeLabel": "이야기 주제",
+      "themePlaceholder": "예: 햇살 가득한 정원, 아기 고양이…",
+      "titleOptionalLabel": "책 제목 (선택)",
+      "titleOptionalPlaceholder": "비워 두면 제목이 자동 추천됩니다",
+      "styleModeLabel": "읽기 형식",
+      "styleDuet": "부모·아이 역할 나누어 읽기 (대화형)",
+      "stylePoem": "4행 어린이 동시",
+      "styleProse": "짧은 산문 동화",
+      "pageCountLabel": "미니북 분량",
+      "threePages": "간결한 3쪽",
+      "fourPages": "알찬 4쪽",
+      "customWordsLabel": "추가로 넣을 단어 (쉼표로 구분)",
+      "customWordsPlaceholder": "예: 따스한 햇살, 성실함, 꽃송이",
+      "submitAction": "미니북 바로 만들기",
+      "safetyFootnote": "아동 안전 검수를 거쳐 가족 전용 서재에 비공개로 저장됩니다."
+    }
   },
   "privateManager": {
     "backToMyBooks": "내 서재로 돌아가기",
@@ -539,5 +569,12 @@
     "enableError": "샘플 기여 설정을 업데이트할 수 없습니다.",
     "disabledNotice": "이 책의 샘플 기여를 중단했습니다. 이후 개선 대상에서 제외됩니다.",
     "disableError": "지금은 샘플 기여를 중단할 수 없습니다."
+  },
+  "readability": {
+    "matched": "학년 수준 적합",
+    "tooHard": "다소 어려움 ({min}–{max}학년 수준)",
+    "tooEasy": "가벼운 워밍업 ({min}–{max}학년 수준)",
+    "estimatedGrade": "추정 {min}–{max}학년",
+    "phonicsScore": "파닉스 적합도 {score}%"
   }
 }

@@ -102,6 +102,7 @@ let cachedHealthFetchedAt = 0;
 let lastBackgroundRefreshAt = 0;
 let inFlightHealthPromise: Promise<VoiceEngineHealthSnapshot | null> | null =
   null;
+let permanentlyHostedLocalUnconfigured = false;
 
 const listeners = new Set<() => void>();
 const healthListeners = new Set<() => void>();
@@ -153,6 +154,20 @@ export function isLocalVoiceConfirmedUnavailable(
   return !health.local.available && !health.local.stt_ready;
 }
 
+export function markHostedLocalUnconfigured(): void {
+  if (permanentlyHostedLocalUnconfigured) return;
+  permanentlyHostedLocalUnconfigured = true;
+  emitHealth();
+}
+
+export function isPermanentlyHostedLocalUnconfigured(
+  health: VoiceEngineHealthSnapshot | null = cachedHealth,
+): boolean {
+  return (
+    permanentlyHostedLocalUnconfigured || isHostedLocalVoiceUnconfigured(health)
+  );
+}
+
 export function subscribeVoiceEngineHealth(listener: () => void): () => void {
   healthListeners.add(listener);
   return () => {
@@ -197,10 +212,14 @@ export function mapProviderToEngineSnapshot(input: {
   let engineLabel = isStt ? "Nhận diện ViRead" : "Giọng đọc ViRead";
   let shortLabel = "ViRead";
 
-  if (normalized === "wasm" || normalized === "browser_wasm") {
+  if (
+    normalized === "wasm" ||
+    normalized === "browser_wasm" ||
+    normalized === "wasm_tts"
+  ) {
     tier = "browser_wasm";
-    engineLabel = "Trên thiết bị";
-    shortLabel = "Thiết bị";
+    engineLabel = isStt ? "Offline (WASM trên máy)" : "Offline (WASM TTS)";
+    shortLabel = isStt ? "Offline (WASM)" : "Offline (WASM TTS)";
   } else if (normalized === "precomputed_cache") {
     tier = "local_offline";
     engineLabel = "Giọng đọc chuẩn bị sẵn";
@@ -356,6 +375,16 @@ export function setCachedVoiceEngineHealth(
   cachedHealth = health;
   cachedHealthFetchedAt = health ? fetchedAt : 0;
   lastBackgroundRefreshAt = 0;
+  if (health) {
+    if (
+      health.local.configured === false ||
+      health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+    ) {
+      permanentlyHostedLocalUnconfigured = true;
+    } else if (health.local.configured === true && health.local.available) {
+      permanentlyHostedLocalUnconfigured = false;
+    }
+  }
   emitHealth();
 }
 
@@ -364,6 +393,7 @@ export function resetVoiceEngineStatus(): void {
   cachedHealthFetchedAt = 0;
   lastBackgroundRefreshAt = 0;
   inFlightHealthPromise = null;
+  permanentlyHostedLocalUnconfigured = false;
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),
