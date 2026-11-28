@@ -2214,3 +2214,187 @@ class TestPictureDescriptionV41DifficultWordLoop(unittest.IsolatedAsyncioTestCas
         self.assertEqual(fallback_book_auto.source_type, "SAMPLE")
         self.assertIsNotNone(fallback_book_auto.sample_key)
         self.assertIsNone(fallback_book_auto.book_page_id)
+
+    async def test_picture_auto_select_passes_parent_id_honors_explicit_book_id_and_prioritizes_exact_page(
+        self,
+    ) -> None:
+        from io import BytesIO
+        from PIL import Image
+        from app.services.child_difficult_word_feed import DifficultWordTarget
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        book_id = uuid4()
+        explicit_book_id = uuid4()
+        page_1 = uuid4()
+        page_2 = uuid4()
+        explicit_page = uuid4()
+        session_id = uuid4()
+        now = datetime.now(timezone.utc)
+        buf = BytesIO()
+        Image.new("RGB", (64, 64), color=(240, 200, 90)).save(buf, format="JPEG")
+        jpeg_bytes = buf.getvalue()
+
+        repo = MagicMock(spec=PictureDescriptionRepository)
+        repo.db = AsyncMock()
+        repo.profile_role = AsyncMock(return_value="parent")
+        repo.child_owned_by = AsyncMock(
+            return_value=ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)
+        )
+        repo.list_sessions = AsyncMock(return_value=[])
+        repo.list_difficult_word_targets = AsyncMock(
+            return_value=[
+                DifficultWordTarget(
+                    word="hướng dương",
+                    normalized_word="hướng dương",
+                    error_count=3,
+                    heard_as=[],
+                    source_book_ids=[],
+                    source_page_ids=[],
+                    priority_score=9.0,
+                    last_seen_at=now,
+                    reinforced_count=0,
+                )
+            ]
+        )
+
+        list_calls: list[dict[str, object]] = []
+
+        async def fake_list_book_pages(
+            grade: int,
+            *,
+            limit: int = 12,
+            parent_id: UUID | None = None,
+            preferred_book_id: UUID | None = None,
+            preferred_page_id: UUID | None = None,
+        ):
+            list_calls.append(
+                {
+                    "grade": grade,
+                    "limit": limit,
+                    "parent_id": parent_id,
+                    "preferred_book_id": preferred_book_id,
+                    "preferred_page_id": preferred_page_id,
+                }
+            )
+            return [
+                BookPageCandidateProjection(
+                    BookId=book_id,
+                    BookTitle="Sách A",
+                    PageId=page_1,
+                    PageNumber=1,
+                    ImagePath="books/a/p1.jpg",
+                    VerifiedText="Hoa hướng dương nở vàng.",
+                ),
+                BookPageCandidateProjection(
+                    BookId=book_id,
+                    BookTitle="Sách A",
+                    PageId=page_2,
+                    PageNumber=2,
+                    ImagePath="books/a/p2.jpg",
+                    VerifiedText="Bạn nhỏ đi học.",
+                ),
+            ]
+
+        repo.list_book_pages_for_grade = fake_list_book_pages
+
+        get_page_calls: list[dict[str, object]] = []
+
+        async def fake_get_book_page(
+            book_page_id: UUID | None,
+            grade: int,
+            *,
+            parent_id: UUID | None = None,
+            fallback_book_id: UUID | None = None,
+        ):
+            get_page_calls.append(
+                {
+                    "book_page_id": book_page_id,
+                    "grade": grade,
+                    "parent_id": parent_id,
+                    "fallback_book_id": fallback_book_id,
+                }
+            )
+            return BookPageCandidateProjection(
+                BookId=explicit_book_id,
+                BookTitle="Sách riêng phụ huynh",
+                PageId=explicit_page,
+                PageNumber=1,
+                ImagePath="private/p1.jpg",
+                VerifiedText="Trang sách riêng của gia đình.",
+            )
+
+        repo.get_book_page_for_grade = fake_get_book_page
+
+        async def fake_create(orm_session):
+            return SessionProjection(
+                Id=session_id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=orm_session.BookId,
+                BookPageId=orm_session.BookPageId,
+                SourceType=orm_session.SourceType,
+                SampleKey=orm_session.SampleKey,
+                ImagePath=orm_session.ImagePath,
+                ImageMimeType=orm_session.ImageMimeType,
+                ChildGrade=orm_session.ChildGrade,
+                SceneTitle=orm_session.SceneTitle,
+                PromptPayload=orm_session.PromptPayload,
+                Status="ACTIVE",
+                BestStars=0,
+                BestScore=0,
+                AttemptsCount=0,
+                AiModelUsed=orm_session.AiModelUsed,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+
+        repo.create_session = AsyncMock(side_effect=fake_create)
+
+        ai_client = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(api_key=None, groq_api_key=None, ollama_enabled=False)
+        )
+        service = PictureDescriptionService(
+            repo,
+            ai_client=ai_client,
+            download_fn=lambda _p: jpeg_bytes,
+            sign_url_fn=lambda path: f"https://cdn.example/{path}",
+        )
+
+        # 1) get_catalog prioritizes exact book_page_id over another page in the same book_id
+        catalog = await service.get_catalog(
+            parent_id,
+            child_id,
+            book_id=book_id,
+            book_page_id=page_2,
+        )
+        self.assertEqual(catalog.book_pages[0].page_id, page_2)
+
+        # 2) source_type=None + auto_select=True forwards parent_id=actor_id
+        list_calls.clear()
+        await service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type=None,
+            auto_select=True,
+        )
+        self.assertEqual(len(list_calls), 1)
+        self.assertEqual(list_calls[0]["parent_id"], parent_id)
+
+        # 3) source_type="BOOK_PAGE" + explicit book_id + auto_select=True honors explicit book_id
+        list_calls.clear()
+        get_page_calls.clear()
+        explicit_session = await service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type="BOOK_PAGE",
+            book_id=explicit_book_id,
+            book_page_id=None,
+            auto_select=True,
+        )
+        self.assertEqual(list_calls, [])
+        self.assertEqual(len(get_page_calls), 1)
+        self.assertEqual(get_page_calls[0]["fallback_book_id"], explicit_book_id)
+        self.assertEqual(get_page_calls[0]["parent_id"], parent_id)
+        self.assertEqual(explicit_session.book_id, explicit_book_id)
+        self.assertEqual(explicit_session.book_page_id, explicit_page)

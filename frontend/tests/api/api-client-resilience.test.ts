@@ -236,6 +236,80 @@ describe("requestApi cold-start resilience, 204 support, scoped cache invalidati
     ).rejects.toBeInstanceOf(SupportFeedbackError);
   });
 
+  it("preserves V4.1 quick_play_href and reading_misread_words_reinforced in adaptive-learning Zod schemas", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        child_id: "child-1",
+        child_alias: "Bé An",
+        child_grade: 2,
+        mascot_greeting_vi: "Chào Bé An!",
+        natural_break_reminder_vi: "Nghỉ 5 phút nhé.",
+        today_activities_count: 1,
+        focus_difficult_words: ["mèo mướp"],
+        primary_recommendation: {
+          game_key: "PICTURE_DESCRIPTION",
+          zone_title_vi: "Kể chuyện",
+          game_title_vi: "Kể chuyện qua tranh",
+          reason_vi: "Ôn từ khó",
+          suggested_mode: "VOCABULARY",
+          suggested_difficulty: 2,
+          target_words: ["mèo mướp"],
+          href: "/entertainment/picture-description",
+          quick_play_href: "/entertainment/picture-description?autoplay=1",
+          priority: 1,
+        },
+        recommendations: [
+          {
+            game_key: "PICTURE_DESCRIPTION",
+            zone_title_vi: "Kể chuyện",
+            game_title_vi: "Kể chuyện qua tranh",
+            reason_vi: "Ôn từ khó",
+            suggested_mode: "VOCABULARY",
+            suggested_difficulty: 2,
+            target_words: ["mèo mướp"],
+            href: "/entertainment/picture-description",
+            quick_play_href: "/entertainment/picture-description?autoplay=1",
+            priority: 1,
+          },
+        ],
+      }),
+    );
+    const recs =
+      await createAdaptiveLearningService().getRecommendations("child-1");
+    expect(recs.primary_recommendation.quick_play_href).toBe(
+      "/entertainment/picture-description?autoplay=1",
+    );
+    expect(recs.recommendations[0]?.quick_play_href).toBe(
+      "/entertainment/picture-description?autoplay=1",
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        child_id: "child-1",
+        child_alias: "Bé An",
+        child_grade: 2,
+        window_days: 30,
+        is_diagnostic: false,
+        disclaimer_vi: "Không phải chẩn đoán y khoa.",
+        observed_skills_count: 1,
+        estimated_skills_count: 0,
+        unknown_skills_count: 0,
+        skills: [],
+        practiced_difficult_words: [],
+        module_activities: [],
+        karaoke_weak_segments: [],
+        home_support_tips_vi: [],
+        reading_misread_words_reinforced: 6,
+        generated_at: "2026-11-28T10:00:00Z",
+      }),
+    );
+    const analytics = await createAdaptiveLearningService().getParentAnalytics(
+      "child-1",
+      30,
+    );
+    expect(analytics.reading_misread_words_reinforced).toBe(6);
+  });
+
   it("refreshes the Supabase session once on 401 and retries with the refreshed Bearer token", async () => {
     refreshSession.mockResolvedValueOnce({
       data: { session: { access_token: "refreshed-token-2" } },

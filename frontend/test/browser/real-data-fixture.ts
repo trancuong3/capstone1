@@ -1466,6 +1466,29 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         cached: false,
       });
     }
+    const vocabNotebookMatch =
+      request.method() === "GET"
+        ? /^\/vocabulary\/children\/([^/]+)\/notebook$/.exec(path)
+        : null;
+    if (vocabNotebookMatch) {
+      return respond(route, {
+        child_id: decodeURIComponent(vocabNotebookMatch[1]),
+        total: 0,
+        items: [],
+        storytelling_words: [],
+      });
+    }
+    const dialectProfileMatch =
+      request.method() === "GET"
+        ? /^\/dialect\/children\/([^/]+)\/profile$/.exec(path)
+        : null;
+    if (dialectProfileMatch) {
+      return respond(route, {
+        child_id: decodeURIComponent(dialectProfileMatch[1]),
+        phonetic_profile: "STRICT_SGK",
+        visibility: "PARENT_PRIVATE",
+      });
+    }
     if (
       request.method() === "GET" &&
       path === "/games/picture-description/catalog"

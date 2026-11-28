@@ -490,7 +490,6 @@ export function SentenceShooterScreen({
     autopilotEnabled,
     setCalmSound,
     toggleAutoPlayFlow,
-    toggleAutopilot,
   } = useEntertainmentPreferences();
   const soundEnabled = calmSound;
   const autoPlayRequested = useMemo(
@@ -669,6 +668,7 @@ export function SentenceShooterScreen({
   const projectileTimersRef = useRef(
     new Map<number, ReturnType<typeof setTimeout>>(),
   );
+  const shotSfxTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
   const sessionEpochRef = useRef(0);
   const sessionBookIdRef = useRef<string | null>(initialBookId ?? null);
   const controlAbortRef = useRef<AbortController | null>(null);
@@ -726,6 +726,13 @@ export function SentenceShooterScreen({
       clearTimeout(timer);
     }
     projectileTimersRef.current.clear();
+  }
+
+  function clearShotSfxTimers() {
+    for (const timer of shotSfxTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    shotSfxTimersRef.current.clear();
   }
 
   async function fetchCompletedResult(sessionId: string, epoch: number) {
@@ -925,6 +932,7 @@ export function SentenceShooterScreen({
       shotQueueRef.current = null;
       layoutCache.dispose();
       clearProjectileTimers();
+      clearShotSfxTimers();
       clearAutoAdvanceTimer();
       disposeShooterAudio();
     };
@@ -1011,7 +1019,10 @@ export function SentenceShooterScreen({
     sessionBookIdRef.current =
       session?.book.id ??
       result?.book.id ??
-      (effectiveSelectedBookId || initialBookId || null);
+      (effectiveSelectedBookId &&
+      effectiveSelectedBookId !== MAGIC_QUEST_BOOK_ID
+        ? effectiveSelectedBookId
+        : (initialBookId ?? null));
   }, [
     effectiveSelectedBookId,
     initialBookId,
@@ -1118,11 +1129,17 @@ export function SentenceShooterScreen({
 
     // Immediate non-blocking visual + audio feedback (<30ms, zero HTTP wait,
     // zero forced layout reflows via ResizeObserver-cached coordinates).
+    // Schedule lazy AudioContext shot SFX on the next macrotask so first-shot
+    // AudioContext construction never stalls the projectile DOM paint (>100ms on mobile).
     spawnVisualProjectile(token.id);
-    playShooterSound("shot", soundEnabled, {
-      reducedMotion,
-      calmSound,
-    });
+    const sfxTimer = setTimeout(() => {
+      shotSfxTimersRef.current.delete(sfxTimer);
+      playShooterSound("shot", soundEnabledRef.current, {
+        reducedMotion: reducedMotionRef.current,
+        calmSound: calmSoundRef.current,
+      });
+    }, 0);
+    shotSfxTimersRef.current.add(sfxTimer);
   }
 
   async function startGame(options?: {
@@ -2463,9 +2480,7 @@ export function SentenceShooterScreen({
             data-testid="shooter-autoplay-toggle"
             fullWidth={false}
             onClick={() => {
-              if (!autoPlayFlow) {
-                userToggledAutopilotOnRef.current = true;
-              }
+              userToggledAutopilotOnRef.current = !autoPlayFlow;
               toggleAutoPlayFlow();
             }}
             size="compact"
@@ -2641,34 +2656,6 @@ export function SentenceShooterScreen({
             {t("sentenceShooter.chooseBook")}
           </h2>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              aria-pressed={autopilotEnabled}
-              className={cn(
-                "inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition",
-                autopilotEnabled
-                  ? "border-primary bg-sky text-primary"
-                  : "border-border bg-white text-muted",
-              )}
-              data-testid="shooter-autopilot-toggle"
-              onClick={() => {
-                userToggledAutopilotOnRef.current = !autopilotEnabled;
-                toggleAutopilot();
-              }}
-              type="button"
-            >
-              <Sparkles aria-hidden="true" className="size-3.5" />
-              {autopilotEnabled
-                ? t(
-                    "sentenceShooter.autopilotOn",
-                    undefined,
-                    "Tự chuyển câu: Bật",
-                  )
-                : t(
-                    "sentenceShooter.autopilotOff",
-                    undefined,
-                    "Tự chuyển câu: Tắt",
-                  )}
-            </button>
             <span className="text-sm font-semibold text-muted">
               {t("sentenceShooter.selectedConfigWithMode", {
                 mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
