@@ -133,6 +133,85 @@ class SupportFeedbackTests(unittest.TestCase):
         self.assertIn("Thời điểm tiếp nhận (UTC):", kwargs["body"])
         self.assertIn(VALID_PAYLOAD["message"], kwargs["body"])
         self.assertEqual(kwargs["reply_to"], "parent@example.com")
+        html_body = kwargs["html_body"]
+        self.assertIsInstance(html_body, str)
+        self.assertIn("Báo lỗi kỹ thuật", html_body)
+        self.assertIn("#fdebec", html_body.lower())
+        self.assertIn("mailto:parent@example.com?subject=", html_body)
+        self.assertIn("Tôi không thể bắt đầu buổi đọc.<br />Ứng dụng hiển thị thông báo lỗi.", html_body)
+        self.assertNotIn("#2563eb", html_body.lower())
+
+    def test_provider_supports_multipart_html_and_sets_root_content_language(self):
+        names = (
+            "SMTP_HOST",
+            "SMTP_PORT",
+            "SMTP_USERNAME",
+            "SMTP_APP_PASSWORD",
+            "SMTP_FROM_EMAIL",
+            "SMTP_SEND_TIMEOUT_SECONDS",
+            "SUPPORT_EMAIL",
+        )
+        previous = {name: getattr(settings, name) for name in names}
+        try:
+            settings.SMTP_HOST = "smtp.example.test"
+            settings.SMTP_PORT = 587
+            settings.SMTP_USERNAME = "sender@example.test"
+            settings.SMTP_APP_PASSWORD = "not-a-real-secret"
+            settings.SMTP_FROM_EMAIL = "sender@example.test"
+            settings.SMTP_SEND_TIMEOUT_SECONDS = 5
+            settings.SUPPORT_EMAIL = "vireadforyou@gmail.com"
+
+            server = MagicMock()
+            server.__enter__.return_value = server
+            with patch(
+                "app.providers.support_email_provider.smtplib.SMTP",
+                return_value=server,
+            ):
+                asyncio.run(
+                    SupportEmailProvider().send(
+                        subject="[ViRead Support] Góp ý",
+                        body="Nội dung thuần",
+                        html_body="<html><body><p>Nội dung HTML</p></body></html>",
+                        reply_to="parent@example.com",
+                        locale="vi",
+                    )
+                )
+
+            message = server.send_message.call_args.args[0]
+            self.assertIsInstance(message, EmailMessage)
+            self.assertTrue(message.is_multipart())
+            self.assertEqual(message["Content-Language"], "vi")
+            self.assertEqual(
+                message.get_body(preferencelist=("plain",)).get_content().strip(),
+                "Nội dung thuần",
+            )
+            self.assertIn(
+                "Nội dung HTML",
+                message.get_body(preferencelist=("html",)).get_content(),
+            )
+
+            # Whitespace-only html_body must stay plain text (never attach a blank HTML part)
+            server.send_message.reset_mock()
+            with patch(
+                "app.providers.support_email_provider.smtplib.SMTP",
+                return_value=server,
+            ):
+                asyncio.run(
+                    SupportEmailProvider().send(
+                        subject="[ViRead Support] Plain only",
+                        body="Chỉ văn bản thuần",
+                        html_body="   \n\t  ",
+                        reply_to="parent@example.com",
+                        locale="vi",
+                    )
+                )
+            plain_only_msg = server.send_message.call_args.args[0]
+            self.assertFalse(plain_only_msg.is_multipart())
+            self.assertEqual(plain_only_msg["Content-Language"], "vi")
+            self.assertEqual(plain_only_msg.get_content().strip(), "Chỉ văn bản thuần")
+        finally:
+            for name, value in previous.items():
+                setattr(settings, name, value)
 
     def test_provider_fails_closed_without_smtp_credentials(self):
         names = ("SMTP_USERNAME", "SMTP_APP_PASSWORD", "SMTP_FROM_EMAIL")

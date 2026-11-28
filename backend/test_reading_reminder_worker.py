@@ -74,8 +74,13 @@ class ReadingReminderWorkerTests(unittest.TestCase):
             first = build_reading_reminder_message(**values)
             second = build_reading_reminder_message(**values)
         self.assertEqual(first["Message-ID"], second["Message-ID"])
-        self.assertIn("Bé An", first.get_content())
-        self.assertIn("2026-11-04 lúc 19:30", first.get_content())
+        self.assertEqual(first["Content-Language"], "vi")
+        plain_body = first.get_body(preferencelist=("plain",)).get_content()
+        html_body = first.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("Bé An", plain_body)
+        self.assertIn("2026-11-04 lúc 19:30", plain_body)
+        self.assertIn("Bé An", html_body)
+        self.assertIn("2026-11-04 lúc 19:30", html_body)
 
     def test_successful_email_marks_occurrence_sent(self):
         repo = FakeRepository()
