@@ -101,6 +101,21 @@ class AssistantQuickAction(BaseModel):
         return value
 
 
+class AssistantNavigationOffer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    href: str = Field(min_length=1, max_length=180)
+    reason: str | None = Field(default=None, max_length=160)
+
+    @field_validator("href")
+    @classmethod
+    def validate_internal_href(cls, value: str) -> str:
+        if not value.startswith("/") or value.startswith("//") or "://" in value:
+            raise ValueError("navigation offer href must be a safe internal path")
+        return value
+
+
 class AssistantChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -114,6 +129,7 @@ class AssistantChatResponse(BaseModel):
     role_scope: AssistantRoleScope
     quick_actions: list[AssistantQuickAction] = Field(default_factory=list, max_length=3)
     suggested_prompts: list[str] = Field(default_factory=list, max_length=3)
+    navigation_offer: AssistantNavigationOffer | None = None
 
 
 class AssistantContextSuggestionsResponse(BaseModel):

@@ -5,10 +5,15 @@ import {
   sendAssistantMessage,
 } from "@/lib/api/assistant-service";
 import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import {
   detectNetworkBandwidth,
   resolveOfflineAssistantReply,
   resolvePageGuide,
 } from "@/lib/assistant/page-guides";
+import { isSafeAssistantNavigationHref } from "@/lib/assistant/route-helpers";
 
 vi.mock("@/lib/api/browser-auth", () => ({
   getBrowserAccessToken: vi.fn().mockRejectedValue(new Error("NO_SESSION")),
@@ -185,5 +190,106 @@ describe("assistant-service and bandwidth detection", () => {
     expect(
       publicOffline.quick_actions.every((a) => !a.href.startsWith("/admin")),
     ).toBe(true);
+  });
+
+  it("enforces strict own-scope navigation allowlists, retries 401 refresh once, and strips unsafe navigation offers", async () => {
+    expect(
+      isSafeAssistantNavigationHref("/settings", "/dashboard", "parent"),
+    ).toBe(true);
+    expect(
+      isSafeAssistantNavigationHref("/settings", "/settings", "parent"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantNavigationHref("/admin/health", "/dashboard", "parent"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantNavigationHref("/children/123", "/dashboard", "parent"),
+    ).toBe(false);
+    expect(isSafeAssistantNavigationHref("/dashboard", "/", "public")).toBe(
+      false,
+    );
+    expect(
+      isSafeAssistantNavigationHref("//evil.example", "/dashboard", "parent"),
+    ).toBe(false);
+
+    vi.mocked(getBrowserAccessToken)
+      .mockResolvedValueOnce("stale-token")
+      .mockResolvedValueOnce("fresh-token");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            reply:
+              "Bạn có muốn chuyển đến trang Cài đặt để đổi mật khẩu không?",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_kb",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: "high",
+            latency_ms: 15,
+            cached: false,
+            role_scope: "parent",
+            quick_actions: [{ label: "Cài đặt", href: "/settings" }],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Đi đến Cài đặt",
+              href: "/settings",
+              reason: "Đổi mật khẩu tài khoản bạn.",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    global.fetch = fetchMock;
+
+    const okRes = await sendAssistantMessage(
+      {
+        message: "Tôi muốn đổi mật khẩu",
+        current_path: "/dashboard",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+      },
+      { online: true },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(invalidateBrowserTokenCache)).toHaveBeenCalled();
+    expect(okRes.navigation_offer?.href).toBe("/settings");
+
+    // Backend returning a disallowed admin navigation_offer to parent scope must be stripped cleanly.
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: "Test scope",
+          source_tier: "tier_1_cloud",
+          provider_id: "groq_qwen",
+          model_id: "qwen",
+          bandwidth_applied: "high",
+          latency_ms: 50,
+          cached: false,
+          role_scope: "parent",
+          quick_actions: [],
+          suggested_prompts: [],
+          navigation_offer: {
+            label: "Admin",
+            href: "/admin/health",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const strippedRes = await sendAssistantMessage(
+      {
+        message: "Test",
+        current_path: "/dashboard",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+      },
+      { online: true },
+    );
+    expect(strippedRes.navigation_offer).toBeNull();
   });
 });

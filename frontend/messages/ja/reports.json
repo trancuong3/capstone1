@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "読書ジャーニーのナビゲーション"
+  },
   "overview": {
     "title": "進捗レポート",
     "subtitle": "お子さまの読書時間、正確性、連続読書日数を追跡します。",
@@ -162,7 +165,11 @@
       "uncertainLabel": "よく聞こえませんでした",
       "uncertainNote": "個別に記録され、確定した発音エラーにはカウントされません。"
     },
-    "entertainmentSummaryHeading": "あそび学習と言語スキルまとめ (V4.0)"
+    "entertainmentSummaryHeading": "あそび学習と言語スキルまとめ (V4.0)",
+    "focusAria": "レポートのセクションを絞り込む",
+    "focusAssessment": "AI評価",
+    "focusSignals": "グラフと指標",
+    "focusEntertainment": "遊びながら学ぶ"
   },
   "sessions": {
     "title": "読書履歴",
@@ -656,7 +663,11 @@
       "favorited": "お気に入り",
       "wantToRead": "読みたい",
       "savedToRead": "読書リストに保存"
-    }
+    },
+    "focusAria": "読書管理のセクションを絞り込む",
+    "focusPlans": "計画",
+    "focusGoals": "目標",
+    "focusReminders": "リマインダー"
   },
   "entertainmentSummary": {
     "loading": "{childName} のあそび学習の記録をまとめています…",

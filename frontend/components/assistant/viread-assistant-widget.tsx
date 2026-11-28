@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ChevronLeft, EyeOff } from "lucide-react";
+import { Bot, ChevronLeft, EyeOff, Loader2, X } from "lucide-react";
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
 import { usePathname } from "next/navigation";
 import {
@@ -108,6 +108,17 @@ function AssistantPanelLoadingFallback(props: DynamicOptionsLoadingProps) {
 
   const hasError = Boolean(props.error);
   const retry = props.retry;
+  const [isSlowLoading, setIsSlowLoading] = useState(false);
+
+  useEffect(() => {
+    if (hasError) return;
+    const timer = window.setTimeout(() => {
+      setIsSlowLoading(true);
+    }, 3000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hasError]);
 
   useEffect(() => {
     if (hasError && retry && fallbackCtx?.consumeRetryOnRemount()) {
@@ -183,14 +194,40 @@ function AssistantPanelLoadingFallback(props: DynamicOptionsLoadingProps) {
       data-testid="viread-assistant-panel-loading"
       role="complementary"
     >
-      <div className="flex shrink-0 items-center gap-2 bg-primary px-3 py-2.5 text-white">
-        <Bot aria-hidden="true" className="size-4" />
-        <span className="text-xs font-extrabold">
-          {t("common.assistant.title")}
-        </span>
+      <div className="flex shrink-0 items-center justify-between gap-2 bg-primary px-3 py-2.5 text-white">
+        <div className="flex items-center gap-2">
+          <Bot aria-hidden="true" className="size-4" />
+          <span className="text-xs font-extrabold">
+            {t("common.assistant.title")}
+          </span>
+        </div>
+        {fallbackCtx ? (
+          <button
+            aria-label={t("common.actions.close")}
+            className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+            onClick={() => {
+              fallbackCtx.markRetryOnRemount();
+              fallbackCtx.onClose();
+            }}
+            type="button"
+          >
+            <X aria-hidden="true" className="size-3.5" />
+          </button>
+        ) : null}
       </div>
       <div className="flex-1 space-y-2.5 bg-canvas/75 p-3">
-        <Skeleton className="h-16 w-full rounded-control" />
+        <div className="flex items-center gap-2 rounded-control border border-border/80 bg-white px-2.5 py-2 text-xs font-medium text-ink shadow-2xs">
+          <Loader2
+            aria-hidden="true"
+            className="size-3.5 shrink-0 animate-spin text-primary"
+          />
+          <span>
+            {isSlowLoading
+              ? t("common.assistant.loadingPanelSlow")
+              : t("common.assistant.loadingPanel")}
+          </span>
+        </div>
+        <Skeleton className="h-14 w-full rounded-control" />
         <Skeleton className="h-10 w-3/4 rounded-control" />
         <Skeleton className="h-8 w-5/6 rounded-full" />
       </div>

@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "التنقل في رحلة القراءة"
+  },
   "overview": {
     "title": "تقرير التقدم",
     "subtitle": "تتبع وقت القراءة ودقة القراءة وسلاسل القراءة لطفلك.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "لم يتم سماع الصوت بوضوح",
       "uncertainNote": "تُسجل بشكل منفصل، ولا تُحتسب كخطأ نطق مؤكد."
     },
-    "entertainmentSummaryHeading": "التعلّم باللعب ومهارات اللغة (V4.0)"
+    "entertainmentSummaryHeading": "التعلّم باللعب ومهارات اللغة (V4.0)",
+    "focusAria": "تصفية أقسام التقرير",
+    "focusAssessment": "تقييم الذكاء الاصطناعي",
+    "focusSignals": "الرسوم والمؤشرات",
+    "focusEntertainment": "اللعب والتعلّم"
   },
   "sessions": {
     "title": "سجل القراءة",
@@ -656,7 +663,11 @@
       "favorited": "المفضلة",
       "wantToRead": "أريد قراءته",
       "savedToRead": "تم الحفظ إلى قائمة القراءة"
-    }
+    },
+    "focusAria": "تصفية أقسام إدارة القراءة",
+    "focusPlans": "الخطط",
+    "focusGoals": "الأهداف",
+    "focusReminders": "التذكيرات"
   },
   "entertainmentSummary": {
     "loading": "جارٍ تلخيص تقدّم {childName} في اللعب والتعلّم…",

@@ -3,6 +3,7 @@
 import {
   ArrowUpRight,
   Bot,
+  Check,
   EyeOff,
   Loader2,
   Minus,
@@ -11,9 +12,11 @@ import {
   Sparkles,
   Wifi,
   WifiOff,
+  X,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -39,6 +42,10 @@ import {
   resolveOfflineAssistantReply,
   resolvePageGuide,
 } from "@/lib/assistant/page-guides";
+import {
+  isSafeAssistantNavigationHref,
+  isSafeAssistantQuickActionHref,
+} from "@/lib/assistant/route-helpers";
 import { cn } from "@/lib/utils/cn";
 import type {
   AssistantMessage,
@@ -252,6 +259,7 @@ export function ViReadAssistantPanel({
   autoFocusTrigger,
 }: ViReadAssistantPanelProps) {
   const { locale, t } = useI18n();
+  const router = useRouter();
 
   const bandwidthPref = useSyncExternalStore<BandwidthPreference>(
     subscribeBandwidthStore,
@@ -270,11 +278,33 @@ export function ViReadAssistantPanel({
 
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
+  const [sendingElapsedSeconds, setSendingElapsedSeconds] = useState(0);
+  const [sendingForceLlm, setSendingForceLlm] = useState(false);
+  const [rateLimitState, setRateLimitState] = useState<{
+    readonly message: string;
+    readonly retryPrompt: string;
+    readonly retryForceLlm: boolean;
+  } | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingPromptRef = useRef<{
+    readonly prompt: string;
+    readonly forceLlm: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isSending) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setSendingElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isSending]);
 
   const effectiveBandwidth = useMemo(
     () => resolveEffectiveBandwidth(bandwidthPref, networkInfo),
@@ -373,13 +403,18 @@ export function ViReadAssistantPanel({
   const sendPrompt = useCallback(
     async (
       rawText: string,
-      options?: { readonly forceLlm?: boolean; readonly clearInput?: boolean },
+      options?: {
+        readonly forceLlm?: boolean;
+        readonly clearInput?: boolean;
+        readonly skipUserEcho?: boolean;
+      },
     ) => {
       const trimmed = rawText.trim();
       if (!trimmed || isSending) return;
 
       const forceLlm = Boolean(options?.forceLlm);
-      setRateLimitNotice(null);
+      const skipUserEcho = Boolean(options?.skipUserEcho) || forceLlm;
+      setRateLimitState(null);
       if (options?.clearInput) {
         setInputValue("");
       }
@@ -395,7 +430,7 @@ export function ViReadAssistantPanel({
         content: item.content.slice(0, 950),
       }));
 
-      if (!forceLlm) {
+      if (!skipUserEcho) {
         const userMessage: AssistantMessage = {
           id: `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           role: "user",
@@ -408,6 +443,9 @@ export function ViReadAssistantPanel({
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      pendingPromptRef.current = { prompt: trimmed, forceLlm };
+      setSendingElapsedSeconds(0);
+      setSendingForceLlm(forceLlm);
       setIsSending(true);
 
       try {
@@ -430,6 +468,20 @@ export function ViReadAssistantPanel({
           result.source_tier === "tier_0_kb" ||
           (result.source_tier === "cache" &&
             result.provider_id === "viread_kb");
+        const canRetryOnline =
+          !forceLlm &&
+          networkInfo.online &&
+          result.provider_id !== "viread_scope_guard" &&
+          (result.source_tier === "offline" ||
+            result.source_tier === "tier_3_fallback");
+
+        const safeNavigationOffer = isSafeAssistantNavigationHref(
+          result.navigation_offer?.href,
+          pathname,
+          result.role_scope,
+        )
+          ? result.navigation_offer
+          : null;
 
         const botMessage: AssistantMessage = {
           id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -441,15 +493,34 @@ export function ViReadAssistantPanel({
           modelId: result.model_id,
           latencyMs: result.latency_ms,
           cached: result.cached,
+          roleScope: result.role_scope,
           quickActions: result.quick_actions,
           suggestedPrompts: result.suggested_prompts,
-          canDeepenWithAi: !forceLlm && networkInfo.online && isKbOrigin,
+          navigationOffer: safeNavigationOffer,
+          navigationDecision: safeNavigationOffer ? "pending" : undefined,
+          canDeepenWithAi:
+            !forceLlm &&
+            networkInfo.online &&
+            isKbOrigin &&
+            result.provider_id !== "viread_scope_guard",
+          canRetryOnline,
           sourcePrompt: trimmed,
         };
         onMessagesChange((prev) => [...prev.slice(-20), botMessage]);
       } catch (error) {
         if (error instanceof AssistantRateLimitError) {
-          setRateLimitNotice(t("common.assistant.rateLimited"));
+          const message =
+            typeof error.retryAfterSeconds === "number" &&
+            error.retryAfterSeconds > 0
+              ? t("common.assistant.rateLimitedWait", {
+                  seconds: error.retryAfterSeconds,
+                })
+              : t("common.assistant.rateLimited");
+          setRateLimitState({
+            message,
+            retryPrompt: trimmed,
+            retryForceLlm: forceLlm,
+          });
         } else if (!controller.signal.aborted) {
           const fallback = resolveOfflineAssistantReply(
             trimmed,
@@ -457,6 +528,13 @@ export function ViReadAssistantPanel({
             locale,
             effectiveBandwidth,
           );
+          const safeFallbackOffer = isSafeAssistantNavigationHref(
+            fallback.navigation_offer?.href,
+            pathname,
+            fallback.role_scope,
+          )
+            ? fallback.navigation_offer
+            : null;
           onMessagesChange((prev) => [
             ...prev.slice(-20),
             {
@@ -467,8 +545,16 @@ export function ViReadAssistantPanel({
               sourceTier: fallback.source_tier,
               providerId: fallback.provider_id,
               latencyMs: fallback.latency_ms,
+              roleScope: fallback.role_scope,
               quickActions: fallback.quick_actions,
               suggestedPrompts: fallback.suggested_prompts,
+              navigationOffer: safeFallbackOffer,
+              navigationDecision: safeFallbackOffer ? "pending" : undefined,
+              canRetryOnline:
+                !forceLlm &&
+                networkInfo.online &&
+                fallback.provider_id !== "viread_scope_guard",
+              sourcePrompt: trimmed,
             },
           ]);
         }
@@ -476,6 +562,9 @@ export function ViReadAssistantPanel({
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
         }
+        pendingPromptRef.current = null;
+        setSendingElapsedSeconds(0);
+        setSendingForceLlm(false);
         setIsSending(false);
       }
     },
@@ -491,6 +580,90 @@ export function ViReadAssistantPanel({
     ],
   );
 
+  const handleCancelSending = useCallback(() => {
+    const pending = pendingPromptRef.current;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    pendingPromptRef.current = null;
+    setIsSending(false);
+    setSendingElapsedSeconds(0);
+    setSendingForceLlm(false);
+    if (pending && !pending.forceLlm) {
+      setInputValue(pending.prompt);
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+      }, 30);
+    }
+  }, []);
+
+  const handleUseQuickGuideNow = useCallback(
+    (prompt: string) => {
+      const offlineGuide = resolveOfflineAssistantReply(
+        prompt,
+        pathname,
+        locale,
+        effectiveBandwidth,
+      );
+      const safeOffer = isSafeAssistantNavigationHref(
+        offlineGuide.navigation_offer?.href,
+        pathname,
+        offlineGuide.role_scope,
+      )
+        ? offlineGuide.navigation_offer
+        : null;
+      setRateLimitState(null);
+      onMessagesChange((prev) => [
+        ...prev.slice(-20),
+        {
+          id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: "assistant",
+          content: offlineGuide.reply,
+          messagePath: pathname,
+          sourceTier: offlineGuide.source_tier,
+          providerId: offlineGuide.provider_id,
+          latencyMs: offlineGuide.latency_ms,
+          roleScope: offlineGuide.role_scope,
+          quickActions: offlineGuide.quick_actions,
+          suggestedPrompts: offlineGuide.suggested_prompts,
+          navigationOffer: safeOffer,
+          navigationDecision: safeOffer ? "pending" : undefined,
+          canRetryOnline: offlineGuide.provider_id !== "viread_scope_guard",
+          sourcePrompt: prompt,
+        },
+      ]);
+    },
+    [effectiveBandwidth, locale, onMessagesChange, pathname],
+  );
+
+  const handleNavigationDecision = useCallback(
+    (messageId: string, decision: "accepted" | "declined") => {
+      const targetMsg = messages.find((item) => item.id === messageId);
+      const offerHref = targetMsg?.navigationOffer?.href;
+      const canNavigate =
+        decision === "accepted" &&
+        isSafeAssistantNavigationHref(
+          offerHref,
+          pathname,
+          targetMsg?.roleScope,
+        );
+
+      onMessagesChange((prev) =>
+        prev.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                navigationDecision: decision,
+              }
+            : item,
+        ),
+      );
+      if (canNavigate && offerHref) {
+        router.push(offerHref);
+      }
+    },
+    [messages, onMessagesChange, pathname, router],
+  );
+
   function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendPrompt(inputValue, { clearInput: true });
@@ -498,8 +671,11 @@ export function ViReadAssistantPanel({
 
   const clearConversation = useCallback(() => {
     abortControllerRef.current?.abort();
+    pendingPromptRef.current = null;
     onMessagesChange([]);
-    setRateLimitNotice(null);
+    setRateLimitState(null);
+    setSendingElapsedSeconds(0);
+    setSendingForceLlm(false);
     setIsSending(false);
   }, [onMessagesChange]);
 
@@ -643,6 +819,16 @@ export function ViReadAssistantPanel({
         {/* Conversation Messages */}
         {messages.map((msg) => {
           const isUser = msg.role === "user";
+          const safeNavigationOffer =
+            !isUser &&
+            isSafeAssistantNavigationHref(
+              msg.navigationOffer?.href,
+              pathname,
+              msg.roleScope,
+            )
+              ? msg.navigationOffer
+              : null;
+
           return (
             <div
               className={cn(
@@ -665,20 +851,88 @@ export function ViReadAssistantPanel({
                   renderFormattedReply(msg.content)
                 )}
 
-                {!isUser && msg.quickActions && msg.quickActions.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1 border-t border-border/60 pt-1.5">
-                    {msg.quickActions.map((action) => (
-                      <Link
-                        className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
-                        href={action.href}
-                        key={action.href}
+                {safeNavigationOffer ? (
+                  <div
+                    className="mt-2 rounded-control border border-primary/25 bg-sky/35 p-2 text-[11.5px]"
+                    data-testid="viread-assistant-nav-card"
+                  >
+                    <p className="font-bold text-ink">
+                      {safeNavigationOffer.label}
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-4 text-muted">
+                      {safeNavigationOffer.reason ||
+                        t("common.assistant.navConfirmPrompt")}
+                    </p>
+                    {msg.navigationDecision === "accepted" ? (
+                      <p
+                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-primary-hover"
+                        data-testid="viread-assistant-nav-status"
                       >
-                        <span>{action.label}</span>
-                        <ArrowUpRight aria-hidden="true" className="size-3" />
-                      </Link>
-                    ))}
+                        <Check aria-hidden="true" className="size-3" />
+                        <span>{t("common.assistant.navConfirmedStatus")}</span>
+                      </p>
+                    ) : msg.navigationDecision === "declined" ? (
+                      <p
+                        className="mt-1.5 text-[11px] font-medium text-muted"
+                        data-testid="viread-assistant-nav-status"
+                      >
+                        {t("common.assistant.navDeclinedStatus")}
+                      </p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <button
+                          className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          data-testid="viread-assistant-nav-yes"
+                          onClick={() =>
+                            handleNavigationDecision(msg.id, "accepted")
+                          }
+                          type="button"
+                        >
+                          <Check aria-hidden="true" className="size-3" />
+                          <span>{t("common.assistant.navConfirmYes")}</span>
+                        </button>
+                        <button
+                          className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          data-testid="viread-assistant-nav-no"
+                          onClick={() =>
+                            handleNavigationDecision(msg.id, "declined")
+                          }
+                          type="button"
+                        >
+                          <X aria-hidden="true" className="size-3" />
+                          <span>{t("common.assistant.navConfirmNo")}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
+
+                {(() => {
+                  const safeActions = !isUser
+                    ? (msg.quickActions ?? []).filter((action) =>
+                        isSafeAssistantQuickActionHref(
+                          action.href,
+                          pathname,
+                          msg.roleScope,
+                        ),
+                      )
+                    : [];
+                  if (safeActions.length === 0) return null;
+                  return (
+                    <div className="mt-2 flex flex-wrap gap-1 border-t border-border/60 pt-1.5">
+                      {safeActions.map((action) => (
+                        <Link
+                          className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
+                          href={action.href}
+                          key={action.href}
+                        >
+                          <span>{action.label}</span>
+                          <ArrowUpRight aria-hidden="true" className="size-3" />
+                        </Link>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {!isUser && msg.sourceTier ? (
@@ -702,6 +956,22 @@ export function ViReadAssistantPanel({
                       {t("common.assistant.askAiDeeper")}
                     </button>
                   ) : null}
+                  {msg.canRetryOnline && msg.sourcePrompt ? (
+                    <button
+                      className="inline-flex items-center gap-0.5 font-bold text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                      data-testid="viread-assistant-retry-ai"
+                      disabled={isSending}
+                      onClick={() =>
+                        void sendPrompt(msg.sourcePrompt!, {
+                          skipUserEcho: true,
+                        })
+                      }
+                      type="button"
+                    >
+                      <RotateCcw aria-hidden="true" className="size-2.5" />
+                      {t("common.assistant.retryWithAi")}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -709,22 +979,91 @@ export function ViReadAssistantPanel({
         })}
 
         {isSending ? (
-          <div className="inline-flex items-center gap-1.5 rounded-control border border-border/80 bg-white px-2.5 py-1.5 text-xs text-muted">
-            <Loader2
-              aria-hidden="true"
-              className="size-3.5 animate-spin text-primary"
-            />
-            <span>{t("common.assistant.thinking")}</span>
+          <div
+            aria-busy="true"
+            className="rounded-control border border-primary/20 bg-white px-2.5 py-2 text-xs shadow-2xs"
+            data-testid="viread-assistant-loading-card"
+            role="status"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Loader2
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 animate-spin text-primary"
+                />
+                <span className="font-semibold text-ink">
+                  {sendingForceLlm && sendingElapsedSeconds < 3
+                    ? t("common.assistant.thinkingDeep")
+                    : sendingElapsedSeconds < 2
+                      ? t("common.assistant.thinking")
+                      : sendingElapsedSeconds < 6
+                        ? t("common.assistant.thinkingConnectAi")
+                        : sendingElapsedSeconds < 12
+                          ? t("common.assistant.thinkingSynthesizing")
+                          : t("common.assistant.thinkingSlowReassure")}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {sendingElapsedSeconds >= 1 ? (
+                  <span
+                    className="rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-bold text-muted"
+                    data-testid="viread-assistant-elapsed"
+                  >
+                    {t("common.assistant.elapsedSeconds", {
+                      seconds: sendingElapsedSeconds,
+                    })}
+                  </span>
+                ) : null}
+                <button
+                  aria-label={t("common.assistant.cancelAria")}
+                  className="rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-primary"
+                  data-testid="viread-assistant-cancel"
+                  onClick={handleCancelSending}
+                  type="button"
+                >
+                  {t("common.assistant.cancelRequest")}
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-canvas">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-primary/70" />
+            </div>
           </div>
         ) : null}
 
-        {rateLimitNotice ? (
-          <p
-            className="rounded-control border border-danger/30 bg-danger-surface px-2.5 py-1.5 text-[11px] font-semibold text-danger"
+        {rateLimitState ? (
+          <div
+            className="space-y-1.5 rounded-control border border-danger/30 bg-danger-surface px-2.5 py-2 text-[11px]"
+            data-testid="viread-assistant-rate-limit"
             role="alert"
           >
-            {rateLimitNotice}
-          </p>
+            <p className="font-semibold text-danger">
+              {rateLimitState.message}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                className="rounded-full border border-danger/30 bg-white px-2.5 py-0.5 text-[10px] font-bold text-danger transition-colors hover:bg-canvas"
+                onClick={() =>
+                  void sendPrompt(rateLimitState.retryPrompt, {
+                    forceLlm: rateLimitState.retryForceLlm,
+                    skipUserEcho: true,
+                  })
+                }
+                type="button"
+              >
+                {t("common.assistant.retryTurn")}
+              </button>
+              <button
+                className="rounded-full border border-border bg-white px-2.5 py-0.5 text-[10px] font-bold text-ink transition-colors hover:bg-canvas"
+                onClick={() =>
+                  handleUseQuickGuideNow(rateLimitState.retryPrompt)
+                }
+                type="button"
+              >
+                {t("common.assistant.useQuickGuideNow")}
+              </button>
+            </div>
+          </div>
         ) : null}
 
         {/* Contextual Quick Suggestion Chips */}
@@ -760,7 +1099,11 @@ export function ViReadAssistantPanel({
           disabled={isSending}
           maxLength={800}
           onChange={(event) => setInputValue(event.target.value)}
-          placeholder={t("common.assistant.inputPlaceholder")}
+          placeholder={
+            isSending
+              ? t("common.assistant.inputWaitingPlaceholder")
+              : t("common.assistant.inputPlaceholder")
+          }
           ref={inputRef}
           type="text"
           value={inputValue}

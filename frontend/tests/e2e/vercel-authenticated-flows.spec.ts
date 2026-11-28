@@ -718,6 +718,7 @@ test.describe("[M3-target] Authenticated catalog concurrency, scoped cache & res
     await seedAuthenticatedParentContext(context);
     const tracker = await installAuthenticatedMockApi(page, {
       childDelayMs: 1200,
+      dashboardDelayMs: 1200,
     });
 
     await page.goto(`/books?childId=${CHILD_ID}`, {
@@ -727,6 +728,20 @@ test.describe("[M3-target] Authenticated catalog concurrency, scoped cache & res
       page.getByRole("heading", { name: "Chú Mèo Đi Hia" }),
     ).toBeVisible();
 
+    await expect
+      .poll(
+        () =>
+          tracker
+            .getEvents()
+            .some(
+              (e) =>
+                e.path === `/profiles/children/${CHILD_ID}` &&
+                e.phase === "end",
+            ),
+        { timeout: 5000 },
+      )
+      .toBe(true);
+
     const events = tracker.getEvents();
     const catalogStart = events.find(
       (e) => e.path === "/books/catalog" && e.phase === "start",
@@ -735,9 +750,8 @@ test.describe("[M3-target] Authenticated catalog concurrency, scoped cache & res
       (e) => e.path === `/profiles/children/${CHILD_ID}` && e.phase === "end",
     );
     expect(catalogStart).toBeDefined();
-    if (childEnd) {
-      expect(catalogStart!.ts).toBeLessThan(childEnd.ts);
-    }
+    expect(childEnd).toBeDefined();
+    expect(catalogStart!.ts).toBeLessThan(childEnd!.ts);
   });
 
   test("reading event mutation preserves cached /books/catalog across client navigation", async ({

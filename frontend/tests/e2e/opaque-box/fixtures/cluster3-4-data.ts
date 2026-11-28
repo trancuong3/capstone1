@@ -400,13 +400,23 @@ export interface TutorGeneratePayload {
 }
 
 export function makeTutorGenerateResponse(
-  sessionId = OPAQUE_SESSION_ID,
+  sessionIdOrOverrides: string | Record<string, unknown> = {},
 ): TutorGeneratePayload {
+  const overrides =
+    typeof sessionIdOrOverrides === "string"
+      ? {
+          session_id: sessionIdOrOverrides,
+          total: 0,
+          source: null,
+          created: false,
+        }
+      : sessionIdOrOverrides;
   return {
-    session_id: sessionId,
-    total: 0,
-    source: null,
-    created: false,
+    session_id: OPAQUE_SESSION_ID,
+    total: 2,
+    source: "AI",
+    created: true,
+    ...overrides,
   };
 }
 
@@ -871,6 +881,7 @@ export function makeSttTranscriptionPayload(
 export interface Cluster3HandlerState {
   healthPayload?: HealthPayload;
   sessionSummary?: Partial<ReadingSessionSummaryPayload>;
+  sessionDetail?: Record<string, unknown>;
   page1?: ReadingPageDtoPayload;
   page2?: ReadingPageDtoPayload;
   currentPageNumber?: 1 | 2;
@@ -1072,10 +1083,13 @@ export function makeCluster3DefaultHandlers(
       if (ctx.method === "GET" && rest === "") {
         return {
           status: 200,
-          body: makeReadingSessionSummary({
-            id: sessionId,
-            ...(state.sessionSummary ?? {}),
-          }),
+          body: {
+            ...makeReadingSessionSummary({
+              id: sessionId,
+              ...(state.sessionSummary ?? {}),
+            }),
+            ...(state.sessionDetail ?? {}),
+          },
         };
       }
       if (ctx.method === "GET" && rest === "page") {
@@ -1649,18 +1663,6 @@ export function makeAdminProfilePayload(
 // ----------------------------------------------------------------------------
 // F-11: Comprehension & AI Tutor Factories
 // ----------------------------------------------------------------------------
-
-export function makeTutorGenerateResponse(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    session_id: OPAQUE_SESSION_ID,
-    total: 2,
-    source: "AI",
-    created: true,
-    ...overrides,
-  };
-}
 
 export function makeTutorNextQuestion(
   overrides: Record<string, unknown> = {},
@@ -3975,7 +3977,7 @@ export function makeCluster4DefaultHandlers(
   return [
     ...(state.customRoutes ?? []),
     c4Handler,
-    ...makeCluster3DefaultHandlers({
+    makeCluster3DefaultHandlers({
       healthPayload: state.healthPayload,
       sessionDetail: state.sessionDetail,
     }),

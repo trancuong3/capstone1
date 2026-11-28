@@ -28,7 +28,6 @@ import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
-import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -942,7 +941,7 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
-  const teacherPersona = useTeacherPersona();
+  useTeacherPersona();
   const { preferences: automationPreferences, coachingStyle } =
     useAutomationPreferences();
   const automationRef = useRef(automationPreferences);

@@ -20,7 +20,6 @@ import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
-import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";

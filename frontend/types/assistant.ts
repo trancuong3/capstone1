@@ -19,6 +19,12 @@ export interface AssistantQuickAction {
   readonly href: string;
 }
 
+export interface AssistantNavigationOffer {
+  readonly label: string;
+  readonly href: string;
+  readonly reason?: string | null;
+}
+
 export interface AssistantHistoryTurn {
   readonly role: "user" | "assistant";
   readonly content: string;
@@ -44,6 +50,7 @@ export interface AssistantChatResponse {
   readonly role_scope: AssistantRoleScope;
   readonly quick_actions: readonly AssistantQuickAction[];
   readonly suggested_prompts: readonly string[];
+  readonly navigation_offer?: AssistantNavigationOffer | null;
 }
 
 export interface AssistantMessage {
@@ -56,9 +63,13 @@ export interface AssistantMessage {
   readonly modelId?: string | null;
   readonly latencyMs?: number;
   readonly cached?: boolean;
+  readonly roleScope?: AssistantRoleScope;
   readonly quickActions?: readonly AssistantQuickAction[];
   readonly suggestedPrompts?: readonly string[];
+  readonly navigationOffer?: AssistantNavigationOffer | null;
+  readonly navigationDecision?: "pending" | "accepted" | "declined";
   readonly canDeepenWithAi?: boolean;
+  readonly canRetryOnline?: boolean;
   readonly sourcePrompt?: string;
 }
 

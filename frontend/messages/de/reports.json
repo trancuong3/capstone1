@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Navigation für die Lesereise"
+  },
   "overview": {
     "title": "Fortschrittsbericht",
     "subtitle": "Verfolgen Sie die Lesezeit, Genauigkeit und Leseserien Ihres Kindes.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "Nicht deutlich gehört",
       "uncertainNote": "Separat erfasst, zählt nicht als bestätigter Aussprachefehler."
     },
-    "entertainmentSummaryHeading": "Spielerisches Lernen & Sprachkompetenzen (V4.0)"
+    "entertainmentSummaryHeading": "Spielerisches Lernen & Sprachkompetenzen (V4.0)",
+    "focusAria": "Berichtsabschnitte filtern",
+    "focusAssessment": "KI-Bewertung",
+    "focusSignals": "Diagramme & Kennzahlen",
+    "focusEntertainment": "Spielen & Lernen"
   },
   "sessions": {
     "title": "Leseverlauf",
@@ -656,7 +663,11 @@
       "favorited": "Zu Favoriten hinzugefügt",
       "wantToRead": "Leseliste",
       "savedToRead": "In Leseliste gespeichert"
-    }
+    },
+    "focusAria": "Bereiche der Leseverwaltung filtern",
+    "focusPlans": "Pläne",
+    "focusGoals": "Ziele",
+    "focusReminders": "Erinnerungen"
   },
   "entertainmentSummary": {
     "loading": "Fortschritte im Spiel- und Lernbereich für {childName} werden geladen…",

@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "ניווט במסע הקריאה"
+  },
   "overview": {
     "title": "דוח התקדמות",
     "subtitle": "עקוב אחר זמן הקריאה, הדיוק ورصيف הקריאה של ילדך.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "לא שמעתי היטב",
       "uncertainNote": "מתועד בנפרד, אינו נחשב כשגיאת הגייה מאומתת."
     },
-    "entertainmentSummaryHeading": "למידה במשחק וכישורי שפה (V4.0)"
+    "entertainmentSummaryHeading": "למידה במשחק וכישורי שפה (V4.0)",
+    "focusAria": "סינון חלקי הדוח",
+    "focusAssessment": "הערכת בינה מלאכותית",
+    "focusSignals": "תרשימים ומדדים",
+    "focusEntertainment": "למידה במשחק"
   },
   "sessions": {
     "title": "היסטוריית קריאה",
@@ -656,7 +663,11 @@
       "favorited": "הוספת למועדפים",
       "wantToRead": "רוצה לקרוא",
       "savedToRead": "נשמר לרשימת הקריאה"
-    }
+    },
+    "focusAria": "סינון חלקי ניהול הקריאה",
+    "focusPlans": "תוכניות",
+    "focusGoals": "יעדים",
+    "focusReminders": "תזכורות"
   },
   "entertainmentSummary": {
     "loading": "מסכם את התקדמות הלמידה במשחק של {childName}…",

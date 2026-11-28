@@ -11,6 +11,7 @@ import { viMessages } from "@/messages/vi";
 
 const navState = vi.hoisted(() => ({
   pathname: "/dashboard",
+  routerPush: vi.fn(),
 }));
 
 const sendAssistantMessageMock = vi.hoisted(() => vi.fn());
@@ -18,7 +19,7 @@ const sendAssistantMessageMock = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
   usePathname: () => navState.pathname,
   useRouter: () => ({
-    push: vi.fn(),
+    push: navState.routerPush,
     replace: vi.fn(),
     refresh: vi.fn(),
   }),
@@ -44,6 +45,7 @@ function renderWidget() {
 describe("ViReadAssistantWidget", () => {
   beforeEach(() => {
     navState.pathname = "/dashboard";
+    navState.routerPush.mockReset();
     sendAssistantMessageMock.mockReset();
     window.localStorage.clear();
     Object.defineProperty(window.navigator, "onLine", {
@@ -398,5 +400,112 @@ describe("ViReadAssistantWidget", () => {
       });
       container.remove();
     }
+  });
+
+  it("renders Yes/No own-scope navigation card, navigates only on Có, blocks /admin/* offers, and supports loading Cancel", async () => {
+    navState.pathname = "/dashboard";
+    const user = userEvent.setup();
+
+    const rejectRef: { fn?: (reason?: unknown) => void } = {};
+    sendAssistantMessageMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectRef.fn = reject;
+          }),
+      )
+      .mockResolvedValueOnce({
+        reply: "Bạn có thể đổi mật khẩu trong Cài đặt tài khoản của bạn nhé!",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 12,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [{ label: "Mở Cài đặt", href: "/settings" }],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Đi đến trang Cài đặt đổi mật khẩu",
+          href: "/settings",
+          reason: "Đổi mật khẩu cho chính tài khoản của bạn.",
+        },
+      })
+      .mockResolvedValueOnce({
+        reply: "Mình gợi ý mở trang Cài đặt nhé!",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_kb",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 10,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Đi đến trang Cài đặt đổi mật khẩu",
+          href: "/settings",
+          reason: "Đổi mật khẩu cho chính tài khoản của bạn.",
+        },
+      })
+      .mockResolvedValueOnce({
+        reply: "Không thể chuyển sang Admin.",
+        source_tier: "tier_0_kb",
+        provider_id: "viread_scope_guard",
+        model_id: "grounded-viread-kb-v1",
+        bandwidth_applied: "high",
+        latency_ms: 8,
+        cached: false,
+        role_scope: "parent",
+        quick_actions: [],
+        suggested_prompts: [],
+        navigation_offer: {
+          label: "Admin",
+          href: "/admin/health",
+        },
+      });
+
+    renderWidget();
+    await user.click(screen.getByTestId("viread-assistant-launcher"));
+    const input = await screen.findByLabelText("Nhập câu hỏi về ViRead");
+
+    // 1. Progressive loading card + Cancel restores prompt text
+    await user.type(input, "Tôi muốn đổi mật khẩu");
+    await user.click(screen.getByLabelText("Gửi câu hỏi"));
+    expect(
+      await screen.findByTestId("viread-assistant-loading-card"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByTestId("viread-assistant-cancel"));
+    rejectRef.fn?.(new DOMException("Aborted", "AbortError"));
+    expect(input).toHaveValue("Tôi muốn đổi mật khẩu");
+
+    // 2. Submit -> shows Yes/No navigation confirmation -> click Không stays on page
+    await user.click(screen.getByLabelText("Gửi câu hỏi"));
+    expect(
+      await screen.findByTestId("viread-assistant-nav-card"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByTestId("viread-assistant-nav-no"));
+    expect(navState.routerPush).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("Đã giữ nguyên trang hiện tại"),
+    ).toBeInTheDocument();
+
+    // 3. Submit -> click Có triggers router.push("/settings")
+    await user.type(input, "Mở trang đổi mật khẩu");
+    await user.click(screen.getByLabelText("Gửi câu hỏi"));
+    const yesBtn = await screen.findByTestId("viread-assistant-nav-yes");
+    await user.click(yesBtn);
+    expect(navState.routerPush).toHaveBeenCalledTimes(1);
+    expect(navState.routerPush).toHaveBeenCalledWith("/settings");
+
+    // 4. Disallowed /admin/health offer in parent scope is never rendered
+    await user.type(input, "Chuyển sang trang admin");
+    await user.click(screen.getByLabelText("Gửi câu hỏi"));
+    expect(
+      await screen.findByText("Không thể chuyển sang Admin."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("viread-assistant-nav-yes"),
+    ).not.toBeInTheDocument();
   });
 });

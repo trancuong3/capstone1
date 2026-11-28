@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Điều hướng hành trình đọc"
+  },
   "overview": {
     "title": "Báo cáo tiến bộ",
     "subtitle": "Theo dõi thời lượng đọc, độ chính xác và chuỗi ngày đọc của bé.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "Chưa nghe rõ",
       "uncertainNote": "Ghi nhận riêng, không tính là lỗi phát âm đã xác nhận."
     },
-    "entertainmentSummaryHeading": "Học tập qua Giải trí & Kỹ năng ngôn ngữ (V4.0)"
+    "entertainmentSummaryHeading": "Học tập qua Giải trí & Kỹ năng ngôn ngữ (V4.0)",
+    "focusAria": "Chọn khu vực báo cáo",
+    "focusAssessment": "Đánh giá AI",
+    "focusSignals": "Biểu đồ & chỉ số",
+    "focusEntertainment": "Học mà Chơi"
   },
   "sessions": {
     "title": "Lịch sử đọc",
@@ -656,7 +663,11 @@
       "favorited": "Đã yêu thích",
       "wantToRead": "Muốn đọc",
       "savedToRead": "Đã lưu đọc"
-    }
+    },
+    "focusAria": "Lọc khu vực quản lý đọc",
+    "focusPlans": "Kế hoạch",
+    "focusGoals": "Mục tiêu",
+    "focusReminders": "Lịch nhắc"
   },
   "entertainmentSummary": {
     "loading": "Đang tổng hợp tiến độ Học mà Chơi cho {childName}…",

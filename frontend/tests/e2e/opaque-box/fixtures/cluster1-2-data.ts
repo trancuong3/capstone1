@@ -32,6 +32,8 @@ import {
   type ParentProfilePayload,
 } from "./test-data";
 
+export { makeAdminCatalogItem } from "./test-data";
+
 export const OPAQUE_SUBMISSION_ID = makeOpaqueUuid(101, "87000000");
 export const OPAQUE_BATCH_ID = makeOpaqueUuid(102, "87000000");
 export const OPAQUE_WORKFLOW_ID = makeOpaqueUuid(103, "87000000");
@@ -536,7 +538,7 @@ export function makePrivateBookListItem(
     max_grade: 3,
     lifecycle_status: "ACTIVE" as const,
     visibility_scope: "PARENT_PRIVATE" as const,
-    moderation_status: "ACTIVE" as const,
+    moderation_status: "ACTIVE" as "ACTIVE" | "SUSPENDED",
     suspended_reason: null as string | null,
     source_declaration: "[SELF_AUTHORED] Gia đình tự biên soạn",
     committed_page_count: 0,
@@ -1104,7 +1106,7 @@ export function makeAdminUserBookQueueItem(
     book_title: "Sách gia đình bé An",
     book_author: "Gia đình bé An",
     owner_label: "Phụ huynh Kiểm thử",
-    moderation_status: "ACTIVE" as const,
+    moderation_status: "ACTIVE" as "ACTIVE" | "SUSPENDED",
     queue_status: "PENDING_ADMIN" as const,
     pending_count: 1,
     flagged_count: 0,

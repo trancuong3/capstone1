@@ -18,12 +18,14 @@ import {
   makeAdminPageListItem,
   makeAdminQualityBookDetail,
   makeAdminRevisionDetail,
+  makeAdminRevisionWord,
+  makeAdminUserBookQueueItem,
+  makeAdminUserBookSubmissionDetail,
   makeBookAssetsSummary,
   makeBookPresentationAsset,
   makeFlow2TriggerResponse,
   makePageOcrExtraction,
   makePrivateBookOcrContribution,
-  makePrivateBookSubmission,
   type Cluster1ApiState,
   type Cluster2ApiState,
 } from "./cluster1-2-data";
@@ -943,7 +945,7 @@ export function createTier34ApiHandler(
 
   return async (
     ctx: ApiMockRequestContext,
-  ): Promise<ApiMockResponse | undefined> => {
+  ): Promise<ApiMockResponse | null | undefined> => {
     const callerRole = options.roleOverride ?? state.actorRole;
     const faultKey = `${ctx.method} ${ctx.pathname}`;
     if (state.faults[faultKey]) return state.faults[faultKey];
@@ -1111,11 +1113,14 @@ export function createTier34ApiHandler(
       const pageNum = pages.length + 1;
       pages.push(
         makeAdminPageListItem({
-          id: pid,
           book_id: bid,
           page_number: pageNum,
-          current_verified_revision_id: null,
-          has_needs_review_revision: true,
+          processing: {
+            page_id: pid,
+            page_revision_id: rid,
+            verification_status: "NEEDS_REVIEW",
+            current_verified_revision_id: null,
+          },
         }),
       );
       state.cluster2.adminPagesByBook[bid] = pages;
@@ -1142,7 +1147,7 @@ export function createTier34ApiHandler(
         body: makeAdminOcrJob({
           book_id: bid,
           page_id: pid,
-          page_revision_id: rid,
+          revision_id: rid,
           status: "SUCCEEDED",
         }),
       };
@@ -1240,13 +1245,7 @@ export function createTier34ApiHandler(
       const nextWords = extraction.canonical_text
         .split(/\s+/u)
         .filter(Boolean)
-        .map((token, idx) => ({
-          id: makeOpaqueUuid(idx + 1, "87000000"),
-          word_index: idx,
-          word_text: token,
-          normalized_word: token.toLowerCase(),
-          confidence: 0.96,
-        }));
+        .map((token, idx) => makeAdminRevisionWord(idx, token));
       state.cluster2.adminRevisionsByPage[pid] = {
         ...existingRev,
         draft_text: extraction.canonical_text,
@@ -1277,18 +1276,18 @@ export function createTier34ApiHandler(
       for (const [bid, pages] of Object.entries(
         state.cluster2.adminPagesByBook,
       )) {
-        const pageEntry = pages.find((p) => p.id === pid);
+        const pageEntry = pages.find((p) => p.processing.page_id === pid);
         if (pageEntry) {
           const rev = state.cluster2.adminRevisionsByPage[pid];
-          pageEntry.current_verified_revision_id =
+          pageEntry.processing.current_verified_revision_id =
             rev?.page_revision_id ?? OPAQUE_REV_ID;
-          pageEntry.has_needs_review_revision = false;
+          pageEntry.processing.verification_status = "VERIFIED";
           const catItem = state.cluster2.adminCatalog.find(
             (c) => c.book.id === bid,
           );
           if (catItem) {
             catItem.verified_count = pages.filter(
-              (p) => p.current_verified_revision_id !== null,
+              (p) => p.processing.current_verified_revision_id !== null,
             ).length;
             catItem.needs_review_count = Math.max(
               0,
@@ -1425,50 +1424,53 @@ export function createTier34ApiHandler(
         ...detail.submissions[subIdx]!,
         workflow_status: "PENDING_ADMIN",
       };
-      const queueItem = {
-        submission_id: sid,
+      const submission = detail.submissions[subIdx]!;
+      const sourceType =
+        submission.source_type ?? detail.book.ocr_contribution.rights_basis;
+      const queueItem = makeAdminUserBookQueueItem({
         book_id: bid,
         book_title: detail.book.title,
-        parent_id: OPAQUE_PARENT_ID,
-        parent_display_name: state.cluster1.profile.display_name,
-        source_type: detail.book.source_type,
-        source_file_name: detail.submissions[subIdx]!.source_file_name,
-        target_page_number: detail.submissions[subIdx]!.target_page_number,
-        queue_status: "PENDING_ADMIN" as const,
+        book_author: detail.book.author ?? "",
+        owner_label:
+          state.cluster1.profile.display_name ?? "Phụ huynh Kiểm thử",
         moderation_status: detail.book.moderation_status,
-        policy_blocked: false,
-        submitted_at: OPAQUE_NOW_ISO,
-        submission_version: detail.submissions[subIdx]!.submission_version,
+        queue_status: "PENDING_ADMIN",
+        pending_count: 1,
+        flagged_count: 0,
+        failed_count: 0,
         committed_page_count: detail.pages.length,
-        findings_count: 1,
-      };
+        latest_submission_id: sid,
+        latest_submission_version: submission.submission_version,
+        latest_submitted_at: OPAQUE_NOW_ISO,
+        policy_blocked: false,
+      });
       const qIdx = state.cluster2.userBookQueue.findIndex(
-        (q) => q.submission_id === sid,
+        (q) => q.book_id === bid || q.latest_submission_id === sid,
       );
       if (qIdx >= 0) {
         state.cluster2.userBookQueue[qIdx] = queueItem;
       } else {
         state.cluster2.userBookQueue.unshift(queueItem);
       }
-      state.cluster2.userBookSubmissions[sid] = {
-        ...makePrivateBookSubmission({
-          id: sid,
+      state.cluster2.userBookSubmissions[sid] =
+        makeAdminUserBookSubmissionDetail({
+          submission_id: sid,
           book_id: bid,
+          book_title: detail.book.title,
+          book_author: detail.book.author ?? "",
+          book_moderation_status: detail.book.moderation_status,
+          owner_label:
+            state.cluster1.profile.display_name ?? "Phụ huynh Kiểm thử",
+          source_file_name: submission.source_file_name,
+          source_page_number:
+            submission.target_page_number ?? submission.source_page_number,
+          submission_version: submission.submission_version,
           workflow_status: "PENDING_ADMIN",
-        }),
-        book_title: detail.book.title,
-        parent_id: OPAQUE_PARENT_ID,
-        parent_display_name: state.cluster1.profile.display_name,
-        source_type: detail.book.source_type,
-        source_note: detail.book.source_note,
-        moderation_status: detail.book.moderation_status,
-        policy_blocked: false,
-        committed_page_count: detail.pages.length,
-        source_image_url:
-          "https://example.supabase.co/storage/v1/object/public/book-pages/page-1.png",
-        ai_findings: [],
-        moderation_history: [],
-      };
+          image_url: submission.image_url,
+          tool_check_findings: [],
+          history: [],
+          source_type: sourceType,
+        });
       return { status: 200, body: detail.submissions[subIdx] };
     }
 
@@ -1507,6 +1509,11 @@ export function createTier34ApiHandler(
       );
     if (ctx.method === "POST" && userBookSuspendMatch) {
       const bid = decodeURIComponent(userBookSuspendMatch[1] ?? "");
+      const body = isRecord(ctx.postDataJson) ? ctx.postDataJson : {};
+      const reason =
+        typeof body.reason === "string" && body.reason.trim()
+          ? body.reason.trim()
+          : "Tạm đình chỉ để kiểm tra";
       if (!state.suspendedPrivateBookIds.includes(bid)) {
         state.suspendedPrivateBookIds.push(bid);
       }
@@ -1523,6 +1530,8 @@ export function createTier34ApiHandler(
         body: {
           book_id: bid,
           moderation_status: "SUSPENDED",
+          suspended_at: OPAQUE_NOW_ISO,
+          reason,
           audit_log_id: makeOpaqueUuid((state.nextId += 1), "87000000"),
         },
       };
@@ -1536,7 +1545,10 @@ export function createTier34ApiHandler(
       const detail = state.cluster2.privateBooks.find((d) => d.book.id === bid);
       if (!detail) return { status: 404, body: { detail: "BOOK_NOT_FOUND" } };
       if (ctx.method === "PUT") {
-        if (detail.book.source_type !== "SELF_AUTHORED") {
+        const sourceType =
+          detail.submissions[0]?.source_type ??
+          detail.book.ocr_contribution.rights_basis;
+        if (sourceType !== "SELF_AUTHORED") {
           return {
             status: 422,
             body: { detail: "OCR_CONTRIBUTION_NOT_ELIGIBLE" },
@@ -1562,7 +1574,7 @@ export function createTier34ApiHandler(
             id: makeOpaqueUuid((state.nextId += 1), "87200000"),
             book_id: bid,
             book_title: detail.book.title,
-            source_type: detail.book.source_type,
+            source_type: sourceType,
             submission_id: detail.submissions[0]?.id ?? OPAQUE_SUBMISSION_ID,
             page_number: 1,
             status: "PENDING",

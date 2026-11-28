@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Reading journey navigation"
+  },
   "overview": {
     "title": "Progress Report",
     "subtitle": "Track your child's reading time, accuracy, and reading streaks.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "Couldn't hear clearly",
       "uncertainNote": "Recorded separately, not counted as a confirmed pronunciation error."
     },
-    "entertainmentSummaryHeading": "Play & Learn Progress & Language Skills (V4.0)"
+    "entertainmentSummaryHeading": "Play & Learn Progress & Language Skills (V4.0)",
+    "focusAria": "Filter report sections",
+    "focusAssessment": "AI Assessment",
+    "focusSignals": "Charts & metrics",
+    "focusEntertainment": "Play & Learn"
   },
   "sessions": {
     "title": "Reading history",
@@ -656,7 +663,11 @@
       "favorited": "Favorited",
       "wantToRead": "Want to read",
       "savedToRead": "Saved to reading list"
-    }
+    },
+    "focusAria": "Filter reading management sections",
+    "focusPlans": "Plans",
+    "focusGoals": "Goals",
+    "focusReminders": "Reminders"
   },
   "entertainmentSummary": {
     "loading": "Summarizing Play & Learn progress for {childName}…",

@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 import re
 import unicodedata
-from typing import Sequence
+from typing import Literal, Sequence
 
 from app.schemas.assistant import (
+    AssistantNavigationOffer,
     AssistantQuickAction,
     AssistantRoleScope,
     BandwidthProfile,
@@ -714,8 +715,8 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
     ),
     KbArticle(
         id="entertainment_games_karaoke",
-        title_vi="Góc giải trí: Karaoke, Ghép câu và Mô tả tranh AI",
-        title_en="Entertainment: Karaoke, Sentence Shooter, and Picture Description",
+        title_vi="Góc giải trí: Karaoke, Lật thẻ ghi nhớ, Ghép câu và Mô tả tranh AI",
+        title_en="Entertainment: Karaoke, Memory Game, Sentence Shooter, and Picture Description",
         scopes=_PARENT_SCOPES,
         route_prefixes=("/entertainment", "/karaoke"),
         keywords=(
@@ -724,6 +725,10 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "karaoke",
             "hat karaoke",
             "bai hat karaoke",
+            "memory game",
+            "lat the",
+            "the ghi nho",
+            "tro choi lat the",
             "ghep cau",
             "sentence shooter",
             "mo ta tranh",
@@ -733,43 +738,47 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "language games",
         ),
         short_answer_vi=(
-            "Góc giải trí (/entertainment) có 3 hoạt động vừa học vừa chơi cho bé:\n"
+            "Góc giải trí (/entertainment) có 4 hoạt động vừa học vừa chơi cho bé:\n"
             "• Karaoke thiếu nhi (/karaoke): hát theo lời chạy khớp nhịp giúp bé luyện phát âm & nhịp điệu.\n"
+            "• Memory Game lật thẻ (/entertainment/memory-game): lật cặp thẻ chữ/hình tương ứng để rèn trí nhớ từ vựng và phản xạ mặt chữ.\n"
             "• Ghép câu (/entertainment/sentence-shooter): sắp xếp từ thành câu tiếng Việt hoàn chỉnh.\n"
             "• Mô tả tranh AI (/entertainment/picture-description): bé nhìn tranh, nói hoặc nhập câu kể chuyện và nhận nhận xét, gợi ý từ vựng + sao khen ngợi."
         ),
         detailed_answer_vi=(
-            "Khám phá 3 hoạt động trong Góc giải trí (/entertainment):\n"
+            "Khám phá 4 hoạt động trong Góc giải trí (/entertainment):\n"
             "1. Karaoke (/karaoke): chọn bài hát thiếu nhi, nghe nhạc nền và đọc/hát theo từng chữ tô sáng khớp thời gian.\n"
-            "2. Ghép câu — Sentence Shooter (/entertainment/sentence-shooter): rèn cấu trúc câu và ngữ pháp tiếng Việt qua từng vòng chơi sinh động.\n"
-            "3. Mô tả tranh AI (/entertainment/picture-description): chọn tranh mẫu hoặc tải ảnh tranh lên, bé quan sát và kể lại bằng lời; AI gợi ý từ vựng, chấm điểm 1–10 (tối đa 3 sao) và khuyên cách mở rộng câu hay hơn."
+            "2. Memory Game lật thẻ (/entertainment/memory-game): tìm và ghép các cặp thẻ tương ứng để luyện ghi nhớ mặt chữ tiếng Việt, từ vựng và sự tập trung.\n"
+            "3. Ghép câu — Sentence Shooter (/entertainment/sentence-shooter): rèn cấu trúc câu và ngữ pháp tiếng Việt qua từng vòng chơi sinh động.\n"
+            "4. Mô tả tranh AI (/entertainment/picture-description): chọn tranh mẫu hoặc tải ảnh tranh lên, bé quan sát và kể lại bằng lời; AI gợi ý từ vựng, chấm điểm 1–10 (tối đa 3 sao) và khuyên cách mở rộng câu hay hơn."
         ),
         short_answer_en=(
-            "Entertainment (/entertainment) offers 3 playful language activities:\n"
+            "Entertainment (/entertainment) offers 4 playful language activities:\n"
             "• Karaoke (/karaoke): sing along with synchronized lyrics.\n"
+            "• Memory Game (/entertainment/memory-game): flip and match pairs to build vocabulary & character recall.\n"
             "• Sentence Shooter (/entertainment/sentence-shooter): build complete Vietnamese sentences.\n"
             "• Picture Description (/entertainment/picture-description): describe pictures and get AI vocabulary hints, stars, and friendly feedback."
         ),
         detailed_answer_en=(
-            "Three learning games inside Entertainment (/entertainment):\n"
+            "Four learning games inside Entertainment (/entertainment):\n"
             "1. Karaoke (/karaoke): synchronized Vietnamese children's songs for rhythm and articulation.\n"
-            "2. Sentence Shooter (/entertainment/sentence-shooter): arrange words into well-formed sentences.\n"
-            "3. Picture Description (/entertainment/picture-description): upload or pick an illustration, let your child describe what they see, and receive AI praise, vocabulary tips, and up to 3 stars."
+            "2. Memory Game (/entertainment/memory-game): card-flip matching game for Vietnamese word memory and focus.\n"
+            "3. Sentence Shooter (/entertainment/sentence-shooter): arrange words into well-formed sentences.\n"
+            "4. Picture Description (/entertainment/picture-description): upload or pick an illustration, let your child describe what they see, and receive AI praise, vocabulary tips, and up to 3 stars."
         ),
         actions=(
             KbAction("Mở Góc giải trí", "Open Entertainment", "/entertainment"),
+            KbAction("Memory Game lật thẻ", "Open Memory Game", "/entertainment/memory-game"),
             KbAction("Mở Karaoke", "Open Karaoke", "/karaoke"),
-            KbAction("Mô tả tranh AI", "Picture Description", "/entertainment/picture-description"),
         ),
         followups_vi=(
+            "Memory Game lật thẻ chơi thế nào?",
             "Mô tả tranh AI chấm điểm như thế nào?",
             "Micro không hoạt động trong trò chơi thì sao?",
-            "Làm sao quay lại đọc sách?",
         ),
         followups_en=(
+            "How do I play Memory Game?",
             "How does Picture Description score answers?",
             "Mic not working during games?",
-            "How do I go back to reading books?",
         ),
     ),
     KbArticle(
@@ -1124,6 +1133,296 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "How does the tiered AI assistant work?",
         ),
     ),
+    KbArticle(
+        id="global_ai_task_center",
+        title_vi="Trung tâm tác vụ AI & Theo dõi tiến trình chạy nền",
+        title_en="AI Task Center & background job progress",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/studio/tasks", "/my-books", "/book-scanner", "/dashboard"),
+        keywords=(
+            "tac vu ai",
+            "tien trinh ai",
+            "tien trinh tac vu",
+            "global task center",
+            "studio tasks",
+            "hang doi ai",
+            "ocr dang chay",
+            "tao anh dang chay",
+            "task center",
+            "background jobs",
+        ),
+        short_answer_vi=(
+            "Bạn theo dõi mọi tác vụ AI đang chạy (quét OCR sách, tạo ảnh bìa/minh họa, chuẩn bị audio, đọc hiểu…) ngay trên thanh nổi Trung tâm tác vụ AI ở góc màn hình hoặc tại trang Tác vụ AI (/studio/tasks)."
+        ),
+        detailed_answer_vi=(
+            "ViRead cập nhật tiến trình tác vụ AI theo thời gian thực:\n"
+            "1. Thanh nổi GlobalTaskCenter: tự xuất hiện khi có tác vụ AI chạy nền cho tài khoản gia đình bạn (như quét OCR, tạo ảnh bìa/minh họa Smart Studio hoặc tổng hợp giọng đọc).\n"
+            "2. Trang Tác vụ AI (/studio/tasks): xem đầy đủ danh sách tác vụ đang chạy, phần trăm tiến trình, trạng thái hoàn thành hoặc thử lại nếu tác vụ bị lỗi.\n"
+            "3. Mọi tác vụ đều tách biệt nghiêm ngặt theo tài khoản của chính bạn."
+        ),
+        short_answer_en=(
+            "Track all your background AI jobs (OCR scans, Smart Studio illustrations, audio generation) via the floating AI Task Center pill or the AI Tasks page (/studio/tasks)."
+        ),
+        detailed_answer_en=(
+            "Monitor background AI progress cleanly in ViRead:\n"
+            "1. Floating GlobalTaskCenter widget shows active jobs in real time without blocking reading.\n"
+            "2. Open /studio/tasks to review full job details, completion progress, and retry controls.\n"
+            "3. Task visibility is strictly scoped to your own account."
+        ),
+        actions=(
+            KbAction("Mở Tác vụ AI", "Open AI Tasks", "/studio/tasks"),
+            KbAction("Mở Sách của tôi", "Open My Books", "/my-books"),
+        ),
+        followups_vi=(
+            "Quét sách giấy mất bao lâu?",
+            "Smart Studio tạo bìa & tranh minh họa ở đâu?",
+            "Làm sao xem sách tôi vừa tải lên?",
+        ),
+        followups_en=(
+            "How long does book scanning take?",
+            "Where is Smart Studio for covers & art?",
+            "Where are my uploaded books?",
+        ),
+    ),
+    KbArticle(
+        id="voice_settings_lock_and_offline_audio",
+        title_vi="Khóa giọng đọc theo buổi, giọng 3 miền & audio ngoại tuyến",
+        title_en="Session Voice Lock, regional voices & offline audio cache",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/reading", "/reading-preparation", "/settings"),
+        keywords=(
+            "khoa giong doc",
+            "khong doi duoc giong doc",
+            "doi giong doc giua buoi",
+            "session voice lock",
+            "giong doc vung mien",
+            "giong bac trung nam",
+            "giong mau",
+            "audio ngoai tuyen",
+            "tai truoc audio",
+            "offline audio",
+            "voice lock",
+        ),
+        short_answer_vi=(
+            "ViRead áp dụng Khóa giọng đọc theo buổi (Session Voice Lock): trong một buổi đọc đang mở, giọng đọc mẫu được giữ ổn định để bé không bị rối tai. Hãy chọn giọng Bắc/Trung/Nam trong phần Chuẩn bị đọc hoặc Cài đặt trước khi bắt đầu buổi mới."
+        ),
+        detailed_answer_vi=(
+            "Cơ chế giọng đọc mẫu thông minh trên ViRead:\n"
+            "1. Khóa giọng đọc trong buổi (Session Voice Lock): ngay khi buổi đọc bắt đầu, hệ thống cố định giọng đọc đã chọn cho đến hết buổi để đảm bảo âm sắc nhất quán và đồng bộ từ ngữ.\n"
+            "2. Cách đổi giọng: bạn chỉ cần tạm dừng/kết thúc buổi hiện tại hoặc mở Cài đặt (/settings) và chọn giọng Bắc, Trung hoặc Nam trước khi mở buổi mới.\n"
+            "3. Audio ngoại tuyến: ViRead có thể chuẩn bị và lưu bộ đệm âm thanh câu mẫu giúp phát mượt ngay cả khi mạng yếu."
+        ),
+        short_answer_en=(
+            "ViRead uses Session Voice Lock: once a reading session starts, the model voice stays consistent so your child isn't distracted. Pick Northern/Central/Southern voice in Reading Preparation or Settings before starting a new session."
+        ),
+        detailed_answer_en=(
+            "How model voices work in ViRead:\n"
+            "1. Session Voice Lock prevents mid-session accent shifts and keeps word-timing highlights accurate.\n"
+            "2. To switch accents (North/Central/South), update your voice preference in Reading Preparation or Settings (/settings) before starting a session.\n"
+            "3. Supported model audio can be cached locally for smoother playback on unstable connections."
+        ),
+        actions=(
+            KbAction("Mở Cài đặt", "Open Settings", "/settings"),
+            KbAction("Quản lý đọc", "Reading Management", "/reading-management"),
+        ),
+        followups_vi=(
+            "Micro không nhận giọng bé khi đang đọc?",
+            "Làm sao thay đổi mật khẩu tài khoản?",
+            "Chế độ đọc tự động và đồng hành khác gì nhau?",
+        ),
+        followups_en=(
+            "Microphone not picking up my child's voice?",
+            "How do I change my account password?",
+            "What is the difference between reading modes?",
+        ),
+    ),
+    KbArticle(
+        id="smart_studio_covers_illustrations",
+        title_vi="Smart Studio: Tạo ảnh bìa & minh họa sách AI",
+        title_en="Smart Studio: AI book covers & page illustrations",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/my-books", "/book-scanner", "/studio/tasks"),
+        keywords=(
+            "smart studio",
+            "tao anh bia",
+            "anh bia ai",
+            "tao tranh minh hoa",
+            "minh hoa trang sach",
+            "tao minh hoa",
+            "book cover ai",
+            "page illustration",
+        ),
+        short_answer_vi=(
+            "Trong Sách của tôi (/my-books), bạn có thể dùng Smart Studio để tạo ảnh bìa và tranh minh họa phù hợp thiếu nhi bằng AI cho cuốn sách gia đình tự tải, và theo dõi tiến trình tạo ảnh tại Tác vụ AI (/studio/tasks)."
+        ),
+        detailed_answer_vi=(
+            "Tính năng Smart Studio dành cho sách riêng tư (/my-books):\n"
+            "1. Mở chi tiết cuốn sách trong Sách của tôi (/my-books).\n"
+            "2. Chọn tạo ảnh bìa sách hoặc sinh tranh minh họa từng trang dựa theo nội dung đã quét.\n"
+            "3. Tiến trình chạy nền hiển thị trong Trung tâm tác vụ AI (/studio/tasks) để bạn không phải chờ trên trang."
+        ),
+        short_answer_en=(
+            "Inside My Books (/my-books), Smart Studio lets you generate child-friendly AI book covers and page illustrations for your private family books, tracked in AI Tasks (/studio/tasks)."
+        ),
+        detailed_answer_en=(
+            "Smart Studio workflow inside My Books (/my-books):\n"
+            "1. Open one of your uploaded/scanned books.\n"
+            "2. Trigger AI cover art or per-page illustration generation.\n"
+            "3. Monitor progress in AI Tasks (/studio/tasks)."
+        ),
+        actions=(
+            KbAction("Mở Sách của tôi", "Open My Books", "/my-books"),
+            KbAction("Mở Tác vụ AI", "Open AI Tasks", "/studio/tasks"),
+        ),
+        followups_vi=(
+            "Sách của tôi có chia sẻ cho người khác không?",
+            "Theo dõi tác vụ AI đang chạy ở đâu?",
+            "Làm sao quét sách giấy mới?",
+        ),
+        followups_en=(
+            "Are My Books private to my family?",
+            "Where can I track running AI tasks?",
+            "How do I scan a printed book?",
+        ),
+    ),
+    KbArticle(
+        id="reading_presence_and_email_prefs",
+        title_vi="Nhắc đọc qua email & trạng thái đang đọc trực tuyến",
+        title_en="Email reading reminders & live reading presence",
+        scopes=_PARENT_SCOPES,
+        route_prefixes=("/settings", "/profile", "/dashboard"),
+        keywords=(
+            "nhac doc email",
+            "email nhac doc",
+            "thong bao email",
+            "email preferences",
+            "trang thai dang doc",
+            "reading presence",
+            "online presence",
+            "lich nhac doc",
+        ),
+        short_answer_vi=(
+            "Bạn có thể bật/tắt email nhắc lịch đọc, báo cáo định kỳ và tùy chọn thông báo trong Cài đặt (/settings) hoặc Hồ sơ ba mẹ (/profile). Khi bé đang trong buổi đọc, ViRead đồng bộ trạng thái đọc an toàn trong chính tài khoản gia đình bạn."
+        ),
+        detailed_answer_vi=(
+            "Quản lý thông báo & nhịp đọc đều đặn:\n"
+            "1. Vào Cài đặt (/settings) → Tùy chọn Email để bật/tắt nhắc lịch đọc hằng ngày và tổng hợp tiến bộ.\n"
+            "2. Trạng thái đang đọc trực tuyến (Reading Presence) giúp ghi nhận phiên đang mở để ba mẹ tiếp tục đúng trang đang đọc dở.\n"
+            "3. Mọi dữ liệu hiện diện và lịch sử đọc chỉ hiển thị trong phạm vi tài khoản của bạn."
+        ),
+        short_answer_en=(
+            "Manage reading reminder emails in Settings (/settings) or Parent Profile (/profile). Active reading presence keeps session state synced strictly inside your own account."
+        ),
+        detailed_answer_en=(
+            "Reminders and reading presence:\n"
+            "1. Configure daily reading reminders and summary emails in Settings (/settings).\n"
+            "2. Reading presence tracks active sessions so you can resume cleanly without duplicates, scoped only to your own account."
+        ),
+        actions=(
+            KbAction("Mở Cài đặt", "Open Settings", "/settings"),
+            KbAction("Hồ sơ ba mẹ", "Parent Profile", "/profile"),
+        ),
+        followups_vi=(
+            "Làm sao đổi mật khẩu tài khoản?",
+            "Xem lại lịch sử các buổi đọc ở đâu?",
+            "Cách xem báo cáo tiến bộ của bé?",
+        ),
+        followups_en=(
+            "How do I change my password?",
+            "Where do I view past reading sessions?",
+            "How do I view child progress reports?",
+        ),
+    ),
+    KbArticle(
+        id="viread_system_architecture_and_privacy",
+        title_vi="Bảo mật riêng tư & phạm vi dữ liệu tài khoản ViRead",
+        title_en="Account privacy & strict own-scope data isolation",
+        scopes=_ALL_SCOPES,
+        route_prefixes=("/", "/settings", "/profile", "/help-support"),
+        keywords=(
+            "bao mat",
+            "rieng tu",
+            "du lieu gia dinh",
+            "phan quyen",
+            "rls",
+            "pham vi tai khoan",
+            "trang nguoi khac",
+            "privacy",
+            "security",
+            "account scope",
+        ),
+        short_answer_vi=(
+            "Mỗi tài khoản ViRead được cách ly dữ liệu nghiêm ngặt (Supabase Auth + RLS): phụ huynh chỉ truy cập được trang, hồ sơ bé, sách riêng tư và báo cáo của chính mình — không thể xem tài khoản người khác hay khu vực quản trị."
+        ),
+        detailed_answer_vi=(
+            "Nguyên tắc an toàn & riêng tư của hệ thống ViRead:\n"
+            "1. Đúng phạm vi người dùng (Own-Scope): mọi hồ sơ bé, sách tự quét (/my-books), buổi đọc (/sessions), tác vụ AI (/studio/tasks) và cài đặt (/settings) chỉ thuộc về tài khoản đang đăng nhập.\n"
+            "2. Trợ lý AI bảo vệ quyền riêng tư: không bao giờ điều hướng bạn sang khu vực quản trị hoặc trang dữ liệu của người dùng khác.\n"
+            "3. Hỗ trợ trực tiếp khi gặp sự cố quyền truy cập tại Trợ giúp (/help-support)."
+        ),
+        short_answer_en=(
+            "ViRead strictly isolates every account's data: you can only view and navigate your own child profiles, private books, reading sessions, and settings — never another user's pages or admin tools."
+        ),
+        detailed_answer_en=(
+            "ViRead security & isolation guarantees:\n"
+            "1. Strict own-scope access enforced across API and database layers.\n"
+            "2. The assistant only offers navigation to valid pages within your authorized scope.\n"
+            "3. Need account assistance? Visit Help & Support (/help-support)."
+        ),
+        actions=(
+            KbAction("Cài đặt tài khoản", "Account Settings", "/settings"),
+            KbAction("Trợ giúp & Hỗ trợ", "Help & Support", "/help-support"),
+        ),
+        followups_vi=(
+            "Cách đổi mật khẩu tài khoản ViRead?",
+            "Quét sách giấy có an toàn cho bé không?",
+            "Liên hệ hỗ trợ ViRead như thế nào?",
+        ),
+        followups_en=(
+            "How do I change my ViRead password?",
+            "Are scanned books private to my family?",
+            "How do I contact ViRead support?",
+        ),
+    ),
+    KbArticle(
+        id="admin_task_center_isolation",
+        title_vi="Quản lý tác vụ AI toàn hệ thống (Admin Tasks)",
+        title_en="System AI Task Monitor (Admin Tasks)",
+        scopes=_ADMIN_ONLY,
+        route_prefixes=("/admin/tasks", "/admin"),
+        keywords=(
+            "admin tasks",
+            "tac vu he thong",
+            "theo doi tac vu admin",
+            "admin task center",
+        ),
+        short_answer_vi=(
+            "Trang /admin/tasks giúp quản trị viên theo dõi toàn bộ tác vụ AI xử lý sách, OCR và tạo media ở cấp hệ thống, tách biệt khỏi màn hình phụ huynh."
+        ),
+        detailed_answer_vi=(
+            "Bảng tác vụ Quản trị (/admin/tasks) tổng hợp các tác vụ nền theo thời gian thực để đội vận hành kiểm tra hàng đợi OCR, lỗi xử lý sách công khai và trạng thái worker (/admin/health)."
+        ),
+        short_answer_en=(
+            "Admin Tasks (/admin/tasks) lets administrators monitor system-wide AI, OCR, and media jobs."
+        ),
+        detailed_answer_en=(
+            "The Admin Task monitor (/admin/tasks) tracks background OCR and publishing queues alongside /admin/health."
+        ),
+        actions=(
+            KbAction("Tác vụ Admin", "Admin Tasks", "/admin/tasks"),
+            KbAction("Vận hành", "Admin Health", "/admin/health"),
+        ),
+        followups_vi=(
+            "Kiểm tra sức khỏe worker ở đâu?",
+            "Quy trình duyệt sách và OCR?",
+            "Cách quản lý mô hình VietOCR?",
+        ),
+        followups_en=(
+            "Where do I check worker health?",
+            "How does book OCR approval work?",
+            "How do I manage VietOCR training?",
+        ),
+    ),
 )
 
 
@@ -1148,6 +1447,116 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         actions=(
             KbAction("Đăng nhập phụ huynh", "Parent Login", "/login"),
             KbAction("Quên mật khẩu", "Forgot password", "/forgot-password"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/tasks",
+        scopes=_ADMIN_ONLY,
+        title_vi="Tác vụ AI Quản trị",
+        title_en="Admin AI Tasks",
+        greeting_vi="Theo dõi hàng đợi xử lý sách, OCR và media của toàn hệ thống tại đây.",
+        greeting_en="Monitor system-wide OCR, book publishing, and media background jobs here.",
+        prompts_vi=(
+            "Kiểm tra sức khỏe worker ở đâu?",
+            "Quy trình duyệt sách và OCR?",
+            "Cách xem nhật ký kiểm toán Admin?",
+        ),
+        prompts_en=(
+            "Where do I check worker health?",
+            "What is the book OCR approval flow?",
+            "How do I view Admin Audit Logs?",
+        ),
+        actions=(
+            KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
+            KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/studio/tasks",
+        scopes=_PARENT_SCOPES,
+        title_vi="Trung tâm tác vụ AI",
+        title_en="AI Task Center",
+        greeting_vi="Bạn có thể xem tiến trình quét OCR, tạo ảnh minh họa và audio của tài khoản bạn tại đây.",
+        greeting_en="Track your own OCR scans, AI illustrations, and audio generation jobs here.",
+        prompts_vi=(
+            "Làm sao xem sách tôi vừa quét xong?",
+            "Smart Studio tạo ảnh bìa và minh họa thế nào?",
+            "Làm sao bắt đầu buổi đọc cho bé?",
+        ),
+        prompts_en=(
+            "Where are my newly scanned books?",
+            "How does Smart Studio create covers & art?",
+            "How do I start a reading session?",
+        ),
+        actions=(
+            KbAction("Mở Sách của tôi", "Open My Books", "/my-books"),
+            KbAction("Quét sách giấy", "Book Scanner", "/book-scanner"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/entertainment/memory-game",
+        scopes=_PARENT_SCOPES,
+        title_vi="Memory Game lật thẻ",
+        title_en="Memory Card Game",
+        greeting_vi="Giúp bé lật cặp thẻ chữ/hình để rèn trí nhớ từ vựng và phản xạ mặt chữ tiếng Việt!",
+        greeting_en="Match pairs of cards to sharpen your child's Vietnamese word recall and focus!",
+        prompts_vi=(
+            "Memory Game lật thẻ giúp bé rèn kỹ năng gì?",
+            "Còn trò chơi nào khác trong Góc giải trí?",
+            "Làm sao chuyển sang đọc sách cùng bé?",
+        ),
+        prompts_en=(
+            "What skills does Memory Game build?",
+            "What other games are in Entertainment?",
+            "How do we start a reading session?",
+        ),
+        actions=(
+            KbAction("Góc giải trí", "Entertainment", "/entertainment"),
+            KbAction("Mở kho Sách", "Browse Books", "/books"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/entertainment/sentence-shooter",
+        scopes=_PARENT_SCOPES,
+        title_vi="Trò chơi Ghép câu",
+        title_en="Sentence Shooter",
+        greeting_vi="Cùng bé sắp xếp từ thành câu tiếng Việt hoàn chỉnh, đúng ngữ pháp!",
+        greeting_en="Help your child arrange words into natural Vietnamese sentences!",
+        prompts_vi=(
+            "Trò chơi Ghép câu luyện kỹ năng gì cho bé?",
+            "Thử Memory Game lật thẻ ở đâu?",
+            "Cách quay về đọc sách?",
+        ),
+        prompts_en=(
+            "What skills does Sentence Shooter train?",
+            "Where is the Memory Card Game?",
+            "How do I go back to reading books?",
+        ),
+        actions=(
+            KbAction("Góc giải trí", "Entertainment", "/entertainment"),
+            KbAction("Memory Game", "Memory Game", "/entertainment/memory-game"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/entertainment/picture-description",
+        scopes=_PARENT_SCOPES,
+        title_vi="Mô tả tranh AI",
+        title_en="AI Picture Description",
+        greeting_vi="Bé nhìn tranh kể chuyện bằng giọng nói hoặc gõ câu để nhận sao & gợi ý từ vựng AI!",
+        greeting_en="Let your child describe pictures by voice or text for AI stars and vocabulary tips!",
+        prompts_vi=(
+            "Mô tả tranh AI chấm điểm như thế nào?",
+            "Micro không nhận giọng khi chơi trò chơi?",
+            "Còn trò chơi nào khác cho bé không?",
+        ),
+        prompts_en=(
+            "How does AI Picture Description score?",
+            "Mic not working during games?",
+            "What other games can we play?",
+        ),
+        actions=(
+            KbAction("Góc giải trí", "Entertainment", "/entertainment"),
+            KbAction("Kiểm tra thiết bị", "Device Check", "/device-permissions"),
         ),
     ),
     PageContextSpec(
@@ -1396,20 +1805,20 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         scopes=_PARENT_SCOPES,
         title_vi="Góc giải trí",
         title_en="Entertainment",
-        greeting_vi="Hỏi tôi về Karaoke thiếu nhi, Ghép câu hoặc Mô tả tranh AI cho bé!",
-        greeting_en="Ask me about Karaoke, Sentence Shooter, or AI Picture Description!",
+        greeting_vi="Hỏi tôi về Karaoke, Memory Game lật thẻ, Ghép câu hoặc Mô tả tranh AI cho bé!",
+        greeting_en="Ask me about Karaoke, Memory Game, Sentence Shooter, or AI Picture Description!",
         prompts_vi=(
+            "Memory game lật thẻ ở đâu và chơi thế nào?",
             "Trò chơi Mô tả tranh AI hoạt động thế nào?",
-            "Karaoke và Ghép câu giúp bé luyện kỹ năng gì?",
             "Micro không nhận giọng khi chơi trò chơi?",
         ),
         prompts_en=(
+            "How do I play Memory Game?",
             "How does AI Picture Description work?",
-            "What skills do Karaoke & Sentence Shooter train?",
             "Mic not working during games?",
         ),
         actions=(
-            KbAction("Mở Karaoke", "Open Karaoke", "/karaoke"),
+            KbAction("Memory Game lật thẻ", "Open Memory Game", "/entertainment/memory-game"),
             KbAction("Mô tả tranh AI", "Picture Description", "/entertainment/picture-description"),
         ),
     ),
@@ -1865,7 +2274,50 @@ def _prefer_english(locale: str) -> bool:
 
 
 _PUBLIC_ALLOWED_HREFS: frozenset[str] = frozenset(
-    {"/", "/login", "/register", "/forgot-password", "/reset-password"}
+    {"/", "/login", "/register", "/forgot-password", "/reset-password", "/admin/login"}
+)
+
+_PARENT_STATIC_NAV_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "/dashboard",
+        "/books",
+        "/my-books",
+        "/book-scanner",
+        "/children",
+        "/children/new",
+        "/profile",
+        "/settings",
+        "/reports",
+        "/reports/difficult-words",
+        "/sessions",
+        "/reading-management",
+        "/reading-preparation",
+        "/entertainment",
+        "/entertainment/memory-game",
+        "/entertainment/sentence-shooter",
+        "/entertainment/picture-description",
+        "/karaoke",
+        "/device-permissions",
+        "/help-support",
+        "/book-reports",
+        "/studio/tasks",
+    }
+)
+
+_ADMIN_STATIC_NAV_ALLOWLIST: frozenset[str] = _PARENT_STATIC_NAV_ALLOWLIST | frozenset(
+    {
+        "/admin",
+        "/admin/books",
+        "/admin/books/new",
+        "/admin/metadata-quality",
+        "/admin/viread-training",
+        "/admin/health",
+        "/admin/audit-logs",
+        "/admin/parents",
+        "/admin/karaoke",
+        "/admin/karaoke/new",
+        "/admin/tasks",
+    }
 )
 
 
@@ -1881,13 +2333,400 @@ def sanitize_scoped_path(current_path: str, role_scope: AssistantRoleScope) -> s
 
 
 def _is_href_allowed_for_scope(href: str, role_scope: AssistantRoleScope) -> bool:
-    if role_scope == "admin":
-        return True
-    if _is_protected_admin_path(href):
+    clean = sanitize_current_path(href)
+    if clean != href or ".." in clean or "?" in clean or "#" in clean:
         return False
     if role_scope == "public":
-        return href in _PUBLIC_ALLOWED_HREFS
-    return True
+        return clean in _PUBLIC_ALLOWED_HREFS
+    if role_scope == "parent":
+        if _is_protected_admin_path(clean):
+            return False
+        return clean in _PARENT_STATIC_NAV_ALLOWLIST or clean in _PUBLIC_ALLOWED_HREFS
+    return clean in _ADMIN_STATIC_NAV_ALLOWLIST or clean in _PUBLIC_ALLOWED_HREFS
+
+
+def is_navigation_href_allowed(href: str, role_scope: AssistantRoleScope) -> bool:
+    """Strict allowlist check for interactive Yes/No navigation offers."""
+    clean = sanitize_current_path(href)
+    if clean != href or ".." in clean or "?" in clean or "#" in clean:
+        return False
+    if role_scope == "public":
+        return clean in _PUBLIC_ALLOWED_HREFS
+    if role_scope == "parent":
+        return clean in _PARENT_STATIC_NAV_ALLOWLIST
+    return clean in _ADMIN_STATIC_NAV_ALLOWLIST
+
+
+def detect_disallowed_scope_request(
+    message: str,
+    *,
+    role_scope: AssistantRoleScope,
+) -> Literal["admin_area", "other_user"] | None:
+    """Detect attempts to navigate into /admin/* (non-admin) or another user's private space."""
+    folded = fold_vietnamese(message)
+    if not folded:
+        return None
+    padded = f" {folded} "
+
+    other_user_markers = (
+        "nguoi dung khac",
+        "tai khoan khac",
+        "tai khoan nguoi khac",
+        "phu huynh khac",
+        "gia dinh khac",
+        "ho so nguoi khac",
+        "trang nguoi khac",
+        "trang cua nguoi khac",
+        "du lieu nguoi khac",
+        "cua nguoi khac",
+        "cho nguoi khac",
+        "muon xem trang cua",
+        "vao tai khoan cua nguoi",
+        "doi sang tai khoan cua",
+        "other user",
+        "another user",
+        "another parent",
+        "another account",
+        "someone else",
+    )
+    if any(marker in padded for marker in other_user_markers):
+        return "other_user"
+
+    if role_scope != "admin":
+        admin_markers = (
+            "/admin",
+            "trang admin",
+            "trang quan tri",
+            "vao admin",
+            "mo admin",
+            "sang admin",
+            "chuyen sang admin",
+            "di den admin",
+            "khu vuc quan tri",
+            "bang dieu khien admin",
+            "admin panel",
+            "admin dashboard",
+            "admin health",
+            "admin tasks",
+            "admin parents",
+            "audit logs",
+            "viread training",
+            "viread-training",
+        )
+        if any(marker in padded or marker in folded for marker in admin_markers):
+            return "admin_area"
+    return None
+
+
+def format_scope_boundary_reply(
+    reason: Literal["admin_area", "other_user"],
+    *,
+    role_scope: AssistantRoleScope,
+    current_path: str,
+    locale: str = "vi",
+) -> tuple[str, list[AssistantQuickAction], list[str]]:
+    """Return a warm, clear own-scope refusal without offering disallowed routes."""
+    use_en = _prefer_english(locale)
+    _, _, page_prompts, page_actions = get_page_context(
+        current_path, role_scope=role_scope, locale=locale
+    )
+    if reason == "admin_area":
+        if use_en:
+            reply = (
+                "I'd love to help with your ViRead learning pages, but admin pages (/admin/*) are strictly "
+                "restricted to authorized administrators. Everything I navigate or open stays safely inside your own user workspace."
+            )
+        else:
+            reply = (
+                "Rất tiếc, mình không thể mở hay chuyển bạn sang khu vực Quản trị (/admin) nhé! "
+                "Vì an toàn tài khoản, trợ lý ViRead chỉ hỗ trợ và điều hướng trong phạm vi các trang dành riêng cho tài khoản của bạn."
+            )
+    else:
+        if use_en:
+            reply = (
+                "For family privacy and security, I can never open or access another user's account, child profiles, "
+                "or private reading pages. You can safely manage everything inside your own ViRead pages."
+            )
+        else:
+            reply = (
+                "Vì bảo mật và quyền riêng tư gia đình, mình không thể truy cập hay chuyển bạn sang trang, hồ sơ "
+                "hoặc dữ liệu của người dùng khác nhé! Mọi thao tác đều được giữ an toàn trong phạm vi tài khoản của chính bạn."
+            )
+    return reply, page_actions[:3], page_prompts[:3]
+
+
+@dataclass(frozen=True)
+class _NavRule:
+    href: str
+    phrases: tuple[str, ...]
+    label_vi: str
+    label_en: str
+    reason_vi: str
+    reason_en: str
+
+
+_NAV_RULES: tuple[_NavRule, ...] = (
+    _NavRule(
+        href="/settings",
+        phrases=(
+            "doi mat khau",
+            "thay doi mat khau",
+            "cap nhat mat khau",
+            "dat mat khau",
+            "change password",
+            "update password",
+            "cai dat",
+            "thiet lap",
+            "nhac doc email",
+            "tuy chon email",
+            "settings",
+        ),
+        label_vi="Đi đến trang Cài đặt đổi mật khẩu",
+        label_en="Go to Password & Settings",
+        reason_vi="Tại trang Cài đặt, bạn có thể đổi mật khẩu và thiết lập bảo mật cho chính tài khoản của mình.",
+        reason_en="Update your own password and account settings safely.",
+    ),
+    _NavRule(
+        href="/forgot-password",
+        phrases=("quen mat khau", "khoi phuc mat khau", "dat lai mat khau", "forgot password", "reset password"),
+        label_vi="Đi đến trang Quên mật khẩu",
+        label_en="Go to Forgot Password",
+        reason_vi="Nhập email đã đăng ký để nhận liên kết đặt lại mật khẩu an toàn.",
+        reason_en="Request a secure password reset link via email.",
+    ),
+    _NavRule(
+        href="/profile",
+        phrases=("ho so ba me", "ho so phu huynh", "doi email", "so dien thoai", "parent profile"),
+        label_vi="Đi đến Hồ sơ ba mẹ",
+        label_en="Go to Parent Profile",
+        reason_vi="Cập nhật tên hiển thị, số điện thoại và thông tin cá nhân của bạn.",
+        reason_en="Manage your parent account details.",
+    ),
+    _NavRule(
+        href="/children/new",
+        phrases=("tao ho so be", "them ho so be", "them be moi", "create child", "add child"),
+        label_vi="Đi đến Tạo hồ sơ bé mới",
+        label_en="Go to Create Child Profile",
+        reason_vi="Tạo nhanh hồ sơ đọc riêng theo tên và lớp (1–5) cho bé nhà bạn.",
+        reason_en="Create a new child reading profile (Grades 1–5).",
+    ),
+    _NavRule(
+        href="/children",
+        phrases=("ho so be", "danh sach be", "sua ho so be", "child profile", "children"),
+        label_vi="Đi đến trang Hồ sơ bé",
+        label_en="Go to Child Profiles",
+        reason_vi="Xem và chỉnh sửa hồ sơ các bé trong gia đình bạn.",
+        reason_en="View and manage your child profiles.",
+    ),
+    _NavRule(
+        href="/book-scanner",
+        phrases=("quet sach", "chup trang sach", "ocr sach", "scan book", "book scanner"),
+        label_vi="Đi đến Quét sách giấy AI",
+        label_en="Go to AI Book Scanner",
+        reason_vi="Chụp hoặc tải ảnh trang sách giấy để AI trích xuất chữ cho bé đọc.",
+        reason_en="Scan printed book pages into interactive text.",
+    ),
+    _NavRule(
+        href="/studio/tasks",
+        phrases=("tac vu ai", "tien trinh ai", "tien trinh tac vu", "task center", "studio/tasks"),
+        label_vi="Đi đến Trung tâm tác vụ AI",
+        label_en="Go to AI Task Center",
+        reason_vi="Theo dõi tiến trình quét sách, tạo ảnh minh họa và audio của bạn.",
+        reason_en="Track your active background AI jobs.",
+    ),
+    _NavRule(
+        href="/my-books",
+        phrases=("sach cua toi", "tu sach gia dinh", "smart studio", "my books"),
+        label_vi="Đi đến Sách của tôi",
+        label_en="Go to My Books",
+        reason_vi="Mở tủ sách riêng gia đình bạn đã quét hoặc tạo minh họa.",
+        reason_en="Open your private scanned & illustrated books.",
+    ),
+    _NavRule(
+        href="/books",
+        phrases=("kho sach", "thu vien sach", "chon sach", "mo sach", "book catalog", "browse books"),
+        label_vi="Đi đến Kho sách ViRead",
+        label_en="Go to Books Library",
+        reason_vi="Chọn sách tiếng Việt phù hợp độ tuổi và trình độ đọc của bé.",
+        reason_en="Browse curated children's books.",
+    ),
+    _NavRule(
+        href="/entertainment/memory-game",
+        phrases=("memory game", "lat the", "the ghi nho"),
+        label_vi="Đi đến Memory Game lật thẻ",
+        label_en="Go to Memory Game",
+        reason_vi="Chơi lật cặp thẻ giúp bé ghi nhớ từ vựng và mặt chữ vui nhộn.",
+        reason_en="Play the memory card matching game.",
+    ),
+    _NavRule(
+        href="/entertainment/sentence-shooter",
+        phrases=("ghep cau", "sentence shooter"),
+        label_vi="Đi đến Trò chơi Ghép câu",
+        label_en="Go to Sentence Shooter",
+        reason_vi="Luyện sắp xếp từ thành câu tiếng Việt hoàn chỉnh.",
+        reason_en="Practice building Vietnamese sentences.",
+    ),
+    _NavRule(
+        href="/entertainment/picture-description",
+        phrases=("mo ta tranh", "picture description", "ke chuyen theo tranh"),
+        label_vi="Đi đến Mô tả tranh AI",
+        label_en="Go to Picture Description",
+        reason_vi="Cho bé nhìn tranh kể chuyện và nhận nhận xét, gợi ý từ vựng AI.",
+        reason_en="Describe pictures and receive AI feedback.",
+    ),
+    _NavRule(
+        href="/karaoke",
+        phrases=("karaoke", "hat karaoke"),
+        label_vi="Đi đến Karaoke thiếu nhi",
+        label_en="Go to Kids Karaoke",
+        reason_vi="Hát theo lời bài hát chạy khớp nhịp để luyện phát âm.",
+        reason_en="Sing along with synchronized lyrics.",
+    ),
+    _NavRule(
+        href="/entertainment",
+        phrases=("giai tri", "goc giai tri", "tro choi", "entertainment"),
+        label_vi="Đi đến Góc giải trí",
+        label_en="Go to Entertainment",
+        reason_vi="Khám phá Karaoke, Memory Game, Ghép câu và Mô tả tranh AI.",
+        reason_en="Explore language games for kids.",
+    ),
+    _NavRule(
+        href="/reports/difficult-words",
+        phrases=("tu can luyen", "tu doc sai", "tu kho", "difficult words"),
+        label_vi="Đi đến Từ cần luyện",
+        label_en="Go to Difficult Words",
+        reason_vi="Xem danh sách các từ bé hay vấp để luyện đọc lại riêng.",
+        reason_en="Review tricky words from your child's sessions.",
+    ),
+    _NavRule(
+        href="/reports",
+        phrases=("bao cao", "tien bo", "thong ke doc", "reports", "progress"),
+        label_vi="Đi đến Báo cáo tiến bộ",
+        label_en="Go to Progress Reports",
+        reason_vi="Xem tốc độ đọc, độ chính xác và xu hướng tiến bộ của bé.",
+        reason_en="Inspect fluency & accuracy analytics.",
+    ),
+    _NavRule(
+        href="/sessions",
+        phrases=("lich su doc", "lich su buoi doc", "session history"),
+        label_vi="Đi đến Lịch sử buổi đọc",
+        label_en="Go to Reading Sessions",
+        reason_vi="Xem lại các buổi đọc đã hoàn thành hoặc đang tạm dừng.",
+        reason_en="Review completed or paused sessions.",
+    ),
+    _NavRule(
+        href="/device-permissions",
+        phrases=("quyen micro", "quyen thiet bi", "kiem tra micro", "khong nhan giong", "microphone", "device permissions"),
+        label_vi="Đi đến Kiểm tra quyền thiết bị",
+        label_en="Go to Device Permissions",
+        reason_vi="Kiểm tra nhanh quyền Micro và Camera trên trình duyệt.",
+        reason_en="Check microphone & camera permissions.",
+    ),
+    _NavRule(
+        href="/reading-management",
+        phrases=("quan ly doc", "reading management"),
+        label_vi="Đi đến Quản lý đọc",
+        label_en="Go to Reading Management",
+        reason_vi="Tổng hợp chuẩn bị đọc, phiên đọc gần đây và từ cần luyện.",
+        reason_en="Open your family's reading hub.",
+    ),
+    _NavRule(
+        href="/reading-preparation",
+        phrases=("chuan bi doc", "reading preparation"),
+        label_vi="Đi đến Chuẩn bị đọc",
+        label_en="Go to Reading Preparation",
+        reason_vi="Chọn phạm vi trang, giọng đọc mẫu và kiểm tra micro trước khi đọc.",
+        reason_en="Configure page range, voice & mic before reading.",
+    ),
+    _NavRule(
+        href="/help-support",
+        phrases=("tro giup", "ho tro", "lien he", "bao loi", "gop y", "help support"),
+        label_vi="Đi đến Trợ giúp & Hỗ trợ",
+        label_en="Go to Help & Support",
+        reason_vi="Xem hướng dẫn nhanh hoặc gửi phản hồi trực tiếp cho đội ngũ ViRead.",
+        reason_en="Get support or contact the ViRead team.",
+    ),
+    _NavRule(
+        href="/dashboard",
+        phrases=("tong quan", "ban doc", "trang chu", "dashboard"),
+        label_vi="Đi đến Bảng điều khiển Tổng quan",
+        label_en="Go to Dashboard",
+        reason_vi="Quay lại Bảng điều khiển chính để chọn bé và tiếp tục buổi đọc.",
+        reason_en="Return to your main parent dashboard.",
+    ),
+    _NavRule(
+        href="/login",
+        phrases=("dang nhap", "sign in", "login"),
+        label_vi="Đi đến trang Đăng nhập",
+        label_en="Go to Sign In",
+        reason_vi="Đăng nhập vào tài khoản ViRead của bạn.",
+        reason_en="Sign in to your ViRead account.",
+    ),
+    _NavRule(
+        href="/register",
+        phrases=("dang ky", "tao tai khoan", "register", "sign up"),
+        label_vi="Đi đến trang Đăng ký",
+        label_en="Go to Register",
+        reason_vi="Tạo tài khoản phụ huynh ViRead mới.",
+        reason_en="Create a new ViRead parent account.",
+    ),
+)
+
+
+def resolve_navigation_offer(
+    message: str,
+    *,
+    role_scope: AssistantRoleScope,
+    current_path: str,
+    locale: str = "vi",
+) -> AssistantNavigationOffer | None:
+    """Return a single safe own-scope navigation offer when user asks how/where to navigate or act."""
+    if detect_disallowed_scope_request(message, role_scope=role_scope) is not None:
+        return None
+    folded = fold_vietnamese(message)
+    if not folded:
+        return None
+
+    clean_current = sanitize_scoped_path(current_path, role_scope)
+    use_en = _prefer_english(locale)
+
+    # Special handling: signed-out user asks to change password -> guide to /forgot-password or /login.
+    if role_scope == "public" and any(
+        phrase in folded for phrase in ("doi mat khau", "change password", "thay doi mat khau")
+    ):
+        target_href = "/forgot-password" if "quen" in folded else "/login"
+        if clean_current != target_href and is_navigation_href_allowed(target_href, role_scope):
+            return AssistantNavigationOffer(
+                label=(
+                    ("Sign in to change password" if target_href == "/login" else "Go to Password Reset")
+                    if use_en
+                    else (
+                        "Đi đến Đăng nhập để đổi mật khẩu"
+                        if target_href == "/login"
+                        else "Đi đến Khôi phục mật khẩu"
+                    )
+                ),
+                href=target_href,
+                reason=(
+                    "Sign in first, then open Settings (/settings) to update your password."
+                    if use_en
+                    else "Hãy đăng nhập tài khoản của bạn trước, sau đó vào mục Cài đặt để đổi mật khẩu an toàn."
+                ),
+            )
+        return None
+
+    for rule in _NAV_RULES:
+        if any(phrase in folded for phrase in rule.phrases):
+            if clean_current == rule.href:
+                return None
+            if not is_navigation_href_allowed(rule.href, role_scope):
+                continue
+            return AssistantNavigationOffer(
+                label=rule.label_en if use_en else rule.label_vi,
+                href=rule.href,
+                reason=rule.reason_en if use_en else rule.reason_vi,
+            )
+    return None
 
 
 def _route_matches(current_path: str, prefix: str) -> bool:

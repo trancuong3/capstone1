@@ -2,6 +2,7 @@ import type {
   Browser,
   BrowserContext,
   BrowserContextOptions,
+  Cookie,
   Page,
   Request,
 } from "@playwright/test";
@@ -36,7 +37,7 @@ export const DEFAULT_OPAQUE_ANDROID_UA =
 
 export interface CreateRoleContextOptions {
   readonly baseURL?: string;
-  readonly locale?: SupportedLocale;
+  readonly locale?: SupportedLocale | (string & {});
   readonly appRole?: ParentRole | "guest";
   readonly selectedChildId?: string;
   readonly userAgent?: string;
@@ -52,6 +53,9 @@ export interface RoleContextHandle {
   readonly effectiveRole: ParentRole | null;
   readonly userId: string | null;
   readonly baseURL: string;
+  newPage(): Promise<Page>;
+  close(): Promise<void>;
+  cookies(urls?: string | string[]): Promise<Cookie[]>;
   getAccessToken(): string | null;
   dispose(): Promise<void>;
 }
@@ -60,6 +64,8 @@ export interface ApiMockRequestContext {
   readonly method: string;
   readonly pathname: string;
   readonly url: URL;
+  readonly searchParams: URLSearchParams;
+  readonly apiBaseUrl: string;
   readonly headers: Record<string, string>;
   readonly postDataText: string | null;
   readonly postDataJson: unknown;
@@ -84,6 +90,7 @@ export type ApiRouteHandler =
 
 export type ApiMockHandlers =
   | Record<string, ApiRouteHandler>
+  | readonly ApiRouteHandler[]
   | ((
       ctx: ApiMockRequestContext,
     ) =>
@@ -366,6 +373,9 @@ export async function createRoleContext(
     effectiveRole,
     userId,
     baseURL,
+    newPage: () => context.newPage(),
+    close: () => context.close(),
+    cookies: (urls?: string | string[]) => context.cookies(urls),
     getAccessToken: () => activeToken,
     dispose: () => context.close(),
   };
@@ -494,6 +504,8 @@ export async function installApiMock(
       method,
       pathname,
       url: parsedUrl,
+      searchParams: parsedUrl.searchParams,
+      apiBaseUrl: apiOrigin,
       headers: req.headers(),
       postDataText: req.postData(),
       postDataJson: safeRequestJson(req),
@@ -502,9 +514,20 @@ export async function installApiMock(
     let customResponse: ApiMockResponse | null | undefined;
     if (typeof handlers === "function") {
       customResponse = await handlers(ctx);
+    } else if (Array.isArray(handlers)) {
+      for (const entry of handlers) {
+        const res = typeof entry === "function" ? await entry(ctx) : entry;
+        if (res !== null && res !== undefined) {
+          customResponse = res;
+          break;
+        }
+      }
     } else if (handlers) {
+      const recordHandlers = handlers as Record<string, ApiRouteHandler>;
       const entry =
-        handlers[`${method} ${pathname}`] ?? handlers[pathname] ?? undefined;
+        recordHandlers[`${method} ${pathname}`] ??
+        recordHandlers[pathname] ??
+        undefined;
       if (typeof entry === "function") {
         customResponse = await entry(ctx);
       } else if (entry !== undefined) {

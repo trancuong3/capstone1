@@ -365,9 +365,15 @@ class _ViReadInMemoryWorld:
         self.cover_webp = _make_image_bytes("WEBP", (300, 400), (244, 162, 97))
         self.illus_webp = _make_image_bytes("WEBP", (400, 300), (82, 183, 136))
 
-        catalog_bucket = os.environ["SUPABASE_STORAGE_BUCKET"]
-        avatar_bucket = os.environ["SUPABASE_AVATAR_BUCKET"]
-        private_bucket = os.environ["SUPABASE_PRIVATE_BOOKS_BUCKET"]
+        from app.database.config import (
+            SUPABASE_AVATAR_BUCKET as CFG_AVATAR_BUCKET,
+            SUPABASE_PRIVATE_BOOKS_BUCKET as CFG_PRIVATE_BUCKET,
+            SUPABASE_STORAGE_BUCKET as CFG_STORAGE_BUCKET,
+        )
+
+        catalog_bucket = CFG_STORAGE_BUCKET or os.environ["SUPABASE_STORAGE_BUCKET"]
+        avatar_bucket = CFG_AVATAR_BUCKET or os.environ["SUPABASE_AVATAR_BUCKET"]
+        private_bucket = CFG_PRIVATE_BUCKET or os.environ["SUPABASE_PRIVATE_BOOKS_BUCKET"]
 
         self.storage.objects[(avatar_bucket, f"profiles/{PARENT_A_ID}/avatar/initial.webp")] = self.cover_webp
         self.storage.objects[(avatar_bucket, f"children/{CHILD_A_ID}/avatar/initial.webp")] = self.cover_webp

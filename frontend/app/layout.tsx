@@ -72,14 +72,6 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} dir={dir}>
-      <head>
-        {preconnectOrigins.map((origin) => (
-          <link key={`pc-${origin}`} rel="preconnect" href={origin} />
-        ))}
-        {preconnectOrigins.map((origin) => (
-          <link key={`dp-${origin}`} rel="dns-prefetch" href={origin} />
-        ))}
-      </head>
       <body>
         <PreconnectResources origins={preconnectOrigins} />
         <I18nProvider initialLocale={locale} initialMessages={initialMessages}>

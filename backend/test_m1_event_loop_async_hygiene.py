@@ -578,7 +578,10 @@ class GlobalTasksServiceAsyncHygieneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(observed_boundary_threads), 1)
         self.assertNotEqual(observed_boundary_threads[0], loop_thread_id)
         self.assertGreaterEqual(ticks, 3)
-        fake_svc.commit_stage_result.assert_awaited_once()
+        self.assertEqual(fake_svc.commit_stage_result.await_count, 2)
+        first_call = fake_svc.commit_stage_result.await_args_list[0].kwargs
+        self.assertEqual(first_call["stage"], "BOUNDARY_DETECT")
+        self.assertTrue(first_call["mark_stage_completed"])
         self.assertEqual(fake_svc.commit_stage_result.await_args.kwargs["next_status"], "SUCCEEDED")
 
     async def test_execute_batch_book_import_job_mode_a_offloads_download_and_rasterizer_and_preserves_statuses(self):

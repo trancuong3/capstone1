@@ -24,6 +24,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.models import (
     AdminAiWorkflow,
@@ -998,17 +999,6 @@ class GlobalTasksService:
             if actor_role == "parent"
             else []
         )
-        parent_submission_ids: set[str] = {str(sub.Id) for sub in parent_submissions}
-        deduped_ocr_jobs: list[OcrInferenceJob] = []
-        for ocr_job in ocr_jobs:
-            if str(ocr_job.JobKind or "") == "PARENT_BOOK_SUBMISSION":
-                sub_id_val = getattr(ocr_job, "SubmissionId", None)
-                if sub_id_val is None and isinstance(getattr(ocr_job, "ProcessingMeta", None), dict):
-                    sub_id_val = ocr_job.ProcessingMeta.get("submission_id")
-                if sub_id_val is not None and str(sub_id_val) in parent_submission_ids:
-                    continue
-            deduped_ocr_jobs.append(ocr_job)
-        ocr_jobs = deduped_ocr_jobs
 
         # Fetch any additional OCR jobs referenced by admin BATCH_BOOK_IMPORT tracking jobs.
         ocr_jobs_by_id: dict[UUID, OcrInferenceJob] = {row.Id: row for row in ocr_jobs}
@@ -1077,14 +1067,18 @@ class GlobalTasksService:
                 )
             )
         for ocr_job in ocr_jobs:
-            if (
-                actor_role == "parent"
-                and str(ocr_job.JobKind) == "PARENT_BOOK_SUBMISSION"
-                and ocr_job.SubmissionId is not None
-                and ocr_job.SubmissionId in submissions_by_id
-            ):
-                linked_ocr_by_submission.setdefault(ocr_job.SubmissionId, ocr_job)
-                continue
+            if actor_role == "parent" and str(ocr_job.JobKind or "") == "PARENT_BOOK_SUBMISSION":
+                sub_id_val = getattr(ocr_job, "SubmissionId", None)
+                if sub_id_val is None and isinstance(getattr(ocr_job, "ProcessingMeta", None), dict):
+                    raw_sub = ocr_job.ProcessingMeta.get("submission_id")
+                    if raw_sub is not None:
+                        try:
+                            sub_id_val = raw_sub if isinstance(raw_sub, UUID) else UUID(str(raw_sub))
+                        except (ValueError, TypeError):
+                            sub_id_val = None
+                if sub_id_val is not None and sub_id_val in submissions_by_id:
+                    linked_ocr_by_submission.setdefault(sub_id_val, ocr_job)
+                    continue
             items.append(
                 self._map_ocr_job(
                     ocr_job,
@@ -1494,7 +1488,10 @@ class GlobalTasksService:
         if wf_status == "CHECKING":
             if (
                 ocr_status == "PENDING"
-                and (linked_ocr_status is None or linked_ocr_status == "QUEUED")
+                and (
+                    linked_ocr_status is None
+                    or linked_ocr_status in ("QUEUED", "FAILED_RETRYABLE")
+                )
                 and worker_online is False
             ):
                 mapped_status: GlobalTaskStatus = "WAITING_FOR_WORKER"

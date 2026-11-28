@@ -235,6 +235,71 @@ function isMethodCall(ast, callNode, objName, propName) {
   );
 }
 
+function hasAdminLayoutI18nAst(ast) {
+  const imports = collectImports(ast);
+  const importsI18nModule = imports.some(
+    (spec) => spec.includes("i18n") || spec.includes("messages"),
+  );
+  if (!importsI18nModule) return false;
+
+  const getCalleeName = (expr) => {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
+    return "";
+  };
+
+  const nodeContainsAdminLiteral = (root) => {
+    let found = false;
+    walkAst(root, (n) => {
+      if (found) return;
+      if (ts.isStringLiteralLike(n) && n.text === "admin") {
+        found = true;
+      }
+    });
+    return found;
+  };
+
+  const ADMIN_LOADER_NAMES = new Set([
+    "getServerAdminI18n",
+    "loadAdminLocaleMessages",
+  ]);
+  const GENERIC_I18N_LOADER_NAMES = new Set([
+    "getServerI18n",
+    "loadLocaleMessages",
+    "loadMessages",
+  ]);
+  const I18N_PROVIDER_NAMES = new Set(["AdminI18nProvider", "I18nProvider"]);
+
+  let loadsAdminNamespace = false;
+  let rendersI18nProvider = false;
+
+  walkAst(ast, (node) => {
+    if (ts.isCallExpression(node)) {
+      const calleeName = getCalleeName(node.expression);
+      if (ADMIN_LOADER_NAMES.has(calleeName)) {
+        loadsAdminNamespace = true;
+      } else if (
+        GENERIC_I18N_LOADER_NAMES.has(calleeName) &&
+        node.arguments.some((arg) => nodeContainsAdminLiteral(arg))
+      ) {
+        loadsAdminNamespace = true;
+      }
+    }
+
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tagName = getCalleeName(node.tagName);
+      if (
+        I18N_PROVIDER_NAMES.has(tagName) &&
+        node.attributes.properties.length > 0
+      ) {
+        rendersI18nProvider = true;
+      }
+    }
+  });
+
+  return loadsAdminNamespace && rendersI18nProvider;
+}
+
 function parseMaxAgeSeconds(headerValue) {
   if (typeof headerValue !== "string") return null;
   const match = /\bmax-age=(\d+)\b/i.exec(headerValue);
@@ -1538,13 +1603,9 @@ describe("E5 [M4-target]: i18n admin split, RootLayout preconnect & code-splitti
 
   it("app/admin/layout.tsx loads the admin i18n namespace", () => {
     const ast = parseTsAst("app/admin/layout.tsx");
-    const imports = collectImports(ast);
-    const source = readFrontendFile("app/admin/layout.tsx");
     assert.ok(
-      imports.some(
-        (spec) => spec.includes("i18n") || spec.includes("messages"),
-      ) && source.includes("admin"),
-      "app/admin/layout.tsx must load and provide the admin i18n namespace",
+      hasAdminLayoutI18nAst(ast),
+      "app/admin/layout.tsx must load and provide the admin i18n namespace via AST-verified i18n call and provider",
     );
   });
 

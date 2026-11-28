@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Navegación del recorrido de lectura"
+  },
   "overview": {
     "title": "Informe de progreso",
     "subtitle": "Realice un seguimiento del tiempo de lectura, la precisión y las rachas de lectura de su hijo.",
@@ -162,7 +165,11 @@
       "uncertainLabel": "No se escuchó claramente",
       "uncertainNote": "Registrado por separado, no cuenta como un error de pronunciación confirmado."
     },
-    "entertainmentSummaryHeading": "Aprendizaje lúdico y habilidades lingüísticas (V4.0)"
+    "entertainmentSummaryHeading": "Aprendizaje lúdico y habilidades lingüísticas (V4.0)",
+    "focusAria": "Filtrar secciones del informe",
+    "focusAssessment": "Evaluación de IA",
+    "focusSignals": "Gráficos y métricas",
+    "focusEntertainment": "Aprender jugando"
   },
   "sessions": {
     "title": "Historial de lectura",
@@ -656,7 +663,11 @@
       "favorited": "Añadido a favoritos",
       "wantToRead": "Quiero leer",
       "savedToRead": "Guardado en la lista de lectura"
-    }
+    },
+    "focusAria": "Filtrar secciones de gestión de lectura",
+    "focusPlans": "Planes",
+    "focusGoals": "Objetivos",
+    "focusReminders": "Recordatorios"
   },
   "entertainmentSummary": {
     "loading": "Resumiendo el progreso lúdico de {childName}…",

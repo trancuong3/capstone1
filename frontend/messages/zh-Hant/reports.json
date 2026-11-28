@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "閱讀旅程導覽"
+  },
   "overview": {
     "title": "進度報告",
     "subtitle": "追蹤孩子的閱讀時長、準確度與連續閱讀天數。",
@@ -162,7 +165,11 @@
       "uncertainLabel": "聽不清楚",
       "uncertainNote": "分開記錄，不計入已確認的發音錯誤。"
     },
-    "entertainmentSummaryHeading": "寓教於樂學習與語言技能概況 (V4.0)"
+    "entertainmentSummaryHeading": "寓教於樂學習與語言技能概況 (V4.0)",
+    "focusAria": "篩選報告板塊",
+    "focusAssessment": "AI 評估",
+    "focusSignals": "圖表與指標",
+    "focusEntertainment": "邊玩邊學"
   },
   "sessions": {
     "title": "閱讀歷史",
@@ -656,7 +663,11 @@
       "favorited": "已收藏",
       "wantToRead": "想讀",
       "savedToRead": "已儲存至閱讀清單"
-    }
+    },
+    "focusAria": "篩選閱讀管理板塊",
+    "focusPlans": "計畫",
+    "focusGoals": "目標",
+    "focusReminders": "提醒"
   },
   "entertainmentSummary": {
     "loading": "正在彙總 {childName} 的趣味學習進度…",

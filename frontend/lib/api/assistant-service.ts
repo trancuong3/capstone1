@@ -7,6 +7,7 @@ import {
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
 import { resolveOfflineAssistantReply } from "@/lib/assistant/page-guides";
+import { isSafeAssistantNavigationHref } from "@/lib/assistant/route-helpers";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   AssistantChatRequest,
@@ -29,6 +30,22 @@ const assistantQuickActionSchema = z.object({
     ),
 });
 
+const assistantNavigationOfferSchema = z.object({
+  label: z.string().min(1).max(80),
+  href: z
+    .string()
+    .min(1)
+    .max(180)
+    .refine(
+      (value) =>
+        value.startsWith("/") &&
+        !value.startsWith("//") &&
+        !value.includes("://"),
+      { message: "Invalid internal path" },
+    ),
+  reason: z.string().max(160).nullable().optional().default(null),
+});
+
 const assistantChatResponseSchema = z.object({
   reply: z.string().min(1),
   source_tier: z.enum([
@@ -46,12 +63,16 @@ const assistantChatResponseSchema = z.object({
   role_scope: z.enum(["public", "parent", "admin"]),
   quick_actions: z.array(assistantQuickActionSchema).max(3).default([]),
   suggested_prompts: z.array(z.string()).max(3).default([]),
+  navigation_offer: assistantNavigationOfferSchema
+    .nullable()
+    .optional()
+    .default(null),
 });
 
 const BANDWIDTH_CLIENT_TIMEOUT_MS: Record<BandwidthProfile, number> = {
-  low: 32_000,
+  low: 34_000,
   medium: 40_000,
-  high: 50_000,
+  high: 46_000,
 };
 
 export class AssistantRateLimitError extends Error {
@@ -82,6 +103,23 @@ function getOptionalApiBaseUrl(): string | null {
   }
 }
 
+function waitAbortAware(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export async function sendAssistantMessage(
   request: AssistantChatRequest,
   options?: {
@@ -104,24 +142,24 @@ export async function sendAssistantMessage(
     );
   }
 
-  const token = await getOptionalAccessToken();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
+  let token = await getOptionalAccessToken();
   const timeoutMs = BANDWIDTH_CLIENT_TIMEOUT_MS[request.bandwidth_profile];
+  const startedAt = Date.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const forwardAbort = () => controller.abort();
   options?.signal?.addEventListener("abort", forwardAbort, { once: true });
 
-  try {
-    const response = await fetch(`${apiBaseUrl}/assistant/chat`, {
+  const executeAttempt = async (authToken: string | null) => {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+    return fetch(`${apiBaseUrl}/assistant/chat`, {
       method: "POST",
       headers,
       body: JSON.stringify(request),
@@ -130,6 +168,28 @@ export async function sendAssistantMessage(
       redirect: "error",
       signal: controller.signal,
     });
+  };
+
+  try {
+    let response = await executeAttempt(token);
+
+    if (response.status === 401 && token) {
+      invalidateBrowserTokenCache();
+      token = await getOptionalAccessToken();
+      if (token && !controller.signal.aborted) {
+        response = await executeAttempt(token);
+      }
+    } else if (
+      (response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504) &&
+      timeoutMs - (Date.now() - startedAt) > 4_000
+    ) {
+      const okToRetry = await waitAbortAware(600, controller.signal);
+      if (okToRetry) {
+        response = await executeAttempt(token);
+      }
+    }
 
     if (response.status === 401) {
       invalidateBrowserTokenCache();
@@ -162,7 +222,19 @@ export async function sendAssistantMessage(
       );
     }
 
-    return parsed.data;
+    const data = parsed.data;
+    const safeOffer = isSafeAssistantNavigationHref(
+      data.navigation_offer?.href,
+      request.current_path,
+      data.role_scope,
+    )
+      ? data.navigation_offer
+      : null;
+
+    return {
+      ...data,
+      navigation_offer: safeOffer,
+    };
   } catch (error) {
     if (error instanceof AssistantRateLimitError) {
       throw error;

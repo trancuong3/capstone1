@@ -15,6 +15,7 @@ import {
   OPAQUE_SCAN_JOB_ID,
   OPAQUE_VOICE_NORTH_ID,
   makeCameraPageMatchResponse,
+  makeLocalOcrPageScan,
   makeLocalOcrScanJob,
   makeReadingPage2Dto,
   makeReadingPageDto,
@@ -593,12 +594,14 @@ test.describe("Tier 4: End-to-End Real-World Application Workflows (14 Scenarios
               worker_online: true,
               result:
                 jobPolls >= 2
-                  ? {
-                      text: "Ánh nắng lấp lánh trên mặt hồ xanh.",
-                      confidence: 0.94,
-                      page_id: OPAQUE_PAGE_2_ID,
-                      book_id: OPAQUE_BOOK_ID,
-                    }
+                  ? makeLocalOcrPageScan({
+                      ocr_text: "Ánh nắng lấp lánh trên mặt hồ xanh.",
+                      match_confidence: 0.94,
+                      matched_page: makeReadingPageDto({
+                        page_id: OPAQUE_PAGE_2_ID,
+                      }),
+                      matched_book_id: OPAQUE_BOOK_ID,
+                    })
                   : null,
             }),
           };
@@ -1312,7 +1315,8 @@ test.describe("Tier 4: End-to-End Real-World Application Workflows (14 Scenarios
         )
         .toBeGreaterThanOrEqual(1);
       const newPageId =
-        sharedState.cluster2.adminPagesByBook[newBookId]![0]!.id;
+        sharedState.cluster2.adminPagesByBook[newBookId]![0]!.processing
+          .page_id;
 
       // 3. Cover Studio upload on /admin/books/[bookId]/edit
       await admin.page.goto(`/admin/books/${newBookId}/edit`, {
@@ -1875,7 +1879,7 @@ test.describe("Tier 4: End-to-End Real-World Application Workflows (14 Scenarios
           status: 200,
           body: makeCameraPageMatchResponse({
             matched: false,
-            reason: "TOO_DARK",
+            status_code: "TOO_DARK",
             matched_page: null,
           }),
         },

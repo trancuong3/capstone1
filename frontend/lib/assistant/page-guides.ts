@@ -3,9 +3,11 @@ import {
   isAdminPath,
   isAuthPath,
   isReadingSessionPath,
+  isSafeAssistantNavigationHref,
 } from "@/lib/assistant/route-helpers";
 import type {
   AssistantChatResponse,
+  AssistantNavigationOffer,
   AssistantQuickAction,
   AssistantRoleScope,
   BandwidthPreference,
@@ -494,6 +496,56 @@ const PAGE_GUIDES: readonly PageGuideConfig[] = [
         href: "/forgot-password",
       },
       { labelVi: "Đăng nhập", labelEn: "Sign in", href: "/login" },
+    ],
+  },
+  {
+    prefix: "/studio/tasks",
+    titleVi: "Trung tâm tác vụ AI",
+    titleEn: "AI Task Center",
+    greetingVi:
+      "Theo dõi tiến trình quét OCR, tạo ảnh minh họa và audio cho tài khoản của bạn.",
+    greetingEn:
+      "Monitor your own OCR scans, AI illustrations, and audio jobs here.",
+    promptsVi: [
+      "Làm sao xem sách tôi vừa quét xong?",
+      "Smart Studio tạo ảnh bìa và minh họa thế nào?",
+      "Làm sao bắt đầu buổi đọc cho bé?",
+    ],
+    promptsEn: [
+      "Where are my newly scanned books?",
+      "How does Smart Studio create covers & art?",
+      "How do I start a reading session?",
+    ],
+    actions: [
+      { labelVi: "Sách của tôi", labelEn: "My Books", href: "/my-books" },
+      { labelVi: "Quét sách", labelEn: "Book Scanner", href: "/book-scanner" },
+    ],
+  },
+  {
+    prefix: "/entertainment/memory-game",
+    titleVi: "Memory Game lật thẻ",
+    titleEn: "Memory Card Game",
+    greetingVi:
+      "Giúp bé lật cặp thẻ chữ/hình để rèn trí nhớ từ vựng và phản xạ mặt chữ!",
+    greetingEn:
+      "Match card pairs to build Vietnamese word recall and reading focus!",
+    promptsVi: [
+      "Memory game lật thẻ ở đâu và chơi thế nào?",
+      "Còn trò chơi nào khác trong Góc giải trí?",
+      "Cách chọn sách và bắt đầu buổi đọc?",
+    ],
+    promptsEn: [
+      "How do I play Memory Game?",
+      "What other games are in Entertainment?",
+      "How do I start a reading session?",
+    ],
+    actions: [
+      {
+        labelVi: "Góc giải trí",
+        labelEn: "Entertainment",
+        href: "/entertainment",
+      },
+      { labelVi: "Kho sách", labelEn: "Books", href: "/books" },
     ],
   },
   {
@@ -1004,21 +1056,158 @@ const OFFLINE_RULES: readonly OfflineRule[] = [
       "tro choi",
       "mo ta tranh",
       "ghep cau",
+      "memory game",
+      "lat the",
       "game",
     ],
     replyVi:
-      "Chế độ ngoại tuyến — Góc giải trí (/entertainment):\n• Karaoke thiếu nhi (/karaoke), Ghép câu (/entertainment/sentence-shooter) và Mô tả tranh AI (/entertainment/picture-description).",
+      "Chế độ ngoại tuyến — Góc giải trí (/entertainment):\n• Karaoke thiếu nhi (/karaoke), Memory Game lật thẻ (/entertainment/memory-game), Ghép câu (/entertainment/sentence-shooter) và Mô tả tranh AI (/entertainment/picture-description).",
     replyEn:
-      "Offline quick guide — Entertainment (/entertainment):\n• Kids Karaoke (/karaoke), Sentence Shooter (/entertainment/sentence-shooter), and AI Picture Description (/entertainment/picture-description).",
+      "Offline quick guide — Entertainment (/entertainment):\n• Kids Karaoke (/karaoke), Memory Game (/entertainment/memory-game), Sentence Shooter (/entertainment/sentence-shooter), and AI Picture Description (/entertainment/picture-description).",
     actions: [
       {
         labelVi: "Góc giải trí",
         labelEn: "Entertainment",
         href: "/entertainment",
       },
+      {
+        labelVi: "Memory Game",
+        labelEn: "Memory Game",
+        href: "/entertainment/memory-game",
+      },
     ],
   },
+  {
+    keywords: [
+      "tac vu ai",
+      "tien trinh ai",
+      "studio tasks",
+      "smart studio",
+      "global task",
+    ],
+    replyVi:
+      "Chế độ ngoại tuyến — Trung tâm tác vụ AI (/studio/tasks):\n• Theo dõi tiến trình quét OCR, tạo ảnh bìa/minh họa Smart Studio và audio trên thanh nổi tác vụ AI hoặc trang /studio/tasks.",
+    replyEn:
+      "Offline quick guide — AI Task Center (/studio/tasks):\n• Track OCR scans, Smart Studio illustrations, and audio jobs inside /studio/tasks.",
+    actions: [
+      {
+        labelVi: "Tác vụ AI",
+        labelEn: "AI Tasks",
+        href: "/studio/tasks",
+      },
+      { labelVi: "Sách của tôi", labelEn: "My Books", href: "/my-books" },
+    ],
+  },
+  {
+    keywords: ["giong doc", "khoa giong", "voice lock", "giong mau"],
+    replyVi:
+      "Chế độ ngoại tuyến — Khóa giọng đọc theo buổi:\n• Trong lúc buổi đọc đang chạy, giọng mẫu được khóa để bé nghe ổn định. Bạn có thể chọn giọng Bắc/Trung/Nam trong Cài đặt (/settings) hoặc Chuẩn bị đọc trước buổi mới.",
+    replyEn:
+      "Offline quick guide — Session Voice Lock:\n• Model voice stays locked mid-session for consistency. Update regional voice preferences in Settings (/settings) before a new session.",
+    actions: [{ labelVi: "Cài đặt", labelEn: "Settings", href: "/settings" }],
+  },
 ];
+
+function resolveOfflineNavigationOffer(
+  foldedQuery: string,
+  pathname: string,
+  roleScope: AssistantRoleScope,
+  useEn: boolean,
+): AssistantNavigationOffer | null {
+  const candidates: readonly {
+    readonly phrases: readonly string[];
+    readonly href: string;
+    readonly labelVi: string;
+    readonly labelEn: string;
+    readonly reasonVi: string;
+    readonly reasonEn: string;
+  }[] = [
+    {
+      phrases: [
+        "doi mat khau",
+        "thay doi mat khau",
+        "change password",
+        "cai dat",
+      ],
+      href: "/settings",
+      labelVi: "Đi đến trang Cài đặt đổi mật khẩu",
+      labelEn: "Go to Password & Settings",
+      reasonVi: "Mở Cài đặt để đổi mật khẩu an toàn cho chính tài khoản bạn.",
+      reasonEn: "Update your password safely in Settings.",
+    },
+    {
+      phrases: ["quen mat khau", "forgot password"],
+      href: "/forgot-password",
+      labelVi: "Đi đến Khôi phục mật khẩu",
+      labelEn: "Go to Forgot Password",
+      reasonVi: "Nhập email của bạn để nhận liên kết đặt lại mật khẩu.",
+      reasonEn: "Request a password reset link by email.",
+    },
+    {
+      phrases: ["ho so ba me", "parent profile", "doi email"],
+      href: "/profile",
+      labelVi: "Đi đến Hồ sơ ba mẹ",
+      labelEn: "Go to Parent Profile",
+      reasonVi: "Cập nhật thông tin tài khoản của bạn.",
+      reasonEn: "Edit your parent profile details.",
+    },
+    {
+      phrases: ["ho so be", "tao ho so be", "child profile"],
+      href: "/children",
+      labelVi: "Đi đến trang Hồ sơ bé",
+      labelEn: "Go to Child Profiles",
+      reasonVi: "Quản lý hồ sơ các bé trong gia đình bạn.",
+      reasonEn: "Manage your child profiles.",
+    },
+    {
+      phrases: ["quet sach", "book scanner", "ocr"],
+      href: "/book-scanner",
+      labelVi: "Đi đến Quét sách giấy AI",
+      labelEn: "Go to Book Scanner",
+      reasonVi: "Chụp hoặc tải trang sách giấy để trích xuất chữ.",
+      reasonEn: "Scan printed pages into ViRead.",
+    },
+    {
+      phrases: ["tac vu ai", "tien trinh ai", "studio/tasks"],
+      href: "/studio/tasks",
+      labelVi: "Đi đến Trung tâm tác vụ AI",
+      labelEn: "Go to AI Task Center",
+      reasonVi: "Xem tiến trình tác vụ AI của bạn.",
+      reasonEn: "Monitor your background AI tasks.",
+    },
+    {
+      phrases: ["memory game", "lat the"],
+      href: "/entertainment/memory-game",
+      labelVi: "Đi đến Memory Game lật thẻ",
+      labelEn: "Go to Memory Game",
+      reasonVi: "Chơi lật thẻ luyện trí nhớ từ vựng cùng bé.",
+      reasonEn: "Play the Memory Card Game.",
+    },
+    {
+      phrases: ["micro", "camera", "quyen thiet bi"],
+      href: "/device-permissions",
+      labelVi: "Đi đến Quyền thiết bị",
+      labelEn: "Go to Device Permissions",
+      reasonVi: "Kiểm tra nhanh quyền Micro và Camera.",
+      reasonEn: "Verify microphone & camera permissions.",
+    },
+  ];
+
+  for (const item of candidates) {
+    if (!item.phrases.some((p) => foldedQuery.includes(p))) {
+      continue;
+    }
+    if (!isSafeAssistantNavigationHref(item.href, pathname, roleScope)) {
+      continue;
+    }
+    return {
+      href: item.href,
+      label: useEn ? item.labelEn : item.labelVi,
+      reason: useEn ? item.reasonEn : item.reasonVi,
+    };
+  }
+  return null;
+}
 
 export function resolveOfflineAssistantReply(
   message: string,
@@ -1034,6 +1223,45 @@ export function resolveOfflineAssistantReply(
     : isAdminPath(pathname)
       ? "admin"
       : "parent";
+
+  const asksOtherUser =
+    folded.includes("nguoi dung khac") ||
+    folded.includes("tai khoan khac") ||
+    folded.includes("phu huynh khac") ||
+    folded.includes("another user") ||
+    folded.includes("someone else");
+  const asksForbiddenAdmin =
+    roleScope !== "admin" &&
+    (folded.includes("trang admin") ||
+      folded.includes("vao admin") ||
+      folded.includes("mo admin") ||
+      folded.includes("trang quan tri") ||
+      folded.includes("admin dashboard") ||
+      folded.includes("admin panel"));
+  if (asksOtherUser || asksForbiddenAdmin) {
+    return {
+      reply: useEn
+        ? "For security and family privacy, I can only help and navigate within your own authorized ViRead pages — never admin areas or another user's account."
+        : "Vì bảo mật và quyền riêng tư gia đình, mình chỉ có thể hỗ trợ và điều hướng trong phạm vi các trang của chính tài khoản bạn — không thể sang trang quản trị hay tài khoản của người dùng khác nhé!",
+      source_tier: "offline",
+      provider_id: "viread_scope_guard",
+      model_id: null,
+      bandwidth_applied: bandwidth,
+      latency_ms: 1,
+      cached: false,
+      role_scope: roleScope,
+      quick_actions: pageGuide.actions.slice(0, 2),
+      suggested_prompts: pageGuide.prompts,
+      navigation_offer: null,
+    };
+  }
+
+  const navigationOffer = resolveOfflineNavigationOffer(
+    folded,
+    pathname,
+    roleScope,
+    useEn,
+  );
 
   for (const rule of OFFLINE_RULES) {
     if (rule.keywords.some((kw) => folded.includes(kw))) {
@@ -1055,6 +1283,7 @@ export function resolveOfflineAssistantReply(
         quick_actions:
           actions.length > 0 ? actions : pageGuide.actions.slice(0, 2),
         suggested_prompts: pageGuide.prompts,
+        navigation_offer: navigationOffer,
       };
     }
   }
@@ -1072,5 +1301,6 @@ export function resolveOfflineAssistantReply(
     role_scope: roleScope,
     quick_actions: pageGuide.actions.slice(0, 2),
     suggested_prompts: pageGuide.prompts,
+    navigation_offer: navigationOffer,
   };
 }

@@ -27,6 +27,7 @@ from app.services.assistant_service import (
     AssistantConfig,
     BANDWIDTH_PROFILES,
     ViReadAssistantService,
+    _build_assistant_providers,
 )
 from app.services.rate_limiter import clear_rate_limits, rate_limiter
 
@@ -568,7 +569,7 @@ class AssistantApiRouteTests(unittest.TestCase):
             )
         )
         self.assertEqual(res.source_tier, "tier_1_cloud")
-        self.assertIn("Reply naturally and accurately in Japanese.", captured_system)
+        self.assertIn("Reply naturally, encouragingly, and accurately in Japanese.", captured_system)
 
     def test_main_server_app_mounts_assistant_routes(self) -> None:
         from app.sever import app as main_app
@@ -577,6 +578,109 @@ class AssistantApiRouteTests(unittest.TestCase):
         self.assertIn("/assistant/chat", route_paths)
         self.assertIn("/assistant/context", route_paths)
         self.assertIn("/assistant/status", route_paths)
+
+    def test_kb_covers_memory_game_task_center_and_session_voice_lock(self) -> None:
+        memory_matches = retrieve_kb_matches(
+            "Memory game lật thẻ ở đâu và chơi thế nào?",
+            role_scope="parent",
+            current_path="/entertainment",
+        )
+        self.assertTrue(memory_matches)
+        self.assertEqual(memory_matches[0].article.id, "entertainment_games_karaoke")
+        self.assertIn("/entertainment/memory-game", memory_matches[0].article.short_answer_vi)
+
+        task_matches = retrieve_kb_matches(
+            "Làm sao xem tiến trình các tác vụ AI đang chạy ở đâu?",
+            role_scope="parent",
+            current_path="/dashboard",
+        )
+        self.assertTrue(task_matches)
+        self.assertEqual(task_matches[0].article.id, "global_ai_task_center")
+        self.assertIn("/studio/tasks", task_matches[0].article.short_answer_vi)
+
+        voice_matches = retrieve_kb_matches(
+            "Tại sao không đổi được giọng đọc giữa buổi đọc?",
+            role_scope="parent",
+            current_path="/reading/123",
+        )
+        self.assertTrue(voice_matches)
+        self.assertEqual(voice_matches[0].article.id, "voice_settings_lock_and_offline_audio")
+
+    def test_groq_precedes_gemini_fallback_to_avoid_double_timeout(self) -> None:
+        priorities = {
+            spec.provider_id: spec.priority_order
+            for spec in _build_assistant_providers(self.service.config)
+        }
+        self.assertLess(priorities["gemini_primary"], priorities["groq_qwen"])
+        self.assertLess(priorities["groq_qwen"], priorities["gemini_fallback"])
+
+    def test_password_change_returns_scoped_navigation_offer(self) -> None:
+        res_parent = asyncio.run(
+            self.service.chat(
+                AssistantChatRequest(
+                    message="Tôi muốn đổi mật khẩu tài khoản",
+                    current_path="/dashboard",
+                    locale="vi",
+                    bandwidth_profile="medium",
+                ),
+                role_scope="parent",
+            )
+        )
+        self.assertIsNotNone(res_parent.navigation_offer)
+        assert res_parent.navigation_offer is not None
+        self.assertEqual(res_parent.navigation_offer.href, "/settings")
+
+        res_on_settings = asyncio.run(
+            self.service.chat(
+                AssistantChatRequest(
+                    message="Tôi muốn đổi mật khẩu tài khoản",
+                    current_path="/settings",
+                    locale="vi",
+                    bandwidth_profile="medium",
+                ),
+                role_scope="parent",
+            )
+        )
+        self.assertIsNone(res_on_settings.navigation_offer)
+
+        res_public = asyncio.run(
+            self.service.chat(
+                AssistantChatRequest(
+                    message="Tôi muốn đổi mật khẩu",
+                    current_path="/",
+                    locale="vi",
+                    bandwidth_profile="low",
+                ),
+                role_scope="public",
+            )
+        )
+        self.assertIsNotNone(res_public.navigation_offer)
+        assert res_public.navigation_offer is not None
+        self.assertEqual(res_public.navigation_offer.href, "/login")
+
+    def test_scope_guard_blocks_admin_and_other_user_navigation_requests(self) -> None:
+        for msg in (
+            "Chuyển tôi sang trang admin",
+            "Mở /admin/health giúp tôi",
+            "Xem dữ liệu tài khoản của người dùng khác",
+        ):
+            res = asyncio.run(
+                self.service.chat(
+                    AssistantChatRequest(
+                        message=msg,
+                        current_path="/dashboard",
+                        locale="vi",
+                        bandwidth_profile="high",
+                        force_llm=True,
+                    ),
+                    role_scope="parent",
+                )
+            )
+            self.assertEqual(res.provider_id, "viread_scope_guard")
+            self.assertIsNone(res.navigation_offer)
+            self.assertTrue(
+                all(not action.href.startswith("/admin") for action in res.quick_actions)
+            )
 
 
 if __name__ == "__main__":

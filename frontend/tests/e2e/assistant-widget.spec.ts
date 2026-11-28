@@ -105,8 +105,33 @@ async function installAssistantMockApi(page: Page): Promise<void> {
 
     if (p === "/assistant/chat") {
       const reqBody = route.request().postDataJSON() as {
+        message?: string;
         bandwidth_profile?: "low" | "medium" | "high";
       };
+      const msg = (reqBody?.message ?? "").toLowerCase();
+      if (msg.includes("mật khẩu")) {
+        await route.fulfill(
+          json({
+            reply:
+              "Mình sẵn sàng hỗ trợ bạn đổi mật khẩu nhé! Bạn có muốn chuyển đến trang **Cài đặt** (`/settings`) ngay không?",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_kb",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 45,
+            cached: false,
+            role_scope: "parent",
+            quick_actions: [{ label: "Mở Cài đặt", href: "/settings" }],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Đi đến trang Cài đặt đổi mật khẩu",
+              href: "/settings",
+              reason: "Đổi mật khẩu an toàn trong tài khoản của chính bạn.",
+            },
+          }),
+        );
+        return;
+      }
       await route.fulfill(
         json({
           reply:
@@ -376,6 +401,23 @@ async function installAssistantMockApi(page: Page): Promise<void> {
       return;
     }
 
+    if (p === "/studio/tasks") {
+      await route.fulfill(
+        json({
+          actor_id: PARENT_ID,
+          actor_role: "parent",
+          active_count: 0,
+          waiting_review_count: 0,
+          failed_count: 0,
+          completed_count: 0,
+          worker_online: false,
+          recommended_poll_ms: null,
+          tasks: [],
+        }),
+      );
+      return;
+    }
+
     if (p === "/tasks" || p.startsWith("/tasks/")) {
       await route.fulfill(json({ items: [], total: 0 }));
       return;
@@ -386,6 +428,8 @@ async function installAssistantMockApi(page: Page): Promise<void> {
 }
 
 test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
+  test.setTimeout(90_000);
+
   test("compact dimensions, hide/reload persistence, markdown rendering, and zero overlap on /dashboard, /admin/login, and /reading/*", async ({
     browser,
   }, testInfo) => {
@@ -463,6 +507,28 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
       page.getByTestId("viread-assistant-source-meta"),
     ).toContainText("Gemini");
 
+    // Interactive Yes/No navigation confirmation: Không stays on /dashboard, Có navigates to /settings
+    await panel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Tôi muốn đổi mật khẩu");
+    await panel.getByLabel("Gửi câu hỏi").click();
+    await expect(panel.getByTestId("viread-assistant-nav-card")).toBeVisible();
+    await panel.getByTestId("viread-assistant-nav-no").click();
+    expect(new URL(page.url()).pathname).toBe("/dashboard");
+    await expect(
+      panel.getByTestId("viread-assistant-nav-status"),
+    ).toContainText("Đã giữ nguyên trang hiện tại");
+
+    await panel
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Chuyển trang đổi mật khẩu ngay");
+    await panel.getByLabel("Gửi câu hỏi").click();
+    await panel.getByTestId("viread-assistant-nav-yes").click();
+    await page.waitForURL("**/settings");
+    await page.goto("/dashboard", { waitUntil: "networkidle" });
+    await page.getByTestId("viread-assistant-launcher").click();
+    await expect(page.getByTestId("viread-assistant-panel")).toBeVisible();
+
     // Hide assistant -> persists across reload -> restore via edge tab
     await page.getByTestId("viread-assistant-hide").click();
     await expect(page.getByTestId("viread-assistant-hidden-tab")).toBeVisible();
@@ -481,7 +547,9 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     await page.goto(`/reading/${SESSION_ID}?state=reading`, {
       waitUntil: "networkidle",
     });
-    await expect(page.locator('[data-reading-shell="true"]')).toBeVisible();
+    await expect(page.locator('[data-reading-shell="true"]')).toBeVisible({
+      timeout: 20_000,
+    });
     const readingWrap = page.getByTestId("viread-assistant-launcher-wrap");
     await expect(readingWrap).toBeVisible();
 

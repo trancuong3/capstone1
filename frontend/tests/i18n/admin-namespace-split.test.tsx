@@ -48,9 +48,11 @@ import { getServerAdminI18n, getServerI18n } from "@/lib/i18n/server";
 import { resetAdminLoaderStateForTests } from "@/messages/admin-loader";
 import {
   clearAllRuntimeNamespacesForTests,
+  registerLocaleLoader,
   registerPersistentTestNamespace,
   resetLocaleLoaderStateForTests,
 } from "@/messages/loader";
+import enCoreMessages from "@/messages/en";
 import { viMessages } from "@/messages/vi";
 import viAdminMessages from "@/messages/vi/admin.json";
 
@@ -244,7 +246,8 @@ describe("M4-A admin i18n namespace split", () => {
     fireEvent.click(trigger);
 
     const panel = await screen.findByTestId("global-task-center-panel");
-    expect(panel).toHaveTextContent("Trung tâm tác vụ AI");
+    expect(panel).toHaveTextContent("Tác vụ AI của tôi");
+    expect(panel).toHaveTextContent("Không gian phụ huynh (riêng bạn)");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
 
@@ -289,5 +292,49 @@ describe("M4-A admin i18n namespace split", () => {
     expect(screen.getByTestId("admin-title")).toHaveTextContent(
       "ספריית ספרים ניהולית",
     );
+  });
+
+  it("does not call loadLocaleMessages('en') or custom loadMessages on mount when initialMessages omits admin", async () => {
+    expect(enCoreMessages.admin).toBeUndefined();
+
+    const localeLoaderSpy = vi.fn(async () => enCoreMessages);
+    registerLocaleLoader("en", localeLoaderSpy);
+    const customLoadMessagesSpy = vi.fn(async () => enCoreMessages);
+
+    function CoreConsumerProbe() {
+      const { locale } = useI18n();
+      const tCommon = useTranslations("common");
+      return (
+        <div>
+          <span data-testid="core-locale">{locale}</span>
+          <span data-testid="core-save">{tCommon("actions.save")}</span>
+        </div>
+      );
+    }
+
+    render(
+      <I18nProvider initialLocale="en" initialMessages={enCoreMessages}>
+        <CoreConsumerProbe />
+      </I18nProvider>,
+    );
+
+    render(
+      <I18nProvider
+        initialLocale="en"
+        initialMessages={enCoreMessages}
+        loadMessages={customLoadMessagesSpy}
+      >
+        <CoreConsumerProbe />
+      </I18nProvider>,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    expect(screen.getAllByTestId("core-locale")[0]).toHaveTextContent("en");
+    expect(screen.getAllByTestId("core-save")[0]).toHaveTextContent("Save");
+    expect(localeLoaderSpy).not.toHaveBeenCalled();
+    expect(customLoadMessagesSpy).not.toHaveBeenCalled();
   });
 });

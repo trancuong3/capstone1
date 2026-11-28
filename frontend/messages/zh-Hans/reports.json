@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "阅读旅程导航"
+  },
   "overview": {
     "title": "进步报告",
     "subtitle": "追踪孩子的阅读时长、准确率和阅读打卡天数。",
@@ -162,7 +165,11 @@
       "uncertainLabel": "没听清",
       "uncertainNote": "单独记录，不计入已确认的发音错误。"
     },
-    "entertainmentSummaryHeading": "寓教于乐学习与语言技能概况 (V4.0)"
+    "entertainmentSummaryHeading": "寓教于乐学习与语言技能概况 (V4.0)",
+    "focusAria": "筛选报告板块",
+    "focusAssessment": "AI 评估",
+    "focusSignals": "图表与指标",
+    "focusEntertainment": "边玩边学"
   },
   "sessions": {
     "title": "阅读历史",
@@ -656,7 +663,11 @@
       "favorited": "已收藏",
       "wantToRead": "想读",
       "savedToRead": "已保存至阅读列表"
-    }
+    },
+    "focusAria": "筛选阅读管理板块",
+    "focusPlans": "计划",
+    "focusGoals": "目标",
+    "focusReminders": "提醒"
   },
   "entertainmentSummary": {
     "loading": "正在汇总 {childName} 的趣味学习进度…",

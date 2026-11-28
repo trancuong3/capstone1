@@ -138,12 +138,12 @@ export function createChildService(): ChildService {
       childId: string,
       payload: ChildVoicePreferencesPayload,
     ): Promise<ChildProfileDTO> {
-      return request(
+      return requestChildApi(
         `/profiles/children/${encodeURIComponent(childId)}/voice-preferences`,
         childProfileSchema,
         {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: payload,
         },
       );
     },
