@@ -267,6 +267,50 @@ function startWasmTtsWarmup(gender?: VoiceGender): Promise<boolean> {
   return req;
 }
 
+function isHostedBrowserOrigin(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    Boolean(window.location?.hostname) &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+  );
+}
+
+/**
+ * Returns true only when browser WASM Vietnamese TTS actually needs warmup:
+ * never on native Android WebView, and never on localhost/E2E when local or
+ * permitted cloud server TTS is already healthy.
+ */
+export function shouldWarmWasmTts(
+  health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth(),
+): boolean {
+  if (
+    isAndroidNativeSpeechAvailable() ||
+    !detectBrowserWasmTtsSupport().supported
+  ) {
+    return false;
+  }
+  if (health) {
+    return !hasLiveServerTts(health);
+  }
+  if (isPermanentlyHostedLocalUnconfigured(null)) {
+    return true;
+  }
+  return isHostedBrowserOrigin();
+}
+
+export function warmWasmTtsIfNeeded(
+  gender?: VoiceGender,
+  health?: VoiceEngineHealthSnapshot | null,
+): Promise<boolean> {
+  const resolvedHealth =
+    health === undefined ? getFreshVoiceEngineHealth() : health;
+  if (!shouldWarmWasmTts(resolvedHealth)) {
+    return Promise.resolve(false);
+  }
+  return startWasmTtsWarmup(gender);
+}
+
 function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
   if (!health) return false;
   const policy = getVoicePolicyPreferences();
@@ -463,11 +507,7 @@ export function preloadReadingVoiceEngines(
       !isAndroid &&
       options.warmTts !== false &&
       detectBrowserWasmTtsSupport().supported;
-    const isHostedOrigin =
-      typeof window !== "undefined" &&
-      Boolean(window.location?.hostname) &&
-      window.location.hostname !== "localhost" &&
-      window.location.hostname !== "127.0.0.1";
+    const isHostedOrigin = isHostedBrowserOrigin();
     const initialHealth = getFreshVoiceEngineHealth();
     const initialUnconfigured =
       isPermanentlyHostedLocalUnconfigured(initialHealth);
@@ -497,12 +537,7 @@ export function preloadReadingVoiceEngines(
     }
 
     let earlyWasmTtsStarted = false;
-    if (
-      wasmTtsSupported &&
-      (initialUnconfigured ||
-        (initialHealth && !hasLiveServerTts(initialHealth)) ||
-        isHostedOrigin)
-    ) {
+    if (wasmTtsSupported && shouldWarmWasmTts(initialHealth)) {
       earlyWasmTtsStarted = true;
       void startWasmTtsWarmup(resolveVoiceGender(getEffectiveVoiceId()));
     }

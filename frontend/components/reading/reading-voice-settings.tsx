@@ -52,10 +52,8 @@ import {
   getSpeechPreferences,
   getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
-import {
-  detectBrowserWasmTtsSupport,
-  getBrowserWasmTtsClient,
-} from "@/lib/reading/browser-wasm-tts";
+import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getBrowserOnlineStatus,
@@ -406,16 +404,12 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
-    if (detectBrowserWasmTtsSupport().supported) {
-      const targetGender = selectedOption
-        ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
-        : value.voiceId === null
-          ? "female"
-          : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
-      void getBrowserWasmTtsClient()
-        .init({ gender: targetGender })
-        .catch(() => undefined);
-    }
+    const targetGender = selectedOption
+      ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
+      : value.voiceId === null
+        ? "female"
+        : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
+    void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
   }
 
   function selectTeacherGender(nextGender: VoiceGender) {
@@ -464,11 +458,7 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
-    if (detectBrowserWasmTtsSupport().supported) {
-      void getBrowserWasmTtsClient()
-        .init({ gender: nextGender })
-        .catch(() => undefined);
-    }
+    void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
   }
 
   function changeProviderPolicy(

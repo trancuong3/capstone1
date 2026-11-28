@@ -23,7 +23,13 @@ import {
   isPermanentlyHostedLocalUnconfigured,
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
+import {
+  resetVoicePreloaderForTests,
+  shouldWarmWasmTts,
+  warmWasmTtsIfNeeded,
+} from "@/lib/reading/voice-preloader";
 import type { SpeechService } from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
 
@@ -487,5 +493,56 @@ describe("Offline WASM Vietnamese TTS, sticky unconfigured latch & countdown sta
     });
     expect(isPermanentlyHostedLocalUnconfigured()).toBe(true);
     rec.abort();
+  });
+
+  it("gates background WASM TTS warmup behind healthy server TTS vs offline/unconfigured", async () => {
+    resetVoicePreloaderForTests();
+    const healthyLocalSnapshot: VoiceEngineHealthSnapshot = {
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: true,
+        available: true,
+        stt_ready: true,
+        tts_ready: true,
+        error_code: null,
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+      elevenlabs: {
+        configured: false,
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    };
+    const unconfiguredLocalSnapshot: VoiceEngineHealthSnapshot = {
+      ...healthyLocalSnapshot,
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+    };
+
+    expect(shouldWarmWasmTts(healthyLocalSnapshot)).toBe(false);
+    await expect(
+      warmWasmTtsIfNeeded("male", healthyLocalSnapshot),
+    ).resolves.toBe(false);
+    expect(MockWasmTtsWorker.instances).toHaveLength(0);
+
+    expect(shouldWarmWasmTts(unconfiguredLocalSnapshot)).toBe(true);
+    await expect(
+      warmWasmTtsIfNeeded("male", unconfiguredLocalSnapshot),
+    ).resolves.toBe(true);
+    expect(MockWasmTtsWorker.instances.length).toBeGreaterThanOrEqual(1);
+    resetVoicePreloaderForTests();
   });
 });

@@ -31,10 +31,6 @@ import {
   type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
-  detectBrowserWasmTtsSupport,
-  getBrowserWasmTtsClient,
-} from "@/lib/reading/browser-wasm-tts";
-import {
   isInjectedTestSpeechRecognition,
   LocalSegmentSpeechRecognition,
   resolveLocalFirstSpeechRecognitionConstructor,
@@ -66,6 +62,7 @@ import {
   awaitSttReadyBeforeListening,
   awaitVoiceEnginesReadyBeforeListening,
   preloadReadingVoiceEngines,
+  warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
@@ -1126,14 +1123,11 @@ function ReadingSessionScreen({
           });
         }
 
-        if (
-          localTtsDown &&
-          !isAndroidNativeSpeechAvailable() &&
-          detectBrowserWasmTtsSupport().supported
-        ) {
-          void getBrowserWasmTtsClient()
-            .init({ gender: resolveVoiceGender(getEffectiveVoiceId()) })
-            .catch(() => undefined);
+        if (localTtsDown) {
+          void warmWasmTtsIfNeeded(
+            resolveVoiceGender(getEffectiveVoiceId()),
+            health,
+          );
         }
 
         const ttsUsingCachedAudio =

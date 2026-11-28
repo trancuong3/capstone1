@@ -45,10 +45,7 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
-import {
-  detectBrowserWasmTtsSupport,
-  getBrowserWasmTtsClient,
-} from "@/lib/reading/browser-wasm-tts";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -365,16 +362,12 @@ export function AiTeacherVoiceSection({
             ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
             : undefined,
       });
-      if (detectBrowserWasmTtsSupport().supported) {
-        const nextGender =
-          input.gender ??
-          resolveVoiceGender(
-            applied?.voiceId ?? input.voiceId ?? effectiveVoiceId,
-          );
-        void getBrowserWasmTtsClient()
-          .init({ gender: nextGender })
-          .catch(() => undefined);
-      }
+      const nextGender =
+        input.gender ??
+        resolveVoiceGender(
+          applied?.voiceId ?? input.voiceId ?? effectiveVoiceId,
+        );
+      void warmWasmTtsIfNeeded(nextGender);
     },
     [
       effectiveVoiceId,
