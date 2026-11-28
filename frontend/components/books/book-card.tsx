@@ -2,6 +2,7 @@
 
 import { BookCover } from "@/components/books/book-cover";
 import { ButtonLink } from "@/components/common/button";
+import { OfflinePackControls } from "@/components/offline/offline-pack-controls";
 import { useTranslations } from "@/hooks/use-i18n";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
@@ -114,6 +115,7 @@ export function BookCard({
           })}
         </div>
       ) : null}
+      <OfflinePackControls bookId={book.id} bookTitle={book.title} compact />
     </article>
   );
 }

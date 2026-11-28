@@ -150,6 +150,23 @@ import {
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
+import { OfflineOutboxStatusPill } from "@/components/offline/offline-pack-controls";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import {
+  buildOfflineCompletedCurrentPageProgress,
+  buildOfflineNavigatedProgress,
+  isUuidString,
+  playOfflineCachedPageAudio,
+  resolveOfflineReadingSessionFallback,
+  type OfflineReadingSessionContext,
+} from "@/lib/offline/offline-reading-bridge";
+import {
+  enqueueOfflineSessionEvent,
+  generateUuidV4,
+  installOfflineOutboxReconnectAutoDrain,
+} from "@/lib/offline/offline-session-outbox";
+import { saveOfflineSessionDescriptor } from "@/lib/offline/reading-pack-store";
 
 type ReadingDynamicPanelKey = "question" | "complete" | "phonics" | "picker";
 
@@ -654,6 +671,15 @@ function ReadingSessionScreen({
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tCommon = useTranslations("common");
+  const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const activeParentAccountId =
+    authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
+  const activeChildProfileId = appStore?.selectedChildId ?? null;
+  const offlineSessionCtxRef = useRef<OfflineReadingSessionContext | null>(
+    null,
+  );
+  const [isOfflinePackMode, setIsOfflinePackMode] = useState(false);
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -1711,9 +1737,77 @@ function ReadingSessionScreen({
     };
   }, [speechPlayer, speechRecorder]);
 
+  const offlineIdentityRef = useRef({
+    parentAccountId: activeParentAccountId,
+    childProfileId: activeChildProfileId,
+    knownChild: appStore?.validatedSelectedChild ?? null,
+  });
+  useEffect(() => {
+    offlineIdentityRef.current = {
+      parentAccountId: activeParentAccountId,
+      childProfileId: activeChildProfileId,
+      knownChild: appStore?.validatedSelectedChild ?? null,
+    };
+  }, [
+    activeChildProfileId,
+    activeParentAccountId,
+    appStore?.validatedSelectedChild,
+  ]);
+
+  useEffect(() => {
+    return installOfflineOutboxReconnectAutoDrain(() => ({
+      parentAccountId:
+        offlineSessionCtxRef.current?.parentAccountId ?? activeParentAccountId,
+      childProfileId:
+        offlineSessionCtxRef.current?.childProfileId ?? activeChildProfileId,
+    }));
+  }, [activeChildProfileId, activeParentAccountId]);
+
   useEffect(() => {
     let active = true;
+    async function tryHydrateFromOfflinePack(): Promise<boolean> {
+      const queryBookId =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("bookId")
+          : null;
+      const identity = offlineIdentityRef.current;
+      const offlineBootstrap = await resolveOfflineReadingSessionFallback({
+        sessionId,
+        initialPageId,
+        queryBookId,
+        parentAccountId: identity.parentAccountId,
+        childProfileId: identity.childProfileId,
+        knownChild: identity.knownChild,
+      });
+      if (!offlineBootstrap || !active) return false;
+      offlineSessionCtxRef.current = offlineBootstrap.context;
+      setIsOfflinePackMode(true);
+      hydrateTeacherVoiceFromChildProfile(offlineBootstrap.child);
+      setPage(offlineBootstrap.currentPage);
+      setPageProgress(offlineBootstrap.pageProgress);
+      setPageNavigationError(null);
+      setCurrentWordId(offlineBootstrap.currentPage.words[0]?.word_id ?? null);
+      setCanonicalState("PAGE_READY");
+      setLoadState({
+        status: "ready",
+        data: {
+          book: offlineBootstrap.book,
+          child: offlineBootstrap.child,
+          completion: offlineBootstrap.completion,
+        },
+      });
+      return true;
+    }
+
     async function load() {
+      if (
+        (typeof navigator !== "undefined" && navigator.onLine === false) ||
+        sessionId.startsWith("offline-")
+      ) {
+        const loadedOffline = await tryHydrateFromOfflinePack();
+        if (loadedOffline) return;
+      }
+
       try {
         const session = await services.readingService.get(sessionId);
         // Batch startup reads in two smaller waves (3 + 3) instead of blasting
@@ -1862,17 +1956,38 @@ function ReadingSessionScreen({
         );
         setCurrentWordId(currentPage.words[0]?.word_id ?? null);
         setCanonicalState(session.state);
+        offlineSessionCtxRef.current = null;
+        setIsOfflinePackMode(false);
+        const currentParentAccountId = offlineIdentityRef.current.parentAccountId;
+        if (currentParentAccountId) {
+          void saveOfflineSessionDescriptor({
+            parentAccountId: currentParentAccountId,
+            childProfileId: child.id,
+            sessionId,
+            clientSessionId: isUuidString(sessionId)
+              ? sessionId
+              : generateUuidV4(),
+            bookId: book.id,
+            child,
+            startPageId: initialProgress.start_page_id,
+            endPageId: initialProgress.end_page_id,
+            currentPageId: currentPage.page_id,
+          }).catch(() => undefined);
+        }
         setLoadState({
           status: "ready",
           data: { book, child, completion },
         });
       } catch (error) {
+        const isExplicitNotFound =
+          isServiceError(error) && error.code === "RESOURCE_NOT_FOUND";
+        if (!isExplicitNotFound) {
+          const recoveredOffline = await tryHydrateFromOfflinePack();
+          if (recoveredOffline) return;
+        }
         if (active) {
           setLoadState({
-            status:
-              isServiceError(error) && error.code === "RESOURCE_NOT_FOUND"
-                ? "not-found"
-                : "error",
+            status: isExplicitNotFound ? "not-found" : "error",
           });
         }
       }
@@ -2845,6 +2960,39 @@ function ReadingSessionScreen({
     let audioPlayed = false;
     let playbackFailed = false;
     let fallbackLastWordIndex = -1;
+    const offlineCtx = offlineSessionCtxRef.current;
+    if (
+      offlineCtx &&
+      page &&
+      (isOfflinePackMode ||
+        (typeof navigator !== "undefined" && navigator.onLine === false))
+    ) {
+      return playOfflineCachedPageAudio({
+        parentAccountId: offlineCtx.parentAccountId,
+        childProfileId: offlineCtx.childProfileId,
+        bookId: offlineCtx.loadedPack.book.id,
+        page,
+        onPlay: () => {
+          audioPlayed = true;
+          options.onPlay?.();
+        },
+        onWordChange: options.onWordChange,
+        onEnded: options.onEnded,
+      })
+        .then((played) => {
+          if (!played) {
+            playbackFailed = true;
+            throw new Error("OFFLINE_PAGE_AUDIO_UNAVAILABLE");
+          }
+        })
+        .finally(() => {
+          if (playbackFailed && !audioPlayed) {
+            echoGuard.discardPlayback(id);
+          } else {
+            echoGuard.playbackEnded(id, performance.now());
+          }
+        });
+    }
     const mergedOptions: WordTimedPlayOptions = {
       ...options,
       isPrivateBook,
@@ -3197,7 +3345,9 @@ function ReadingSessionScreen({
           if (
             !plan.supported &&
             plan.canPlayWholeWord &&
-            typeof speechService.analyzePhonics === "function"
+            typeof speechService.analyzePhonics === "function" &&
+            !offlineSessionCtxRef.current &&
+            (typeof navigator === "undefined" || navigator.onLine !== false)
           ) {
             setIsAnalyzingPhonicsAi(true);
             try {
@@ -4438,6 +4588,23 @@ function ReadingSessionScreen({
             .filter(Boolean),
         ),
       ).slice(0, 40);
+      if (
+        (offlineSessionCtxRef.current !== null ||
+          (typeof navigator !== "undefined" && navigator.onLine === false)) &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        const wasmDecoded = await getBrowserWasmSttClient().transcribeBlob(
+          recording,
+          {
+            signal: controller.signal,
+            timeoutMs,
+          },
+        );
+        if (!mountedRef.current || controller.signal.aborted) return null;
+        const wasmText = wasmDecoded.text?.trim() ?? "";
+        return wasmText ? { text: wasmText, words: null } : null;
+      }
+
       const transcript = await speechService.transcribe(recording, {
         languageCode: "vi",
         ...(pageKeyterms.length ? { keyterms: pageKeyterms } : {}),
@@ -5507,11 +5674,39 @@ function ReadingSessionScreen({
       }
 
       if (page) freezeCompletedPageAssessment(page);
-      const nextProgress = await services.readingService.navigateToPage(
-        sessionId,
-        target.page_id,
-      );
-      const nextPage = await services.readingService.getCurrentPage(sessionId);
+      const offlineCtx = offlineSessionCtxRef.current;
+      let nextProgress: ReadingSessionPageProgressDTO;
+      let nextPage: ReadingPageDTO;
+      if (offlineCtx && pageProgress) {
+        const offlineNav = buildOfflineNavigatedProgress(
+          pageProgress,
+          offlineCtx.loadedPack,
+          target.page_id,
+        );
+        if (!offlineNav) {
+          throw new Error("Offline page missing from pack");
+        }
+        nextProgress = offlineNav.nextProgress;
+        nextPage = offlineNav.nextPage;
+        if (page) {
+          void enqueueOfflineSessionEvent({
+            parentAccountId: offlineCtx.parentAccountId,
+            childProfileId: offlineCtx.childProfileId,
+            clientSessionId: offlineCtx.clientSessionId,
+            bookId: offlineCtx.loadedPack.book.id,
+            pageId: page.page_id,
+            pageRevisionId: page.page_revision_id,
+            eventKind: "PAGE_READ",
+            transcript: transcriptsListRef.current.join(" ").trim() || undefined,
+          }).catch(() => undefined);
+        }
+      } else {
+        nextProgress = await services.readingService.navigateToPage(
+          sessionId,
+          target.page_id,
+        );
+        nextPage = await services.readingService.getCurrentPage(sessionId);
+      }
       if (!mountedRef.current) return;
       setPageProgress(nextProgress);
       resetPagePresentation();
@@ -5570,10 +5765,25 @@ function ReadingSessionScreen({
       }
 
       freezeCompletedPageAssessment(page);
-      const progress = await services.readingService.completeCurrentPage(
-        sessionId,
-        page.page_id,
-      );
+      const offlineCtx = offlineSessionCtxRef.current;
+      const progress = offlineCtx
+        ? buildOfflineCompletedCurrentPageProgress(pageProgress, page.page_id)
+        : await services.readingService.completeCurrentPage(
+            sessionId,
+            page.page_id,
+          );
+      if (offlineCtx) {
+        void enqueueOfflineSessionEvent({
+          parentAccountId: offlineCtx.parentAccountId,
+          childProfileId: offlineCtx.childProfileId,
+          clientSessionId: offlineCtx.clientSessionId,
+          bookId: offlineCtx.loadedPack.book.id,
+          pageId: page.page_id,
+          pageRevisionId: page.page_revision_id,
+          eventKind: "PAGE_READ",
+          transcript: transcriptsListRef.current.join(" ").trim() || undefined,
+        }).catch(() => undefined);
+      }
       if (!mountedRef.current) return;
       setPageProgress(progress);
       if (progress.current_index + 1 < progress.total_pages) {
@@ -6475,33 +6685,66 @@ function ReadingSessionScreen({
     setIsBusy(true);
 
     try {
-      await services.readingService.createRetryEvent({
-        sessionId,
-        pageId: pending.candidate.pageId,
-        pageRevisionId: pending.candidate.pageRevisionId,
-        wordId: pending.candidate.wordId,
-        status: pending.status,
-        startMs: 0,
-        endMs: null,
-        metadata: {
-          retry_attempt: pending.attempt,
-          incorrect_retry_count: incorrectCount,
-          resolution_status:
-            pending.status === "CONFIRMED"
-              ? "SELF_CORRECTED"
-              : pending.status === "UNCERTAIN" || terminal
-                ? "UNRESOLVED"
-                : "RETRYING",
-          ...(pending.status === "UNCERTAIN" && !pending.transcript
-            ? { skip_reason: "TECHNICAL_OR_MANUAL" as const }
-            : {}),
-          original_status: pending.candidate.originalStatus,
-          target_word: pending.candidate.text.slice(0, 100),
-          ...(pending.transcript
-            ? { recognized_text: pending.transcript.slice(0, 200) }
-            : {}),
-        },
-      });
+      const offlineCtx = offlineSessionCtxRef.current;
+      const retryMeta = {
+        retry_attempt: pending.attempt,
+        incorrect_retry_count: incorrectCount,
+        resolution_status:
+          pending.status === "CONFIRMED"
+            ? ("SELF_CORRECTED" as const)
+            : pending.status === "UNCERTAIN" || terminal
+              ? ("UNRESOLVED" as const)
+              : ("RETRYING" as const),
+        ...(pending.status === "UNCERTAIN" && !pending.transcript
+          ? { skip_reason: "TECHNICAL_OR_MANUAL" as const }
+          : {}),
+        original_status: pending.candidate.originalStatus,
+        target_word: pending.candidate.text.slice(0, 100),
+        ...(pending.transcript
+          ? { recognized_text: pending.transcript.slice(0, 200) }
+          : {}),
+      };
+      if (
+        offlineCtx ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+        const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+        const bookIdForOutbox =
+          offlineCtx?.loadedPack.book.id ??
+          (loadState.status === "ready" ? loadState.data.book.id : "");
+        if (pid && cid && bookIdForOutbox) {
+          await enqueueOfflineSessionEvent({
+            parentAccountId: pid,
+            childProfileId: cid,
+            clientSessionId:
+              offlineCtx?.clientSessionId ??
+              (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+            bookId: bookIdForOutbox,
+            pageId: pending.candidate.pageId,
+            pageRevisionId: pending.candidate.pageRevisionId,
+            eventKind: "WORD_ATTEMPT",
+            wordId: pending.candidate.wordId,
+            wordText: pending.candidate.text,
+            transcript: pending.transcript || undefined,
+            readingEventType: "WORD_RETRY",
+            readingEventStatus: pending.status,
+            isCorrect: pending.status === "CONFIRMED",
+            metadata: retryMeta,
+          });
+        }
+      } else {
+        await services.readingService.createRetryEvent({
+          sessionId,
+          pageId: pending.candidate.pageId,
+          pageRevisionId: pending.candidate.pageRevisionId,
+          wordId: pending.candidate.wordId,
+          status: pending.status,
+          startMs: 0,
+          endMs: null,
+          metadata: retryMeta,
+        });
+      }
       if (!isActiveRetryCandidate(pending.candidate)) return false;
       pendingRetryEventRef.current = null;
       retryUnclearStreakRef.current = 0;
@@ -7870,15 +8113,32 @@ function ReadingSessionScreen({
     speechRecorder.cancel();
 
     try {
-      // REST là nguồn dữ liệu chính thức để kết thúc session.
-      const finishedSession = await services.readingService.finish(sessionId);
+      const offlineCtx = offlineSessionCtxRef.current;
+      const isOfflineFinish =
+        offlineCtx !== null ||
+        (typeof navigator !== "undefined" && navigator.onLine === false);
+      const finishedSession = isOfflineFinish
+        ? {
+            id: offlineCtx?.clientSessionId ?? sessionId,
+            child_id: offlineCtx?.childProfileId ?? activeChildProfileId ?? "",
+            book_id:
+              offlineCtx?.loadedPack.book.id ??
+              (loadState.status === "ready" ? loadState.data.book.id : ""),
+            state: "FINISHED" as const,
+            started_at: new Date().toISOString(),
+            ended_at: new Date().toISOString(),
+            duration_ms: 60_000,
+          }
+        : await services.readingService.finish(sessionId);
 
-      // WebSocket chỉ là thông báo phụ, không ảnh hưởng kết quả REST.
-      void services.readingSocketAdapter
-        .sendControl(sessionId, "finish")
-        .catch((error: unknown) => {
-          console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
-        });
+      if (!isOfflineFinish) {
+        // WebSocket chỉ là thông báo phụ, không ảnh hưởng kết quả REST.
+        void services.readingSocketAdapter
+          .sendControl(sessionId, "finish")
+          .catch((error: unknown) => {
+            console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
+          });
+      }
 
       if (!mountedRef.current) return;
 
@@ -7887,12 +8147,14 @@ function ReadingSessionScreen({
         .filter(Boolean);
       const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
 
-      const [persistedCompletion, postFinishState] = await Promise.all([
-        services.readingService
-          .getCompletionSummary(sessionId)
-          .catch(() => null),
-        resolvePostFinishUiState(services.comprehensionService, sessionId),
-      ]);
+      const [persistedCompletion, postFinishState] = isOfflineFinish
+        ? [null, "complete" as const]
+        : await Promise.all([
+            services.readingService
+              .getCompletionSummary(sessionId)
+              .catch(() => null),
+            resolvePostFinishUiState(services.comprehensionService, sessionId),
+          ]);
 
       if (!mountedRef.current) return;
 
@@ -7951,6 +8213,29 @@ function ReadingSessionScreen({
       };
 
       setSessionSummary(updatedSummary);
+      if (isOfflineFinish) {
+        const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+        const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+        const bid =
+          offlineCtx?.loadedPack.book.id ??
+          (loadState.status === "ready" ? loadState.data.book.id : "");
+        const pg = page ?? offlineCtx?.loadedPack.pages[0] ?? null;
+        if (pid && cid && bid && pg) {
+          await enqueueOfflineSessionEvent({
+            parentAccountId: pid,
+            childProfileId: cid,
+            clientSessionId:
+              offlineCtx?.clientSessionId ??
+              (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+            bookId: bid,
+            pageId: pg.page_id,
+            pageRevisionId: pg.page_revision_id,
+            eventKind: "SESSION_FINISH",
+            score: score ?? undefined,
+            durationMs: finishedSession.duration_ms ?? undefined,
+          }).catch(() => undefined);
+        }
+      }
       setCanonicalState("FINISHED");
       setConfirmFinish(false);
       setRetryPrompt(false);
@@ -8017,6 +8302,36 @@ function ReadingSessionScreen({
         const currentIndex = nextIndex;
         nextIndex += 1;
         const { bucket, transcript } = nonEmptyBuckets[currentIndex];
+        if (
+          offlineSessionCtxRef.current !== null ||
+          (typeof navigator !== "undefined" && navigator.onLine === false)
+        ) {
+          const offlineCtx = offlineSessionCtxRef.current;
+          const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+          const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+          const bid =
+            offlineCtx?.loadedPack.book.id ??
+            (loadState.status === "ready" ? loadState.data.book.id : "");
+          if (pid && cid && bid) {
+            await enqueueOfflineSessionEvent({
+              parentAccountId: pid,
+              childProfileId: cid,
+              clientSessionId:
+                offlineCtx?.clientSessionId ??
+                (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+              bookId: bid,
+              pageId: bucket.page_id,
+              pageRevisionId: bucket.page_revision_id,
+              eventKind: "PAGE_READ",
+              transcript,
+              metadata: { initial_assessment: bucket.initial_assessment },
+            }).catch(() => undefined);
+            savedInitialPagesRef.current.add(
+              `${bucket.page_id}:${bucket.page_revision_id}`,
+            );
+            continue;
+          }
+        }
         try {
           const result = await compareTranscript(
             sessionId,
@@ -8528,6 +8843,7 @@ function ReadingSessionScreen({
   }
 
   const hasTopBarContent = Boolean(
+    isOfflinePackMode ||
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
@@ -8537,6 +8853,26 @@ function ReadingSessionScreen({
 
   const readingTopBar = hasTopBarContent ? (
     <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
+      {isOfflinePackMode ? (
+        <div
+          data-testid="reading-offline-pack-banner"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-amber-200 bg-amber-50/90 px-3 py-1.5 text-xs text-amber-950"
+        >
+          <span className="font-bold">
+            Gói đọc ngoại tuyến ({child.alias}) — lượt đọc sẽ tự đồng bộ khi có mạng.
+          </span>
+          <OfflineOutboxStatusPill
+            parentAccountId={
+              offlineSessionCtxRef.current?.parentAccountId ??
+              activeParentAccountId
+            }
+            childProfileId={
+              offlineSessionCtxRef.current?.childProfileId ??
+              activeChildProfileId
+            }
+          />
+        </div>
+      ) : null}
       {pageProgress ? (
         <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
           <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">

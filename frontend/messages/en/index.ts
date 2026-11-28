@@ -17,6 +17,7 @@ import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
 import { fiveMinTrainEn } from "@/messages/features/five_min_train";
+import { offlinePackEn } from "@/messages/features/offline_pack";
 import { microStoryEn } from "../features/micro_story";
 import { scanInstantEn } from "../features/scan_instant";
 import { wordGlossaryEn } from "../features/word_glossary";
@@ -45,6 +46,7 @@ const messages: MessagesDictionary = {
   wordGlossary: wordGlossaryEn,
   fiveMinTrain: fiveMinTrainEn,
   microStory: microStoryEn,
+  offlinePack: offlinePackEn,
 };
 
 export default messages;

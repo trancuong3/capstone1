@@ -54,6 +54,8 @@ import {
   hydrateTeacherVoiceFromChildProfile,
   resetTeacherVoiceForActorSwitch,
 } from "@/lib/reading/session-voice-lock";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
+import { installOfflineOutboxReconnectAutoDrain } from "@/lib/offline/offline-session-outbox";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
@@ -357,6 +359,13 @@ export function AppShell({ children }: AppShellProps) {
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
 
+  useEffect(() => {
+    return installOfflineOutboxReconnectAutoDrain(() => ({
+      parentAccountId: userId,
+      childProfileId: selectedChildId,
+    }));
+  }, [selectedChildId, userId]);
+
   async function handleSignOut() {
     if (isSigningOut) return;
 
@@ -364,6 +373,10 @@ export function AppShell({ children }: AppShellProps) {
     setIsSigningOut(true);
 
     try {
+      void wipeOfflineAccountData({
+        parentAccountId: userId,
+        reason: "logout",
+      }).catch(() => undefined);
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
       clearStoredScanJobIds();

@@ -17,6 +17,7 @@ import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
 import { fiveMinTrainVi } from "@/messages/features/five_min_train";
+import { offlinePackVi } from "@/messages/features/offline_pack";
 import { microStoryVi } from "../features/micro_story";
 import { scanInstantVi } from "../features/scan_instant";
 import { wordGlossaryVi } from "../features/word_glossary";
@@ -45,6 +46,7 @@ export const viMessages: MessagesDictionary = {
   wordGlossary: wordGlossaryVi,
   fiveMinTrain: fiveMinTrainVi,
   microStory: microStoryVi,
+  offlinePack: offlinePackVi,
 };
 
 export default viMessages;

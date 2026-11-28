@@ -35,6 +35,7 @@ from app.api.routes import karaoke_practice
 from app.api.routes import karaoke_processing
 from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
+from app.api.routes import offline_reading_pack
 from app.api.routes import personalized_micro_story
 from app.api.routes import vocabulary_notebook
 
@@ -107,4 +108,9 @@ api_router.include_router(
     personalized_micro_story.router,
     prefix="/micro-stories",
     tags=["Personalized Micro Stories"],
+)
+api_router.include_router(
+    offline_reading_pack.router,
+    prefix="/offline",
+    tags=["Offline Reading Pack"],
 )

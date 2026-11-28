@@ -47,4 +47,5 @@ from .smart_book_studio import (
     PageOcrExtraction,
     SmartStudioJob,
 )
+from .offline_sync import OfflineSyncEvent
 from .vocabulary_notebook import ChildFavoriteWord, WordGlossaryCache
