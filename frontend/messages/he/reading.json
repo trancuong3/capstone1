@@ -174,6 +174,15 @@
       "no_device": "לא נמצא מיקרופון במכשיר. אנא חבר מיקרופון ונסה שוב.",
       "device_busy": "המיקרופון נמצא בשימוש על ידי אפליקציה אחרת. אנא סגור אותה ונסה שוב.",
       "error": "לא ניתן לבדוק את המיקרופון. אנא בדקו את החיבור המאובטח והגדרות הדפדפן ונסו שוב."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "חזרה מרווחת על מילים (1-3-7 ימים)",
+      "starterEyebrow": "חימום נעים לפני קריאה",
+      "title": "סיפורון חימום קצר",
+      "listenStory": "האזנה לסיפורון",
+      "stopListen": "עצירה",
+      "refreshStory": "רענון סיפורון החימום",
+      "focusWordsLabel": "מילים משולבות להיום"
     }
   },
   "ready": {
@@ -313,7 +322,8 @@
     "listenPhonics": "האזנה לפוניקה",
     "listeningRetry": "מאזין לילד שלך...",
     "readAgain": "קרא שוב",
-    "stepsAria": "שלבי פוניקה"
+    "stepsAria": "שלבי פוניקה",
+    "autoHideHint": "האיות הסתיים · מסתיר כדי לקרוא בנוחות…"
   },
   "companion": {
     "teacherFemaleTitle": "מורה AI",
@@ -340,7 +350,8 @@
     "phrasePhonicsTitle": "דוגמת פוניקה · קריאת הביטוי",
     "quickFixTitle": "כל הכבוד · תיקון עצמי מהיר!",
     "phonicsWinTitle": "כל הכבוד · שליטה מצוינת בפוניקה!",
-    "overcameWordTitle": "הידד · צלחת מילה קשה!"
+    "overcameWordTitle": "הידד · צלחת מילה קשה!",
+    "dismissAria": "הסתר הודעת הדרכה"
   },
   "tutor": {
     "title": "איך קוראים את המילה הזו?",
@@ -459,5 +470,31 @@
     "keepTrying": "נסה/י לקרוא לאט ובבירור.",
     "wordsRead": "{count, plural, =0 {לא נקראו מילים} one {נקראה מילה אחת} other {נקראו # מילים}}"
   },
-  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון."
+  "learningContentNotice": "תוכן הקריאה מוצג משמאל לימין כדי לשמור על איות נכון.",
+  "pageKinds": {
+    "TEXT_ONLY": "טקסט",
+    "TEXT_AND_IMAGE": "סיפור מאויר",
+    "IMAGE_PRIMARY": "עמוד איור",
+    "COMIC": "קומיקס / דו-שיח",
+    "POEM": "שיר ילדים",
+    "EXERCISE": "עמוד תרגול",
+    "MULTI_COLUMN": "רב-עמודות",
+    "TEXT_OVER_IMAGE": "טקסט על איור",
+    "LOW_QUALITY": "דרוש בדיקה"
+  },
+  "duet": {
+    "toggleLabel": "קריאה משותפת בתורות",
+    "toggleActive": "מצב תורות פעיל",
+    "parentTurnBadge": "תור ההורה להוביל",
+    "childTurnBadge": "עכשיו תור הילד/ה לקרוא!",
+    "listenParentSample": "האזנה לדוגמה",
+    "completeParentTurn": "סיימתי לקרוא — תור הילד/ה",
+    "turnCounter": "תור {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "גלו את האיור והמשפטים שבעמוד",
+    "subtitle": "הרחיבו אוצר מילים ומשפטים ישירות מהעמוד שקראתם כעת.",
+    "pictureCta": "תיאור איור העמוד",
+    "shooterCta": "הרכבת משפטי העמוד"
+  }
 }

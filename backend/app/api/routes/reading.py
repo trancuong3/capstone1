@@ -34,7 +34,7 @@ from app.schemas.reading import (
     ReadingSessionReportsRead,
     ReadingPracticeStateRead,
 )
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.repositories.book_repository import CatalogRepository
@@ -306,7 +306,9 @@ class HistoryRepository:
         return await ReadingComparisonRepository(self.db).list_for_session(session_id)
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
+        from app.database.role_cache import get_cached_profile_role
+
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def owned_child(self, child_id: UUID, actor_id: UUID):
         return await self.db.scalar(select(ChildProfile.Id).where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id))
@@ -420,10 +422,28 @@ class HistoryService:
 
     @staticmethod
     def summary(row, book: CatalogBookResponse | None = None):
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
         duration = None
         try:
             if row.EndedAt is not None:
-                duration = int((row.EndedAt - row.StartedAt).total_seconds() * 1000)
+                start_dt = row.StartedAt
+                end_dt = row.EndedAt
+                if (
+                    start_dt is not None
+                    and start_dt.tzinfo is not None
+                    and end_dt.tzinfo is not None
+                ):
+                    start_dt = start_dt.astimezone(timezone.utc)
+                    end_dt = end_dt.astimezone(timezone.utc)
+                raw_ms = (end_dt - start_dt) // timedelta(milliseconds=1)
+                # Preserve negative-duration validation errors (501); only cap absurd
+                # positive wall-clock spans from abandoned/resumed sessions.
+                duration = (
+                    min(raw_ms, MAX_SESSION_MINUTES * 60 * 1000)
+                    if raw_ms >= 0
+                    else raw_ms
+                )
             return HistorySessionSummaryRead(
                 id=row.Id, child_id=row.ChildId, book_id=row.BookId,
                 state="FINISHED" if row.State == "COMPLETED" else row.State,
@@ -596,12 +616,40 @@ class HistoryService:
                 return "unsupported"
             return "partial" if readable < total or partial else "available"
 
+        from app.services.child_progress.metrics import SessionRow, session_minutes
         from app.services.reading_assessment import aggregate_assessment
-        assessment_metrics = aggregate_assessment(
-            session_id, await self.repository.comparison_reports(session_id), events,
-        )["assessment"]
+
+        reports = await self.repository.comparison_reports(session_id)
+        assessment_bundle = aggregate_assessment(session_id, reports, events)
+        assessment_metrics = assessment_bundle["assessment"]
+        summary_data = summary.model_dump()
+        if row.EndedAt is not None and row.StartedAt is not None:
+            activity_ts = [
+                ts
+                for ts in (
+                    *(getattr(rep, "CreatedAt", None) for rep in reports),
+                    *(getattr(ev, "CreatedAt", None) for ev in events),
+                    *(getattr(pg, "StartedAt", None) for pg in page_rows),
+                    *(getattr(pg, "CompletedAt", None) for pg in page_rows),
+                )
+                if ts is not None
+            ]
+            if activity_ts:
+                active_min = session_minutes(
+                    SessionRow(
+                        id=row.Id,
+                        book_id=row.BookId,
+                        state=row.State,
+                        started_at=row.StartedAt,
+                        ended_at=row.EndedAt,
+                    ),
+                    activity_timestamps=activity_ts,
+                    words_read=int(assessment_bundle.get("practiced_words") or 0),
+                    pages_compared=len(reports),
+                )
+                summary_data["duration_ms"] = max(0, int(round(active_min * 60 * 1000)))
         return SessionDetailRead(
-            **summary.model_dump(),
+            **summary_data,
             assessment=assessment_metrics,
             selected_range_pages=len(page_rows) if page_rows else None,
             pages_completed=(

@@ -73,6 +73,9 @@ class PictureBookPageItem(BaseModel):
     page_number: int = Field(..., ge=1)
     image_url: str
     matched_difficult_words: list[str] = Field(default_factory=list)
+    has_verified_illustration: bool = False
+    page_kind: str | None = None
+    ocr_excerpt: str | None = None
 
 
 class PictureCatalogRead(BaseModel):

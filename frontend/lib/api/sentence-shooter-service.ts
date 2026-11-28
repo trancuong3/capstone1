@@ -120,6 +120,7 @@ export interface CreateSentenceShooterSessionInput {
   readonly child_id: string;
   readonly book_id?: string | null;
   readonly auto_select_book?: boolean;
+  readonly book_page_id?: string | null;
   readonly difficulty: SentenceShooterDifficulty;
   readonly total_rounds: number;
   readonly learning_mode?: SentenceShooterLearningMode;

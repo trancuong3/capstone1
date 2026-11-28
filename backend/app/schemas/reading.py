@@ -1,7 +1,7 @@
 import json
 
 from pydantic import BaseModel, Field, ConfigDict, AwareDatetime, field_validator, model_validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -42,6 +42,15 @@ class ReadingPageWordTimingDTO(BaseModel):
     end: float = Field(ge=0, allow_inf_nan=False)
 
 
+class ReadingDuetSegmentDTO(BaseModel):
+    turn_index: int = Field(ge=0)
+    role: Literal["PARENT", "CHILD"]
+    block_type: str = "STORY_BODY"
+    line_indices: list[int] = Field(default_factory=list)
+    word_indices: list[int] = Field(default_factory=list)
+    text: str
+
+
 class ReadingPageDTO(BaseModel):
     page_id: UUID
     page_revision_id: UUID
@@ -61,6 +70,8 @@ class ReadingPageDTO(BaseModel):
     image_overlay_safe: bool = False
     illustration_url: Optional[str] = None
     illustration_text_free: bool = False
+    page_kind: Optional[str] = None
+    duet_segments: list[ReadingDuetSegmentDTO] = Field(default_factory=list)
     text: Optional[str] = None
     words: list[ReadingPageWordDTO]
     paragraph_start_line_indices: list[int] = Field(default_factory=list)

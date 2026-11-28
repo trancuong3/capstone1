@@ -88,7 +88,9 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 }
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_UNAVAILABLE_ROUTING_TTL_MS = 2 * 60_000;
 export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
+const BACKGROUND_HEALTH_REFRESH_COOLDOWN_MS = 15_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -97,8 +99,10 @@ let state: VoiceEngineStatusState = {
 
 let cachedHealth: VoiceEngineHealthSnapshot | null = null;
 let cachedHealthFetchedAt = 0;
+let lastBackgroundRefreshAt = 0;
 let inFlightHealthPromise: Promise<VoiceEngineHealthSnapshot | null> | null =
   null;
+let permanentlyHostedLocalUnconfigured = false;
 
 const listeners = new Set<() => void>();
 const healthListeners = new Set<() => void>();
@@ -122,6 +126,45 @@ export function isHostedLocalVoiceUnconfigured(
   return (
     health.local.configured === false ||
     health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+  );
+}
+
+export function isLocalVoiceConfirmedUnavailable(
+  health: VoiceEngineHealthSnapshot | null = cachedHealth,
+): boolean {
+  if (!health || isHostedLocalVoiceUnconfigured(health)) return false;
+  const codes = [
+    health.local.error_code,
+    health.local.stt_error_code,
+    health.local.tts_error_code,
+  ];
+  if (
+    codes.some(
+      (code) =>
+        code === "LOCAL_VOICE_UNAVAILABLE" ||
+        code === "LOCAL_VOICE_TIMEOUT" ||
+        code === "LOCAL_STT_UNAVAILABLE" ||
+        code === "LOCAL_STT_TIMEOUT" ||
+        code === "LOCAL_TTS_UNAVAILABLE" ||
+        code === "LOCAL_TTS_TIMEOUT",
+    )
+  ) {
+    return true;
+  }
+  return !health.local.available && !health.local.stt_ready;
+}
+
+export function markHostedLocalUnconfigured(): void {
+  if (permanentlyHostedLocalUnconfigured) return;
+  permanentlyHostedLocalUnconfigured = true;
+  emitHealth();
+}
+
+export function isPermanentlyHostedLocalUnconfigured(
+  health: VoiceEngineHealthSnapshot | null = cachedHealth,
+): boolean {
+  return (
+    permanentlyHostedLocalUnconfigured || isHostedLocalVoiceUnconfigured(health)
   );
 }
 
@@ -169,10 +212,14 @@ export function mapProviderToEngineSnapshot(input: {
   let engineLabel = isStt ? "Nhận diện ViRead" : "Giọng đọc ViRead";
   let shortLabel = "ViRead";
 
-  if (normalized === "wasm" || normalized === "browser_wasm") {
+  if (
+    normalized === "wasm" ||
+    normalized === "browser_wasm" ||
+    normalized === "wasm_tts"
+  ) {
     tier = "browser_wasm";
-    engineLabel = "Trên thiết bị";
-    shortLabel = "Thiết bị";
+    engineLabel = isStt ? "Offline (WASM trên máy)" : "Offline (WASM TTS)";
+    shortLabel = isStt ? "Offline (WASM)" : "Offline (WASM TTS)";
   } else if (normalized === "precomputed_cache") {
     tier = "local_offline";
     engineLabel = "Giọng đọc chuẩn bị sẵn";
@@ -283,21 +330,39 @@ export function getFreshVoiceEngineHealth(
 }
 
 /**
- * Returns fresh voice health, or retains a confirmed `LOCAL_VOICE_UNCONFIGURED`
- * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
- * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
+ * Returns fresh voice health, or retains:
+ * - a confirmed `LOCAL_VOICE_UNCONFIGURED` snapshot for up to 10 minutes, and
+ * - a confirmed `LOCAL_VOICE_UNAVAILABLE` / `LOCAL_VOICE_TIMEOUT` snapshot for
+ *   up to 2 minutes (triggering a non-blocking background refresh when > 30s old)
+ * so active reading/practice sessions never fall back into slow dead-backend roundtrips.
  */
 export function getVoiceEngineHealthForRouting(
   maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
 ): VoiceEngineHealthSnapshot | null {
   const fresh = getFreshVoiceEngineHealth(maxAgeMs);
   if (fresh) return fresh;
+  if (!cachedHealth || cachedHealthFetchedAt <= 0) return null;
+  const ageMs = Date.now() - cachedHealthFetchedAt;
   if (
-    cachedHealth &&
-    cachedHealthFetchedAt > 0 &&
     isHostedLocalVoiceUnconfigured(cachedHealth) &&
-    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+    ageMs <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
   ) {
+    return cachedHealth;
+  }
+  if (
+    isLocalVoiceConfirmedUnavailable(cachedHealth) &&
+    ageMs <= VOICE_UNAVAILABLE_ROUTING_TTL_MS
+  ) {
+    const now = Date.now();
+    if (
+      typeof window !== "undefined" &&
+      typeof fetch === "function" &&
+      !inFlightHealthPromise &&
+      now - lastBackgroundRefreshAt >= BACKGROUND_HEALTH_REFRESH_COOLDOWN_MS
+    ) {
+      lastBackgroundRefreshAt = now;
+      void fetchVoiceEngineHealth().catch(() => null);
+    }
     return cachedHealth;
   }
   return null;
@@ -309,13 +374,26 @@ export function setCachedVoiceEngineHealth(
 ): void {
   cachedHealth = health;
   cachedHealthFetchedAt = health ? fetchedAt : 0;
+  lastBackgroundRefreshAt = 0;
+  if (health) {
+    if (
+      health.local.configured === false ||
+      health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+    ) {
+      permanentlyHostedLocalUnconfigured = true;
+    } else if (health.local.configured === true && health.local.available) {
+      permanentlyHostedLocalUnconfigured = false;
+    }
+  }
   emitHealth();
 }
 
 export function resetVoiceEngineStatus(): void {
   cachedHealth = null;
   cachedHealthFetchedAt = 0;
+  lastBackgroundRefreshAt = 0;
   inFlightHealthPromise = null;
+  permanentlyHostedLocalUnconfigured = false;
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),

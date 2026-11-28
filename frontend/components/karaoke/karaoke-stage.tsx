@@ -995,6 +995,7 @@ export function KaraokeStage({
     prepare(0, undefined, false, useMic);
   }
   function finishAndScoreSong() {
+    cancelAutopilotCoach();
     cancelPreparation();
     player.pause();
     setManualEnded(true);
@@ -1110,6 +1111,7 @@ export function KaraokeStage({
   function selectPracticeMode(nextMode: KaraokePracticeMode) {
     if (nextMode === practiceMode) return;
     setAutoplayDismissed(true);
+    cancelAutopilotCoach();
     cancelPreparation();
     player.pause();
     setManualEnded(false);
@@ -1230,6 +1232,7 @@ export function KaraokeStage({
         scoring.status === "finishing"
       )
         return;
+      cancelAutopilotCoach();
       if (!practiceId)
         setPracticeReturnMs(ended ? source.duration_ms : player.getCurrentMs());
       setManualEnded(false);
@@ -1273,7 +1276,25 @@ export function KaraokeStage({
     });
   }
 
+  const autopilotRefs = useRef({
+    player,
+    practice,
+    lines,
+    musicalScore: scoring.musicalScore,
+    proScore: scoring.proScore,
+  });
+  useEffect(() => {
+    autopilotRefs.current = {
+      player,
+      practice,
+      lines,
+      musicalScore: scoring.musicalScore,
+      proScore: scoring.proScore,
+    };
+  });
+
   // Hands-free post-song coaching: auto-apply comfortable key shift & count down 5s into 0.85x slow segment practice.
+  // Uses `autopilotRefs` for `player`/`practice` so `setKeyShift` or audio re-renders never cancel the 5s countdown!
   useEffect(() => {
     if (!ended) {
       autopilotHandledRunRef.current = false;
@@ -1290,15 +1311,20 @@ export function KaraokeStage({
     }
     autopilotHandledRunRef.current = true;
 
-    const suggestedShift = scoring.proScore?.suggestedKeyShift ?? 0;
-    if (suggestedShift !== 0 && player.keyShift === 0) {
+    const {
+      player: currentPlayer,
+      musicalScore: currentMusicalScore,
+      proScore: currentProScore,
+    } = autopilotRefs.current;
+    const suggestedShift = currentProScore?.suggestedKeyShift ?? 0;
+    if (suggestedShift !== 0 && currentPlayer.keyShift === 0) {
       queueMicrotask(() => {
-        player.setKeyShift(suggestedShift);
+        autopilotRefs.current.player.setKeyShift(suggestedShift);
         setAutopilotKeyShiftApplied(suggestedShift);
       });
     }
 
-    const weakest = scoring.musicalScore?.weakestSegment ?? null;
+    const weakest = currentMusicalScore?.weakestSegment ?? null;
     if (!weakest || weakest.status !== "PRACTICE") {
       return;
     }
@@ -1309,9 +1335,11 @@ export function KaraokeStage({
       if (remaining <= 0) {
         autopilotCoachTimerRef.current = null;
         setAutopilotSlowCountdown(null);
-        const target = lines.find((item) => item.id === weakest.lineId);
+        const target = autopilotRefs.current.lines.find(
+          (item) => item.id === weakest.lineId,
+        );
         if (target) {
-          practice(target, {
+          autopilotRefs.current.practice(target, {
             mode: "SEGMENT",
             rate: SEGMENT_PRACTICE_DEFAULT_RATE,
             loop: true,
@@ -1333,21 +1361,14 @@ export function KaraokeStage({
         clearTimeout(autopilotCoachTimerRef.current);
         autopilotCoachTimerRef.current = null;
       }
+      queueMicrotask(() => {
+        setAutopilotSlowCountdown(null);
+      });
     };
-  }, [
-    autopilotActive,
-    ended,
-    lines,
-    player,
-    practice,
-    practiceMode,
-    scoredMode,
-    scoring.musicalScore,
-    scoring.proScore,
-    scoring.status,
-  ]);
+  }, [autopilotActive, ended, practiceMode, scoredMode, scoring.status]);
 
   function leavePractice() {
+    cancelAutopilotCoach();
     cancelPreparation();
     player.pause();
     scoring.endPractice();
@@ -2286,6 +2307,7 @@ export function KaraokeStage({
           value={player.currentMs}
           disabled={!player.ready}
           onChange={(event) => {
+            cancelAutopilotCoach();
             cancelPreparation();
             if (practiceId && scoredMode) {
               player.pause();

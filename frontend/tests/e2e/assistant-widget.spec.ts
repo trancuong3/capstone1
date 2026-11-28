@@ -7,6 +7,7 @@ const API_BASE = "http://127.0.0.1:8000";
 const NOW = "2026-11-27T10:00:00Z";
 const PARENT_ID = "91000000-0000-4000-8000-000000000001";
 const CHILD_ID = "92000000-0000-4000-8000-000000000001";
+const CHILD_TWO_ID = "92000000-0000-4000-8000-000000000002";
 const BOOK_ID = "82000000-0000-4000-8000-000000000010";
 const SESSION_ID = "72000000-0000-4000-8000-000000000001";
 const PAGE_1_ID = "83000000-0000-4000-8000-000000000011";
@@ -109,6 +110,61 @@ async function installAssistantMockApi(page: Page): Promise<void> {
         bandwidth_profile?: "low" | "medium" | "high";
       };
       const msg = (reqBody?.message ?? "").toLowerCase();
+      if (msg.includes("memory game") || msg.includes("lật thẻ")) {
+        await route.fulfill(
+          json({
+            reply:
+              "Bé có thể chơi **Memory Game lật thẻ** (`/entertainment/memory-game`) để luyện nhớ mặt chữ vui nhé!",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_kb",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 18,
+            cached: false,
+            role_scope: "parent",
+            quick_actions: [
+              {
+                label: "Mở Memory Game",
+                href: "/entertainment/memory-game",
+              },
+            ],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Mở Memory Game lật thẻ",
+              href: "/entertainment/memory-game",
+              reason: "Trò chơi ghép thẻ giúp bé luyện phản xạ mặt chữ.",
+              requires_child_selection: true,
+              scenario_id: "memory_game",
+            },
+          }),
+        );
+        return;
+      }
+      if (msg.includes("kho sách") || msg.includes("chọn sách")) {
+        await route.fulfill(
+          json({
+            reply:
+              "Bạn có thể vào **Kho sách ViRead** (`/books`) để chọn truyện phù hợp cho bé nhé!",
+            source_tier: "tier_0_kb",
+            provider_id: "viread_kb",
+            model_id: "grounded-viread-kb-v1",
+            bandwidth_applied: reqBody?.bandwidth_profile ?? "high",
+            latency_ms: 16,
+            cached: false,
+            role_scope: "parent",
+            quick_actions: [{ label: "Mở Kho sách", href: "/books" }],
+            suggested_prompts: [],
+            navigation_offer: {
+              label: "Mở Kho sách ViRead",
+              href: "/books",
+              reason: "Chọn sách phù hợp với lớp của bé.",
+              requires_child_selection: true,
+              scenario_id: "books_catalog",
+            },
+          }),
+        );
+        return;
+      }
       if (msg.includes("mật khẩu")) {
         await route.fulfill(
           json({
@@ -188,8 +244,19 @@ async function installAssistantMockApi(page: Page): Promise<void> {
               settings: {},
               created_at: NOW,
             },
+            {
+              id: CHILD_TWO_ID,
+              parent_id: PARENT_ID,
+              alias: "Bé Bình",
+              grade: 4,
+              settings: {},
+              created_at: NOW,
+            },
           ],
-          latest_sessions_by_child: { [CHILD_ID]: null },
+          latest_sessions_by_child: {
+            [CHILD_ID]: null,
+            [CHILD_TWO_ID]: null,
+          },
         }),
       );
       return;
@@ -203,6 +270,14 @@ async function installAssistantMockApi(page: Page): Promise<void> {
             parent_id: PARENT_ID,
             alias: "Bé An",
             grade: 2,
+            settings: {},
+            created_at: NOW,
+          },
+          {
+            id: CHILD_TWO_ID,
+            parent_id: PARENT_ID,
+            alias: "Bé Bình",
+            grade: 4,
             settings: {},
             created_at: NOW,
           },
@@ -222,6 +297,25 @@ async function installAssistantMockApi(page: Page): Promise<void> {
           created_at: NOW,
         }),
       );
+      return;
+    }
+
+    if (p === `/profiles/children/${CHILD_TWO_ID}`) {
+      await route.fulfill(
+        json({
+          id: CHILD_TWO_ID,
+          parent_id: PARENT_ID,
+          alias: "Bé Bình",
+          grade: 4,
+          settings: {},
+          created_at: NOW,
+        }),
+      );
+      return;
+    }
+
+    if (p.startsWith("/reading-management/")) {
+      await route.fulfill(json([]));
       return;
     }
 
@@ -596,6 +690,84 @@ test.describe("ViRead Assistant Widget real browser geometry & E2E", () => {
     expect(rtlLauncherBox).not.toBeNull();
     // Logical `end` in RTL places widget on the left half of the viewport
     expect(rtlLauncherBox!.x).toBeLessThan(viewport.width / 2);
+
+    await context.close();
+  });
+
+  test("soft child-selection gate inside chatbot lets parent pick a child and reach /books and /entertainment/memory-game without /dashboard redirect", async ({
+    browser,
+  }, testInfo) => {
+    const isDesktop = testInfo.project.name === "desktop-chromium";
+    const viewport = isDesktop
+      ? { width: 1440, height: 1000 }
+      : { width: 390, height: 844 };
+
+    const context = await browser.newContext({
+      viewport,
+      extraHTTPHeaders: authFixtureHeaders("parent"),
+    });
+    await seedParentSession(context);
+    const page = await context.newPage();
+    await installAssistantMockApi(page);
+
+    // 1. Start on /dashboard with NO child selected -> ask for Kho sách -> click Yes -> pick Bé An -> lands on /books
+    await page.goto("/dashboard", { waitUntil: "networkidle" });
+    await page.evaluate(() => {
+      window.sessionStorage.clear();
+    });
+    await page.getByTestId("viread-assistant-launcher").click();
+    const panel = page.getByTestId("viread-assistant-panel");
+    await expect(panel).toBeVisible();
+
+    await panel.getByLabel("Nhập câu hỏi về ViRead").fill("Mở kho sách cho bé");
+    await panel.getByLabel("Gửi câu hỏi").click();
+
+    await expect(panel.getByTestId("viread-assistant-nav-card")).toBeVisible();
+    await expect(
+      panel.getByTestId("viread-assistant-child-required-notice"),
+    ).toBeVisible();
+    await panel.getByTestId("viread-assistant-nav-yes").click();
+
+    // Soft child-picker appears inside chatbot while staying on /dashboard
+    const picker = panel.getByTestId("viread-assistant-child-picker");
+    await expect(picker).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/dashboard");
+
+    await picker
+      .getByTestId(`viread-assistant-select-child-${CHILD_ID}`)
+      .click();
+    await page.waitForURL("**/books");
+    await page.waitForLoadState("networkidle");
+    expect(new URL(page.url()).pathname).toBe("/books");
+    await expect(
+      page.getByRole("heading", { name: "Chú mèo đi hia" }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // 2. Clear selected child in a fresh reload on /dashboard -> ask for Memory Game -> pick Bé Bình -> lands on /entertainment/memory-game
+    await page.goto("/dashboard", { waitUntil: "networkidle" });
+    await page.evaluate(() => {
+      window.sessionStorage.clear();
+    });
+    await page.reload({ waitUntil: "networkidle" });
+
+    await page.getByTestId("viread-assistant-launcher").click();
+    const panel2 = page.getByTestId("viread-assistant-panel");
+    await panel2
+      .getByLabel("Nhập câu hỏi về ViRead")
+      .fill("Bé muốn chơi Memory Game lật thẻ");
+    await panel2.getByLabel("Gửi câu hỏi").click();
+    await panel2.getByTestId("viread-assistant-nav-yes").click();
+
+    const picker2 = panel2.getByTestId("viread-assistant-child-picker");
+    await expect(picker2).toBeVisible();
+    await picker2
+      .getByTestId(`viread-assistant-select-child-${CHILD_TWO_ID}`)
+      .click();
+    await page.waitForURL("**/entertainment/memory-game");
+    await page.waitForLoadState("networkidle");
+    expect(new URL(page.url()).pathname).toBe("/entertainment/memory-game");
 
     await context.close();
   });

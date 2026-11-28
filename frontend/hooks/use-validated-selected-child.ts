@@ -3,7 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { useAppStore } from "@/components/providers/app-store-provider";
+import {
+  areEquivalentChildProfiles,
+  useAppStore,
+} from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
@@ -74,6 +77,24 @@ function findFreshCachedChild(
   return null;
 }
 
+const stableImmediateChildCache = new Map<string, ChildProfileDTO>();
+
+function stabilizeImmediateChild(
+  cacheKey: string,
+  candidate: ChildProfileDTO | null,
+): ChildProfileDTO | null {
+  if (!candidate) return null;
+  const cached = stableImmediateChildCache.get(cacheKey);
+  if (cached && areEquivalentChildProfiles(cached, candidate)) {
+    return cached;
+  }
+  if (stableImmediateChildCache.size >= 32) {
+    stableImmediateChildCache.clear();
+  }
+  stableImmediateChildCache.set(cacheKey, candidate);
+  return candidate;
+}
+
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
   const replaceRef = useRef(replace);
@@ -102,10 +123,14 @@ export function useValidatedSelectedChild() {
 
   const immediateChild = useMemo<ChildProfileDTO | null>(() => {
     if (!selectedChildId) return null;
-    if (validatedSelectedChild?.id === selectedChildId) {
-      return validatedSelectedChild;
-    }
-    return findCachedChild(userId, selectedChildId);
+    const candidate =
+      validatedSelectedChild?.id === selectedChildId
+        ? validatedSelectedChild
+        : findCachedChild(userId, selectedChildId);
+    return stabilizeImmediateChild(
+      `${userId ?? "anon"}:${selectedChildId}`,
+      candidate,
+    );
   }, [selectedChildId, userId, validatedSelectedChild]);
   const immediateChildRef = useRef<ChildProfileDTO | null>(immediateChild);
   const validatedSelectedChildRef = useRef<ChildProfileDTO | null>(
@@ -148,7 +173,12 @@ export function useValidatedSelectedChild() {
     const freshCachedChild =
       retryKey === 0 ? findFreshCachedChild(userId, requestChildId) : null;
     if (freshCachedChild) {
-      if (validatedSelectedChildRef.current?.id !== freshCachedChild.id) {
+      if (
+        !areEquivalentChildProfiles(
+          validatedSelectedChildRef.current,
+          freshCachedChild,
+        )
+      ) {
         setValidatedSelectedChild(freshCachedChild);
       }
       return () => {
@@ -170,8 +200,15 @@ export function useValidatedSelectedChild() {
           replaceRef.current("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
+        hydrateTeacherVoiceFromChildProfile(child);
         setValidatedSelectedChild(child);
-        setState({ status: "ready", childId: requestChildId, child });
+        setState((current) =>
+          current.status === "ready" &&
+          current.childId === requestChildId &&
+          areEquivalentChildProfiles(current.child, child)
+            ? current
+            : { status: "ready", childId: requestChildId, child },
+        );
       })
       .catch((error: unknown) => {
         if (!active || requestEpoch !== requestEpochRef.current) return;

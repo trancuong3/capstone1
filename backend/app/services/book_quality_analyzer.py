@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import re
 import unicodedata
-from dataclasses import dataclass
+from app.services.vietnamese_readability import (
+    VietnameseReadabilityReport,
+    analyse_vietnamese_readability,
+)
+
+__all__ = [
+    "QualityFinding",
+    "VietnameseReadabilityReport",
+    "analyse_verified_text",
+    "analyse_vietnamese_readability",
+    "content_fingerprint",
+    "duplicate_page_finding",
+    "page_gap_finding",
+]
 
 
 @dataclass(frozen=True)

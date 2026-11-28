@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "추가 연습이 필요한 단어 ({days}일)",
       "heardAsCount": "아이가 자주 “{heardAs}”라고 읽음 ({times}회)",
       "recordedCount": "{times}회 기록됨",
-      "heardAsInline": "(“{heardAs}”로 읽음)"
+      "heardAsInline": "(“{heardAs}”로 읽음)",
+      "phonologyTitle": "읽기 연습 중 자주 헷갈리는 성조 및 발음 패턴",
+      "phonologyDisclaimer": "최근 독서 기록을 바탕으로 가벼운 워밍업을 제안합니다 (의학적 진단 아님).",
+      "openMinimalPairSandbox": "60초 단어쌍 연습",
+      "phonologySessionsBadge": "{sessions}회 세션"
     },
     "firstPassSummary": {
       "regionAria": "첫 시도 및 연습 결과",
@@ -670,7 +674,8 @@
     "focusAria": "독서 관리 섹션 필터",
     "focusPlans": "계획",
     "focusGoals": "목표",
-    "focusReminders": "알림"
+    "focusReminders": "알림",
+    "androidReminderBody": "ViRead에서 {alias} 어린이와 함께 책 읽을 시간이에요!"
   },
   "entertainmentSummary": {
     "loading": "{childName}의 놀이 학습 진행 상황을 요약하는 중…",
@@ -693,5 +698,20 @@
     "openSongAction": "노래 열기",
     "homeTipsTitle": "가정에서 함께할 수 있는 팁",
     "misreadWordsReinforcedLabel": "게임으로 복습한 읽기 낱말"
+  },
+  "printCertificate": {
+    "brandTagline": "가족 독서 성장 리포트",
+    "printA4Action": "A4 리포트 인쇄",
+    "downloadCertificateAction": "인증서 저장 (.png)",
+    "certificateHeading": "독서 성장 마일스톤 인증서",
+    "certificateSubtitle": "가족과 함께 꾸준히 이어온 베트남어 읽기 여정을 축하하며",
+    "awardedTo": "자랑스러운 어린이 독서가",
+    "progressAchievement": "{alias} 어린이는 매주 꾸준히 읽기를 연습하며 베트남어 어휘력을 키웠어요!",
+    "progressStatsLine": "완료 세션: {sessions} · 읽은 단어: {words} · 평균 정확도: {accuracy}",
+    "sessionReaderFallback": "성실한 어린이 독서가",
+    "sessionAchievement": "또렷하고 자신감 있게 읽기 세션을 완주했어요!",
+    "sessionStatsLine": "읽은 페이지: {pages} · 전체 단어: {words} · 최고 정확도: {accuracy}",
+    "issuedOn": "발급일: {date}",
+    "encouragementFooter": "오늘 읽은 한 페이지가 가족과 함께 자라는 따뜻한 지혜의 씨앗이 됩니다."
   }
 }

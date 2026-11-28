@@ -249,6 +249,22 @@ class ToolCheckFindingRead(BaseModel):
     recommendation: str | None = None
 
 
+class VietnameseReadabilityRead(BaseModel):
+    syllable_count: int = 0
+    sentence_count: int = 0
+    avg_syllables_per_sentence: float = 0.0
+    complex_phonics_ratio: float = 0.0
+    multisyllable_ratio: float = 0.0
+    decodable_syllable_ratio: float = 0.0
+    estimated_grade_band: Literal["GRADE_1", "GRADE_2", "GRADE_3", "GRADE_4_5", "UNRATED"] = "UNRATED"
+    estimated_min_grade: int = 1
+    estimated_max_grade: int = 5
+    grade_match_status: Literal["MATCHED", "TOO_HARD", "TOO_EASY", "UNRATED"] = "UNRATED"
+    phonics_readiness_score: float = 0.0
+    sample_complex_syllables: list[str] = Field(default_factory=list)
+    explanation_vi: str = ""
+
+
 class ParentPrivatePageRead(BaseModel):
     page_id: UUID
     page_number: int
@@ -256,6 +272,7 @@ class ParentPrivatePageRead(BaseModel):
     verified_text: str = ""
     verified_text_preview: str = ""
     image_url: str
+    readability: VietnameseReadabilityRead | None = None
     created_at: datetime
 
 
@@ -340,7 +357,27 @@ class ParentPrivateBookSummaryRead(BaseModel):
     has_held_multipage_batch: bool = False
     privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ."
     ocr_contribution: "ParentOcrContributionStateRead | None" = None
+    readability: VietnameseReadabilityRead | None = None
     created_at: datetime
+
+
+class ParentStoryweaverRequest(BaseModel):
+    child_id: UUID | None = None
+    title: str | None = Field(default=None, max_length=180)
+    theme: str = Field(default="khu vườn nhỏ", min_length=2, max_length=120)
+    page_count: int = Field(default=3, ge=3, le=4)
+    target_grade: int | None = Field(default=None, ge=1, le=5)
+    style_mode: Literal["PROSE", "DUET_DIALOGUE", "POEM"] = "DUET_DIALOGUE"
+    custom_words: list[str] = Field(default_factory=list, max_length=8)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ParentStoryweaverResponse(BaseModel):
+    book_detail: "ParentPrivateBookDetailRead"
+    target_words_used: list[str] = Field(default_factory=list)
+    generation_source: Literal["AI", "DETERMINISTIC_TEMPLATE"] = "DETERMINISTIC_TEMPLATE"
+    readability: VietnameseReadabilityRead
 
 
 class ParentPrivateBookPageRead(BaseModel):
@@ -372,6 +409,19 @@ class ParentAddPageResponse(BaseModel):
     revision_id: UUID
     submission: ParentPageSubmissionRead
     book_readable_for_children: bool
+
+
+ScanSaveMode = Literal["create_book", "append_page"]
+
+
+class ParentSaveFromScanResponse(BaseModel):
+    book_id: UUID
+    page_id: UUID
+    page_number: int
+    revision_id: UUID
+    title: str
+    visibility_scope: Literal["PARENT_PRIVATE"] = "PARENT_PRIVATE"
+    reader_href: str
 
 
 class ParentDeletePrivateBookResponse(BaseModel):

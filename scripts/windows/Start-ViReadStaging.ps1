@@ -97,8 +97,9 @@ function Test-PortListening([int]$port) {
 
 function Read-DotEnv([string]$path) {
     $map = @{}
-    foreach ($line in (Get-Content $path -Encoding UTF8)) {
-        $trimmed = $line.Trim()
+    foreach ($line in [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::UTF8)) {
+        if ($null -eq $line) { continue }
+        $trimmed = $line.TrimStart([char]0xFEFF).Trim()
         if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
         if ($trimmed -match "^([A-Za-z0-9_]+)\s*=\s*(.*)$") {
             $k = $Matches[1]

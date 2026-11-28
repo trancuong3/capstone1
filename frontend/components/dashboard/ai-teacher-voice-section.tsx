@@ -53,6 +53,7 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -281,6 +282,17 @@ export function AiTeacherVoiceSection({
 
   useEffect(() => {
     mountedRef.current = true;
+    if (
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      typeof window.speechSynthesis?.getVoices === "function"
+    ) {
+      try {
+        window.speechSynthesis.getVoices();
+      } catch {
+        // Best-effort browser voice list warmup
+      }
+    }
     return () => {
       mountedRef.current = false;
       speechPlayerRef.current.stop();
@@ -334,6 +346,21 @@ export function AiTeacherVoiceSection({
     policy.region,
   );
 
+  useEffect(() => {
+    if (speechPlayer.state !== "completed" && speechPlayer.state !== "error") {
+      return;
+    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsPreviewing(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [speechPlayer.state]);
+
   const persistChildVoice = useCallback(
     async (
       childId: string,
@@ -378,7 +405,7 @@ export function AiTeacherVoiceSection({
       readonly modelVersion?: string;
     }) => {
       stopPreview();
-      applyGlobalTeacherVoiceSelection({
+      const applied = applyGlobalTeacherVoiceSelection({
         ...input,
         childId: selectedChild?.id ?? null,
         persistToBackend: selectedChild?.id ? persistChildVoice : undefined,
@@ -387,8 +414,20 @@ export function AiTeacherVoiceSection({
             ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
             : undefined,
       });
+      const nextGender =
+        input.gender ??
+        resolveVoiceGender(
+          applied?.voiceId ?? input.voiceId ?? effectiveVoiceId,
+        );
+      void warmWasmTtsIfNeeded(nextGender);
     },
-    [persistChildVoice, selectedChild?.id, stopPreview, voiceStudio],
+    [
+      effectiveVoiceId,
+      persistChildVoice,
+      selectedChild?.id,
+      stopPreview,
+      voiceStudio,
+    ],
   );
 
   const findPreferredVoice = useCallback(
@@ -432,6 +471,11 @@ export function AiTeacherVoiceSection({
           cacheScope: "COACHING",
           bypassSessionLock: true,
           utteranceKind: "voice_preview",
+          onEnded: () => {
+            if (mountedRef.current && gen === previewGenRef.current) {
+              setIsPreviewing(false);
+            }
+          },
         })
         .catch((error: unknown) => {
           const isAbortError =
@@ -578,8 +622,14 @@ export function AiTeacherVoiceSection({
       ? currentVoice
       : findPreferredVoice("male", activeRegion);
 
+  const isPreviewActive =
+    isPreviewing ||
+    speechPlayer.state === "loading" ||
+    speechPlayer.state === "playing" ||
+    speechPlayer.state === "fallback";
+
   const handlePreviewToggle = () => {
-    if (isPreviewing || speechPlayer.isPlaying) {
+    if (isPreviewActive) {
       stopPreview();
       return;
     }
@@ -634,11 +684,9 @@ export function AiTeacherVoiceSection({
           onClick={handlePreviewToggle}
           size="compact"
           type="button"
-          variant={
-            isPreviewing || speechPlayer.isPlaying ? "secondary" : "primary"
-          }
+          variant={isPreviewActive ? "secondary" : "primary"}
         >
-          {isPreviewing || speechPlayer.isPlaying ? (
+          {isPreviewActive ? (
             <>
               <Square aria-hidden="true" className="size-4" />
               {tParent("teacherVoice.stopPreviewButton")}

@@ -129,6 +129,15 @@ const wordTimingDtoSchema = z.object({
   end: z.number().nonnegative(),
 });
 
+const readingDuetSegmentSchema = z.object({
+  turn_index: z.number().int().nonnegative(),
+  role: z.enum(["PARENT", "CHILD"]),
+  block_type: z.string().optional(),
+  line_indices: z.array(z.number().int().nonnegative()),
+  word_indices: z.array(z.number().int().nonnegative()),
+  text: z.string(),
+});
+
 export const readingPageDtoSchema = z.object({
   page_id: z.guid(),
   page_revision_id: z.guid(),
@@ -144,6 +153,8 @@ export const readingPageDtoSchema = z.object({
   image_overlay_safe: z.boolean().optional(),
   illustration_url: z.string().nullable().optional(),
   illustration_text_free: z.boolean().optional(),
+  page_kind: z.string().nullable().optional(),
+  duet_segments: z.array(readingDuetSegmentSchema).optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
   paragraph_start_line_indices: z

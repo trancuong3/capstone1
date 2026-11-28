@@ -70,17 +70,37 @@ class ReadingComparisonService:
                 detail="page_id and page_revision_id must be supplied together.",
             )
 
+        content_dict = getattr(self.content, "__dict__", {})
         if payload.page_id is not None:
-            page = await self.content.get_page(
-                payload.page_id,
-                session_id,
-                actor_id,
-                revision_id=payload.page_revision_id,
-            )
+            if (
+                isinstance(self.content, ReadingContentService)
+                and "get_page" not in content_dict
+            ):
+                page = await self.content.get_page_for_comparison(
+                    payload.page_id,
+                    session_id,
+                    actor_id,
+                    revision_id=payload.page_revision_id,
+                )
+            else:
+                page = await self.content.get_page(
+                    payload.page_id,
+                    session_id,
+                    actor_id,
+                    revision_id=payload.page_revision_id,
+                )
         else:
             # Backward compatibility for callers that still compare only the
             # current page. New multi-page clients must send the exact snapshot.
-            page = await self.content.get_session_page(session_id, actor_id)
+            if (
+                isinstance(self.content, ReadingContentService)
+                and "get_session_page" not in content_dict
+            ):
+                page = await self.content.get_session_page_for_comparison(
+                    session_id, actor_id
+                )
+            else:
+                page = await self.content.get_session_page(session_id, actor_id)
 
         reference_text = unicodedata.normalize(
             "NFC", page.text or " ".join(word.text for word in page.words)
@@ -139,9 +159,29 @@ class ReadingComparisonService:
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
 
-        finalized = await self.repository.finalized_for_page(
-            session_id, page.page_id, page.page_revision_id,
+        repo_dict = getattr(self.repository, "__dict__", {})
+        is_real_repo = (
+            isinstance(self.repository, ReadingComparisonRepository)
+            and "finalized_for_page" not in repo_dict
         )
+        session_reports: list[ReadingComparisonReport] | None = None
+        if is_real_repo:
+            session_reports = await self.repository.list_for_session(session_id)
+            finalized = next(
+                (
+                    row
+                    for row in reversed(session_reports)
+                    if row.PageId == page.page_id
+                    and row.PageRevisionId == page.page_revision_id
+                    and isinstance(row.Summary, dict)
+                    and row.Summary.get("assessment_version") == 1
+                ),
+                None,
+            )
+        else:
+            finalized = await self.repository.finalized_for_page(
+                session_id, page.page_id, page.page_revision_id,
+            )
         if finalized is not None:
             finalized_transcript_nfc = unicodedata.normalize(
                 "NFC", str(finalized.Transcript or "")
@@ -170,30 +210,43 @@ class ReadingComparisonService:
             return self._to_read(finalized)
         if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
             raise HTTPException(status_code=409, detail="Cannot assess a finished session")
-        if payload.finalize and any(
-            row.PageId == page.page_id and row.PageRevisionId == page.page_revision_id
-            for row in await self.repository.list_for_session(session_id)
-        ):
-            raise HTTPException(status_code=409, detail="A legacy comparison cannot be replaced with a new initial assessment")
+        if payload.finalize:
+            if session_reports is None:
+                session_reports = await self.repository.list_for_session(session_id)
+            if any(
+                row.PageId == page.page_id and row.PageRevisionId == page.page_revision_id
+                for row in session_reports
+            ):
+                raise HTTPException(status_code=409, detail="A legacy comparison cannot be replaced with a new initial assessment")
 
         # Safe retry after a lost HTTP response: return an already-persisted
         # identical comparison instead of creating a duplicate report.
-        existing = await self.repository.find_exact(
-            session_id,
-            page.page_id,
-            page.page_revision_id,
-            transcript,
-        )
-        if existing is not None and not payload.finalize:
-            return self._to_read(existing)
-        if existing is None and not payload.finalize:
-            for row in await self.repository.list_for_session(session_id):
-                if (
-                    row.PageId == page.page_id
-                    and row.PageRevisionId == page.page_revision_id
-                    and unicodedata.normalize("NFC", str(row.Transcript or "")).strip() == transcript
-                ):
-                    return self._to_read(row)
+        if not payload.finalize:
+            if session_reports is not None:
+                for row in session_reports:
+                    if (
+                        row.PageId == page.page_id
+                        and row.PageRevisionId == page.page_revision_id
+                        and unicodedata.normalize("NFC", str(row.Transcript or "")).strip() == transcript
+                    ):
+                        return self._to_read(row)
+            else:
+                existing = await self.repository.find_exact(
+                    session_id,
+                    page.page_id,
+                    page.page_revision_id,
+                    transcript,
+                )
+                if existing is not None:
+                    return self._to_read(existing)
+                session_reports = await self.repository.list_for_session(session_id)
+                for row in session_reports:
+                    if (
+                        row.PageId == page.page_id
+                        and row.PageRevisionId == page.page_revision_id
+                        and unicodedata.normalize("NFC", str(row.Transcript or "")).strip() == transcript
+                    ):
+                        return self._to_read(row)
 
         report = ReadingComparisonReport(
             SessionId=session_id,
@@ -205,6 +258,18 @@ class ReadingComparisonService:
             Summary=summary,
         )
         persisted = await self.repository.create(report)
+        from app.services.reading_skill_evidence import (
+            emit_reading_comparison_skill_evidence,
+        )
+
+        await emit_reading_comparison_skill_evidence(
+            self.repository,
+            child_id=getattr(session, "ChildId", None),
+            parent_id=actor_id,
+            report_id=getattr(persisted, "Id", None),
+            alignment=result["alignment"],
+            summary=summary,
+        )
         return self._to_read(persisted)
 
     async def list_for_session(

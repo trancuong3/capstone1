@@ -45,6 +45,7 @@ import {
   suspendShooterAudio,
 } from "@/components/entertainment/sentence-shooter/sound-engine";
 import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
+import { MagicWordQuestPanel } from "@/components/entertainment/sentence-shooter/magic-word-quest-panel";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
@@ -77,7 +78,9 @@ import type {
   SentenceShooterTokenDTO,
 } from "@/types/sentence-shooter";
 
-type ScreenMode = "lobby" | "playing" | "result";
+export const MAGIC_QUEST_BOOK_ID = "__magic_word_quest__";
+
+type ScreenMode = "lobby" | "playing" | "magic-quest" | "result";
 type BookLoadState =
   | { status: "loading" }
   | { status: "ready"; books: SentenceShooterBookDTO[] }
@@ -158,11 +161,13 @@ const VALID_LEARNING_MODES: readonly SentenceShooterLearningMode[] = [
   "GRAMMAR_FOCUS",
 ];
 
-interface SentenceShooterScreenProps {
+export interface SentenceShooterScreenProps {
   autoPlay?: boolean;
   initialBookId?: string;
   initialDifficulty?: SentenceShooterDifficulty;
   initialLearningMode?: SentenceShooterLearningMode;
+  initialMode?: "magic-quest";
+  initialPageId?: string;
   readingSessionId?: string;
 }
 
@@ -452,6 +457,8 @@ export function SentenceShooterScreen({
   initialBookId,
   initialDifficulty,
   initialLearningMode,
+  initialMode,
+  initialPageId,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
@@ -523,6 +530,29 @@ export function SentenceShooterScreen({
       return [];
     }
   });
+  const [hasUrlAutopilot] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("autopilot") === "1" || params.get("autoplay") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [hasUrlMagicQuestMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        new URLSearchParams(window.location.search).get("mode") ===
+        "magic-quest"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const isInitialMagicQuestMode =
+    initialMode === "magic-quest" || hasUrlMagicQuestMode;
+
   const [difficulty, setDifficulty] = useState<SentenceShooterDifficulty>(
     () => resolvedInitialDifficulty ?? "easy",
   );
@@ -640,12 +670,15 @@ export function SentenceShooterScreen({
     new Map<number, ReturnType<typeof setTimeout>>(),
   );
   const sessionEpochRef = useRef(0);
+  const sessionBookIdRef = useRef<string | null>(initialBookId ?? null);
   const controlAbortRef = useRef<AbortController | null>(null);
   const shooterServiceRef = useRef(shooterService);
   const speechPlayerRef = useRef(speechPlayer);
   const soundEnabledRef = useRef(soundEnabled);
   const reducedMotionRef = useRef(reducedMotion);
   const calmSoundRef = useRef(calmSound);
+  const autopilotEnabledRef = useRef(autopilotEnabled);
+  const userToggledAutopilotOnRef = useRef(false);
   const roundRef = useRef(round);
   const shootErrorRef = useRef(shootError);
   const readingCompletionHref = readingSessionId
@@ -663,10 +696,11 @@ export function SentenceShooterScreen({
   useEffect(() => {
     soundEnabledRef.current = soundEnabled;
     calmSoundRef.current = calmSound;
+    autopilotEnabledRef.current = autopilotEnabled;
     if (!calmSound) {
       speechPlayerRef.current.stop();
     }
-  }, [calmSound, soundEnabled]);
+  }, [autopilotEnabled, calmSound, soundEnabled]);
 
   useEffect(() => {
     reducedMotionRef.current = reducedMotion;
@@ -754,6 +788,25 @@ export function SentenceShooterScreen({
               calmSound: calmSoundRef.current,
             },
           );
+          const autopilotAudioActive =
+            autopilotEnabledRef.current &&
+            (hasUrlAutopilot || userToggledAutopilotOnRef.current);
+          if (
+            !response.round_completed &&
+            shot.token.is_difficult_word &&
+            autopilotAudioActive &&
+            calmSoundRef.current &&
+            shot.token.text.trim()
+          ) {
+            speechPlayerRef.current.stop();
+            void speechPlayerRef.current
+              .play(shot.token.text.trim(), {
+                wordSample: true,
+                speedScale: 0.92,
+                bypassSessionLock: true,
+              })
+              .catch(() => undefined);
+          }
           if (response.round_completed) {
             roundCompletedRef.current = true;
             const completedText = response.completed_sentence ?? "";
@@ -923,17 +976,48 @@ export function SentenceShooterScreen({
     totalRounds,
   ]);
 
-  const effectiveSelectedBookId =
-    !hasManuallySelectedBook && initialBookId
-      ? bookState.status === "ready" &&
-        bookState.books.some((book) => book.id === initialBookId)
-        ? initialBookId
-        : ""
-      : !hasManuallySelectedBook &&
-          bookState.status === "ready" &&
-          bookState.books.length > 0
-        ? bookState.books[0].id
-        : selectedBookId;
+  const effectiveSelectedBookId = (() => {
+    if (hasManuallySelectedBook) {
+      return selectedBookId;
+    }
+    if (isInitialMagicQuestMode) {
+      return MAGIC_QUEST_BOOK_ID;
+    }
+    if (initialBookId) {
+      if (bookState.status !== "ready") return selectedBookId;
+      if (bookState.books.some((book) => book.id === initialBookId)) {
+        return initialBookId;
+      }
+      return readingSessionId ? selectedBookId : MAGIC_QUEST_BOOK_ID;
+    }
+    if (!selectedBookId && bookState.status === "ready") {
+      if (bookState.books.length === 0) {
+        return MAGIC_QUEST_BOOK_ID;
+      }
+      if (
+        (bookState.books[0]?.difficult_word_count ?? 0) === 0 &&
+        urlFocusWords.length > 0
+      ) {
+        return MAGIC_QUEST_BOOK_ID;
+      }
+      return bookState.books[0]?.id ?? "";
+    }
+    return selectedBookId;
+  })();
+
+  const isMagicQuestSelected = effectiveSelectedBookId === MAGIC_QUEST_BOOK_ID;
+
+  useEffect(() => {
+    sessionBookIdRef.current =
+      session?.book.id ??
+      result?.book.id ??
+      (effectiveSelectedBookId || initialBookId || null);
+  }, [
+    effectiveSelectedBookId,
+    initialBookId,
+    result?.book.id,
+    session?.book.id,
+  ]);
 
   const selectedBook = useMemo(
     () =>
@@ -1050,6 +1134,13 @@ export function SentenceShooterScreen({
   }) {
     if (!child || isStartingSession) return;
     const autoSelectBook = Boolean(options?.autoSelectBook);
+    if (!autoSelectBook && !options?.bookIdOverride && isMagicQuestSelected) {
+      clearAutoAdvanceTimer();
+      speechPlayer.stop();
+      setError("");
+      setMode("magic-quest");
+      return;
+    }
     const resolvedBookId = options?.bookIdOverride ?? selectedBook?.id;
     if (!autoSelectBook && !resolvedBookId) return;
     const targetDifficulty = options?.difficultyOverride ?? difficulty;
@@ -1083,7 +1174,14 @@ export function SentenceShooterScreen({
               child_id: child.id,
               ...(autoSelectBook
                 ? { auto_select_book: true }
-                : { book_id: resolvedBookId }),
+                : {
+                    book_id: resolvedBookId,
+                    ...(initialPageId &&
+                    (!hasManuallySelectedBook ||
+                      resolvedBookId === initialBookId)
+                      ? { book_page_id: initialPageId }
+                      : {}),
+                  }),
               difficulty: candidateDiff,
               total_rounds: totalRounds,
               learning_mode: targetLearningMode,
@@ -1590,6 +1688,20 @@ export function SentenceShooterScreen({
     );
   }
 
+  if (mode === "magic-quest" && child) {
+    return (
+      <MagicWordQuestPanel
+        autopilotEnabled={autopilotEnabled}
+        calmSound={calmSound}
+        child={child}
+        focusWords={urlFocusWords}
+        onExitToLobby={restartLobby}
+        onToggleCalmSound={() => setCalmSound(!calmSound)}
+        reducedMotion={reducedMotion}
+      />
+    );
+  }
+
   if (mode === "playing" && session && round) {
     const roundComplete = placedTokens.length === round.token_count;
     const activeLearningMode: SentenceShooterLearningMode =
@@ -1721,10 +1833,16 @@ export function SentenceShooterScreen({
             <div className="flex shrink-0 items-center gap-2">
               <ReadingVoiceSettings
                 fallbackNotice={speechPlayer.fallbackNotice}
-                isPreviewing={speechPlayer.isPlaying}
+                isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
                 onPreview={(sample) => {
                   speechPlayer.stop();
-                  return speechPlayer.play(sample, { bypassSessionLock: true });
+                  return speechPlayer.play(sample, {
+                    coaching: true,
+                    cacheScope: "COACHING",
+                    isPrivateBook: false,
+                    bypassSessionLock: true,
+                    utteranceKind: "voice_preview",
+                  });
                 }}
                 onStopPreview={speechPlayer.stop}
               />
@@ -2324,10 +2442,16 @@ export function SentenceShooterScreen({
         <div className="flex flex-wrap items-center gap-2">
           <ReadingVoiceSettings
             fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
+            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
             onPreview={(sample) => {
               speechPlayer.stop();
-              return speechPlayer.play(sample, { bypassSessionLock: true });
+              return speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+              });
             }}
             onStopPreview={speechPlayer.stop}
           />
@@ -2336,7 +2460,12 @@ export function SentenceShooterScreen({
             className="min-h-11 shrink-0"
             data-testid="shooter-autoplay-toggle"
             fullWidth={false}
-            onClick={toggleAutoPlayFlow}
+            onClick={() => {
+              if (!autoPlayFlow) {
+                userToggledAutopilotOnRef.current = true;
+              }
+              toggleAutoPlayFlow();
+            }}
             size="compact"
             type="button"
             variant={autoPlayFlow ? "secondary" : "quiet"}
@@ -2519,7 +2648,10 @@ export function SentenceShooterScreen({
                   : "border-border bg-white text-muted",
               )}
               data-testid="shooter-autopilot-toggle"
-              onClick={toggleAutopilot}
+              onClick={() => {
+                userToggledAutopilotOnRef.current = !autopilotEnabled;
+                toggleAutopilot();
+              }}
               type="button"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />
@@ -2546,7 +2678,14 @@ export function SentenceShooterScreen({
             </span>
           </div>
         </div>
-        {initialBookId && selectedBook?.id === initialBookId ? (
+        {isMagicQuestSelected && !hasManuallySelectedBook ? (
+          <p
+            className="mb-3 rounded-control border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950"
+            data-testid="shooter-preselected-magic-quest"
+          >
+            ✨ {t("sentenceShooter.magicQuest.preselectedBanner")}
+          </p>
+        ) : initialBookId && selectedBook?.id === initialBookId ? (
           <p className="mb-3 rounded-control bg-success-surface px-4 py-3 text-sm font-semibold text-success-ink">
             <Gamepad2 aria-hidden="true" className="me-2 inline size-4" />
             {t("sentenceShooter.preselectedRecentBook")}
@@ -2602,6 +2741,60 @@ export function SentenceShooterScreen({
               <RefreshCw aria-hidden="true" className="size-5" />{" "}
               {t("sentenceShooter.retry")}
             </Button>
+          </div>
+        ) : null}
+        {bookState.status === "ready" ||
+        bookState.status === "error" ||
+        isInitialMagicQuestMode ? (
+          <div className="mb-4">
+            <button
+              aria-pressed={isMagicQuestSelected}
+              className={cn(
+                "flex min-h-28 w-full items-center gap-4 rounded-control border-2 bg-gradient-to-r from-amber-50/90 via-white to-sky/70 p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                isMagicQuestSelected
+                  ? "border-primary ring-2 ring-primary/25"
+                  : "border-amber-300 hover:border-primary/70",
+              )}
+              data-testid="magic-quest-deck-card"
+              onClick={() => {
+                setHasManuallySelectedBook(true);
+                setSelectedBookId(MAGIC_QUEST_BOOK_ID);
+              }}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-16 shrink-0 place-items-center rounded-2xl bg-amber-100 text-3xl shadow-2xs"
+              >
+                🦉
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-extrabold text-amber-950">
+                  {t("sentenceShooter.magicQuest.deckBadge")}
+                </span>
+                <span className="mt-1 block text-base font-extrabold text-ink sm:text-lg">
+                  {t("sentenceShooter.magicQuest.deckTitle")}
+                </span>
+                <span className="mt-0.5 block text-sm font-semibold text-muted">
+                  {urlFocusWords.length > 0
+                    ? t("sentenceShooter.magicQuest.deckSubtitle")
+                    : t("sentenceShooter.magicQuest.deckStarterSubtitle")}
+                </span>
+                <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                    {t("sentenceShooter.magicQuest.deckReadyBadge")}
+                  </span>
+                  {urlFocusWords.length > 0 ? (
+                    <span className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-xs font-extrabold text-amber-950">
+                      ⭐{" "}
+                      {t("sentenceShooter.magicQuest.deckWordsBadge", {
+                        count: urlFocusWords.length,
+                      })}
+                    </span>
+                  ) : null}
+                </span>
+              </span>
+            </button>
           </div>
         ) : null}
         {bookState.status === "ready" && bookState.books.length === 0 ? (
@@ -2744,7 +2937,9 @@ export function SentenceShooterScreen({
         <Button
           className="sm:max-w-sm"
           disabled={
-            !selectedBook || isStartingSession || bookState.status !== "ready"
+            (!selectedBook && !isMagicQuestSelected) ||
+            isStartingSession ||
+            (!isMagicQuestSelected && bookState.status !== "ready")
           }
           isLoading={isStartingSession}
           onClick={() => void startGame()}

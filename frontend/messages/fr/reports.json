@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Mots suggérés pour l'entraînement ({days} jours)",
       "heardAsCount": "L'enfant lit souvent « {heardAs} » ({times} fois)",
       "recordedCount": "Enregistré {times} fois",
-      "heardAsInline": "(lu comme « {heardAs} »)"
+      "heardAsInline": "(lu comme « {heardAs} »)",
+      "phonologyTitle": "Tons et sons souvent travaillés en lecture",
+      "phonologyDisclaimer": "Regroupé depuis les séances récentes pour un échauffement doux (non médical).",
+      "openMinimalPairSandbox": "Paires minimales 60s",
+      "phonologySessionsBadge": "{sessions} séances"
     },
     "firstPassSummary": {
       "regionAria": "Résultats de la première tentative et de l'entraînement",
@@ -670,7 +674,8 @@
     "focusAria": "Filtrer les sections de gestion de lecture",
     "focusPlans": "Programmes",
     "focusGoals": "Objectifs",
-    "focusReminders": "Rappels"
+    "focusReminders": "Rappels",
+    "androidReminderBody": "C'est l'heure de lire avec {alias} sur ViRead !"
   },
   "entertainmentSummary": {
     "loading": "Synthèse des progrès ludiques de {childName} en cours…",
@@ -693,5 +698,20 @@
     "openSongAction": "Ouvrir la chanson",
     "homeTipsTitle": "Conseils d'accompagnement à la maison",
     "misreadWordsReinforcedLabel": "Mots de lecture consolidés en jouant"
+  },
+  "printCertificate": {
+    "brandTagline": "Bilan familial de progression en lecture",
+    "printA4Action": "Imprimer le bilan A4",
+    "downloadCertificateAction": "Télécharger le certificat (.png)",
+    "certificateHeading": "CERTIFICAT D’ÉTAPE DE LECTURE",
+    "certificateSubtitle": "Célébrant la persévérance en lecture vietnamienne en famille",
+    "awardedTo": "Décerné avec fierté à",
+    "progressAchievement": "{alias} a pratiqué la lecture avec régularité et enrichi son vocabulaire vietnamien !",
+    "progressStatsLine": "Séances : {sessions} · Mots lus : {words} · Précision moy. : {accuracy}",
+    "sessionReaderFallback": "Jeune lecteur assidu",
+    "sessionAchievement": "A terminé une séance de lecture claire et confiante !",
+    "sessionStatsLine": "Pages lues : {pages} · Mots totaux : {words} · Meilleure précision : {accuracy}",
+    "issuedOn": "Délivré le : {date}",
+    "encouragementFooter": "Chaque page lue aujourd’hui sème une graine chaleureuse de savoir en famille."
   }
 }

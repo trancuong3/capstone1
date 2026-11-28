@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -23,14 +23,23 @@ import Image from "next/image";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { ReadingPassportPanel } from "@/components/dashboard/reading-passport-panel";
+import { ProsodyAssessmentCard } from "@/components/reading/prosody-assessment-card";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import {
+  analyzeProsody,
+  buildSampleSessionWordTimings,
+  type ProsodyAnalysisResponse,
+  type WordTiming,
+} from "@/lib/api/fluency-prosody-service";
 import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
+import { useProsodyCoachTranslations } from "@/messages/features/prosody_coach";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingCompletionSummaryUI } from "@/types/reading";
 
@@ -39,9 +48,14 @@ interface SessionCompleteProps {
   bookId: string;
   startPageId?: string;
   endPageId?: string;
+  lastPageId?: string;
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
+  prosodyResult?: ProsodyAnalysisResponse | null;
+  referenceText?: string | null;
+  wordTimings?: readonly WordTiming[] | null;
+  autoAnalyzeProsody?: boolean;
   reportError?: string | null;
   onRetryReports?: () => void;
   isRetryingReports?: boolean;
@@ -52,9 +66,14 @@ export function SessionComplete({
   bookId,
   startPageId,
   endPageId,
+  lastPageId,
   child,
   sessionId,
   summary,
+  prosodyResult: initialProsodyResult = null,
+  referenceText = null,
+  wordTimings = null,
+  autoAnalyzeProsody = false,
   reportError = null,
   onRetryReports,
   isRetryingReports = false,
@@ -62,6 +81,7 @@ export function SessionComplete({
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tb = useTranslations("books");
+  const tp = useProsodyCoachTranslations();
   const speechPlayer = useSpeechPlayer();
   const speechPlayerRef = useRef(speechPlayer);
   const offeredVoiceRef = useRef(false);
@@ -79,6 +99,12 @@ export function SessionComplete({
   const [mispronouncedWordsPage, setMispronouncedWordsPage] = useState(1);
   const [skippedWordsPage, setSkippedWordsPage] = useState(1);
   const [transcriptsPage, setTranscriptsPage] = useState(1);
+  const [prosodyData, setProsodyData] =
+    useState<ProsodyAnalysisResponse | null>(initialProsodyResult);
+  const [isAnalyzingProsody, setIsAnalyzingProsody] = useState(false);
+  const [prosodyError, setProsodyError] = useState<string | null>(null);
+  const autoProsodyTriggeredRef = useRef(false);
+
   const WORDS_PAGE_SIZE = 24;
   const ISSUE_WORDS_PAGE_SIZE = 18;
   const TRANSCRIPTS_PAGE_SIZE = 5;
@@ -97,6 +123,58 @@ export function SessionComplete({
   const mispronouncedWords = summary.mispronounced_words ?? [];
   const skippedWords = summary.skipped_words ?? [];
   const difficultWordsHref = `/reports/difficult-words?childId=${encodeURIComponent(child.id)}`;
+  const prosodySourceText = (
+    referenceText?.trim() ||
+    (transcripts.length > 0 ? `${transcripts.join(". ")}.` : "") ||
+    (spokenWords.length > 0 ? `${spokenWords.join(" ")}.` : "")
+  ).trim();
+
+  const runProsodyAnalysis = useCallback(async () => {
+    if (!prosodySourceText || isAnalyzingProsody) return;
+    setIsAnalyzingProsody(true);
+    setProsodyError(null);
+    try {
+      const timings =
+        wordTimings && wordTimings.length > 0
+          ? wordTimings
+          : buildSampleSessionWordTimings(
+              prosodySourceText,
+              summary.duration_minutes,
+            );
+      const res = await analyzeProsody({
+        childId: child.id,
+        sessionId,
+        referenceText: prosodySourceText,
+        wordTimings: timings,
+      });
+      setProsodyData(res);
+    } catch {
+      setProsodyError(tp("errorNotice"));
+    } finally {
+      setIsAnalyzingProsody(false);
+    }
+  }, [
+    child.id,
+    isAnalyzingProsody,
+    prosodySourceText,
+    sessionId,
+    summary.duration_minutes,
+    tp,
+    wordTimings,
+  ]);
+
+  useEffect(() => {
+    if (
+      !autoAnalyzeProsody ||
+      autoProsodyTriggeredRef.current ||
+      prosodyData ||
+      !prosodySourceText
+    ) {
+      return;
+    }
+    autoProsodyTriggeredRef.current = true;
+    void runProsodyAnalysis();
+  }, [autoAnalyzeProsody, prosodyData, prosodySourceText, runProsodyAnalysis]);
   const hasDifficultWords = summary.assessment
     ? summary.assessment.unresolved_words > 0 ||
       summary.assessment.skipped_after_retry_limit > 0
@@ -688,6 +766,92 @@ export function SessionComplete({
             )}
           </div>
         )}
+
+        {prosodyData ? (
+          <ProsodyAssessmentCard result={prosodyData} />
+        ) : prosodySourceText ? (
+          <div
+            data-testid="session-prosody-coach-trigger"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-3.5"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 text-sm font-bold text-ink">
+                <Mic
+                  className="size-4 shrink-0 text-violet-700"
+                  aria-hidden="true"
+                />
+                <span>{tp("sessionCardHeading")}</span>
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                {prosodyError ?? tp("sessionCardPrompt")}
+              </p>
+            </div>
+            <Button
+              className="min-h-10! w-auto! shrink-0 px-3.5! py-1.5! text-xs! sm:text-sm!"
+              disabled={isAnalyzingProsody}
+              onClick={() => void runProsodyAnalysis()}
+              size="compact"
+              variant="secondary"
+            >
+              <Sparkles aria-hidden="true" className="size-4 shrink-0" />
+              {isAnalyzingProsody
+                ? tp("analyzingAction")
+                : prosodyError
+                  ? tp("retryAction")
+                  : tp("runSampleAction")}
+            </Button>
+          </div>
+        ) : null}
+
+        <ReadingPassportPanel
+          allowParentRecording={false}
+          childAlias={child.alias}
+          childId={child.id}
+          collapsible
+          defaultExpanded={false}
+        />
+
+        {lastPageId || startPageId ? (
+          <div
+            className="mx-auto w-full max-w-[440px] rounded-card border border-primary/25 bg-sky/40 p-4 text-center"
+            data-testid="multimodal-bridge-panel"
+          >
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary-hover">
+              {t("multimodalBridge.title")}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              {t("multimodalBridge.subtitle")}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <ButtonLink
+                className="w-auto"
+                href={`/entertainment/picture-description?${new URLSearchParams(
+                  {
+                    childId: child.id,
+                    bookId,
+                    pageId: (lastPageId ?? startPageId)!,
+                  },
+                ).toString()}`}
+                size="compact"
+                variant="secondary"
+              >
+                {t("multimodalBridge.pictureCta")}
+              </ButtonLink>
+              <ButtonLink
+                className="w-auto"
+                href={`/entertainment/sentence-shooter?${new URLSearchParams({
+                  childId: child.id,
+                  bookId,
+                  pageId: (lastPageId ?? startPageId)!,
+                }).toString()}`}
+                size="compact"
+                variant="secondary"
+              >
+                {t("multimodalBridge.shooterCta")}
+              </ButtonLink>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-2 pt-0.5 sm:grid-cols-2 lg:grid-cols-3">
           <ButtonLink

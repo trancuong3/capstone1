@@ -35,6 +35,9 @@ export interface PictureBookPageItemDTO {
   readonly page_number: number;
   readonly image_url: string;
   readonly matched_difficult_words?: readonly string[];
+  readonly has_verified_illustration?: boolean;
+  readonly page_kind?: string | null;
+  readonly ocr_excerpt?: string | null;
 }
 
 export interface PictureCatalogDTO {

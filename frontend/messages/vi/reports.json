@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Từ gợi ý luyện thêm ({days} ngày)",
       "heardAsCount": "Bé thường đọc thành “{heardAs}” ({times} lần)",
       "recordedCount": "Ghi nhận {times} lần",
-      "heardAsInline": "(đọc thành “{heardAs}”)"
+      "heardAsInline": "(đọc thành “{heardAs}”)",
+      "phonologyTitle": "Âm & thanh điệu bé hay gặp thử thách khi luyện đọc",
+      "phonologyDisclaimer": "Tổng hợp từ các phiên đọc gần đây để gợi ý khởi động nhẹ nhàng (không phải chẩn đoán y khoa).",
+      "openMinimalPairSandbox": "Luyện cặp từ 60s",
+      "phonologySessionsBadge": "{sessions} buổi đọc"
     },
     "firstPassSummary": {
       "regionAria": "Kết quả lượt đầu và luyện lại",
@@ -670,7 +674,8 @@
     "focusAria": "Lọc khu vực quản lý đọc",
     "focusPlans": "Kế hoạch",
     "focusGoals": "Mục tiêu",
-    "focusReminders": "Lịch nhắc"
+    "focusReminders": "Lịch nhắc",
+    "androidReminderBody": "Đến giờ đọc sách cùng {alias} trên ViRead rồi!"
   },
   "entertainmentSummary": {
     "loading": "Đang tổng hợp tiến độ Học mà Chơi cho {childName}…",
@@ -693,5 +698,20 @@
     "openSongAction": "Mở bài hát",
     "homeTipsTitle": "Gợi ý đồng hành tại nhà cho ba mẹ",
     "misreadWordsReinforcedLabel": "Từ đọc nhầm đã ôn qua trò chơi"
+  },
+  "printCertificate": {
+    "brandTagline": "Báo cáo tiến bộ đọc sách gia đình",
+    "printA4Action": "In báo cáo A4",
+    "downloadCertificateAction": "Tải chứng nhận (.png)",
+    "certificateHeading": "CHỨNG NHẬN CỘT MỐC ĐỌC SÁCH",
+    "certificateSubtitle": "Ghi nhận hành trình rèn đọc tiếng Việt bền bỉ cùng gia đình",
+    "awardedTo": "Trao tặng bạn nhỏ chăm ngoan",
+    "progressAchievement": "{alias} đã kiên trì luyện đọc và mở rộng vốn từ tiếng Việt mỗi tuần!",
+    "progressStatsLine": "Phiên hoàn thành: {sessions} · Số từ đã đọc: {words} · Độ chính xác TB: {accuracy}",
+    "sessionReaderFallback": "Bạn nhỏ chăm đọc",
+    "sessionAchievement": "Đã hoàn thành phiên luyện đọc rõ ràng và tự tin!",
+    "sessionStatsLine": "Số trang đã đọc: {pages} · Tổng số từ: {words} · Độ chính xác cao nhất: {accuracy}",
+    "issuedOn": "Ngày cấp: {date}",
+    "encouragementFooter": "Mỗi trang sách con đọc hôm nay là một hạt mầm tri thức ấm áp bên gia đình."
   }
 }

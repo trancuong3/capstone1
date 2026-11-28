@@ -189,11 +189,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       if (typeof pages.cancelOcrJob === "function") {
         await pages.cancelOcrJob(jobId);
+        taskCenter?.markTaskAlertSeen(jobId);
         emitStudioTasksChanged({ portal: "admin" });
       } else {
+        taskCenter?.markTaskAlertSeen(jobId);
         await cancelAdminOcrJob(jobId);
       }
-      taskCenter?.markTaskAlertSeen(jobId);
       clearApiReadCache();
       await refreshPages();
       if (!mountedRef.current) return;
@@ -237,11 +238,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       if (typeof pages.retryOcrJob === "function") {
         await pages.retryOcrJob(jobId);
+        taskCenter?.markTaskAlertSeen(jobId);
         emitStudioTasksChanged({ portal: "admin" });
       } else {
+        taskCenter?.markTaskAlertSeen(jobId);
         await retryAdminOcrJob(jobId);
       }
-      taskCenter?.markTaskAlertSeen(jobId);
       clearApiReadCache();
       await refreshPages();
       if (!mountedRef.current) return;
@@ -302,6 +304,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       );
       setPendingRetire(null);
       setRetiringPageId(null);
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+      emitStudioTasksChanged({ portal: "admin" });
       setPageActionNotice({
         tone: "info",
         title: t("books.detail.pageRetiredTitle"),

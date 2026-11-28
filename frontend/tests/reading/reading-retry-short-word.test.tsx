@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import type { ReadingServices } from "@/hooks/use-reading-services";
+import { resetBrowserWasmSttForTests } from "@/lib/reading/browser-wasm-stt";
+import { encodeFloat32ToWav16kBlob } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  resetVoiceEngineStatus,
+  setCachedVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 import {
   bookFixture,
   childFixture,
@@ -327,7 +333,10 @@ describe("ReadingScreen short-word 'có' retry state synchronization", () => {
   });
 
   afterEach(() => {
+    resetBrowserWasmSttForTests();
+    resetVoiceEngineStatus();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     if (previousSpeechRecognition) {
       Object.defineProperty(
         window,
@@ -599,5 +608,184 @@ describe("ReadingScreen short-word 'có' retry state synchronization", () => {
         }),
       );
     });
+  });
+
+  it("resumes retry listening and never sticks on 'Đang kiểm tra' after phonics voice command during stopRetryListeningAndTranscribe", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+    });
+
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "đánh vần giúp con",
+      language_code: "vi",
+      words: [],
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText("Đang kiểm tra")).not.toBeInTheDocument();
+    expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+  });
+
+  it("skips Pass 2 keyterm backend STT when localSttConfirmedDown or Pass 1 ran on WASM", async () => {
+    class FakeWasmWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type: string; id: string }) {
+        queueMicrotask(() => {
+          if (msg.type === "init") {
+            this.onmessage?.({
+              data: { type: "ready", id: msg.id },
+            } as MessageEvent);
+          } else if (msg.type === "transcribe") {
+            this.onmessage?.({
+              data: {
+                type: "result",
+                id: msg.id,
+                text: "",
+                decodeMs: 5,
+              },
+            } as MessageEvent);
+          }
+        });
+      }
+      terminate() {}
+    }
+
+    vi.stubGlobal("Worker", FakeWasmWorker);
+    if (!globalThis.crypto?.subtle) {
+      vi.stubGlobal("crypto", { subtle: { digest: vi.fn() } });
+    }
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    speechRecorderMock.stop.mockResolvedValueOnce(
+      encodeFloat32ToWav16kBlob(new Float32Array(3200).fill(0.05)),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+    });
+    // Pass 1 ran via Browser WASM and Pass 2 server keyterm STT was skipped completely.
+    expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+    expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+  });
+
+  it("calls recognition.abort() when browserFinalResult hits the 300ms timeout during stopRetryListeningAndTranscribe", async () => {
+    class HangingSpeechRecognition {
+      static instances: HangingSpeechRecognition[] = [];
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start = vi.fn();
+      // Intentionally never invokes onend so the 300ms timeout fires.
+      stop = vi.fn();
+      abort = vi.fn();
+
+      constructor() {
+        HangingSpeechRecognition.instances.push(this);
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: HangingSpeechRecognition,
+    });
+
+    const user = userEvent.setup();
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1);
+      expect(HangingSpeechRecognition.instances).toHaveLength(1);
+    });
+
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "có",
+      language_code: "vi",
+      language_probability: 0.99,
+      words: [{ text: "có", start: 0, end: 0.2, logprob: -0.05 }],
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+
+    await waitFor(
+      () => {
+        expect(services.readingService.createRetryEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            wordId: coWord.word_id,
+            status: "CONFIRMED",
+          }),
+        );
+      },
+      { timeout: 3000 },
+    );
+    expect(HangingSpeechRecognition.instances[0].stop).toHaveBeenCalledOnce();
+    expect(HangingSpeechRecognition.instances[0].abort).toHaveBeenCalledOnce();
   });
 });

@@ -34,9 +34,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 interface PictureDescriptionPageProps {
-  readonly searchParams: Promise<{
+  readonly searchParams?: Promise<{
     autoplay?: string | string[];
     mode?: string | string[];
+    childId?: string | string[];
+    bookId?: string | string[];
+    pageId?: string | string[];
   }>;
 }
 
@@ -46,8 +49,8 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 
 export default async function PictureDescriptionPage({
   searchParams,
-}: PictureDescriptionPageProps) {
-  const query = await searchParams;
+}: PictureDescriptionPageProps = {}) {
+  const query = searchParams ? await searchParams : {};
   const rawMode = firstValue(query.mode);
   const initialTeachingMode =
     rawMode && (VALID_TEACHING_MODES as readonly string[]).includes(rawMode)
@@ -56,6 +59,9 @@ export default async function PictureDescriptionPage({
   return (
     <PictureDescriptionScreen
       autoPlay={firstValue(query.autoplay) === "1"}
+      initialBookId={firstValue(query.bookId)}
+      initialChildId={firstValue(query.childId)}
+      initialPageId={firstValue(query.pageId)}
       initialTeachingMode={initialTeachingMode}
     />
   );

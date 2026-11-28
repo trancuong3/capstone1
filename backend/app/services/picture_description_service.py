@@ -63,6 +63,7 @@ from app.services.picture_description_ai import (
     evaluate_description_with_guide_fallback,
     resolve_provider_tier,
 )
+from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.services.storage_service import (
     StorageUploadFailure,
     create_signed_image_url,
@@ -400,6 +401,18 @@ class PictureDescriptionService:
             )
         return child
 
+    def _sign_storage_path(self, image_path: str, *, is_private: bool = False) -> str:
+        use_private_bucket = is_private or image_path.startswith("private-books/")
+        if use_private_bucket and self._supports_kwarg(self._sign_url_fn, "bucket_name"):
+            return self._sign_url_fn(image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
+        return self._sign_url_fn(image_path)
+
+    def _download_storage_path(self, image_path: str, *, is_private: bool = False) -> bytes:
+        use_private_bucket = is_private or image_path.startswith("private-books/")
+        if use_private_bucket and self._supports_kwarg(self._download_fn, "bucket_name"):
+            return self._download_fn(image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)  # type: ignore[call-arg]
+        return self._download_fn(image_path)
+
     def _resolve_image_url(
         self,
         *,
@@ -412,7 +425,7 @@ class PictureDescriptionService:
         if image_path.startswith("sample://"):
             filename = image_path.removeprefix("sample://")
             return f"/images/picture-description/{filename}"
-        return self._sign_url_fn(image_path)
+        return self._sign_storage_path(image_path)
 
     async def _load_bytes_for_session(self, session: SessionProjection) -> tuple[bytes, str]:
         if session.SourceType == "SAMPLE":
@@ -420,7 +433,7 @@ class PictureDescriptionService:
             if spec is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
             return await asyncio.to_thread(_load_sample_bytes, spec), "image/jpeg"
-        raw = await asyncio.to_thread(self._download_fn, session.ImagePath)
+        raw = await asyncio.to_thread(self._download_storage_path, session.ImagePath)
         return await asyncio.to_thread(_normalize_mime_type, raw, session.ImageMimeType)
 
     def _ai_config(self) -> PictureDescriptionAiConfig | None:
@@ -527,13 +540,24 @@ class PictureDescriptionService:
         self,
         actor_id: UUID,
         child_id: UUID,
+        *,
+        book_id: UUID | None = None,
+        book_page_id: UUID | None = None,
     ) -> PictureCatalogRead:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
         child_grade = int(child.Grade)
         feed_targets = await self._safe_feed_targets(actor_id, child_id, limit=8)
         focus_difficult_words = [target.word for target in feed_targets if target.word]
-        candidates = await self.repository.list_book_pages_for_grade(child_grade)
+        if self._supports_kwarg(self.repository.list_book_pages_for_grade, "parent_id"):
+            candidates = await self.repository.list_book_pages_for_grade(
+                child_grade,
+                parent_id=actor_id,
+                preferred_book_id=book_id,
+                preferred_page_id=book_page_id,
+            )
+        else:
+            candidates = await self.repository.list_book_pages_for_grade(child_grade)
 
         samples = [
             PictureSampleItem(
@@ -554,12 +578,15 @@ class PictureDescriptionService:
         def _sign_pages() -> list[PictureBookPageItem]:
             items: list[PictureBookPageItem] = []
             for row in candidates:
+                chosen_path = getattr(row, "IllustrationPath", None) or row.ImagePath
+                is_priv = bool(getattr(row, "IsPrivateBook", False))
                 try:
-                    signed_url = self._sign_url_fn(row.ImagePath)
+                    signed_url = self._sign_storage_path(chosen_path, is_private=is_priv)
                 except HTTPException:
                     continue
+                v_text = str(getattr(row, "VerifiedText", "") or "").strip()
                 searchable_page = " ".join(
-                    part for part in (row.BookTitle, getattr(row, "VerifiedText", None)) if part
+                    part for part in (row.BookTitle, v_text) if part
                 )
                 items.append(
                     PictureBookPageItem(
@@ -572,9 +599,20 @@ class PictureDescriptionService:
                             searchable_page,
                             focus_difficult_words,
                         ),
+                        has_verified_illustration=bool(getattr(row, "IllustrationPath", None)),
+                        page_kind=getattr(row, "PageKind", None),
+                        ocr_excerpt=v_text[:140] if v_text else None,
                     )
                 )
-            items.sort(key=lambda item: -len(item.matched_difficult_words))
+            items.sort(
+                key=lambda item: (
+                    0
+                    if (book_page_id is not None and item.page_id == book_page_id)
+                    or (book_id is not None and item.book_id == book_id)
+                    else 1,
+                    -len(item.matched_difficult_words),
+                )
+            )
             return items
 
         book_pages = await asyncio.to_thread(_sign_pages)
@@ -763,6 +801,15 @@ class PictureDescriptionService:
         return gender if gender in ("female", "male") else None
 
     @staticmethod
+    def _allow_private_book_cloud_ai() -> bool:
+        try:
+            from app.services.ocr_ai.config import OcrCorrectionConfig
+
+            return bool(OcrCorrectionConfig.private_book_allow_cloud_ai())
+        except Exception:
+            return False
+
+    @staticmethod
     def _supports_kwarg(fn: Any, name: str) -> bool:
         import inspect as _inspect
 
@@ -784,6 +831,7 @@ class PictureDescriptionService:
         child_id: UUID,
         source_type: SourceType | None = None,
         sample_key: str | None = None,
+        book_id: UUID | None = None,
         book_page_id: UUID | None = None,
         upload_bytes: bytes | None = None,
         teaching_mode: TeachingMode = "OBSERVE",
@@ -866,6 +914,8 @@ class PictureDescriptionService:
 
         sample_spec: SamplePictureSpec | None = None
 
+        bible_vocab: list[str] = []
+
         if resolved_source_type == "SAMPLE":
             spec = SAMPLE_BY_KEY.get((resolved_sample_key_input or "").strip())
             if spec is None:
@@ -885,15 +935,31 @@ class PictureDescriptionService:
                 image_bytes = await asyncio.to_thread(_load_sample_bytes, spec)
 
         elif resolved_source_type == "BOOK_PAGE":
-            if resolved_book_page_id_input is None:
+            if resolved_book_page_id_input is None and book_id is None:
                 await self.repository.db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="BOOK_PAGE_REQUIRED",
                 )
-            candidate = preloaded_candidate or await self.repository.get_book_page_for_grade(
-                resolved_book_page_id_input, child_grade
-            )
+            if preloaded_candidate is not None:
+                candidate = preloaded_candidate
+            elif self._supports_kwarg(self.repository.get_book_page_for_grade, "parent_id"):
+                candidate = await self.repository.get_book_page_for_grade(
+                    resolved_book_page_id_input,
+                    child_grade,
+                    parent_id=actor_id,
+                    fallback_book_id=book_id,
+                )
+            else:
+                if resolved_book_page_id_input is None:
+                    await self.repository.db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail="BOOK_PAGE_REQUIRED",
+                    )
+                candidate = await self.repository.get_book_page_for_grade(
+                    resolved_book_page_id_input, child_grade
+                )
             await self.repository.db.rollback()
             if candidate is None:
                 raise HTTPException(
@@ -902,15 +968,29 @@ class PictureDescriptionService:
                 )
             resolved_book_id = candidate.BookId
             resolved_book_page_id = candidate.PageId
-            storage_path = candidate.ImagePath
-            context_hint = f"Trang {candidate.PageNumber} của sách {candidate.BookTitle}"
+            chosen_illustration = getattr(candidate, "IllustrationPath", None)
+            is_private_candidate = bool(getattr(candidate, "IsPrivateBook", False))
+            storage_path = chosen_illustration or candidate.ImagePath
+            bible_summary = getattr(candidate, "StyleBibleSummary", None)
+            verified_excerpt = str(getattr(candidate, "VerifiedText", "") or "").strip()[:220]
+            hint_parts = [f"Trang {candidate.PageNumber} của sách {candidate.BookTitle}"]
+            if bible_summary:
+                hint_parts.append(f"Bối cảnh/phong cách: {bible_summary}")
+            if verified_excerpt:
+                hint_parts.append(f"Nội dung trang: {verified_excerpt}")
+            context_hint = " — ".join(hint_parts)
             scene_match_text = " ".join(
                 part
                 for part in (candidate.BookTitle, getattr(candidate, "VerifiedText", None))
                 if part
             )
+            bible_vocab = list(getattr(candidate, "StyleBibleVocabulary", ()) or ())
             try:
-                raw_bytes = await asyncio.to_thread(self._download_fn, storage_path)
+                raw_bytes = await asyncio.to_thread(
+                    self._download_storage_path,
+                    storage_path,
+                    is_private=is_private_candidate,
+                )
                 image_bytes, image_mime = await asyncio.to_thread(_normalize_mime_type, raw_bytes)
             except Exception as exc:
                 if not auto_selected_book_page:
@@ -934,6 +1014,7 @@ class PictureDescriptionService:
                 storage_path = best_sample.storage_ref
                 context_hint = f"{best_sample.title}: {best_sample.description}"
                 scene_match_text = _sample_searchable_text(best_sample)
+                bible_vocab = []
                 image_bytes = (
                     await asyncio.to_thread(_load_sample_bytes, best_sample)
                     if refresh_ai_guide
@@ -961,6 +1042,8 @@ class PictureDescriptionService:
             focus_words,
             scene_match_text,
         )
+        if not cleaned_targets and bible_vocab:
+            cleaned_targets = _normalize_target_words(bible_vocab)
 
         # Static built-in samples serve curated default_guide directly with ZERO outbound cloud calls
         # unless the caller explicitly requests refresh_ai_guide=True.
@@ -1006,6 +1089,18 @@ class PictureDescriptionService:
                 }
             )
             model_used = "curated-sample-v4"
+        elif (
+            resolved_source_type == "BOOK_PAGE"
+            and storage_path.startswith("private-books/")
+            and not self._allow_private_book_cloud_ai()
+        ):
+            guide = build_deterministic_picture_guide(
+                child_grade=child_grade,
+                context_hint=context_hint,
+                teaching_mode=active_mode,
+                target_words=cleaned_targets,
+            )
+            model_used = "guide-fallback"
         else:
             assert image_bytes is not None
             # Release any DB lock completely before calling Vision AI!

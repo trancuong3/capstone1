@@ -1700,6 +1700,17 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         return "unknown".equals(classified) ? null : classified;
     }
 
+    static boolean isVoiceGenderMismatch(
+            @Nullable Voice resolvedVoice, @Nullable String requestedGender) {
+        String normalizedGender = normalizeVoiceGender(requestedGender);
+        if (normalizedGender == null || resolvedVoice == null) {
+            return false;
+        }
+        String inferred = inferAndroidVoiceGender(resolvedVoice);
+        return (inferred != null && !normalizedGender.equals(inferred))
+                || (inferred == null && "male".equals(normalizedGender));
+    }
+
     @Nullable
     static Voice selectBestVietnameseVoice(@Nullable Set<Voice> voices) {
         return selectBestVietnameseVoice(voices, null);
@@ -1730,12 +1741,17 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         if (rawLower.endsWith("-language")) {
             return "unknown";
         }
-        // Strip "vietnamese" / "vietnam" BEFORE tokenizing so the substring "nam" inside
-        // "vietnam" never falsely classifies female/neutral Vietnamese voices as male.
+        // Strip "vietnamese" / "vietnam" / southern dialect region labels BEFORE tokenizing
+        // so the substring "nam" inside "vietnam" or "miền nam" never falsely classifies
+        // female/neutral Vietnamese voices as male.
         // Collapse Vietnamese compound names so "minh" inside "minh_chau" stays female.
         String sanitized = rawLower
                 .replace("vietnamese", " ")
                 .replace("vietnam", " ")
+                .replace("miền nam", " ")
+                .replace("mien nam", " ")
+                .replace("mien-nam", " ")
+                .replace("mien_nam", " ")
                 .replace("minh_chau", " minhchau ")
                 .replace("truc_ly", " trucly ")
                 .replace("ngoc_linh", " ngoclinh ")
@@ -2391,11 +2407,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                     pinnedSelectionKey = selectionKey;
                     activeVoiceGender = classifyVoiceGender(chosen);
                     lastResolvedVoiceName = chosen.getName();
-                    if (normalizedGender != null
-                            && !"unknown".equals(activeVoiceGender)
-                            && !normalizedGender.equals(activeVoiceGender)) {
-                        lastVoiceGenderMismatch = true;
-                    }
+                    lastVoiceGenderMismatch = isVoiceGenderMismatch(chosen, normalizedGender);
                 } else {
                     pinnedVoice = null;
                     pinnedSelectionKey = null;

@@ -363,18 +363,21 @@ class SentenceShooterService:
         focus_set: set[str],
         rng: random.SystemRandom,
         focus_phrases: list[tuple[str, ...]] | None = None,
+        *,
+        preferred_page_id: UUID | None = None,
     ) -> list[tuple[_PageSource, ExtractedSentence]]:
-        if not focus_set and not focus_phrases:
+        if not focus_set and not focus_phrases and preferred_page_id is None:
             return rng.sample(candidates, total_rounds)
 
-        buckets: dict[int, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
+        buckets: dict[tuple[int, int], list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
         for item in candidates:
+            page_boost = 1 if preferred_page_id is not None and item[0].page.Id == preferred_page_id else 0
             score = len(cls._matched_difficult_words(item[1], focus_set, focus_phrases))
-            buckets[score].append(item)
+            buckets[(page_boost, score)].append(item)
 
         chosen: list[tuple[_PageSource, ExtractedSentence]] = []
-        for score in sorted(buckets.keys(), reverse=True):
-            group = list(buckets[score])
+        for bucket_key in sorted(buckets.keys(), reverse=True):
+            group = list(buckets[bucket_key])
             rng.shuffle(group)
             needed = total_rounds - len(chosen)
             chosen.extend(group[:needed])
@@ -801,7 +804,6 @@ class SentenceShooterService:
         # transaction with rollback and would expire ORM instances.
         child_id = child.Id
         child_grade = child.Grade
-
         # Gather active difficult words safely (explicit payload + child reading/practice history).
         repo_difficult_words, history_book_ids = await self._load_difficult_context(
             child_id,
@@ -811,12 +813,29 @@ class SentenceShooterService:
             [*payload.focus_words, *repo_difficult_words]
         )
 
+        supports_parent_rows = hasattr(self.repository.verified_word_rows, "__code__") and (
+            "parent_id" in self.repository.verified_word_rows.__code__.co_varnames
+        )
+        supports_parent_book = hasattr(self.repository.book_for_session, "__code__") and (
+            "parent_id" in self.repository.book_for_session.__code__.co_varnames
+        )
+
         if payload.book_id is not None and not payload.auto_select_book:
-            rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
+            if supports_parent_rows:
+                rows = await self.repository.verified_word_rows(
+                    child_grade, payload.book_id, parent_id=actor_id
+                )
+            else:
+                rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
             sources = self._group_page_sources(rows)
             candidates = self._sentences(sources, payload.difficulty)
             if not candidates:
-                book = await self.repository.book_for_session(payload.book_id)
+                if supports_parent_book:
+                    book = await self.repository.book_for_session(
+                        payload.book_id, parent_id=actor_id
+                    )
+                else:
+                    book = await self.repository.book_for_session(payload.book_id)
                 if (
                     book is None
                     or book.LifecycleStatus != "ACTIVE"
@@ -832,7 +851,12 @@ class SentenceShooterService:
             if len(candidates) < payload.total_rounds:
                 raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
         else:
-            rows = await self.repository.verified_word_rows(child_grade, None)
+            if supports_parent_rows:
+                rows = await self.repository.verified_word_rows(
+                    child_grade, None, parent_id=actor_id
+                )
+            else:
+                rows = await self.repository.verified_word_rows(child_grade, None)
             sources = self._group_page_sources(rows)
             all_candidates = self._sentences(sources, payload.difficulty)
             by_book: dict[UUID, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
@@ -877,6 +901,7 @@ class SentenceShooterService:
             focus_set,
             rng,
             focus_phrases=focus_phrases,
+            preferred_page_id=payload.book_page_id,
         )
         book_word_pool = [
             token.text

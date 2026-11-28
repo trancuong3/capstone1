@@ -977,6 +977,132 @@ class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ACTIVE", compiled.params.values())
         self.assertIn(BOOK_ID, compiled.params.values())
 
+    async def test_initial_word_status_selects_summary_only_without_alignment_jsonb(self):
+        word_id = UUID("66666666-6666-4666-8666-666666666666")
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [
+            {
+                "assessment_version": 1,
+                "initial_assessment": [{"word_id": str(word_id), "status": "MISPRONUNCIATION"}],
+            }
+        ]
+        db.execute = AsyncMock(return_value=result)
+
+        status_val = await ReadingContentRepository(db).initial_word_status(
+            session_id, PAGE_ID, REVISION_ID, word_id
+        )
+        self.assertEqual(status_val, "MISPRONUNCIATION")
+        compiled = db.execute.await_args.args[0].compile(dialect=postgresql.dialect())
+        sql_lower = str(compiled).lower()
+        self.assertIn("readingcomparisonreports.summary", sql_lower)
+        self.assertNotIn("alignment", sql_lower)
+        for value in (session_id, PAGE_ID, REVISION_ID):
+            self.assertIn(value, compiled.params.values())
+
+    async def test_get_practice_state_batches_pages_revisions_and_words_for_real_repo(self):
+        from unittest.mock import patch
+
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        p1, p2 = PAGE_ID, UUID("44444444-4444-4444-8444-444444444445")
+        r1, r2 = REVISION_ID, UUID("55555555-5555-4555-8555-555555555556")
+        w1, w2 = UUID("88888888-8888-4888-8888-888888888881"), UUID("88888888-8888-4888-8888-888888888882")
+
+        repo = ReadingContentRepository(MagicMock())
+        service = ReadingContentService(repo)
+        reports = [
+            SimpleNamespace(
+                SessionId=session_id,
+                PageId=p2,
+                PageRevisionId=r2,
+                Transcript="cây",
+                Summary={
+                    "assessment_version": 1,
+                    "initial_assessment": [{"word_id": str(w2), "word_index": 0, "text": "cây", "status": "OMISSION"}],
+                },
+            ),
+            SimpleNamespace(
+                SessionId=session_id,
+                PageId=p1,
+                PageRevisionId=r1,
+                Transcript="mèo",
+                Summary={
+                    "assessment_version": 1,
+                    "initial_assessment": [{"word_id": str(w1), "word_index": 0, "text": "mèo", "status": "MISPRONUNCIATION"}],
+                },
+            ),
+        ]
+        with (
+            patch.object(repo, "profile_role", AsyncMock(return_value="parent")),
+            patch.object(repo, "session", AsyncMock(return_value=SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID))),
+            patch.object(repo, "child_belongs_to_parent", AsyncMock(return_value=True)),
+            patch.object(repo, "comparison_reports", AsyncMock(return_value=reports)),
+            patch.object(repo, "events_for_session", AsyncMock(return_value=[])),
+            patch.object(repo, "session_page_rows", AsyncMock(return_value=[])),
+            patch.object(repo, "pages_by_ids", AsyncMock(return_value={
+                p1: SimpleNamespace(Id=p1, BookId=BOOK_ID, PageNumber=1),
+                p2: SimpleNamespace(Id=p2, BookId=BOOK_ID, PageNumber=2),
+            })) as pages_batch,
+            patch.object(repo, "revisions_by_ids", AsyncMock(return_value={
+                (p1, r1): SimpleNamespace(Id=r1, PageId=p1),
+                (p2, r2): SimpleNamespace(Id=r2, PageId=p2),
+            })) as revs_batch,
+            patch.object(repo, "revision_words_by_revision_ids", AsyncMock(return_value={
+                r1: [SimpleNamespace(Id=w1)],
+                r2: [SimpleNamespace(Id=w2)],
+            })) as words_batch,
+            patch.object(repo, "page_by_id", AsyncMock(side_effect=AssertionError("N+1 page_by_id"))),
+            patch.object(repo, "revision_snapshot", AsyncMock(side_effect=AssertionError("N+1 revision_snapshot"))),
+            patch.object(repo, "revision_words", AsyncMock(side_effect=AssertionError("N+1 revision_words"))),
+        ):
+            state = await service.get_practice_state(session_id, PARENT_ID)
+
+        self.assertEqual(len(state.pages), 2)
+        self.assertEqual(len(state.words), 2)
+        pages_batch.assert_awaited_once()
+        revs_batch.assert_awaited_once()
+        words_batch.assert_awaited_once()
+
+    async def test_navigate_and_complete_do_not_re_query_session_progress(self):
+        service, repo = ReadingContentServiceTests().make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        second_page_id = UUID("66666666-6666-4666-8666-666666666666")
+        now = datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc)
+        session = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            CurrentPageId=PAGE_ID,
+            StartedAt=now,
+            EndedAt=None,
+        )
+        rows = [
+            SimpleNamespace(
+                PageId=PAGE_ID, PageRevisionId=REVISION_ID, PageNumber=1,
+                PageOrder=0, Status="IN_PROGRESS", StartedAt=now, CompletedAt=None,
+            ),
+            SimpleNamespace(
+                PageId=second_page_id, PageRevisionId=REVISION_ID, PageNumber=2,
+                PageOrder=1, Status="PENDING", StartedAt=None, CompletedAt=None,
+            ),
+        ]
+        repo.session_for_update = AsyncMock(return_value=session)
+        repo.session_page_rows.return_value = rows
+        repo.session = AsyncMock(side_effect=AssertionError("must not re-fetch session via get_session_progress"))
+
+        nav = await service.navigate_session_page(
+            session_id, PARENT_ID, ReadingPageNavigationCreate(target_page_id=second_page_id)
+        )
+        self.assertEqual(nav.current_page_id, second_page_id)
+        self.assertEqual(nav.completed_pages, 1)
+        self.assertEqual(repo.session_page_rows.await_count, 1)
+
+        comp = await service.complete_session_page(session_id, second_page_id, PARENT_ID)
+        self.assertEqual(comp.completed_pages, 2)
+        self.assertEqual(repo.session_page_rows.await_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

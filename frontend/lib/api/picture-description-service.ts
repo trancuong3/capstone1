@@ -58,6 +58,9 @@ const bookPageSchema = z.object({
   page_number: z.number().int().min(1),
   image_url: z.string(),
   matched_difficult_words: z.array(z.string()).optional(),
+  has_verified_illustration: z.boolean().optional(),
+  page_kind: z.string().nullish(),
+  ocr_excerpt: z.string().nullish(),
 });
 
 const catalogSchema = z.object({
@@ -170,12 +173,18 @@ export interface CreatePictureSessionInput {
   readonly source_type?: PictureSourceType;
   readonly auto_select?: boolean;
   readonly sample_key?: string;
+  readonly book_id?: string;
   readonly book_page_id?: string;
   readonly image_file?: File;
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
   readonly refresh_ai_guide?: boolean;
   readonly teacher_gender?: "female" | "male";
+}
+
+export interface PictureCatalogQueryOptions {
+  readonly bookId?: string;
+  readonly bookPageId?: string;
 }
 
 export interface EvaluatePictureInput {
@@ -187,7 +196,11 @@ export interface EvaluatePictureInput {
 }
 
 export interface PictureDescriptionService {
-  getCatalog(childId: string, signal?: AbortSignal): Promise<PictureCatalogDTO>;
+  getCatalog(
+    childId: string,
+    signal?: AbortSignal,
+    options?: PictureCatalogQueryOptions,
+  ): Promise<PictureCatalogDTO>;
   listSessions(
     childId: string,
     signal?: AbortSignal,
@@ -240,11 +253,15 @@ async function withPictureDeadline<T>(
 
 export function createPictureDescriptionService(): PictureDescriptionService {
   return {
-    getCatalog(childId, signal) {
+    getCatalog(childId, signal, options) {
       return withPictureDeadline(
         (requestSignal) =>
           requestApi(
-            `/games/picture-description/catalog${apiQuery({ child_id: childId })}`,
+            `/games/picture-description/catalog${apiQuery({
+              child_id: childId,
+              book_id: options?.bookId,
+              book_page_id: options?.bookPageId,
+            })}`,
             catalogSchema,
             requestSignal,
           ),
@@ -290,6 +307,9 @@ export function createPictureDescriptionService(): PictureDescriptionService {
       }
       if (input.sample_key) {
         form.append("sample_key", input.sample_key);
+      }
+      if (input.book_id) {
+        form.append("book_id", input.book_id);
       }
       if (input.book_page_id) {
         form.append("book_page_id", input.book_page_id);

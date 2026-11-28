@@ -252,6 +252,7 @@ _session_voice_locks: "OrderedDict[tuple[str, str], tuple[float, str, str]]" = O
 _tts_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
 
 _ELEVENLABS_QUOTA_COOLDOWN_SECONDS = 300.0
+_ELEVENLABS_FAILURE_COOLDOWN_SECONDS = 45.0
 _elevenlabs_tts_cooldown_until: float = 0.0
 _elevenlabs_stt_cooldown_until: float = 0.0
 
@@ -307,7 +308,7 @@ async def _call_local_with_busy_retry(call_fn: Any) -> Any:
     except LocalVoiceTechnicalError as err:
         if err.code not in _TRANSIENT_BUSY_CODES:
             raise
-        await asyncio.sleep(0.45)
+        await asyncio.sleep(0.20)
         return await call_fn()
 
 
@@ -320,10 +321,17 @@ def _resolve_local_voice_region_gender(voice_id: str) -> tuple[str, str]:
             gender = str(item.get("gender") or "female")
             return region, gender
     lower = voice_id.lower()
-    if "south" in lower or "nam" in lower:
-        region = "south"
-    elif "central" in lower or "trung" in lower:
+    if "central" in lower or "trung" in lower:
         region = "central"
+    elif (
+        "south" in lower
+        or "mien_nam" in lower
+        or "mien-nam" in lower
+        or "nam_bo" in lower
+        or "wavenet_b" in lower
+        or "wavenet_c" in lower
+    ):
+        region = "south"
     if any(
         marker in lower
         for marker in (
@@ -388,6 +396,9 @@ class VoiceOrchestrator:
         aclose_google = getattr(self.google, "aclose", None)
         if callable(aclose_google):
             await aclose_google()
+        aclose_el = getattr(self.elevenlabs, "aclose", None)
+        if callable(aclose_el):
+            await aclose_el()
 
     async def get_status(self) -> dict[str, Any]:
         local_health = await self.local.get_health()
@@ -454,16 +465,34 @@ class VoiceOrchestrator:
         global _elevenlabs_tts_cooldown_until, _elevenlabs_stt_cooldown_until
         code_upper = str(getattr(err, "code", "") or "").upper()
         status_code = getattr(err, "status_code", None)
+        cooldown_s: float = 0.0
         if (
             "QUOTA" in code_upper
             or "RATE_LIMIT" in code_upper
             or status_code == 429
         ):
-            until = time.monotonic() + _ELEVENLABS_QUOTA_COOLDOWN_SECONDS
+            cooldown_s = _ELEVENLABS_QUOTA_COOLDOWN_SECONDS
+        elif (
+            code_upper
+            in {
+                "STT_TIMEOUT",
+                "STT_NETWORK_ERROR",
+                "STT_AUTH_FAILED",
+                "STT_TEMPORARILY_UNAVAILABLE",
+                "TTS_TIMEOUT",
+                "TTS_NETWORK_ERROR",
+                "TTS_AUTH_FAILED",
+                "SPEECH_UNAVAILABLE",
+            }
+            or (isinstance(status_code, int) and status_code >= 500)
+        ):
+            cooldown_s = _ELEVENLABS_FAILURE_COOLDOWN_SECONDS
+        if cooldown_s > 0.0:
+            until = time.monotonic() + cooldown_s
             if capability == "tts":
-                _elevenlabs_tts_cooldown_until = until
+                _elevenlabs_tts_cooldown_until = max(_elevenlabs_tts_cooldown_until, until)
             else:
-                _elevenlabs_stt_cooldown_until = until
+                _elevenlabs_stt_cooldown_until = max(_elevenlabs_stt_cooldown_until, until)
 
     def _elevenlabs_status(self) -> dict[str, Any]:
         is_conf_fn = getattr(self.elevenlabs, "is_configured", None)
@@ -926,14 +955,18 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
-                    _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    _el_region, req_gender = _resolve_local_voice_region_gender(voice_id)
                     el_kwargs: dict[str, Any] = {
                         "text": text,
                         "requested_voice_id": el_voice_id,
                         "speed": speed,
                     }
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize, "expected_gender"):
-                        el_kwargs["expected_gender"] = el_expected_gender
+                        el_kwargs["expected_gender"] = req_gender
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize, "allow_default_fallback"
+                    ):
+                        el_kwargs["allow_default_fallback"] = False
                     try:
                         el_audio = await self.elevenlabs.synthesize(**el_kwargs)
                     except VoiceProviderError as el_err:
@@ -1290,6 +1323,7 @@ class VoiceOrchestrator:
                 if el_voice_id:
                     t_el = time.perf_counter()
                     _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
                     el_timed_kwargs: dict[str, Any] = {
                         "words": words,
                         "requested_voice_id": el_voice_id,
@@ -1299,6 +1333,10 @@ class VoiceOrchestrator:
                         el_timed_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
                         el_timed_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_timed, "allow_default_fallback"
+                    ):
+                        el_timed_kwargs["allow_default_fallback"] = False
                     try:
                         el_timed = await self.elevenlabs.synthesize_timed(**el_timed_kwargs)
                     except VoiceProviderError as el_err:
@@ -1570,6 +1608,7 @@ class VoiceOrchestrator:
                 if el_voice_id:
                     t_el = time.perf_counter()
                     _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
                     el_phonics_kwargs: dict[str, Any] = {
                         "steps": steps,
                         "requested_voice_id": el_voice_id,
@@ -1579,6 +1618,10 @@ class VoiceOrchestrator:
                         el_phonics_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
                         el_phonics_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_phonics, "allow_default_fallback"
+                    ):
+                        el_phonics_kwargs["allow_default_fallback"] = False
                     try:
                         el_phonics = await self.elevenlabs.synthesize_phonics(**el_phonics_kwargs)
                     except VoiceProviderError as el_err:
@@ -1749,13 +1792,23 @@ class VoiceOrchestrator:
             if self._can_use_elevenlabs_stt(ctx):
                 t_el = time.perf_counter()
                 try:
-                    el_res = await self.elevenlabs.transcribe(
-                        audio=audio,
-                        filename=filename,
-                        content_type=content_type,
-                        language_code=language_code or "vi",
-                        keyterms=keyterms,
-                    )
+                    el_kwargs: dict[str, Any] = {
+                        "audio": audio,
+                        "filename": filename,
+                        "content_type": content_type,
+                        "language_code": language_code or "vi",
+                        "keyterms": keyterms,
+                    }
+                    try:
+                        el_sig = inspect.signature(self.elevenlabs.transcribe)
+                        if "max_retries" in el_sig.parameters or any(
+                            p.kind == inspect.Parameter.VAR_KEYWORD
+                            for p in el_sig.parameters.values()
+                        ):
+                            el_kwargs["max_retries"] = 0
+                    except (TypeError, ValueError):
+                        pass
+                    el_res = await self.elevenlabs.transcribe(**el_kwargs)
                 except VoiceProviderError as el_err:
                     self._mark_elevenlabs_cooldown("stt", el_err)
                     if not can_fallback:

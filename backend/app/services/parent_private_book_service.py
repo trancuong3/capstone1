@@ -5,6 +5,7 @@ import asyncio
 import gc
 import hashlib
 import inspect
+import json
 import logging
 import math
 import os
@@ -64,6 +65,7 @@ from app.schemas.parent_private_book import (
     ParentPrivatePageRead,
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
+    ParentSaveFromScanResponse,
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
     ProofreadSuggestionRead,
@@ -73,11 +75,16 @@ from app.schemas.parent_private_book import (
 )
 from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
+    MAX_SINGLE_IMAGE_BYTES,
     RasterizedDocumentPage,
     iter_rasterized_spooled_document,
     spool_upload_file,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
+from app.services.parent_private_book_post_ocr import (
+    build_tool_check_scope,
+    normalize_private_book_text,
+)
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_inference_job_service import (
     JOB_KIND_PARENT_SUBMISSION,
@@ -97,6 +104,43 @@ logger = logging.getLogger(__name__)
 STAGING_TTL_DAYS = 7
 ADMIN_REVIEW_TTL_DAYS = 30
 VALID_SOURCE_TYPES = set(SOURCE_TYPE_LABELS.keys())
+_ALLOWED_SCAN_IMAGE_MIMES = {
+    "",
+    "application/octet-stream",
+    "binary/octet-stream",
+    "image/jpeg",
+    "image/jpg",
+    "image/pjpeg",
+    "image/png",
+    "image/x-png",
+    "image/webp",
+    "image/bmp",
+    "image/x-ms-bmp",
+    "image/x-bmp",
+    "image/tiff",
+    "image/x-tiff",
+}
+_ALLOWED_SCAN_IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+}
+_ALLOWED_SCAN_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP", "BMP", "TIFF"}
+
+
+def _derive_default_scan_book_title(clean_text: str, now: datetime) -> str:
+    for raw_line in clean_text.split("\n"):
+        candidate = " ".join(raw_line.split()).strip(" -–—•·.,;:!?\"'“”‘’()[]{}")
+        if candidate:
+            if len(candidate) > 72:
+                clipped = candidate[:72].rsplit(" ", 1)[0].strip()
+                return f"{clipped or candidate[:72]}…"
+            return candidate
+    return f"Trang chụp ngày {now.strftime('%d/%m/%Y')}"
 
 
 def _safe_media_type(path: str) -> str:
@@ -481,6 +525,7 @@ class ParentPrivateBookService:
         submissions: list[ParentBookPageSubmission],
         readable_for_children: bool,
         ocr_contribution: Any | None = None,
+        readability: Any | None = None,
     ) -> ParentPrivateBookSummaryRead:
         pending_count = sum(
             1 for s in submissions if s.WorkflowStatus in ("CHECKING", "PENDING_ADMIN", "NEEDS_RECHECK")
@@ -539,6 +584,7 @@ class ParentPrivateBookService:
             has_held_multipage_batch=has_held_multipage,
             privacy_notice=privacy_notice,
             ocr_contribution=ocr_contribution,
+            readability=readability,
             created_at=book.CreatedAt,
         )
 
@@ -688,6 +734,400 @@ class ParentPrivateBookService:
             ocr_contribution=contrib_map.get(book.Id),
         )
 
+    async def save_from_scan(
+        self,
+        actor_id: UUID,
+        upload: UploadFile,
+        *,
+        ocr_text: str,
+        mode: str = "create_book",
+        title: str | None = None,
+        grade_level: int | None = None,
+        target_book_id: UUID | None = None,
+        words_json: str | None = None,
+        source_type: str = "OWNED_PHYSICAL_BOOK",
+        source_note: str | None = None,
+    ) -> ParentSaveFromScanResponse:
+        """1-Tap Save from `/book-scanner`: create a new PARENT_PRIVATE book or append a ready-to-read page."""
+        await self._require_parent(actor_id)
+
+        clean_mode = (mode or "").strip()
+        if clean_mode not in ("create_book", "append_page"):
+            raise HTTPException(
+                status_code=422,
+                detail="Chế độ lưu trang quét không hợp lệ (chỉ hỗ trợ create_book hoặc append_page).",
+            )
+        if source_type not in VALID_SOURCE_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail="Loại nguồn sử dụng không hợp lệ.",
+            )
+
+        clean_text = normalize_private_book_text(ocr_text or "")
+        if not clean_text:
+            raise HTTPException(
+                status_code=422,
+                detail="Nội dung văn bản nhận diện không được để trống.",
+            )
+        if len(clean_text) > 30000:
+            raise HTTPException(
+                status_code=422,
+                detail="Nội dung văn bản vượt quá giới hạn cho phép (30.000 ký tự).",
+            )
+
+        base_words: list[dict[str, Any]] = []
+        if words_json and words_json.strip():
+            try:
+                parsed_words = json.loads(words_json)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Dữ liệu tọa độ từ (words_json) không đúng định dạng JSON.",
+                ) from exc
+            if not isinstance(parsed_words, list):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Dữ liệu tọa độ từ (words_json) phải là danh sách.",
+                )
+            base_words = [w for w in parsed_words if isinstance(w, dict)]
+
+        aligned_words = align_edited_text_to_words(clean_text, base_words)
+        if not aligned_words:
+            raise HTTPException(
+                status_code=422,
+                detail="Văn bản nhận diện không có từ hợp lệ để tạo trang đọc.",
+            )
+
+        min_grade = 1
+        max_grade = 5
+        if grade_level is not None:
+            if isinstance(grade_level, bool) or not (1 <= int(grade_level) <= 5):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Khối lớp phải nằm trong khoảng từ Lớp 1 đến Lớp 5.",
+                )
+            min_grade = int(grade_level)
+            max_grade = int(grade_level)
+
+        now = datetime.now(timezone.utc)
+        resolved_title = ""
+        if clean_mode == "create_book":
+            stripped_title = (title or "").strip()
+            if stripped_title and len(stripped_title) > 200:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Tên sách không được vượt quá 200 ký tự.",
+                )
+            resolved_title = stripped_title or _derive_default_scan_book_title(clean_text, now)
+        else:
+            if target_book_id is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Vui lòng chọn cuốn sách đích trong Sách của tôi để thêm trang.",
+                )
+            existing_book = await self.repo.get_owned_private_book(target_book_id, actor_id)
+            if existing_book is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+            if existing_book.ModerationStatus != MODERATION_ACTIVE or existing_book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể thêm trang.",
+                )
+            resolved_title = str(existing_book.Title)
+
+        raw_mime = (upload.content_type or "").lower().split(";", 1)[0].strip()
+        if raw_mime not in _ALLOWED_SCAN_IMAGE_MIMES:
+            raise HTTPException(
+                status_code=422,
+                detail="Định dạng tệp ảnh không được hỗ trợ. Vui lòng dùng ảnh JPEG, PNG hoặc WebP.",
+            )
+        raw_filename = (upload.filename or "").strip()
+        if "." in raw_filename:
+            ext_check = "." + raw_filename.rsplit(".", 1)[-1].lower()
+            if ext_check not in _ALLOWED_SCAN_IMAGE_EXTENSIONS:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Định dạng tệp ảnh không được hỗ trợ. Vui lòng dùng ảnh JPEG, PNG hoặc WebP.",
+                )
+
+        # Release any read transaction BEFORE spooling image bytes & uploading to Storage
+        await self.repo.rollback()
+
+        spooled = await spool_upload_file(upload, max_bytes=MAX_SINGLE_IMAGE_BYTES)
+        if spooled.byte_length <= 0:
+            spooled.close()
+            raise HTTPException(
+                status_code=422,
+                detail="Tệp ảnh tải lên bị trống hoặc hư hỏng.",
+            )
+
+        try:
+            with iter_rasterized_spooled_document(spooled) as (
+                source_file_name,
+                source_format,
+                _source_sha256,
+                page_iter,
+            ):
+                if source_format not in _ALLOWED_SCAN_IMAGE_FORMATS:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Chỉ hỗ trợ lưu trực tiếp từ một ảnh trang sách chụp.",
+                    )
+
+                def _take_single(
+                    it: Any,
+                ) -> tuple[RasterizedDocumentPage | None, RasterizedDocumentPage | None]:
+                    try:
+                        first = next(it, None)
+                        second = next(it, None) if first is not None else None
+                        return first, second
+                    finally:
+                        close_fn = getattr(it, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+
+                page_img, extra_page = await asyncio.to_thread(_take_single, page_iter)
+                if page_img is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Tệp ảnh tải lên bị trống hoặc hư hỏng.",
+                    )
+                if extra_page is not None:
+                    del extra_page
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Chỉ hỗ trợ lưu một trang ảnh mỗi lần từ màn hình quét.",
+                    )
+        finally:
+            spooled.close()
+            gc.collect()
+
+        img_sha = hashlib.sha256(page_img.image_bytes).hexdigest()
+        cand_hash = compute_candidate_hash(
+            clean_text, source_sha256=img_sha, is_image_only=False
+        )
+        clean_note = (source_note or "").strip()[:1000] or None
+        book_uuid = uuid4() if clean_mode == "create_book" else target_book_id
+        assert book_uuid is not None
+        page_uuid = uuid4()
+        sub_uuid = uuid4()
+        batch_uuid = uuid4()
+        permanent_path = (
+            f"private-books/{actor_id}/{book_uuid}/pages/{page_uuid}/rev-1.{page_img.extension}"
+        )
+
+        uploaded_permanent = False
+        try:
+            await asyncio.to_thread(
+                upload_object,
+                permanent_path,
+                page_img.image_bytes,
+                page_img.content_type,
+                bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                upsert=False,
+            )
+            uploaded_permanent = True
+
+            commit_now = datetime.now(timezone.utc)
+            if clean_mode == "create_book":
+                book_row = Book(
+                    Id=book_uuid,
+                    Name=resolved_title[:250],
+                    Title=resolved_title,
+                    Author=None,
+                    MinGrade=min_grade,
+                    MaxGrade=max_grade,
+                    LifecycleStatus="ACTIVE",
+                    CreatedBy=actor_id,
+                    VisibilityScope=VISIBILITY_PARENT_PRIVATE,
+                    OwnerParentId=actor_id,
+                    ModerationStatus=MODERATION_ACTIVE,
+                    SourceDeclaration=_format_source_declaration(source_type, clean_note),
+                    CreatedAt=commit_now,
+                )
+                await self.repo.create_private_book(book_row)
+                page_number = 1
+            else:
+                locked_book = await self.repo.get_owned_private_book(
+                    book_uuid, actor_id, lock=True
+                )
+                if locked_book is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Resource not found",
+                    )
+                if (
+                    locked_book.ModerationStatus != MODERATION_ACTIVE
+                    or locked_book.LifecycleStatus != "ACTIVE"
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể thêm trang.",
+                    )
+                book_row = locked_book
+                resolved_title = str(locked_book.Title)
+                page_number = (await self.repo.max_page_number(locked_book.Id)) + 1
+                if page_number < 1 or page_number > 32767:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Số trang đã vượt quá giới hạn tối đa cho một cuốn sách (32767).",
+                    )
+
+            page_row = BookPage(
+                Id=page_uuid,
+                BookId=book_row.Id,
+                PageNumber=page_number,
+                ImagePath=permanent_path,
+                Width=min(32767, int(page_img.width)),
+                Height=min(32767, int(page_img.height)),
+                ProcessingMeta={
+                    "parent_private_book": True,
+                    "parent_submission_id": str(sub_uuid),
+                    "parent_submission_batch_id": str(batch_uuid),
+                    "parent_submission_batch_total": 1,
+                    "approval_mode": "PARENT_INSTANT_SCAN_SAVE",
+                    "snapshot_hash": cand_hash,
+                },
+                LifecycleStatus="ACTIVE",
+                CreatedAt=commit_now,
+            )
+            revision_row = PageRevision(
+                Id=uuid4(),
+                RevisionNo="1",
+                VerificationStatus="VERIFIED",
+                OriginalOcrText=clean_text,
+                VerifiedText=clean_text,
+                DraftText=clean_text,
+                ContentHash=cand_hash,
+                ProcessingMeta={
+                    "source_image_path": permanent_path,
+                    "source_image_width": int(page_img.width),
+                    "source_image_height": int(page_img.height),
+                    "parent_submission_id": str(sub_uuid),
+                    "parent_submission_version": 1,
+                    "approval_mode": "PARENT_INSTANT_SCAN_SAVE",
+                },
+                VerifiedBy=actor_id,
+                VerifiedAt=commit_now,
+                CreatedAt=commit_now,
+            )
+            word_rows = [
+                PageRevisionWord(
+                    Id=uuid4(),
+                    WordIndex=int(idx),
+                    LineIndex=max(0, int(item.get("line_index", 0) or 0)),
+                    Text=str(item["text"]),
+                    NormalizedText=str(
+                        item.get("normalized_text")
+                        or normalize_word(str(item["text"]))
+                        or str(item["text"]).lower()
+                    ),
+                    BoundingBox=_coerce_word_bounding_box(item, idx, len(aligned_words)),
+                    OCRConfidence=item.get("ocr_confidence"),
+                )
+                for idx, item in enumerate(aligned_words)
+            ]
+            created_page, created_rev = await self.repo.create_committed_page(
+                page=page_row, revision=revision_row, words=word_rows
+            )
+
+            sub_row = ParentBookPageSubmission(
+                Id=sub_uuid,
+                BookId=book_row.Id,
+                OwnerParentId=actor_id,
+                BatchId=batch_uuid,
+                BatchTotalPages=1,
+                SourcePageNumber=1,
+                TargetPageNumber=page_number,
+                IdempotencyKey=f"from-scan-{sub_uuid.hex[:20]}",
+                SourceFileName=source_file_name,
+                SourceFormat=source_format,
+                SourceStoragePath=permanent_path,
+                SourceSha256=img_sha,
+                ImageWidth=int(page_img.width),
+                ImageHeight=int(page_img.height),
+                SourceType=source_type,
+                SourceNote=clean_note,
+                SubmissionVersion=1,
+                OptimisticLockVersion=1,
+                WorkflowStatus="ADDED_TO_BOOK",
+                OcrStatus="COMPLETED",
+                OcrText=clean_text,
+                OcrWordsJson=aligned_words,
+                OcrMetaJson={"source": "book_scanner_instant_save"},
+                OcrHash=safety_content_hash(clean_text),
+                IsImageOnly=False,
+                ProofreadStatus="COMPLETED",
+                ProofreadText=clean_text,
+                ProofreadHash=safety_content_hash(clean_text),
+                ProofreadSuggestionsJson=[],
+                UncertainWordIndicesJson=[],
+                SpellingAcceptedAt=commit_now,
+                CandidateText=clean_text,
+                CandidateHash=cand_hash,
+                CandidateWordsJson=aligned_words,
+                ToolCheckStatus="PASSED",
+                ToolCheckInputHash=cand_hash,
+                ToolCheckSuitability="SUITABLE",
+                ToolCheckScopeJson=build_tool_check_scope(
+                    chunks_checked=1,
+                    total_chunks=1,
+                    requires_admin_visual_review=False,
+                    local_ai_enforced=_default_local_ai_enforced(),
+                ),
+                ToolCheckFindingsJson=[],
+                ToolCheckPolicyBlocked=False,
+                ToolCheckCompletedAt=commit_now,
+                CommittedPageId=created_page.Id,
+                CommittedRevisionId=created_rev.Id,
+                CommittedAt=commit_now,
+                TempExpiresAt=commit_now + timedelta(days=STAGING_TTL_DAYS),
+                CreatedAt=commit_now,
+                UpdatedAt=commit_now,
+            )
+            await self.repo.add_submissions([sub_row])
+
+            await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="parent_private_book.saved_from_scan",
+                resource_type="book_page",
+                resource_id=created_page.Id,
+                metadata={
+                    "book_id": str(book_row.Id),
+                    "mode": clean_mode,
+                    "visibility_scope": VISIBILITY_PARENT_PRIVATE,
+                    "page_number": page_number,
+                    "word_count": len(word_rows),
+                },
+            )
+            committed_book_id = book_row.Id
+            committed_page_id = created_page.Id
+            committed_rev_id = created_rev.Id
+            committed_title = str(book_row.Title)
+            await self.repo.commit()
+        except Exception:
+            await self.repo.rollback()
+            if uploaded_permanent:
+                try:
+                    await asyncio.to_thread(
+                        delete_object,
+                        permanent_path,
+                        bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                    )
+                except Exception:
+                    pass
+            raise
+
+        return ParentSaveFromScanResponse(
+            book_id=committed_book_id,
+            page_id=committed_page_id,
+            page_number=page_number,
+            revision_id=committed_rev_id,
+            title=committed_title,
+            visibility_scope="PARENT_PRIVATE",
+            reader_href=f"/books/{committed_book_id}?pageId={committed_page_id}",
+        )
+
     async def _readable_private_book_ids(
         self, book_ids: list[UUID], actor_id: UUID
     ) -> set[UUID] | None:
@@ -727,6 +1167,34 @@ class ParentPrivateBookService:
         if not ready_only:
             readable_ids = await self._readable_private_book_ids(book_ids, actor_id)
 
+        texts_by_book: dict[UUID, list[str]] = {}
+        committed_book_ids = [
+            b_id for b_id in book_ids if committed_map.get(b_id, 0) > 0
+        ]
+        if (
+            isinstance(getattr(self, "db", None), AsyncSession)
+            and committed_book_ids
+        ):
+            try:
+                text_rows = await self.db.execute(
+                    select(BookPage.BookId, PageRevision.VerifiedText)
+                    .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+                    .where(
+                        BookPage.BookId.in_(committed_book_ids),
+                        BookPage.LifecycleStatus == "ACTIVE",
+                        PageRevision.VerificationStatus == "VERIFIED",
+                    )
+                    .order_by(BookPage.BookId, BookPage.PageNumber)
+                )
+                for b_id, v_text in text_rows.all():
+                    if v_text:
+                        texts_by_book.setdefault(b_id, []).append(str(v_text))
+            except Exception:
+                texts_by_book = {}
+
+        from app.schemas.parent_private_book import VietnameseReadabilityRead
+        from app.services.vietnamese_readability import analyse_vietnamese_readability
+
         results: list[ParentPrivateBookSummaryRead] = []
         for book in books:
             if ready_only:
@@ -735,6 +1203,18 @@ class ParentPrivateBookService:
                 readable = book.Id in readable_ids
             else:
                 readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+            book_texts = texts_by_book.get(book.Id, [])
+            book_readability = (
+                VietnameseReadabilityRead(
+                    **analyse_vietnamese_readability(
+                        "\n".join(book_texts),
+                        min_grade=int(book.MinGrade),
+                        max_grade=int(book.MaxGrade),
+                    ).to_dict()
+                )
+                if book_texts
+                else None
+            )
             results.append(
                 self._serialize_book_summary(
                     book,
@@ -742,6 +1222,7 @@ class ParentPrivateBookService:
                     submissions=subs_by_book.get(book.Id, []),
                     readable_for_children=readable,
                     ocr_contribution=contrib_map.get(book.Id),
+                    readability=book_readability,
                 )
             )
         return results
@@ -813,31 +1294,63 @@ class ParentPrivateBookService:
                 reason="parent_book_poll_nudge",
             )
 
-        pages_dto = [
-            ParentPrivatePageRead(
-                page_id=page.Id,
-                page_number=int(page.PageNumber),
-                current_verified_revision_id=page.CurrentVerifiedRevisionId,
-                verified_text=((rev.VerifiedText or "") if rev else ""),
-                verified_text_preview=((rev.VerifiedText or "")[:240] if rev else ""),
-                image_url=private_page_image_url(
-                    book.Id,
-                    page.Id,
-                    revision_id=page.CurrentVerifiedRevisionId,
-                    base_url=base_url,
-                    storage_path=page.ImagePath,
-                    owner_id=book.OwnerParentId,
-                ),
-                created_at=page.CreatedAt,
+        from app.schemas.parent_private_book import VietnameseReadabilityRead
+        from app.services.vietnamese_readability import analyse_vietnamese_readability
+
+        pages_dto = []
+        committed_texts: list[str] = []
+        for page, rev in pages_rows:
+            v_text = (rev.VerifiedText or "") if rev else ""
+            if v_text.strip():
+                committed_texts.append(v_text)
+            page_readability = (
+                VietnameseReadabilityRead(
+                    **analyse_vietnamese_readability(
+                        v_text,
+                        min_grade=int(book.MinGrade),
+                        max_grade=int(book.MaxGrade),
+                    ).to_dict()
+                )
+                if v_text.strip()
+                else None
             )
-            for page, rev in pages_rows
-        ]
+            pages_dto.append(
+                ParentPrivatePageRead(
+                    page_id=page.Id,
+                    page_number=int(page.PageNumber),
+                    current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                    verified_text=v_text,
+                    verified_text_preview=v_text[:240],
+                    image_url=private_page_image_url(
+                        book.Id,
+                        page.Id,
+                        revision_id=page.CurrentVerifiedRevisionId,
+                        base_url=base_url,
+                        storage_path=page.ImagePath,
+                        owner_id=book.OwnerParentId,
+                    ),
+                    readability=page_readability,
+                    created_at=page.CreatedAt,
+                )
+            )
+        book_readability = (
+            VietnameseReadabilityRead(
+                **analyse_vietnamese_readability(
+                    "\n".join(committed_texts),
+                    min_grade=int(book.MinGrade),
+                    max_grade=int(book.MaxGrade),
+                ).to_dict()
+            )
+            if committed_texts
+            else None
+        )
         summary = self._serialize_book_summary(
             book,
             committed_count=len(pages_rows),
             submissions=submissions,
             readable_for_children=readable,
             ocr_contribution=contrib_map.get(book.Id),
+            readability=book_readability,
         )
         return ParentPrivateBookDetailRead(
             book=summary,

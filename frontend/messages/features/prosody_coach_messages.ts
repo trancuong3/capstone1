@@ -1,0 +1,78 @@
+import type { MessageTree } from "@/lib/i18n/types";
+
+export const prosodyCoachVi = {
+  barToggleLabel: "Nhịp thở & Ngắt dấu câu",
+  barShowHint: "Hiện hướng dẫn",
+  barHideHint: "Ẩn hướng dẫn",
+  legendCommaPause: "Nghỉ hơi ngắn",
+  legendPeriodPause: "Nghỉ hơi dài",
+  legendRisingCue: "Lên giọng nhẹ",
+  legendExpressiveCue: "Đọc diễn cảm",
+  legendCommaSubLabel: "dấu phẩy",
+  legendPeriodSubLabel: "dấu chấm",
+  legendQuestionSubLabel: "dấu hỏi",
+  legendExclaimSubLabel: "dấu chấm than",
+  barEmptyHint: "Chưa có văn bản để hiển thị nhịp thở. Hãy bắt đầu đọc nhé!",
+  barTipPrefix: "Bí kíp đọc hay:",
+  barTipBody:
+    "Khi thấy dấu • hãy nghỉ hơi ngắn, dấu •• thở dài hơn, dấu ↗ lên giọng hỏi nhẹ nhàng, dấu ✦ đọc thật vui và sinh động nhé!",
+  cardTitle: "Huấn Luyện Viên Đọc Diễn Cảm",
+  cardSubtitle: "Ngắt nhịp dấu câu & Ngữ điệu Lớp 2–5",
+  cardOverallLabel: "Điểm diễn cảm",
+  cardGradeRange: "Lớp 2–5",
+  cardMeterComma: "Ngắt nhịp dấu phẩy (,)",
+  cardMeterPeriod: "Ngắt nhịp dấu chấm (.)",
+  cardMeterIntonation: "Ngữ điệu diễn cảm (↗ ✦)",
+  clauseBreakdownTitle: "Chi tiết từng cụm câu",
+  gradeBandExcellent: "Xuất sắc",
+  gradeBandGood: "Tốt",
+  gradeBandDeveloping: "Đang tiến bộ",
+  gradeBandNeedsPractice: "Cần luyện thêm",
+  sessionCardHeading: "Đọc diễn cảm & Ngắt nhịp dấu câu",
+  sessionCardPrompt:
+    "Xem nhận xét cách ngắt hơi ở dấu phẩy, dấu chấm và lên xuống giọng cuối câu của bé.",
+  runSampleAction: "Xem đánh giá nhịp đọc",
+  analyzingAction: "Đang phân tích nhịp đọc...",
+  retryAction: "Phân tích lại",
+  errorNotice: "Chưa thể phân tích nhịp đọc lúc này, bé thử lại nhé!",
+} as const satisfies MessageTree;
+
+export const prosodyCoachEn = {
+  barToggleLabel: "Breathing Rhythm & Punctuation Pauses",
+  barShowHint: "Show guide",
+  barHideHint: "Hide guide",
+  legendCommaPause: "Short breath",
+  legendPeriodPause: "Long breath",
+  legendRisingCue: "Gentle rise",
+  legendExpressiveCue: "Expressive read",
+  legendCommaSubLabel: "comma",
+  legendPeriodSubLabel: "period",
+  legendQuestionSubLabel: "question mark",
+  legendExclaimSubLabel: "exclamation",
+  barEmptyHint:
+    "No text to display yet. Start reading to see the rhythm guide!",
+  barTipPrefix: "Reading tip:",
+  barTipBody:
+    "At • take a short breath, at •• pause a little longer, at ↗ lift your voice gently, and at ✦ read with warm expression!",
+  cardTitle: "Expressive Reading Coach",
+  cardSubtitle: "Punctuation Pauses & Intonation · Grade 2–5",
+  cardOverallLabel: "Prosody score",
+  cardGradeRange: "Grade 2–5",
+  cardMeterComma: "Comma pause (,)",
+  cardMeterPeriod: "Period pause (.)",
+  cardMeterIntonation: "Expressive intonation (↗ ✦)",
+  clauseBreakdownTitle: "Clause-by-clause rhythm",
+  gradeBandExcellent: "Excellent",
+  gradeBandGood: "Good",
+  gradeBandDeveloping: "Developing",
+  gradeBandNeedsPractice: "Needs practice",
+  sessionCardHeading: "Expressive Reading & Punctuation Rhythm",
+  sessionCardPrompt:
+    "Check gentle feedback on comma pauses, period breaths, and sentence intonation.",
+  runSampleAction: "Analyze reading rhythm",
+  analyzingAction: "Analyzing reading rhythm...",
+  retryAction: "Analyze again",
+  errorNotice: "Could not analyze reading rhythm right now — please try again!",
+} as const satisfies MessageTree;
+
+export type ProsodyCoachMessageKey = keyof typeof prosodyCoachVi;

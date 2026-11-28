@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  Ear,
   Mic,
   Pause,
   Play,
@@ -19,6 +20,9 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { TaiThinhEarTrainerModal } from "@/components/entertainment/tai-thinh-ear-trainer-modal";
+import { RegionalPhoneticProfileCard } from "@/components/profiles/regional-phonetic-profile-card";
+import { CreateMicroStoryModal } from "@/components/reports/create-micro-story-modal";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
@@ -34,6 +38,8 @@ import { translateMessage } from "@/lib/i18n/formatter";
 import { normalizeLocale, type SupportedLocale } from "@/lib/i18n/locales";
 import { readLocaleCookie } from "@/lib/i18n/persistence";
 import { getCachedLocaleMessages } from "@/messages/loader";
+import { useMicroStoryTranslations } from "@/messages/features/micro_story";
+import { useRegionalDialectTranslations } from "@/messages/features/regional_dialect";
 import { viMessages } from "@/messages/vi";
 import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import { isServiceError } from "@/lib/api/service-error";
@@ -50,7 +56,6 @@ import {
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import {
   LocalSegmentSpeechRecognition,
-  encodeFloat32ToWav16kBlob,
   isInjectedTestSpeechRecognition,
   resolveLocalFirstSpeechRecognitionConstructor,
   shouldPreferAndroidNativeStt,
@@ -62,6 +67,8 @@ import {
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
+  isPermanentlyHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -150,11 +157,73 @@ interface WindowWithSpeechRecognition {
 
 interface CapturedAttemptPayload {
   readonly requestId: string;
-  readonly audioBlob: Blob;
+  readonly audioBlob?: Blob | null;
   readonly durationMs: number;
   readonly audioQualityStatus: string | undefined;
   readonly browserTranscript: string | null;
   readonly browserConfidence: number | null;
+}
+
+type PreparedShortWordLike =
+  | (Blob & { readonly pcm16k?: Float32Array | null })
+  | { readonly blob: Blob; readonly pcm16k?: Float32Array | null };
+
+function unpackPreparedShortWordAudio(
+  prepared: PreparedShortWordLike | null,
+): { readonly blob: Blob; readonly pcm16k: Float32Array | null } | null {
+  if (!prepared) return null;
+  if (prepared instanceof Blob) {
+    return {
+      blob: prepared,
+      pcm16k: prepared.pcm16k ?? null,
+    };
+  }
+  return {
+    blob: prepared.blob,
+    pcm16k: prepared.pcm16k ?? null,
+  };
+}
+
+function hasTargetTokenSequence(
+  spokenTokens: readonly string[],
+  expectedTokens: readonly string[],
+): boolean {
+  if (
+    expectedTokens.length === 0 ||
+    spokenTokens.length < expectedTokens.length
+  ) {
+    return false;
+  }
+  for (let i = 0; i <= spokenTokens.length - expectedTokens.length; i += 1) {
+    let matched = true;
+    for (let j = 0; j < expectedTokens.length; j += 1) {
+      if (spokenTokens[i + j] !== expectedTokens[j]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return true;
+  }
+  return false;
+}
+
+function isBackendSttHealthyForPractice(): boolean {
+  const routingHealth = getVoiceEngineHealthForRouting();
+  if (!routingHealth) return false;
+  if (routingHealth.local.available && routingHealth.local.stt_ready) {
+    return true;
+  }
+  const policy = getVoicePolicyPreferences();
+  const allowCloud =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleSttFallback;
+  if (!allowCloud) return false;
+  return Boolean(
+    (routingHealth.google.stt_configured &&
+      !routingHealth.google.stt_cooldown) ||
+    (routingHealth.elevenlabs?.stt_configured &&
+      !routingHealth.elevenlabs?.stt_cooldown),
+  );
 }
 
 const PRACTICE_STATUS_KEYS: Record<DifficultWordPracticeStatus, string> = {
@@ -187,8 +256,11 @@ const FAILURE_LABEL_KEYS: Record<string, string> = {
   "Máy đang bận": "practice.assessmentEngineError",
 };
 
-const EVALUATION_TIMEOUT_MS = 15_000;
+const EVALUATION_TIMEOUT_MS = 13_000;
 const CUE_TIMEOUT_MS = 8_000;
+const STT_WARMUP_WAIT_CAP_MS = 1_500;
+const WASM_INIT_TIMEOUT_MS = 4_000;
+const WASM_DECODE_TIMEOUT_MS = 8_000;
 
 function resolvePracticeLocale(): SupportedLocale {
   if (typeof document !== "undefined") {
@@ -277,6 +349,10 @@ export function DifficultWordPracticePanel({
   const { formatDateTime } = useI18n();
   const t = useTranslations("difficultWords");
   const tCommon = useTranslations("common");
+  const tMicroStory = useMicroStoryTranslations();
+  const tDialect = useRegionalDialectTranslations();
+  const [showMicroStoryModal, setShowMicroStoryModal] = useState(false);
+  const [showEarTrainerModal, setShowEarTrainerModal] = useState(false);
   const { difficultWordService } = useReportServices();
   const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -361,6 +437,11 @@ export function DifficultWordPracticePanel({
   const browserBestConfRef = useRef<number | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognitionLike | null>(null);
   const stopCaptureLockRef = useRef(false);
+  const stopCaptureTokenRef = useRef(0);
+  const sttWarmupAttemptedRef = useRef(false);
+  const lastKnownPracticeStatusRef = useRef<DifficultWordPracticeStatus>(
+    word.practice_status ?? "NOT_PRACTICED",
+  );
   const autoRetryCountRef = useRef(0);
   const incorrectCountRef = useRef(0);
   const heardFailuresRef = useRef(0);
@@ -526,24 +607,10 @@ export function DifficultWordPracticePanel({
     }
   }, []);
 
-  const refreshHistory = useCallback(async () => {
-    try {
-      const response = await difficultWordService.getPracticeHistory(child.id, {
-        normalizedWord: word.normalized_word,
-        limit: 10,
-      });
-      if (!mountedRef.current) return;
-      setHistoryStorageReady(response.storage_ready);
-      setHistoryItems(response.items);
-    } catch {
-      if (mountedRef.current) {
-        setHistoryStorageReady(false);
-        setHistoryItems([]);
-      }
-    } finally {
-      if (mountedRef.current) setHistoryLoading(false);
-    }
-  }, [child.id, difficultWordService, word.normalized_word]);
+  useEffect(() => {
+    lastKnownPracticeStatusRef.current =
+      word.practice_status ?? "NOT_PRACTICED";
+  }, [word.normalized_word, word.practice_status]);
 
   useEffect(() => {
     let active = true;
@@ -608,7 +675,7 @@ export function DifficultWordPracticePanel({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
-    if (!getFreshVoiceEngineHealth()) {
+    if (!getVoiceEngineHealthForRouting()) {
       void fetchVoiceEngineHealth().catch(() => null);
     }
     return () => {
@@ -731,6 +798,11 @@ export function DifficultWordPracticePanel({
           ) {
             setFlowState("IDLE");
           }
+        } else if (
+          mountedRef.current &&
+          generation === flowGenerationRef.current
+        ) {
+          setFlowState("IDLE");
         }
         return;
       }
@@ -914,6 +986,18 @@ export function DifficultWordPracticePanel({
       } else if (guide) {
         helpRoundsRef.current += 1;
         usedHintRef.current = true;
+        if (phraseTurnRef.current && contextPhrase) {
+          void speechPlayer.prefetch?.(contextPhrase + ".", {
+            coaching: false,
+          });
+        } else {
+          void speechPlayer.prefetch?.(word.display_text, {
+            wordSample: true,
+          });
+        }
+        void speechPlayer.prefetch?.("Đến lượt con. Con đọc lại nhé.", {
+          coaching: true,
+        });
         if (
           !(await playCue(
             adaptTextToTeacherPersona(
@@ -954,6 +1038,7 @@ export function DifficultWordPracticePanel({
       contextPhrase,
       playCue,
       scheduleNextWord,
+      speechPlayer,
       speechRecorder,
       visitedWords,
       word.display_text,
@@ -963,13 +1048,22 @@ export function DifficultWordPracticePanel({
   );
 
   const submitEvaluation = useCallback(
-    async (payload: CapturedAttemptPayload, generation: number) => {
+    async (
+      payload: CapturedAttemptPayload,
+      generation: number,
+      existingController?: AbortController,
+      startedAtMs?: number,
+    ) => {
       if (!mountedRef.current || generation !== flowGenerationRef.current) {
         return;
       }
-      if (evaluationRef.current) return;
-      const controller = new AbortController();
-      const evaluationStart = performance.now();
+      if (existingController) {
+        if (existingController.signal.aborted) return;
+      } else if (evaluationRef.current) {
+        return;
+      }
+      const controller = existingController ?? new AbortController();
+      const evaluationStart = startedAtMs ?? performance.now();
       evaluationRef.current = controller;
       setFlowState("EVALUATING");
       setSubmitError(null);
@@ -987,7 +1081,7 @@ export function DifficultWordPracticePanel({
                   normalized_word: word.normalized_word,
                   display_text: word.display_text,
                   context_phrase: rawContextPhrase ?? undefined,
-                  audio: payload.audioBlob,
+                  audio: payload.audioBlob ?? undefined,
                   audio_duration_ms: payload.durationMs,
                   audio_quality_status: payload.audioQualityStatus ?? undefined,
                   browser_transcript: payload.browserTranscript ?? undefined,
@@ -1001,6 +1095,8 @@ export function DifficultWordPracticePanel({
                   evidence_word_ids: word.evidence_word_ids,
                   provider_mode: policy.providerMode,
                   allow_google_stt: policy.allowGoogleSttFallback,
+                  includeNextRecommended: false,
+                  timeoutMs: 12_000,
                 },
                 signal,
               );
@@ -1021,7 +1117,8 @@ export function DifficultWordPracticePanel({
                 started.attempt_id,
                 {
                   completion_request_id: payload.requestId,
-                  audio: payload.audioBlob,
+                  audio:
+                    payload.audioBlob ?? new Blob([], { type: "audio/wav" }),
                   audio_duration_ms: payload.durationMs,
                   audio_quality_status: payload.audioQualityStatus ?? undefined,
                   browser_transcript: payload.browserTranscript ?? undefined,
@@ -1039,16 +1136,53 @@ export function DifficultWordPracticePanel({
           return;
         }
 
-        evaluationRef.current = null;
+        if (evaluationRef.current === controller) {
+          evaluationRef.current = null;
+        }
         setEvaluationDurationMs(
           Math.round(performance.now() - evaluationStart),
         );
         setLatestResult(evaluated);
         onAttemptCompleted?.(evaluated);
-        void Promise.resolve()
-          .then(onProgressSaved)
-          .catch(() => undefined);
-        void refreshHistory();
+        const prevPracticeStatus = lastKnownPracticeStatusRef.current;
+        const nextPracticeStatus = evaluated.word_progress?.practice_status;
+        if (nextPracticeStatus) {
+          lastKnownPracticeStatusRef.current = nextPracticeStatus;
+        }
+        if (
+          nextPracticeStatus === "COMPLETED" &&
+          prevPracticeStatus !== "COMPLETED"
+        ) {
+          void Promise.resolve()
+            .then(onProgressSaved)
+            .catch(() => undefined);
+        }
+        const nowIso = new Date().toISOString();
+        setHistoryItems((prev) => {
+          const attemptId = evaluated.attempt_id ?? payload.requestId;
+          const deduped = prev.filter((item) => item.attempt_id !== attemptId);
+          const localItem: DifficultWordPracticeHistoryItemDTO = {
+            attempt_id: attemptId,
+            normalized_word: evaluated.normalized_word ?? word.normalized_word,
+            display_text: evaluated.display_text ?? word.display_text,
+            attempt_number:
+              typeof evaluated.attempt_number === "number"
+                ? evaluated.attempt_number
+                : deduped.length + 1,
+            state: evaluated.state ?? "COMPLETED",
+            assessment_status: evaluated.assessment_status ?? null,
+            recognition_source: evaluated.recognition_source ?? null,
+            spoken_transcript: evaluated.spoken_transcript ?? null,
+            confidence: evaluated.confidence ?? null,
+            audio_duration_ms:
+              evaluated.audio_duration_ms ?? payload.durationMs,
+            assessment_version: evaluated.assessment_version ?? 1,
+            started_at: evaluated.started_at ?? nowIso,
+            completed_at: evaluated.completed_at ?? nowIso,
+          };
+          return [localItem, ...deduped].slice(0, 10);
+        });
+        setHistoryLoading(false);
 
         if (!mountedRef.current || generation !== flowGenerationRef.current) {
           return;
@@ -1258,7 +1392,6 @@ export function DifficultWordPracticePanel({
       phonicsLesson,
       primarySource,
       rawContextPhrase,
-      refreshHistory,
       playCue,
       runPhonicsGuidance,
       scheduleNextWord,
@@ -1276,231 +1409,368 @@ export function DifficultWordPracticePanel({
   const finalizeCaptureAndEvaluate = useCallback(
     async (generation: number) => {
       if (stopCaptureLockRef.current) return;
+      const myStopToken = ++stopCaptureTokenRef.current;
       stopCaptureLockRef.current = true;
       clearTimers();
-      const recognition = recognitionRef.current;
-      // stop() may deliver its last final after the recorder has already stopped.
-      const finalResult = recognition
-        ? new Promise<void>((resolve) => {
-            const timer = window.setTimeout(resolve, 300);
-            recognition.onend = () => {
-              window.clearTimeout(timer);
-              resolve();
-            };
-            try {
-              recognition.stop();
-            } catch {
-              window.clearTimeout(timer);
-              resolve();
-            }
-          })
-        : Promise.resolve();
 
-      const usedAndroidNativeStt = usingAndroidNativeSttRef.current;
-      let blob: Blob | null = null;
-      if (!usedAndroidNativeStt) {
-        try {
-          blob = await speechRecorder.stop();
-        } catch {
-          blob = null;
+      const evalController = new AbortController();
+      const evaluationStart = performance.now();
+      evaluationRef.current?.abort();
+      evaluationRef.current = evalController;
+      setFlowState("EVALUATING");
+      setSubmitError(null);
+      setPendingSavePayload(null);
+
+      const isStale = () =>
+        !mountedRef.current ||
+        generation !== flowGenerationRef.current ||
+        evalController.signal.aborted;
+
+      const releaseEvalControllerIfOwned = () => {
+        if (evaluationRef.current === evalController) {
+          evaluationRef.current = null;
         }
-      }
-      await finalResult;
+      };
 
-      if (!mountedRef.current || generation !== flowGenerationRef.current) {
-        return;
-      }
-      stopBrowserRecognition();
-      const transcript = browserCollectorRef.current.getTranscript();
-      const transcriptIntent = transcript
-        ? parseVoiceIntent(transcript, { upcomingText: word.display_text })
-        : { type: "NONE" as const };
-      if (
-        isSpellingHelpRequest(transcript, word.display_text) ||
-        transcriptIntent.type === "SPELL"
-      ) {
-        setFailureLabel(null);
-        setLiveTranscript(null);
-        await runPhonicsGuidance(generation, true);
-        return;
-      }
-      if (
-        isReplaySampleRequest(transcript, word.display_text) ||
-        transcriptIntent.type === "REPLAY"
-      ) {
-        usedHintRef.current = true;
-        setFailureLabel(null);
-        setLiveTranscript(null);
-        setFlowState("INSTRUCTING");
-        await playCue(word.display_text, generation, true);
-        await playCue("Đến lượt con. Con đọc lại nhé.", generation);
-        await captureTurnRef.current(generation);
-        return;
-      }
-      if (transcriptIntent.type === "STOP") {
-        flowGenerationRef.current += 1;
-        cleanupRef.current();
-        setFlowState("PAUSED");
-        return;
-      }
-      if (transcriptIntent.type === "SKIP") {
-        speechRecorder.cancel();
-        setFailureLabel(null);
-        setLiveTranscript(null);
+      const releaseStopLockIfOwned = () => {
+        if (stopCaptureTokenRef.current === myStopToken) {
+          stopCaptureLockRef.current = false;
+        }
+      };
+
+      try {
+        const recognition = recognitionRef.current;
+        // stop() may deliver its last final after the recorder has already stopped.
+        const finalResult = recognition
+          ? new Promise<void>((resolve) => {
+              let settled = false;
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timer);
+                evalController.signal.removeEventListener("abort", onAbort);
+                resolve();
+              };
+              const onAbort = () => {
+                try {
+                  recognition.abort?.();
+                } catch {
+                  // Ignore abort errors
+                }
+                finish();
+              };
+              const timer = window.setTimeout(() => {
+                try {
+                  recognition.abort?.();
+                } catch {
+                  // Ignore abort errors
+                }
+                finish();
+              }, 300);
+              if (evalController.signal.aborted) {
+                onAbort();
+                return;
+              }
+              evalController.signal.addEventListener("abort", onAbort, {
+                once: true,
+              });
+              recognition.onend = () => {
+                finish();
+              };
+              try {
+                recognition.stop();
+              } catch {
+                finish();
+              }
+            })
+          : Promise.resolve();
+
+        const usedAndroidNativeStt = usingAndroidNativeSttRef.current;
+        let blob: Blob | null = null;
+        if (!usedAndroidNativeStt) {
+          try {
+            blob = await speechRecorder.stop();
+          } catch {
+            blob = null;
+          }
+        }
+        await finalResult;
+
+        if (isStale()) {
+          return;
+        }
+        stopBrowserRecognition();
+        const transcript = browserCollectorRef.current.getTranscript();
+        const transcriptIntent = transcript
+          ? parseVoiceIntent(transcript, { upcomingText: word.display_text })
+          : { type: "NONE" as const };
         if (
-          nextWordTarget &&
-          nextWordTarget.normalized_word !== word.normalized_word
+          isSpellingHelpRequest(transcript, word.display_text) ||
+          transcriptIntent.type === "SPELL"
         ) {
-          onSelectWord(nextWordTarget.normalized_word, { autoStart: true });
-        } else {
-          onClose();
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          setFailureLabel(null);
+          setLiveTranscript(null);
+          await runPhonicsGuidance(generation, true);
+          return;
         }
-        return;
-      }
-      if (
-        isWordHelpRequest(transcript, word.display_text) ||
-        transcriptIntent.type === "HELP"
-      ) {
-        setFailureLabel(null);
-        setLiveTranscript(null);
-        await retryTurn(generation, "help");
-        return;
-      }
-      if (usedPhonicsRef.current && phonicsLesson.supported && transcript) {
-        const preCheck = evaluatePostPhonicsAttempt(transcript, phonicsLesson);
-        if (preCheck.kind === "SPELLING_STEP_ONLY") {
+        if (
+          isReplaySampleRequest(transcript, word.display_text) ||
+          transcriptIntent.type === "REPLAY"
+        ) {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          usedHintRef.current = true;
           setFailureLabel(null);
           setLiveTranscript(null);
           setFlowState("INSTRUCTING");
-          if (!(await playCue(preCheck.message, generation))) return;
+          await playCue(word.display_text, generation, true);
+          await playCue("Đến lượt con. Con đọc lại nhé.", generation);
           await captureTurnRef.current(generation);
           return;
         }
-      }
+        if (transcriptIntent.type === "STOP") {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          flowGenerationRef.current += 1;
+          cleanupRef.current();
+          setFlowState("PAUSED");
+          return;
+        }
+        if (transcriptIntent.type === "SKIP") {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          speechRecorder.cancel();
+          setFailureLabel(null);
+          setLiveTranscript(null);
+          if (
+            nextWordTarget &&
+            nextWordTarget.normalized_word !== word.normalized_word
+          ) {
+            onSelectWord(nextWordTarget.normalized_word, { autoStart: true });
+          } else {
+            onClose();
+          }
+          return;
+        }
+        if (
+          isWordHelpRequest(transcript, word.display_text) ||
+          transcriptIntent.type === "HELP"
+        ) {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          setFailureLabel(null);
+          setLiveTranscript(null);
+          await retryTurn(generation, "help");
+          return;
+        }
+        if (usedPhonicsRef.current && phonicsLesson.supported && transcript) {
+          const preCheck = evaluatePostPhonicsAttempt(
+            transcript,
+            phonicsLesson,
+          );
+          if (preCheck.kind === "SPELLING_STEP_ONLY") {
+            releaseEvalControllerIfOwned();
+            releaseStopLockIfOwned();
+            setFailureLabel(null);
+            setLiveTranscript(null);
+            setFlowState("INSTRUCTING");
+            if (!(await playCue(preCheck.message, generation))) return;
+            await captureTurnRef.current(generation);
+            return;
+          }
+        }
 
-      if (usedAndroidNativeStt && (!blob || blob.size === 0)) {
-        if (!transcript) {
+        if (usedAndroidNativeStt && (!blob || blob.size === 0)) {
+          if (!transcript) {
+            releaseEvalControllerIfOwned();
+            releaseStopLockIfOwned();
+            setRecordedBlob(null);
+            setFailureLabel("Chưa nghe thấy");
+            await retryTurn(generation, "silence");
+            return;
+          }
+          const elapsed = Math.max(
+            200,
+            Math.round(performance.now() - captureStartedAtRef.current),
+          );
+          stopSelfPlayback();
+          setRecordedBlob(null);
+          const captured: CapturedAttemptPayload = {
+            requestId: createRequestUuid(),
+            audioBlob: undefined,
+            durationMs: elapsed,
+            audioQualityStatus: "ANDROID_NATIVE_STT",
+            browserTranscript: transcript,
+            browserConfidence: browserBestConfRef.current ?? 0.9,
+          };
+          releaseStopLockIfOwned();
+          await submitEvaluation(
+            captured,
+            generation,
+            evalController,
+            evaluationStart,
+          );
+          return;
+        }
+
+        if (!blob || blob.size === 0) {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          speechRecorder.cancel({ retainStream: false });
+          setMicError(t("practice.micEmptyAudioError"));
+          setFlowState("NEEDS_RETRY");
+          return;
+        }
+
+        const quality = speechRecorder.getQuality?.();
+        const qualityStatus = quality?.status as string | undefined;
+        if (
+          qualityStatus === "CLIPPING" ||
+          qualityStatus === "INVALID_AUDIO" ||
+          qualityStatus === "AUDIO_TOO_SHORT"
+        ) {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
+          setRecordedBlob(null);
+          setFailureLabel("Nghe chưa rõ");
+          await retryTurn(generation, "unclear");
+          return;
+        }
+        const preparedRaw =
+          quality?.status === "SILENCE" || quality?.status === "NO_AUDIO"
+            ? null
+            : await prepareShortWordAudio(blob);
+        if (isStale()) return;
+        const prepared = unpackPreparedShortWordAudio(
+          preparedRaw as PreparedShortWordLike | null,
+        );
+        if (!prepared) {
+          releaseEvalControllerIfOwned();
+          releaseStopLockIfOwned();
           setRecordedBlob(null);
           setFailureLabel("Chưa nghe thấy");
           await retryTurn(generation, "silence");
           return;
         }
-        const elapsed = Math.max(
-          200,
-          Math.round(performance.now() - captureStartedAtRef.current),
-        );
+        const recording = prepared.blob;
+        const preparedPcm16k = prepared.pcm16k;
+        const elapsed =
+          quality?.durationMs && quality.durationMs > 0
+            ? quality.durationMs
+            : Math.max(
+                0,
+                Math.round(performance.now() - captureStartedAtRef.current),
+              );
+
         stopSelfPlayback();
-        setRecordedBlob(null);
-        const captured: CapturedAttemptPayload = {
-          requestId: createRequestUuid(),
-          audioBlob: encodeFloat32ToWav16kBlob(new Float32Array(1600)),
-          durationMs: elapsed,
-          audioQualityStatus: "SPEECH_DETECTED",
-          browserTranscript: transcript,
-          browserConfidence: browserBestConfRef.current ?? 0.9,
-        };
-        await submitEvaluation(captured, generation);
-        return;
-      }
+        setRecordedBlob(recording);
 
-      if (!blob || blob.size === 0) {
-        speechRecorder.cancel({ retainStream: false });
-        setMicError(t("practice.micEmptyAudioError"));
-        setFlowState("NEEDS_RETRY");
-        return;
-      }
-
-      const quality = speechRecorder.getQuality?.();
-      const qualityStatus = quality?.status as string | undefined;
-      if (
-        qualityStatus === "CLIPPING" ||
-        qualityStatus === "INVALID_AUDIO" ||
-        qualityStatus === "AUDIO_TOO_SHORT"
-      ) {
-        setRecordedBlob(null);
-        setFailureLabel("Nghe chưa rõ");
-        await retryTurn(generation, "unclear");
-        return;
-      }
-      const recording =
-        quality?.status === "SILENCE" || quality?.status === "NO_AUDIO"
-          ? null
-          : await prepareShortWordAudio(blob);
-      if (!mountedRef.current || generation !== flowGenerationRef.current)
-        return;
-      if (!recording) {
-        setRecordedBlob(null);
-        setFailureLabel("Chưa nghe thấy");
-        await retryTurn(generation, "silence");
-        return;
-      }
-      const elapsed =
-        quality?.durationMs && quality.durationMs > 0
-          ? quality.durationMs
-          : Math.max(
-              0,
-              Math.round(performance.now() - captureStartedAtRef.current),
-            );
-
-      stopSelfPlayback();
-      setRecordedBlob(recording);
-
-      let effectiveTranscript = transcript
-        ? transcript.normalize("NFC").trim()
-        : null;
-      let effectiveConfidence = browserBestConfRef.current;
-      const freshHealth = getFreshVoiceEngineHealth();
-      const localSttDown =
-        freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready);
-      if (
-        localSttDown &&
-        !effectiveTranscript &&
-        detectBrowserWasmSttSupport().supported
-      ) {
-        try {
-          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
-            recording,
-            {
-              timeoutMs: 12_000,
-              voicedDurationMs: quality?.speechDurationMs,
-            },
-          );
-          if (!mountedRef.current || generation !== flowGenerationRef.current) {
-            return;
-          }
-          const wasmText = wasmRes.text.normalize("NFC").trim();
-          if (wasmText) {
-            effectiveTranscript = wasmText;
-            recordSttEngineUsage({
-              provider: "wasm",
-              fallbackUsed: true,
-              fallbackReason: "LOCAL_STT_UNAVAILABLE",
-            });
-            if (
-              normalizeVietnameseWord(wasmText) ===
-              normalizeVietnameseWord(word.display_text)
-            ) {
-              effectiveConfidence = Math.max(effectiveConfidence ?? 0, 0.95);
+        const policy = getVoicePolicyPreferences();
+        const allowCloudSttFallback =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleSttFallback;
+        let effectiveTranscript = transcript
+          ? transcript.normalize("NFC").trim()
+          : null;
+        let effectiveConfidence = browserBestConfRef.current;
+        let effectiveQualityStatus: string | undefined = quality?.status;
+        let uploadAudioBlob: Blob | undefined = recording;
+        const freshHealth = getFreshVoiceEngineHealth();
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(
+          freshHealth ?? routingHealth,
+        );
+        const localSttDown =
+          permanentlyUnconfigured ||
+          (routingHealth !== null &&
+            (!routingHealth.local.available || !routingHealth.local.stt_ready));
+        if (
+          localSttDown &&
+          !effectiveTranscript &&
+          detectBrowserWasmSttSupport().supported
+        ) {
+          const wasmClient = getBrowserWasmSttClient();
+          const shouldSkipColdWasm =
+            allowCloudSttFallback && !wasmClient.isReady();
+          if (!shouldSkipColdWasm) {
+            try {
+              const wasmOpts = {
+                initTimeoutMs: WASM_INIT_TIMEOUT_MS,
+                timeoutMs: WASM_DECODE_TIMEOUT_MS,
+                signal: evalController.signal,
+                voicedDurationMs: quality?.speechDurationMs,
+              };
+              const wasmRes =
+                preparedPcm16k && preparedPcm16k.length > 0
+                  ? await wasmClient.transcribeSamples(preparedPcm16k, wasmOpts)
+                  : await wasmClient.transcribeBlob(recording, wasmOpts);
+              if (isStale()) {
+                return;
+              }
+              const wasmText = wasmRes.text.normalize("NFC").trim();
+              if (wasmText) {
+                effectiveTranscript = wasmText;
+                recordSttEngineUsage({
+                  provider: "wasm",
+                  fallbackUsed: !permanentlyUnconfigured,
+                  fallbackReason: permanentlyUnconfigured
+                    ? null
+                    : "LOCAL_STT_UNAVAILABLE",
+                });
+                const isExactMatch =
+                  normalizeVietnameseWord(wasmText) ===
+                  normalizeVietnameseWord(word.display_text);
+                const isPhraseMatch =
+                  phraseTurnRef.current &&
+                  Boolean(contextPhrase) &&
+                  hasTargetTokenSequence(
+                    tokenizeVietnameseText(wasmText),
+                    tokenizeVietnameseText(word.display_text),
+                  );
+                const wasmIsCorrect = isExactMatch || isPhraseMatch;
+                if (wasmIsCorrect || !allowCloudSttFallback) {
+                  effectiveQualityStatus = "BROWSER_WASM_VERIFIED";
+                  effectiveConfidence = Math.max(
+                    effectiveConfidence ?? 0,
+                    wasmIsCorrect ? 0.95 : 0.85,
+                  );
+                  uploadAudioBlob = undefined;
+                }
+              }
+            } catch {
+              if (isStale()) {
+                return;
+              }
+              // Proceed to backend evaluation cleanly if WASM decode fails.
             }
           }
-        } catch {
-          // Proceed to backend evaluation cleanly if WASM decode fails.
         }
-      }
 
-      const captured: CapturedAttemptPayload = {
-        requestId: createRequestUuid(),
-        audioBlob: recording,
-        durationMs: elapsed,
-        audioQualityStatus: quality?.status,
-        browserTranscript: effectiveTranscript,
-        browserConfidence: effectiveConfidence,
-      };
-      await submitEvaluation(captured, generation);
+        const captured: CapturedAttemptPayload = {
+          requestId: createRequestUuid(),
+          audioBlob: uploadAudioBlob,
+          durationMs: elapsed,
+          audioQualityStatus: effectiveQualityStatus,
+          browserTranscript: effectiveTranscript,
+          browserConfidence: effectiveConfidence,
+        };
+        releaseStopLockIfOwned();
+        await submitEvaluation(
+          captured,
+          generation,
+          evalController,
+          evaluationStart,
+        );
+      } finally {
+        releaseStopLockIfOwned();
+        releaseEvalControllerIfOwned();
+      }
     },
     [
       clearTimers,
+      contextPhrase,
       nextWordTarget,
       onClose,
       onSelectWord,
@@ -1529,19 +1799,18 @@ export function DifficultWordPracticePanel({
 
       const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
       if (
+        !sttWarmupAttemptedRef.current &&
         !preferAndroidNativeStt &&
         detectBrowserWasmSttSupport().supported &&
-        !getBrowserWasmSttClient().isReady()
+        !getBrowserWasmSttClient().isReady() &&
+        !isBackendSttHealthyForPractice()
       ) {
-        const freshHealth = getFreshVoiceEngineHealth();
-        const localSttReady = Boolean(
-          freshHealth?.local.available && freshHealth.local.stt_ready,
+        sttWarmupAttemptedRef.current = true;
+        await awaitSttReadyBeforeListening(STT_WARMUP_WAIT_CAP_MS).catch(
+          () => false,
         );
-        if (!localSttReady) {
-          await awaitSttReadyBeforeListening(4_000).catch(() => false);
-          if (!mountedRef.current || generation !== flowGenerationRef.current) {
-            return;
-          }
+        if (!mountedRef.current || generation !== flowGenerationRef.current) {
+          return;
         }
       }
       usingAndroidNativeSttRef.current = preferAndroidNativeStt;
@@ -1772,7 +2041,8 @@ export function DifficultWordPracticePanel({
           browserPulseRef.current = false;
           const active = hasShortWordSpeechActivity({
             isSpeakingNow: speechRecorder.getIsSpeaking(),
-            audioLevel: speechRecorder.audioLevel,
+            audioLevel:
+              speechRecorder.getAudioLevel?.() ?? speechRecorder.audioLevel,
             quality,
             hasLiveBrowserSpeech: browserPulse,
             speechObserved: speechObservedRef.current,
@@ -1861,24 +2131,30 @@ export function DifficultWordPracticePanel({
     stopCaptureLockRef.current = false;
 
     setFlowState("PREPARING");
+    void speechPlayer.prefetch?.("Con đọc từ trên màn hình nhé.", {
+      coaching: true,
+    });
+    void speechPlayer.prefetch?.(word.display_text, {
+      wordSample: true,
+    });
+    let pendingWasmWarmup = false;
     if (shouldPreferAndroidNativeStt()) {
       micPreparedRef.current = true;
+      sttWarmupAttemptedRef.current = true;
     } else {
       if (
         detectBrowserWasmSttSupport().supported &&
-        !getBrowserWasmSttClient().isReady()
+        !getBrowserWasmSttClient().isReady() &&
+        !isBackendSttHealthyForPractice()
       ) {
-        const freshHealth = getFreshVoiceEngineHealth();
-        const localSttReady = Boolean(
-          freshHealth?.local.available && freshHealth.local.stt_ready,
+        // Kick off WASM warmup in parallel with mic prep & teacher instruction
+        // instead of blocking before speaking the cue.
+        pendingWasmWarmup = true;
+        void awaitSttReadyBeforeListening(STT_WARMUP_WAIT_CAP_MS).catch(
+          () => false,
         );
-        if (!localSttReady) {
-          await awaitSttReadyBeforeListening(4_000).catch(() => false);
-          if (!mountedRef.current || generation !== flowGenerationRef.current) {
-            return;
-          }
-        }
       }
+      sttWarmupAttemptedRef.current = true;
       try {
         await speechRecorder.prepare();
         micPreparedRef.current = true;
@@ -1904,6 +2180,15 @@ export function DifficultWordPracticePanel({
       return;
     }
 
+    if (pendingWasmWarmup && !getBrowserWasmSttClient().isReady()) {
+      await awaitSttReadyBeforeListening(STT_WARMUP_WAIT_CAP_MS).catch(
+        () => false,
+      );
+      if (!mountedRef.current || generation !== flowGenerationRef.current) {
+        return;
+      }
+    }
+
     await captureWordTurn(generation);
   }, [
     captureWordTurn,
@@ -1913,6 +2198,7 @@ export function DifficultWordPracticePanel({
     speechRecorder,
     stopBrowserRecognition,
     stopSelfPlayback,
+    word.display_text,
   ]);
 
   function handlePauseSession(): void {
@@ -2105,9 +2391,22 @@ export function DifficultWordPracticePanel({
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
           <ReadingVoiceSettings
+            childId={child.id}
             disabled={flowState === "LISTENING"}
             fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
+            isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+            onOpen={() => {
+              flowGenerationRef.current += 1;
+              cleanupRef.current();
+              setIsPlayingPhonics(false);
+              setFlowState((prev) =>
+                prev === "LISTENING" ||
+                prev === "INSTRUCTING" ||
+                prev === "EVALUATING"
+                  ? "IDLE"
+                  : prev,
+              );
+            }}
             onPreview={(sample) => {
               flowGenerationRef.current += 1;
               clearTimers();
@@ -2495,6 +2794,38 @@ export function DifficultWordPracticePanel({
           {t("practice.listenSample")}
         </Button>
 
+        <Button
+          className="min-h-14 rounded-2xl sm:w-auto"
+          data-testid="practice-open-micro-story-cta"
+          disabled={isBusyActive}
+          onClick={() => {
+            flowGenerationRef.current += 1;
+            cleanupRef.current();
+            setFlowState("IDLE");
+            setShowMicroStoryModal(true);
+          }}
+          variant="secondary"
+        >
+          <Sparkles aria-hidden="true" className="size-4 text-primary" />
+          {tMicroStory("ctaButton")}
+        </Button>
+
+        <Button
+          className="min-h-14 rounded-2xl sm:w-auto"
+          data-testid="practice-open-tai-thinh-cta"
+          disabled={isBusyActive}
+          onClick={() => {
+            flowGenerationRef.current += 1;
+            cleanupRef.current();
+            setFlowState("IDLE");
+            setShowEarTrainerModal(true);
+          }}
+          variant="secondary"
+        >
+          <Ear aria-hidden="true" className="size-4 text-primary" />
+          {tDialect("practiceDialectBtn")}
+        </Button>
+
         {recordedBlob ? (
           <Button
             className="min-h-14 rounded-2xl sm:w-auto"
@@ -2598,6 +2929,38 @@ export function DifficultWordPracticePanel({
           )}
         </div>
       </details>
+
+      <details
+        className="rounded-2xl border border-amber-200/80 bg-amber-50/40 px-4 py-3 text-sm"
+        data-testid="practice-regional-profile-details"
+      >
+        <summary className="cursor-pointer font-bold text-[#213C42]">
+          {tDialect("practiceProfileToggle")}
+        </summary>
+        <div className="mt-3">
+          <RegionalPhoneticProfileCard
+            childAlias={child.alias}
+            childId={child.id}
+            compact
+            onOpenEarTrainer={() => setShowEarTrainerModal(true)}
+          />
+        </div>
+      </details>
+
+      <CreateMicroStoryModal
+        child={child}
+        isOpen={showMicroStoryModal}
+        onClose={() => setShowMicroStoryModal(false)}
+      />
+
+      <TaiThinhEarTrainerModal
+        childAlias={child.alias}
+        childId={child.id}
+        isOpen={showEarTrainerModal}
+        onClose={() => setShowEarTrainerModal(false)}
+        speechPlayer={speechPlayer}
+        speechService={speechService}
+      />
     </section>
   );
 }

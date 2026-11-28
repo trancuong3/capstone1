@@ -8,7 +8,7 @@ Provides 8 primary-school songs (Grades 1–5) aligned with Vietnamese phonics p
 4. Cò lả đồng dao (Dân ca đồng bằng Bắc Bộ, Grades 2–5)
 5. Rồng rắn lên mây (Đồng dao dân gian Việt Nam, Grades 1–3)
 6. Khúc ca Đánh vần vui (Sáng tác giáo dục ViRead CC0, luyện âm l/n, s/x, tr/ch, Grades 1–2)
-7. Vườn xuân lung linh (Sáng tác giáo dục ViRead CC0, luyện từ láy & thanh hỏi/ngã, Grades 3–5)
+7. Vườn xuân lung linh (Sáng tác giáo dục ViRead CC0, luyện từ láy & thanh hỏi/ngã, Grades 1–5)
 
 100% public-domain / CC0 copyright clean; zero external paid APIs.
 """
@@ -202,7 +202,7 @@ CHILDREN_KARAOKE_PACK: tuple[ChildrenSongSpec, ...] = (
         slug="vuon-xuan-lung-linh",
         title="Vườn xuân lung linh",
         author="ViRead Âm nhạc Giáo dục (CC0)",
-        min_grade=3,
+        min_grade=1,
         max_grade=5,
         bpm=94.0,
         source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication.",
@@ -220,6 +220,114 @@ CHILDREN_KARAOKE_PACK: tuple[ChildrenSongSpec, ...] = (
             ("Yêu tiếng Việt mình đẹp thiết tha", (67, 69, 62, 62, 62, 69, 60)),
         ),
     ),
+)
+
+
+GRADE_SERIES_KARAOKE_PACK: tuple[ChildrenSongSpec, ...] = (
+    ChildrenSongSpec(
+        slug="meo-mun-vui-den-truong",
+        title="Mèo Mun Vui Đến Trường",
+        author="ViRead Âm nhạc Giáo dục (CC0)",
+        min_grade=1,
+        max_grade=1,
+        bpm=98.0,
+        source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication (đồng hành sách Lớp 1).",
+        usage_note="Luyện nhịp điệu và đánh vần vần đơn, âm m/n, tr/ch cho học sinh Lớp 1.",
+        phonics_focus="Lớp 1 · Vần đơn & âm m/n · tr/ch",
+        palette=((255, 247, 237), (251, 146, 60), (194, 65, 12)),
+        lines=(
+            ("Nắng sớm lên hồng trên mái trường", (60, 62, 64, 67, 67, 69, 67)),
+            ("Mèo Mun đeo cặp bước trên đường", (67, 64, 62, 64, 67, 64, 60)),
+            ("Cô giáo hiền hòa tươi mắt cười", (64, 67, 69, 69, 67, 64, 62)),
+            ("Đánh vần tròn tiếng chữ thêm tươi", (62, 64, 67, 69, 67, 64, 60)),
+            ("Tờ ê tê đọc vang cùng bạn", (67, 67, 69, 67, 64, 62, 64)),
+            ("Mỗi ngày đến lớp thật là vui", (64, 67, 69, 67, 64, 62, 60)),
+        ),
+    ),
+    ChildrenSongSpec(
+        slug="nang-som-vuon-hoa",
+        title="Nắng Sớm Vườn Hoa",
+        author="ViRead Âm nhạc Giáo dục (CC0)",
+        min_grade=2,
+        max_grade=2,
+        bpm=96.0,
+        source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication (đồng hành sách Lớp 2).",
+        usage_note="Luyện phát âm các cặp âm r/d/gi, s/x và từ ngữ thiên nhiên cho học sinh Lớp 2.",
+        phonics_focus="Lớp 2 · Âm r/d/gi · s/x & từ láy",
+        palette=((236, 253, 245), (52, 211, 153), (5, 150, 105)),
+        lines=(
+            ("Sáng nay bé Na ra vườn nhỏ", (60, 64, 67, 67, 69, 67, 64)),
+            ("Tưới làn nước mát cho mầm xanh", (64, 67, 69, 67, 64, 62, 60)),
+            ("Gió reo rì rào qua kẽ lá", (67, 67, 69, 72, 69, 67, 64)),
+            ("Chim sâu ríu rít chuyền trên cành", (67, 64, 69, 69, 67, 64, 62)),
+            ("Hướng dương nở vàng khoe sắc thắm", (60, 62, 64, 67, 69, 67, 64)),
+            ("Vườn em thơm ngát nắng trong lành", (62, 64, 67, 69, 67, 62, 60)),
+        ),
+    ),
+    ChildrenSongSpec(
+        slug="lung-linh-den-anh-sao",
+        title="Lung Linh Đèn Ánh Sao",
+        author="ViRead Âm nhạc Giáo dục (CC0)",
+        min_grade=3,
+        max_grade=3,
+        bpm=94.0,
+        source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication (đồng hành sách Lớp 3).",
+        usage_note="Luyện phân biệt thanh hỏi / ngã và từ gợi tả ánh sáng cho học sinh Lớp 3.",
+        phonics_focus="Lớp 3 · Thanh hỏi / ngã & từ gợi tả",
+        palette=((254, 249, 195), (250, 204, 21), (180, 83, 9)),
+        lines=(
+            ("Đêm thu trăng sáng tròn vằng vặc", (64, 67, 69, 72, 69, 67, 64)),
+            ("Đèn sao năm cánh rực sắc màu", (64, 67, 64, 69, 67, 64, 62)),
+            ("Tiếng trống tùng dinh vang khắp ngõ", (60, 64, 67, 67, 69, 69, 67)),
+            ("Bạn bè ríu rít bước bên nhau", (69, 67, 69, 72, 69, 67, 64)),
+            ("Trao chiếc đèn xinh cùng em nhỏ", (67, 69, 67, 64, 62, 64, 67)),
+            ("Ánh sao sẻ chia sáng đêm rằm", (69, 67, 64, 67, 64, 62, 60)),
+        ),
+    ),
+    ChildrenSongSpec(
+        slug="khuc-hat-giot-suong-mai",
+        title="Khúc Hát Giọt Sương Mai",
+        author="ViRead Âm nhạc Giáo dục (CC0)",
+        min_grade=4,
+        max_grade=4,
+        bpm=90.0,
+        source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication (đồng hành sách Lớp 4).",
+        usage_note="Luyện ngắt nhịp câu thơ bảy chữ và từ láy miêu tả thiên nhiên cho học sinh Lớp 4.",
+        phonics_focus="Lớp 4 · Ngắt nhịp & từ miêu tả thiên nhiên",
+        palette=((224, 242, 254), (56, 189, 248), (3, 105, 161)),
+        lines=(
+            ("Long lanh giọt sương nằm trên lá", (60, 64, 67, 69, 67, 64, 67)),
+            ("Đón tia nắng ấm buổi ban mai", (69, 67, 69, 72, 69, 67, 64)),
+            ("Bay lên trời cao thành mây trắng", (64, 67, 69, 72, 72, 69, 67)),
+            ("Bồng bềnh theo gió dạo dặm dài", (67, 64, 67, 69, 67, 64, 62)),
+            ("Hóa cơn mưa rào về muôn lối", (60, 62, 64, 67, 69, 67, 64)),
+            ("Cho đồng lúa chín thắm tương lai", (64, 67, 69, 67, 64, 62, 60)),
+        ),
+    ),
+    ChildrenSongSpec(
+        slug="ngon-hai-dang-bien-xanh",
+        title="Ngọn Hải Đăng Biển Xanh",
+        author="ViRead Âm nhạc Giáo dục (CC0)",
+        min_grade=5,
+        max_grade=5,
+        bpm=92.0,
+        source_note="Sáng tác giáo dục gốc của dự án ViRead phát hành theo CC0 1.0 Public Domain Dedication (đồng hành sách Lớp 5).",
+        usage_note="Luyện biểu cảm hào hùng và từ vựng biển đảo quê hương cho học sinh Lớp 5.",
+        phonics_focus="Lớp 5 · Biểu cảm câu dài & từ vựng quê hương",
+        palette=((224, 231, 255), (99, 102, 241), (49, 46, 129)),
+        lines=(
+            ("Giữa trùng khơi xanh ngọn hải đăng", (60, 64, 67, 72, 69, 67, 67)),
+            ("Đứng canh biển rộng suốt tháng năm", (69, 69, 67, 64, 67, 69, 64)),
+            ("Mặc cho sóng vỗ cùng giông gió", (64, 67, 69, 69, 67, 69, 72)),
+            ("Ngọn đèn kiên cường chiếu xa xăm", (72, 69, 67, 64, 67, 64, 62)),
+            ("Dẫn đoàn tàu cá về bến ấm", (60, 64, 67, 69, 67, 69, 67)),
+            ("Biển trời Tổ quốc mãi bình yên", (69, 67, 64, 67, 64, 62, 60)),
+        ),
+    ),
+)
+
+ALL_CHILDREN_KARAOKE_SONGS: tuple[ChildrenSongSpec, ...] = (
+    CHILDREN_KARAOKE_PACK + GRADE_SERIES_KARAOKE_PACK
 )
 
 
@@ -570,6 +678,40 @@ def render_children_song_cover_webp(spec: ChildrenSongSpec, *, size: int = 512) 
     cx, cy, r = size // 2, int(size * 0.46), int(size * 0.20)
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255), outline=accent, width=8)
     # Musical eighth-note pair inside badge
+    nx1, nx2 = cx - 26, cx + 24
+    ny_top, ny_bot = cy - 38, cy + 28
+    draw.line((nx1 + 14, ny_bot, nx1 + 14, ny_top), fill=accent, width=10)
+    draw.line((nx2 + 14, ny_bot - 8, nx2 + 14, ny_top - 10), fill=accent, width=10)
+    draw.line((nx1 + 14, ny_top, nx2 + 14, ny_top - 10), fill=accent, width=12)
+    draw.ellipse((nx1 - 14, ny_bot - 12, nx1 + 18, ny_bot + 14), fill=accent)
+    draw.ellipse((nx2 - 14, ny_bot - 20, nx2 + 18, ny_bot + 6), fill=accent)
+
+    png_buf = BytesIO()
+    img.save(png_buf, format="PNG")
+    return normalize_cover(png_buf.getvalue())
+
+
+def render_ngoi_sao_nho_cover_webp(*, size: int = 512) -> bytes:
+    """Render a matching pastel starry-sky cover illustration for 'Ngôi sao nhỏ'."""
+    bg = (224, 231, 255)
+    mid = (129, 140, 248)
+    accent = (79, 70, 229)
+    star_gold = (251, 191, 36)
+
+    img = Image.new("RGB", (size, size), bg)
+    draw = ImageDraw.Draw(img)
+
+    # Gentle twilight hills + golden moon/stars matching the children's song pack aesthetic
+    draw.ellipse((size * 0.60, size * 0.08, size * 0.88, size * 0.36), fill=star_gold)
+    for sx, sy, sr in ((0.18, 0.16, 0.032), (0.34, 0.11, 0.024), (0.14, 0.34, 0.022), (0.84, 0.46, 0.026)):
+        px, py, pr = size * sx, size * sy, size * sr
+        draw.ellipse((px - pr, py - pr, px + pr, py + pr), fill=star_gold)
+    draw.ellipse((-size * 0.2, size * 0.62, size * 0.72, size * 1.18), fill=mid)
+    draw.ellipse((size * 0.32, size * 0.68, size * 1.2, size * 1.22), fill=accent)
+
+    # Central friendly music badge
+    cx, cy, r = size // 2, int(size * 0.46), int(size * 0.20)
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255), outline=accent, width=8)
     nx1, nx2 = cx - 26, cx + 24
     ny_top, ny_bot = cy - 38, cy + 28
     draw.line((nx1 + 14, ny_bot, nx1 + 14, ny_top), fill=accent, width=10)

@@ -21,6 +21,20 @@ export interface DifficultWordListOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface DifficultWordEvaluateAudioRequestInput extends DifficultWordEvaluateAudioInput {
+  readonly provider_mode?: string | null;
+  readonly allow_google_stt?: boolean | null;
+  readonly timeoutMs?: number;
+}
+
+export interface DifficultWordEvaluateDirectRequestInput extends DifficultWordEvaluateDirectInput {
+  readonly includeNextRecommended?: boolean;
+  readonly include_next_recommended?: boolean;
+  readonly timeoutMs?: number;
+}
+
+const DEFAULT_PRACTICE_EVALUATE_TIMEOUT_MS = 12_000;
+
 export interface DifficultWordService {
   list(
     childId: string,
@@ -40,12 +54,12 @@ export interface DifficultWordService {
   evaluateAudio(
     childId: string,
     attemptId: string,
-    input: DifficultWordEvaluateAudioInput,
+    input: DifficultWordEvaluateAudioRequestInput,
     signal?: AbortSignal,
   ): Promise<DifficultWordPracticeAttemptDTO>;
   evaluatePracticeWord?(
     childId: string,
-    input: DifficultWordEvaluateDirectInput,
+    input: DifficultWordEvaluateDirectRequestInput,
     signal?: AbortSignal,
   ): Promise<DifficultWordPracticeAttemptDTO>;
   completePractice(
@@ -303,6 +317,12 @@ export function createDifficultWordService(): DifficultWordService {
       if (input.browser_confidence != null) {
         form.append("browser_confidence", String(input.browser_confidence));
       }
+      if (input.provider_mode) {
+        form.append("provider_mode", input.provider_mode);
+      }
+      if (input.allow_google_stt != null) {
+        form.append("allow_google_stt", String(input.allow_google_stt));
+      }
       return requestApi(
         `/system/difficult-words/${encodeURIComponent(childId)}/practice/${encodeURIComponent(attemptId)}/evaluate-audio`,
         practiceAttemptSchema,
@@ -310,6 +330,7 @@ export function createDifficultWordService(): DifficultWordService {
         {
           method: "POST",
           body: form,
+          timeoutMs: input.timeoutMs ?? DEFAULT_PRACTICE_EVALUATE_TIMEOUT_MS,
         },
       );
     },
@@ -368,6 +389,11 @@ export function createDifficultWordService(): DifficultWordService {
       if (input.allow_google_stt != null) {
         form.append("allow_google_stt", String(input.allow_google_stt));
       }
+      const includeNextRecommended =
+        input.includeNextRecommended ?? input.include_next_recommended;
+      if (includeNextRecommended === false) {
+        form.append("include_next_recommended", "false");
+      }
       return requestApi(
         `/system/difficult-words/${encodeURIComponent(childId)}/practice/evaluate`,
         practiceAttemptSchema,
@@ -375,6 +401,7 @@ export function createDifficultWordService(): DifficultWordService {
         {
           method: "POST",
           body: form,
+          timeoutMs: input.timeoutMs ?? DEFAULT_PRACTICE_EVALUATE_TIMEOUT_MS,
         },
       );
     },

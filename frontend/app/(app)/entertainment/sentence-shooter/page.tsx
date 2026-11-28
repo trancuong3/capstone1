@@ -43,10 +43,13 @@ interface SentenceShooterPageProps {
   searchParams: Promise<{
     autoplay?: string | string[];
     book_id?: string | string[];
+    bookId?: string | string[];
+    pageId?: string | string[];
+    childId?: string | string[];
     difficulty?: string | string[];
-    mode?: string | string[];
     reading_session_id?: string | string[];
     source?: string | string[];
+    mode?: string | string[];
   }>;
 }
 
@@ -76,13 +79,21 @@ export default async function SentenceShooterPage({
     rawMode && (VALID_LEARNING_MODES as readonly string[]).includes(rawMode)
       ? (rawMode as SentenceShooterLearningMode)
       : undefined;
+  const initialMode = rawMode === "magic-quest" ? "magic-quest" : undefined;
+  const candidatePageId = firstValue(query.pageId);
+  const initialPageId =
+    candidatePageId && z.uuid().safeParse(candidatePageId).success
+      ? candidatePageId
+      : undefined;
 
   return (
     <SentenceShooterScreen
       autoPlay={firstValue(query.autoplay) === "1"}
-      initialBookId={firstValue(query.book_id)}
+      initialBookId={firstValue(query.bookId) ?? firstValue(query.book_id)}
       initialDifficulty={initialDifficulty}
       initialLearningMode={initialLearningMode}
+      initialMode={initialMode}
+      initialPageId={initialPageId}
       readingSessionId={readingSessionId}
     />
   );

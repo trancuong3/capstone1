@@ -56,6 +56,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
 import type { BookPresentationAssetDTO } from "@/types/book-assets";
+import type { GlobalTaskStatus } from "@/types/global-tasks";
 import {
   SOURCE_USAGE_OPTIONS,
   type ParentPageSubmissionDTO,
@@ -93,6 +94,30 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   SKIPPED: "privateManager.statusLabels.SKIPPED",
   FAILED: "privateManager.statusLabels.FAILED",
 };
+
+function mapSubmissionStatusToGlobalTaskStatus(
+  status: SubmissionWorkflowStatus | undefined,
+): GlobalTaskStatus | undefined {
+  switch (status) {
+    case "PASSED_READY_TO_ADD":
+    case "APPROVED_READY_TO_ADD":
+    case "ADDED_TO_BOOK":
+      return "SUCCEEDED";
+    case "NEEDS_ADMIN_REVIEW":
+    case "PENDING_ADMIN":
+    case "NEEDS_RECHECK":
+      return "WAITING_FOR_REVIEW";
+    case "CHECK_FAILED":
+    case "REJECTED":
+      return "FAILED";
+    case "CANCELLED":
+      return "CANCELLED";
+    case "CHECKING":
+      return "RUNNING";
+    default:
+      return undefined;
+  }
+}
 
 function generateClientKey(): string {
   if (
@@ -309,7 +334,9 @@ function describeStageErrorHint(
   if (
     upper.includes("BUSY") ||
     upper.includes("RATE") ||
-    upper.includes("429")
+    upper.includes("429") ||
+    upper.includes("QUOTA") ||
+    upper.includes("ALL_PROVIDERS_SKIPPED")
   ) {
     return t("privateManager.workerErrorOverloaded");
   }
@@ -746,7 +773,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.acceptSpelling(
+      const updated = await service.acceptSpelling(
         bookId,
         sub.id,
         sub.submission_version,
@@ -757,7 +784,18 @@ function ParentPrivateBookManagerContent({
           page: sub.source_page_number,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status: mapSubmissionStatusToGlobalTaskStatus(
+                updated.workflow_status,
+              ),
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -789,7 +827,20 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: result.submission?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  result.submission.workflow_status,
+                ) ?? "SUCCEEDED",
+              updated_at: result.submission.updated_at,
+              completed_at: result.submission.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -806,7 +857,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.requestAdminReview(bookId, sub.id, {
+      const updated = await service.requestAdminReview(bookId, sub.id, {
         expected_submission_version: sub.submission_version,
         expected_candidate_hash: sub.candidate_hash,
         source_type: reviewSourceType,
@@ -820,7 +871,19 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  updated.workflow_status,
+                ) ?? "WAITING_FOR_REVIEW",
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -871,7 +934,18 @@ function ParentPrivateBookManagerContent({
         sub.id,
         updated?.workflow_status === "CHECKING"
           ? undefined
-          : { includeNextSync: true },
+          : {
+              includeNextSync: true,
+              optimisticTask: updated?.updated_at
+                ? {
+                    source: "parent_submission",
+                    status: mapSubmissionStatusToGlobalTaskStatus(
+                      updated.workflow_status,
+                    ),
+                    updated_at: updated.updated_at,
+                  }
+                : undefined,
+            },
       );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
@@ -932,6 +1006,7 @@ function ParentPrivateBookManagerContent({
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
       if (updated.pending_submission_count > 0) {
+        taskCenter?.markTargetAlertsSeen({ bookId });
         emitStudioTasksChanged({ portal: "parent" });
       }
       await loadDetail(true);
@@ -977,7 +1052,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.editCommittedPage(bookId, page.page_id, {
+      const updated = await service.editCommittedPage(bookId, page.page_id, {
         candidate_text: editPageText,
         page_number: editPageNumber,
         source_type: editPageSourceType,
@@ -989,6 +1064,25 @@ function ParentPrivateBookManagerContent({
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(
+          updated.id,
+          updated.workflow_status === "CHECKING"
+            ? undefined
+            : {
+                includeNextSync: true,
+                optimisticTask: updated.updated_at
+                  ? {
+                      source: "parent_submission",
+                      status: mapSubmissionStatusToGlobalTaskStatus(
+                        updated.workflow_status,
+                      ),
+                      updated_at: updated.updated_at,
+                    }
+                  : undefined,
+              },
+        );
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1008,7 +1102,11 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.replaceCommittedPageFile(bookId, page.page_id, file);
+      const updated = await service.replaceCommittedPageFile(
+        bookId,
+        page.page_id,
+        file,
+      );
       setEditingPageId(null);
       setActionNotice(
         ocrWorkerOffline
@@ -1020,6 +1118,9 @@ function ParentPrivateBookManagerContent({
             }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(updated.id);
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1971,6 +2072,11 @@ function ParentPrivateBookManagerContent({
                   sub.tool_check_error_code,
                   t,
                 );
+                const parentNotice =
+                  sub.tool_check_parent_notice ||
+                  sub.tool_check_findings_count > 0
+                    ? parentNoticeMeta(sub, t)
+                    : null;
 
                 return (
                   <article
@@ -2138,41 +2244,52 @@ function ParentPrivateBookManagerContent({
                         </p>
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
-                        {sub.tool_check_parent_notice ||
-                        sub.tool_check_findings_count > 0
-                          ? (() => {
-                              const notice = parentNoticeMeta(sub, t);
-                              return (
-                                <div
-                                  className={`rounded-control border p-3 text-xs ${notice.className}`}
+                        {parentNotice ? (
+                          <div
+                            className={`rounded-control border p-3 text-xs ${parentNotice.className}`}
+                          >
+                            <p className="flex items-center gap-1.5 font-bold">
+                              {sub.workflow_status === "PASSED_READY_TO_ADD" ||
+                              sub.workflow_status === "APPROVED_READY_TO_ADD" ||
+                              sub.workflow_status === "ADDED_TO_BOOK" ? (
+                                <ShieldCheck
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              ) : (
+                                <AlertTriangle
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              )}
+                              {parentNotice.title}
+                            </p>
+                            {sub.tool_check_parent_notice ? (
+                              <p className="mt-1">
+                                {sub.tool_check_parent_notice}
+                              </p>
+                            ) : null}
+                            {sub.workflow_status === "CHECK_FAILED" &&
+                            sub.can_retry ? (
+                              <div className="mt-2.5">
+                                <Button
+                                  className="min-h-10 w-auto px-3.5 text-xs"
+                                  disabled={isSubBusy || isSuspended}
+                                  isLoading={busyKey === `retry:${sub.id}`}
+                                  onClick={() => void handleRetry(sub)}
+                                  type="button"
+                                  variant="secondary"
                                 >
-                                  <p className="flex items-center gap-1.5 font-bold">
-                                    {sub.workflow_status ===
-                                      "PASSED_READY_TO_ADD" ||
-                                    sub.workflow_status ===
-                                      "APPROVED_READY_TO_ADD" ||
-                                    sub.workflow_status === "ADDED_TO_BOOK" ? (
-                                      <ShieldCheck
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    ) : (
-                                      <AlertTriangle
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    )}
-                                    {notice.title}
-                                  </p>
-                                  {sub.tool_check_parent_notice ? (
-                                    <p className="mt-1">
-                                      {sub.tool_check_parent_notice}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              );
-                            })()
-                          : null}
+                                  <RotateCcw
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                  {t("privateManager.retryCheckAction")}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
 
                         {/* Candidate Text Preview */}
                         {sub.candidate_text ? (
@@ -2492,8 +2609,13 @@ function ParentPrivateBookManagerContent({
                             </Button>
                           ) : null}
 
-                          {/* Stage-preserving Retry */}
-                          {sub.can_retry ? (
+                          {/* Stage-preserving Retry (avoid duplicating when already shown in the top error notice) */}
+                          {sub.can_retry &&
+                          !(
+                            sub.workflow_status === "CHECK_FAILED" &&
+                            (sub.tool_check_parent_notice ||
+                              sub.tool_check_findings_count > 0)
+                          ) ? (
                             <Button
                               className="min-h-11 w-auto px-4 text-sm"
                               disabled={isSubBusy || isSuspended}

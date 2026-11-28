@@ -23,9 +23,12 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-interface KaraokeLibraryPageProps {
-  readonly searchParams: Promise<{
+interface KaraokePageProps {
+  readonly searchParams?: Promise<{
     autoplay?: string | string[];
+    mode?: string | string[];
+    focus?: string | string[];
+    autopilot?: string | string[];
   }>;
 }
 
@@ -33,7 +36,11 @@ function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-export default async function Page({ searchParams }: KaraokeLibraryPageProps) {
-  const query = await searchParams;
-  return <KaraokeLibraryScreen autoPlay={firstValue(query.autoplay) === "1"} />;
+export default async function Page({ searchParams }: KaraokePageProps = {}) {
+  const query = searchParams ? await searchParams : undefined;
+  const initialMode =
+    firstValue(query?.mode) === "magic-chant" ? "magic-chant" : undefined;
+  const autoPlay =
+    firstValue(query?.autoplay) === "1" || firstValue(query?.autopilot) === "1";
+  return <KaraokeLibraryScreen autoPlay={autoPlay} initialMode={initialMode} />;
 }

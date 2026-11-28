@@ -196,6 +196,144 @@ class VoiceWorkerHelpersTests(unittest.TestCase):
         self.assertEqual(words[0]["text"], "một")
         self.assertIsNone(words[0]["logprob"])
 
+    def test_worker_fast_path_magic_hints_nonblocking_tts_check_and_split_loading(self) -> None:
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        # 1. Queue wait strictly below backend 5.0s loopback read timeout & widened WS interim step
+        self.assertLessEqual(self.vw.STT_QUEUE_WAIT_SECONDS, 3.5)
+        self.assertEqual(self.vw._WS_INTERIM_STEP_SAMPLES, int(16000 * 0.28))
+
+        # 2. Magic-byte hints prioritize webm before None auto-probe & skip doomed sf.read()
+        webm_bytes = b"\x1a\x45\xdf\xa3" + b"\x00" * 32
+        hints = self.vw._guess_av_format_hints(webm_bytes, filename="clip.webm", content_type="audio/webm")
+        self.assertEqual(hints[0], "webm")
+        self.assertEqual(hints[-1], None)
+
+        with (
+            patch.object(self.vw.sf, "read", side_effect=AssertionError("sf.read must be skipped for WebM")),
+            patch.object(self.vw.av, "open", side_effect=RuntimeError("mock av stop")) as mock_av_open,
+        ):
+            with self.assertRaises(RuntimeError):
+                self.vw.decode_audio_bytes_to_16k_mono(
+                    webm_bytes, filename="clip.webm", content_type="audio/webm"
+                )
+        self.assertEqual(mock_av_open.call_args_list[0].kwargs.get("format"), "webm")
+
+        # 3. TTS quality self-check skips immediately without blocking when STT is active
+        sr = 16000
+        clip = np.full(1600, 0.1, dtype=np.float32)
+        with (
+            patch.object(self.vw.runtime, "stt_recognizer", MagicMock()),
+            patch.object(self.vw.runtime, "active_stt_jobs", 1),
+            patch.object(self.vw, "decode_stt_window_sync", side_effect=AssertionError("must skip")),
+        ):
+            ok, reason, stt = self.vw._check_tts_audio_quality(
+                clip, sr, "con mèo", is_short_word=True
+            )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "stt_busy_skipped")
+        self.assertEqual(stt, "")
+
+        # 4. ensure_stt_loaded loads ONLY STT (not heavy TTS) and still honors patched ensure_loaded
+        eng = self.vw.VoiceRuntimeEngine()
+        stt_loads = 0
+        tts_loads = 0
+
+        def _fake_load_stt() -> None:
+            nonlocal stt_loads
+            stt_loads += 1
+            eng.stt_recognizer = MagicMock()
+
+        def _fake_load_tts() -> None:
+            nonlocal tts_loads
+            tts_loads += 1
+            eng.tts_engine = MagicMock()
+
+        with (
+            patch.object(eng, "load_stt_sync", side_effect=_fake_load_stt),
+            patch.object(eng, "load_tts_sync", side_effect=_fake_load_tts),
+        ):
+            asyncio.run(eng.ensure_stt_loaded())
+        self.assertEqual(stt_loads, 1)
+        self.assertEqual(tts_loads, 0)
+
+        eng2 = self.vw.VoiceRuntimeEngine()
+        patched_ensure = AsyncMock()
+        with patch.object(eng2, "ensure_loaded", new=patched_ensure):
+            asyncio.run(eng2.ensure_stt_loaded())
+        patched_ensure.assert_awaited_once()
+
+    def test_tts_quality_check_timeout_does_not_leak_stt_semaphore(self) -> None:
+        import asyncio
+        import threading
+        import time
+
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+
+        def _run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            ready.set()
+            loop.run_forever()
+
+        thread = threading.Thread(target=_run_loop, daemon=True)
+        thread.start()
+        ready.wait(timeout=2.0)
+
+        try:
+            sem_holder: dict[str, asyncio.Semaphore] = {}
+
+            async def _init_sem() -> None:
+                sem_holder["sem"] = asyncio.Semaphore(2)
+
+            asyncio.run_coroutine_threadsafe(_init_sem(), loop).result(timeout=2.0)
+            sem = sem_holder["sem"]
+
+            # Block the event loop briefly (>0.1s) so fut.result(timeout=0.1) times out
+            # before _try_acquire_idle_stt runs, then let it execute and verify 0 leaked permits.
+            def _stall_loop() -> None:
+                time.sleep(0.18)
+
+            loop.call_soon_threadsafe(_stall_loop)
+
+            clip = np.full(1600, 0.1, dtype=np.float32)
+            with (
+                patch.object(self.vw.runtime, "stt_recognizer", MagicMock()),
+                patch.object(self.vw.runtime, "active_stt_jobs", 0),
+                patch.object(self.vw.runtime, "stt_semaphore", sem),
+                patch.object(
+                    self.vw,
+                    "decode_stt_window_sync",
+                    side_effect=AssertionError("must not decode after timeout"),
+                ),
+            ):
+                ok, reason, stt = self.vw._check_tts_audio_quality(
+                    clip, 16000, "con mèo", is_short_word=True, event_loop=loop
+                )
+
+            self.assertTrue(ok)
+            self.assertEqual(reason, "stt_busy_skipped")
+            self.assertEqual(stt, "")
+
+            # Drain the event loop and confirm both STT semaphore permits remain available
+            async def _verify_two_permits() -> int:
+                await asyncio.sleep(0.05)
+                await asyncio.wait_for(sem.acquire(), timeout=0.5)
+                await asyncio.wait_for(sem.acquire(), timeout=0.5)
+                sem.release()
+                sem.release()
+                return 2
+
+            permits = asyncio.run_coroutine_threadsafe(
+                _verify_two_permits(), loop
+            ).result(timeout=2.0)
+            self.assertEqual(permits, 2)
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=2.0)
+            loop.close()
+
 
 if __name__ == "__main__":
     unittest.main()

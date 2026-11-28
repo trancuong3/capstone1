@@ -15,63 +15,22 @@ import {
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import {
+  SELECTED_CHILD_SIGNAL_KEY,
+  SELECTED_CHILD_SYNC_CHANNEL,
+  broadcastChildSelection,
   clearPersistedSelectedChild,
   getSelectedChildStorageKey,
   normalizeSelectedChildId,
   readSessionSelectedChildId,
+  subscribeLocalSelectedChildChange,
   writeSessionSelectedChildId,
+  type ChildSyncMessage,
 } from "@/lib/cache/selected-child-storage";
 import {
   hydrateTeacherVoiceFromChildProfile,
   resetTeacherVoiceForActorSwitch,
 } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
-
-const SELECTED_CHILD_SYNC_CHANNEL = "viread:selected-child-sync";
-const SELECTED_CHILD_SIGNAL_KEY = "viread:selected-child-signal";
-
-interface ChildSyncMessage {
-  userId: string;
-  childId: string | null;
-  nonce: string;
-}
-
-function broadcastChildSelection(
-  userId: string | null,
-  childId: string | null,
-  channel?: BroadcastChannel | null,
-) {
-  if (!userId || typeof window === "undefined") return;
-  const payload: ChildSyncMessage = {
-    userId,
-    childId,
-    nonce: `${Date.now()}-${Math.random()}`,
-  };
-  if (channel) {
-    try {
-      channel.postMessage(payload);
-    } catch {
-      // Ignore closed/unsupported channel errors; storage signal handles fallback.
-    }
-  } else if (typeof BroadcastChannel !== "undefined") {
-    try {
-      const transient = new BroadcastChannel(SELECTED_CHILD_SYNC_CHANNEL);
-      transient.postMessage(payload);
-      transient.close();
-    } catch {
-      // Ignore unsupported BroadcastChannel environments.
-    }
-  }
-  try {
-    window.localStorage.setItem(
-      SELECTED_CHILD_SIGNAL_KEY,
-      JSON.stringify(payload),
-    );
-    window.localStorage.removeItem(SELECTED_CHILD_SIGNAL_KEY);
-  } catch {
-    // Ignore storage quota or private-mode restrictions; in-memory state stays authoritative.
-  }
-}
 
 export interface AppStore {
   selectedChildId: string | null;
@@ -92,6 +51,34 @@ interface SelectionState {
   userId: string | null;
   childId: string | null;
   child: ChildProfileDTO | null;
+}
+
+function stableSettingsKey(
+  settings: Record<string, unknown> | null | undefined,
+): string {
+  if (!settings || typeof settings !== "object") return "{}";
+  try {
+    return JSON.stringify(settings);
+  } catch {
+    return "{}";
+  }
+}
+
+export function areEquivalentChildProfiles(
+  left: ChildProfileDTO | null | undefined,
+  right: ChildProfileDTO | null | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.parent_id === right.parent_id &&
+    left.alias === right.alias &&
+    left.grade === right.grade &&
+    (left.avatar_url ?? null) === (right.avatar_url ?? null) &&
+    left.created_at === right.created_at &&
+    stableSettingsKey(left.settings) === stableSettingsKey(right.settings)
+  );
 }
 
 export function AppStoreProvider({
@@ -225,8 +212,16 @@ export function AppStoreProvider({
       }
     }
 
+    const unsubscribeLocal = subscribeLocalSelectedChildChange((detail) => {
+      if (detail.userId !== activeUserId) {
+        return;
+      }
+      applySyncedChildId(normalizeSelectedChildId(detail.childId));
+    });
+
     window.addEventListener("storage", handleStorage);
     return () => {
+      unsubscribeLocal();
       window.removeEventListener("storage", handleStorage);
       if (channel) {
         channel.onmessage = null;
@@ -317,6 +312,13 @@ export function AppStoreProvider({
             ? (current.childId ?? readSessionSelectedChildId(activeUserId))
             : current.childId;
         if (effectiveUserId !== activeUserId || effectiveChildId !== child.id) {
+          return current;
+        }
+        if (
+          current.userId === activeUserId &&
+          current.childId === effectiveChildId &&
+          areEquivalentChildProfiles(current.child, child)
+        ) {
           return current;
         }
         return {

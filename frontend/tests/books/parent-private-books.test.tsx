@@ -1673,4 +1673,346 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     );
     expect(screen.queryByTestId("avatar-running-dot")).not.toBeInTheDocument();
   });
+
+  it("suppresses ParentAccountDropdown warnings on committed-page edit/delete, book edit, and deleting a book directly from ParentMyBooksScreen", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const PAGE_2_ID = "dd000000-0000-4000-8000-000000000002";
+    const SUB_2_ID = "bb000000-0000-4000-8000-000000000002";
+
+    const makeParentTask = (
+      overrides: Partial<GlobalTaskItem> = {},
+    ): GlobalTaskItem => ({
+      id: SUB_ID,
+      source: "parent_submission",
+      job_type: "PARENT_PAGE_PIPELINE",
+      title_vi: "Kiểm tra trang sách của tôi",
+      book_id: BOOK_ID,
+      book_page_id: PAGE_ID,
+      book_title: "Truyện Riêng Nhà An",
+      page_number: 1,
+      source_revision_id: REV_ID,
+      actor_id: "parent-a",
+      actor_role: "parent",
+      portal: "parent",
+      status: "SUCCEEDED",
+      status_label_vi: "Bản đọc đã sẵn sàng để xem",
+      stage: "COMPLETED",
+      stage_label_vi: "Hoàn tất",
+      priority: 50,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 3,
+      progress_total: 3,
+      progress_unit: "bước",
+      progress_pct: 100,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/my-books?bookId=${BOOK_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: null,
+      error_message_vi: null,
+      created_at: NOW,
+      updated_at: "2026-11-28T12:00:00.000Z",
+      started_at: NOW,
+      completed_at: "2026-11-28T12:00:00.000Z",
+      ...overrides,
+    });
+
+    let currentTasks: GlobalTaskItem[] = [
+      makeParentTask({
+        id: SUB_ID,
+        book_page_id: PAGE_ID,
+        status: "SUCCEEDED",
+        updated_at: "2026-11-28T12:00:00.000Z",
+      }),
+      makeParentTask({
+        id: SUB_2_ID,
+        book_page_id: PAGE_2_ID,
+        page_number: 2,
+        status: "SUCCEEDED",
+        updated_at: "2026-11-28T12:00:10.000Z",
+      }),
+    ];
+
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => ({
+        actor_id: "parent-a",
+        actor_role: "parent" as const,
+        portal: "parent" as const,
+        active_count: currentTasks.filter((t) => t.status === "RUNNING").length,
+        waiting_review_count: currentTasks.filter(
+          (t) => t.status === "WAITING_FOR_REVIEW",
+        ).length,
+        failed_count: currentTasks.filter((t) => t.status === "FAILED").length,
+        completed_count: currentTasks.filter((t) => t.status === "SUCCEEDED")
+          .length,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: currentTasks,
+      })),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    let currentBook: ParentPrivateBookSummaryDTO | null = makeBookSummary({
+      title: "Truyện Riêng Nhà An",
+      committed_page_count: 2,
+      readable_for_children: true,
+    });
+    let currentDetail: ParentPrivateBookDetailDTO = {
+      book: currentBook,
+      pages: [
+        {
+          page_id: PAGE_ID,
+          page_number: 1,
+          current_verified_revision_id: REV_ID,
+          verified_text: "Trang một nguyên bản.",
+          verified_text_preview: "Trang một nguyên bản.",
+          image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_ID}/image`,
+          created_at: NOW,
+        },
+        {
+          page_id: PAGE_2_ID,
+          page_number: 2,
+          current_verified_revision_id: REV_ID,
+          verified_text: "Trang hai nguyên bản.",
+          verified_text_preview: "Trang hai nguyên bản.",
+          image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_2_ID}/image`,
+          created_at: NOW,
+        },
+      ],
+      submissions: [],
+    };
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (
+        (url.pathname === "/books/my-books" ||
+          url.pathname === "/books/my-books/paged") &&
+        method === "GET"
+      ) {
+        const list = currentBook ? [currentBook] : [];
+        return Response.json(
+          url.pathname === "/books/my-books/paged"
+            ? { items: list, total: list.length, limit: 9, offset: 0 }
+            : list,
+        );
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}` && method === "GET") {
+        return Response.json(currentDetail);
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/pages/${PAGE_2_ID}` &&
+        method === "DELETE"
+      ) {
+        currentDetail = {
+          ...currentDetail,
+          book: makeBookSummary({
+            committed_page_count: 1,
+            readable_for_children: true,
+          }),
+          pages: [currentDetail.pages[0]],
+        };
+        currentTasks = [
+          currentTasks[0],
+          makeParentTask({
+            id: SUB_2_ID,
+            book_page_id: PAGE_2_ID,
+            page_number: 2,
+            status: "CANCELLED",
+            status_label_vi: "Đã hủy",
+            updated_at: "2026-11-28T12:01:00.000Z",
+          }),
+        ];
+        return Response.json({
+          status: "deleted",
+          book_id: BOOK_ID,
+          page_id: PAGE_2_ID,
+          committed_page_count: 1,
+          readable_for_children: true,
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/pages/${PAGE_ID}` &&
+        method === "PATCH"
+      ) {
+        const recheckSub = makeSubmission({
+          id: SUB_ID,
+          workflow_status: "CHECKING",
+          workflow_status_label: "Đang kiểm tra",
+          can_add_to_book: false,
+          can_request_admin_review: false,
+          updated_at: "2026-11-28T12:02:00.000Z",
+        });
+        currentDetail = {
+          book: makeBookSummary({
+            committed_page_count: 0,
+            pending_submission_count: 1,
+            readable_for_children: false,
+          }),
+          pages: [],
+          submissions: [recheckSub],
+        };
+        currentTasks = [
+          makeParentTask({
+            id: SUB_ID,
+            book_page_id: null,
+            status: "RUNNING",
+            status_label_vi: "Đang xử lý",
+            updated_at: "2026-11-28T12:02:00.000Z",
+          }),
+          currentTasks[1],
+        ];
+        return Response.json(recheckSub);
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}` &&
+        method === "DELETE"
+      ) {
+        currentBook = null;
+        currentTasks = [];
+        return Response.json({
+          status: "deleted",
+          book_id: BOOK_ID,
+          retired_pages_count: 0,
+          cancelled_submissions_count: 1,
+        });
+      }
+      throw new Error(`Unexpected ${method} ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <I18nProvider initialLocale="vi">
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+          <AppServicesProvider>
+            <AiTaskCenterProvider
+              actorId="parent-a"
+              actorRole="parent"
+              service={taskService}
+            >
+              <ParentAccountDropdown
+                appStore={null}
+                availableChildren={[]}
+                avatarUrl={null}
+                displayName="Phụ huynh An"
+                email="parent-a@example.test"
+                isSigningOut={false}
+                onSignOut={vi.fn(async () => {})}
+                pathname={`/my-books/${BOOK_ID}`}
+                roleLabel="Phụ huynh"
+                selectedChild={null}
+                userId="parent-a"
+              />
+              <ParentPrivateBookManager bookId={BOOK_ID} />
+            </AiTaskCenterProvider>
+          </AppServicesProvider>
+        </AuthRuntimeContext.Provider>
+      </I18nProvider>,
+    );
+
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+
+    // 1) Delete committed page 2 -> page 2 alert clears, page 1 alert keeps dot visible.
+    await user.click(
+      await screen.findByRole("button", { name: "Xóa trang 2" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Xác nhận xóa" }));
+    expect(
+      await screen.findByText("Các trang đã thêm vào sách đọc (1)"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("avatar-notification-dot")).toBeInTheDocument();
+
+    // 2) Edit committed page 1 -> page 1 alert clears and transitions to calm running dot!
+    await user.click(
+      screen.getByRole("button", { name: "Sửa nội dung trang 1" }),
+    );
+    const textarea = screen.getByLabelText("Chỉnh sửa văn bản trang 1");
+    await user.clear(textarea);
+    await user.type(textarea, "Trang một đã chỉnh sửa.");
+    await user.click(
+      screen.getByRole("button", { name: /Lưu & kiểm tra lại/ }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("avatar-running-dot")).toBeInTheDocument();
+
+    // 3) Now test deleting a book with an unread FAILED alert directly from /my-books (ParentMyBooksScreen)!
+    unmount();
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+    currentTasks = [
+      makeParentTask({
+        id: SUB_ID,
+        book_page_id: null,
+        status: "FAILED",
+        status_label_vi: "Xử lý thất bại",
+        updated_at: "2026-11-28T12:10:00.000Z",
+      }),
+    ];
+
+    render(
+      <I18nProvider initialLocale="vi">
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+          <AppServicesProvider>
+            <AiTaskCenterProvider
+              actorId="parent-a"
+              actorRole="parent"
+              service={taskService}
+            >
+              <ParentAccountDropdown
+                appStore={null}
+                availableChildren={[]}
+                avatarUrl={null}
+                displayName="Phụ huynh An"
+                email="parent-a@example.test"
+                isSigningOut={false}
+                onSignOut={vi.fn(async () => {})}
+                pathname="/my-books"
+                roleLabel="Phụ huynh"
+                selectedChild={null}
+                userId="parent-a"
+              />
+              <ParentMyBooksScreen />
+            </AiTaskCenterProvider>
+          </AppServicesProvider>
+        </AuthRuntimeContext.Provider>
+      </I18nProvider>,
+    );
+
+    expect(
+      await screen.findByTestId("avatar-notification-dot"),
+    ).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Xóa sách Truyện Riêng Nhà An",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Xác nhận xóa" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-notification-dot"),
+      ).not.toBeInTheDocument(),
+    );
+  });
 });

@@ -100,8 +100,15 @@ class SentenceShooterRepository:
         # rollback could expire and make trigger implicit async I/O.
         return _ChildProjection(Id=row.Id, Grade=row.Grade)
 
-    async def book_for_session(self, book_id: UUID) -> _BookProjection | None:
+    async def book_for_session(
+        self, book_id: UUID, *, parent_id: UUID | None = None
+    ) -> _BookProjection | None:
         """Read only the book fields needed to classify an empty content result."""
+        visibility_clause = (
+            CatalogRepository.readable_book(parent_id)
+            if parent_id is not None
+            else CatalogRepository.eligible_book()
+        )
         result = await self.db.execute(
             select(
                 Book.Id,
@@ -111,7 +118,7 @@ class SentenceShooterRepository:
                 Book.MinGrade,
                 Book.MaxGrade,
                 Book.LifecycleStatus,
-            ).where(Book.Id == book_id, CatalogRepository.eligible_book())
+            ).where(Book.Id == book_id, visibility_clause)
         )
         row = result.one_or_none()
         if row is None:
@@ -130,6 +137,8 @@ class SentenceShooterRepository:
         self,
         grade: int,
         book_id: UUID | None = None,
+        *,
+        parent_id: UUID | None = None,
     ) -> list[tuple[_BookProjection, _PageProjection, _RevisionProjection, _WordProjection]]:
         """Load only game fields, avoiding ORM entities and duplicated page text.
 
@@ -137,6 +146,11 @@ class SentenceShooterRepository:
         entity query repeated VerifiedText, image metadata, OCR boxes and other
         unused columns for every word, then globally sorted that expanded rowset.
         """
+        visibility_clause = (
+            CatalogRepository.readable_book(parent_id)
+            if parent_id is not None
+            else CatalogRepository.eligible_book()
+        )
         page_query = (
             select(
                 Book.Id,
@@ -163,7 +177,7 @@ class SentenceShooterRepository:
                 BookPage.LifecycleStatus == "ACTIVE",
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
-                CatalogRepository.eligible_book(),
+                visibility_clause,
             )
             .order_by(Book.Id, BookPage.PageNumber, BookPage.Id)
         )

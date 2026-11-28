@@ -68,10 +68,10 @@ async function installReading(
   const headers = {
     "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
     "access-control-allow-headers":
-      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
-    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id,x-voice-lock-update",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS",
     "access-control-expose-headers":
-      "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback",
+      "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback,x-voice-gender",
   };
   const respond = (route: Route, body: unknown, status = 200) =>
     route.fulfill({
@@ -587,6 +587,12 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
     voice_id?: string;
     speed?: number;
     cache_scope?: string;
+    word_sample?: boolean;
+  }> = [];
+  const timedPayloads: Array<{
+    words?: string[];
+    voice_id?: string;
+    speed?: number;
   }> = [];
   const sessionLockUpdates: Array<{ session_id?: string; voice_id?: string }> =
     [];
@@ -598,6 +604,115 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
     "access-control-expose-headers":
       "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback,x-voice-gender",
   };
+
+  for (const optionalPattern of [
+    "http://127.0.0.1:8000/phoneme-garden/**",
+    "http://127.0.0.1:8000/dialect/**",
+  ]) {
+    await page.route(optionalPattern, async (route) => {
+      if (route.request().method() === "OPTIONS") {
+        return route.fulfill({ status: 204, headers: corsHeaders });
+      }
+      return route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify({}),
+      });
+    });
+  }
+
+  await page.route("http://127.0.0.1:8000/reading/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const base = `/reading/sessions/${ids.session}`;
+    if (!path.startsWith(base) || path.endsWith("/reports")) {
+      return route.fallback();
+    }
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    }
+    const fulfillJson = (body: unknown) =>
+      route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === `${base}/practice-state`) {
+      return fulfillJson({
+        session_id: ids.session,
+        legacy_evidence_present: false,
+        pages: [],
+        words: [],
+      });
+    }
+    if (path === base) {
+      return fulfillJson({
+        id: ids.session,
+        child_id: ids.child,
+        book_id: ids.book,
+        state: "PAGE_READY",
+        started_at: "2026-11-11T00:00:00Z",
+        ended_at: null,
+        duration_ms: null,
+      });
+    }
+    if (path === `${base}/page`) {
+      const pageText = "Bé mèo nhỏ đọc sách.";
+      return fulfillJson({
+        page_id: ids.page,
+        page_revision_id: ids.revision,
+        page_number: 1,
+        confidence: null,
+        width: 800,
+        height: 1000,
+        image_url: null,
+        text: pageText,
+        words: pageText.split(/\s+/u).map((w, index) => ({
+          word_id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          word_index: index,
+          text: w,
+          bbox: [0.05 + index * 0.16, 0.15, 0.14, 0.05],
+          line_index: 0,
+        })),
+      });
+    }
+    if (path === `${base}/progress`) {
+      return fulfillJson({
+        session_id: ids.session,
+        persisted: true,
+        start_page_id: ids.page,
+        end_page_id: ids.page,
+        current_page_id: ids.page,
+        start_page_number: 1,
+        end_page_number: 1,
+        current_page_number: 1,
+        current_index: 0,
+        total_pages: 1,
+        completed_pages: 0,
+        pages: [
+          {
+            page_id: ids.page,
+            page_revision_id: ids.revision,
+            page_number: 1,
+            page_order: 0,
+            status: "IN_PROGRESS",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+      });
+    }
+    if (path === `${base}/completion-summary`) {
+      return fulfillJson({
+        duration_minutes: null,
+        pages_explored: 0,
+        selected_range_pages: 1,
+        practiced_words: 0,
+      });
+    }
+    return route.fallback();
+  });
 
   await page.route("http://127.0.0.1:8000/voice/**", async (route) => {
     if (route.request().method() === "OPTIONS") {
@@ -639,7 +754,48 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
         voice_id?: string;
       };
       sessionLockUpdates.push(body);
-      return route.fallback();
+      return route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify({
+          session_id: body.session_id ?? ids.session,
+          voice_id: body.voice_id ?? "local_north_truc_ly",
+          provider: "local",
+          locked: true,
+        }),
+      });
+    }
+    if (
+      path === "/voice/text-to-speech/timed" &&
+      route.request().method() === "POST"
+    ) {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        words?: string[];
+        voice_id?: string;
+        speed?: number;
+      };
+      timedPayloads.push(body);
+      const words = body.words ?? [];
+      return route.fulfill({
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "x-voice-provider": "precomputed_cache",
+          "x-resolved-voice-id": body.voice_id ?? "local_north_truc_ly",
+        },
+        contentType: "application/json",
+        body: JSON.stringify({
+          audio_base64: silentWav(2),
+          content_type: "audio/wav",
+          duration_seconds: 2,
+          words: words.map((_w, index) => ({
+            index,
+            start: (index * 2) / Math.max(1, words.length),
+            end: ((index + 1) * 2) / Math.max(1, words.length),
+          })),
+        }),
+      });
     }
     if (
       path === "/voice/text-to-speech" &&
@@ -650,10 +806,14 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
         voice_id?: string;
         speed?: number;
         cache_scope?: string;
+        word_sample?: boolean;
       };
       ttsPayloads.push(body);
-      // Enforce real production constraint: only COACHING-scoped greetings hit Supabase cache when local worker is offline!
-      if (body.cache_scope !== "COACHING") {
+      if (
+        body.cache_scope !== "COACHING" &&
+        body.cache_scope !== "CATALOG" &&
+        !body.word_sample
+      ) {
         return route.fulfill({
           status: 503,
           headers: corsHeaders,
@@ -675,7 +835,7 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
               : "female",
         },
         contentType: "audio/wav",
-        body: Buffer.from(silentWav(4), "base64"),
+        body: Buffer.from(silentWav(2), "base64"),
       });
     }
     return route.fallback();
@@ -704,6 +864,7 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
 
   await page.goto("/dashboard");
   const section = page.getByTestId("ai-teacher-voice-section");
+  const previewBtn = page.getByTestId("teacher-voice-preview-btn");
   await expect(section).toBeVisible();
   await expect(page.getByTestId("teacher-policy-local-only")).toBeVisible();
   await expect(page.getByTestId("teacher-policy-online-backup")).toBeVisible();
@@ -719,6 +880,7 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
   await expect
     .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
     .toBe(false);
+  await expect(previewBtn).toContainText("Dừng nghe thử");
 
   // 2. Switching region to Miền Nam keeps Male persona (Thầy Thái Sơn), stops prior audio, and plays new greeting
   await page.getByTestId("teacher-region-south").click();
@@ -736,11 +898,24 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
       })),
     )
     .toEqual({ firstPaused: true, secondPlaying: true });
+  await expect(previewBtn).toContainText("Dừng nghe thử");
   await expect(section.locator('[role="alert"]')).toHaveCount(0);
 
   await section.screenshot({
     path: testInfo.outputPath("dashboard-ai-teacher-male-voice.png"),
   });
+
+  // Goal B: When preview audio finishes naturally, button MUST automatically reset to "Nghe thử giọng"
+  await expect(previewBtn).toContainText("Nghe thử giọng", { timeout: 6_000 });
+
+  // Goal A + B: Clicking "Nghe thử giọng" again plays immediately from client cache (0 extra network calls) and resets on completion
+  await previewBtn.click();
+  await expect(previewBtn).toContainText("Dừng nghe thử");
+  await expect
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios.at(-1)?.paused))
+    .toBe(false);
+  expect(ttsPayloads.length).toBe(2);
+  await expect(previewBtn).toContainText("Nghe thử giọng", { timeout: 6_000 });
 
   // 3. Reloading /dashboard hydrates the persisted child voice_preferences (Thầy Thái Sơn · Miền Nam)
   await page.reload();
@@ -753,7 +928,25 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
     "true",
   );
 
-  // 4. Navigating to Difficult Words report keeps Thầy Thái Sơn hydrated across routes
+  // 4. Navigating to Book Reading (/reading/:session) locks & speaks page + word samples in Thầy Thái Sơn
+  await page.goto(`/reading/${ids.session}?state=reading`);
+  const readPageBtn = page.getByRole("button", {
+    name: "Nghe đọc mẫu cả trang",
+  });
+  await expect(readPageBtn).toBeVisible();
+  await readPageBtn.click();
+  await expect.poll(() => timedPayloads.length).toBe(1);
+  expect(timedPayloads[0]?.voice_id).toBe("local_south_thai_son");
+  await page.getByRole("button", { name: "Bé", exact: true }).click();
+  await expect
+    .poll(() =>
+      ttsPayloads.some(
+        (p) => p.word_sample === true && p.voice_id === "local_south_thai_son",
+      ),
+    )
+    .toBe(true);
+
+  // 5. Navigating to Difficult Words report keeps Thầy Thái Sơn hydrated across routes
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
   await expect(
     page.getByRole("heading", { name: /Từ cần luyện của Bé API/ }),
@@ -765,7 +958,6 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
   );
   expect(syncedPrefs.voiceId).toBe("local_south_thai_son");
   await page.getByRole("button", { name: /Luyện 1 từ cần ôn/ }).click();
-  // DifficultWordPracticePanel automatically speaks the word cue with the synced Thầy Thái Sơn voice!
   await expect
     .poll(() =>
       ttsPayloads.some(
@@ -785,7 +977,7 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
     dialog.getByRole("radio", { name: /Thầy Thái Sơn/ }),
   ).toBeChecked();
   const stopBtn = dialog.getByRole("button", {
-    name: "Dừng nghe",
+    name: "Dừng nghe thử",
     exact: true,
   });
   if (await stopBtn.isVisible()) {
@@ -793,6 +985,9 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
   }
   const prevAudios = await page.evaluate(() => window.__ttsProbe.audios.length);
   await dialog.getByRole("button", { name: "Nghe thử", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Dừng nghe thử", exact: true }),
+  ).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(
@@ -806,6 +1001,34 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
   await page.screenshot({
     path: testInfo.outputPath("difficult-words-synced-teacher.png"),
   });
+
+  // Goal B inside ReadingVoiceSettings: "Dừng nghe" automatically returns to "Nghe thử" when preview completes
+  await expect(
+    dialog.getByRole("button", { name: "Nghe thử", exact: true }),
+  ).toBeVisible({ timeout: 6_000 });
+
+  // Goal C: Explicitly switching to Cô giáo AI re-syncs persona & voice globally (Cô Thục Đoan · Miền Nam)
+  await dialog.getByTestId("voice-modal-teacher-female").click();
+  await expect(
+    dialog.getByRole("heading", { name: /Giọng đọc mẫu · Cô giáo AI/ }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("radio", { name: /Cô Thục Đoan/ }),
+  ).toBeChecked();
+  await dialog.getByRole("button", { name: "Nghe thử", exact: true }).click();
+  await expect
+    .poll(() =>
+      ttsPayloads.some(
+        (p) =>
+          p.voice_id === "local_south_thuc_doan" &&
+          (p.text ?? "").includes("cô trò mình"),
+      ),
+    )
+    .toBe(true);
+  await expect(
+    dialog.getByRole("button", { name: "Nghe thử", exact: true }),
+  ).toBeVisible({ timeout: 6_000 });
+
   expect(
     api.unexpected.filter((item) => item !== "external:huggingface.co"),
   ).toEqual([]);

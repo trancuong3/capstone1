@@ -10,6 +10,8 @@ import {
   RotateCcw,
   SendHorizontal,
   Sparkles,
+  UserCheck,
+  UserPlus,
   Wifi,
   WifiOff,
   X,
@@ -26,6 +28,7 @@ import {
   useSyncExternalStore,
   type Dispatch,
   type FormEvent,
+  type MouseEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -36,6 +39,12 @@ import {
   sendAssistantMessage,
 } from "@/lib/api/assistant-service";
 import {
+  readAssistantChildContext,
+  requiresSelectedChildForHref,
+  selectChildFromAssistant,
+  type AssistantChildContextSnapshot,
+} from "@/lib/assistant/child-gate";
+import {
   detectNetworkBandwidth,
   getNavigatorConnection,
   resolveEffectiveBandwidth,
@@ -43,21 +52,43 @@ import {
   resolvePageGuide,
 } from "@/lib/assistant/page-guides";
 import {
+  inferAssistantRoleScope,
   isSafeAssistantNavigationHref,
   isSafeAssistantQuickActionHref,
 } from "@/lib/assistant/route-helpers";
+import {
+  SELECTED_CHILD_LOCAL_EVENT,
+  SELECTED_CHILD_SIGNAL_KEY,
+} from "@/lib/cache/selected-child-storage";
 import { cn } from "@/lib/utils/cn";
 import type {
   AssistantMessage,
+  AssistantNavigationOffer,
+  AssistantQuickAction,
+  AssistantRoleScope,
   AssistantSourceTier,
   AssistantVisibilityState,
   BandwidthPreference,
   DetectedNetworkInfo,
 } from "@/types/assistant";
+import type { ChildProfileDTO } from "@/types/child";
 
 const BANDWIDTH_STORAGE_KEY = "viread:assistant:bandwidth";
 const PREFS_CHANGE_EVENT = "viread:assistant:prefs-changed";
+const SELECTED_CHILD_STORAGE_PREFIX = "viread:selected-child:";
 const DEFAULT_NETWORK_SNAPSHOT = "1|high||0|";
+
+function hasValidSelectedChild(
+  ctx: AssistantChildContextSnapshot | null,
+): ctx is AssistantChildContextSnapshot & {
+  readonly selectedChildId: string;
+  readonly selectedChild: ChildProfileDTO;
+} {
+  if (!ctx || !ctx.selectedChildId || !ctx.selectedChild) {
+    return false;
+  }
+  return ctx.children.some((child) => child.id === ctx.selectedChildId);
+}
 
 function readStoredBandwidthSnapshot(): BandwidthPreference {
   try {
@@ -237,6 +268,27 @@ function formatLatency(latencyMs: number): string {
   return `${(latencyMs / 1000).toFixed(1)}s`;
 }
 
+function AssistantCircularAvatar({
+  showActiveDot = false,
+  testId,
+}: {
+  readonly showActiveDot?: boolean;
+  readonly testId?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-hover text-white shadow-xs ring-2 ring-white"
+      data-testid={testId}
+    >
+      <Bot className="size-3.5" />
+      {showActiveDot ? (
+        <span className="absolute -bottom-0.5 -end-0.5 size-2 rounded-full bg-emerald-400 ring-[1.5px] ring-white" />
+      ) : null}
+    </span>
+  );
+}
+
 export interface ViReadAssistantPanelProps {
   readonly pathname: string;
   readonly isReadingRoute: boolean;
@@ -280,6 +332,11 @@ export function ViReadAssistantPanel({
   const [isSending, setIsSending] = useState(false);
   const [sendingElapsedSeconds, setSendingElapsedSeconds] = useState(0);
   const [sendingForceLlm, setSendingForceLlm] = useState(false);
+  const [childContext, setChildContext] =
+    useState<AssistantChildContextSnapshot | null>(null);
+  const [checkingChildMessageId, setCheckingChildMessageId] = useState<
+    string | null
+  >(null);
   const [rateLimitState, setRateLimitState] = useState<{
     readonly message: string;
     readonly retryPrompt: string;
@@ -289,10 +346,103 @@ export function ViReadAssistantPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const pendingPromptRef = useRef<{
     readonly prompt: string;
     readonly forceLlm: boolean;
   } | null>(null);
+
+  const effectiveRoleScope = useMemo(
+    () => inferAssistantRoleScope(pathname),
+    [pathname],
+  );
+  const effectiveChildContext =
+    effectiveRoleScope === "parent" ? childContext : null;
+
+  const refreshChildContext = useCallback(
+    async (forceRefresh = false): Promise<AssistantChildContextSnapshot> => {
+      try {
+        const snapshot = await readAssistantChildContext({ forceRefresh });
+        if (mountedRef.current) {
+          setChildContext(snapshot);
+        }
+        return snapshot;
+      } catch {
+        const fallbackSnapshot: AssistantChildContextSnapshot = {
+          userId: null,
+          selectedChildId: null,
+          children: [],
+          selectedChild: null,
+          loadFailed: true,
+        };
+        if (mountedRef.current) {
+          setChildContext(fallbackSnapshot);
+        }
+        return fallbackSnapshot;
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (effectiveRoleScope !== "parent") {
+      return;
+    }
+
+    let cancelled = false;
+    const syncChildContext = () => {
+      void readAssistantChildContext({ forceRefresh: false })
+        .then((snapshot) => {
+          if (!cancelled && mountedRef.current) {
+            setChildContext(snapshot);
+          }
+        })
+        .catch(() => {
+          if (!cancelled && mountedRef.current) {
+            setChildContext({
+              userId: null,
+              selectedChildId: null,
+              children: [],
+              selectedChild: null,
+              loadFailed: true,
+            });
+          }
+        });
+    };
+
+    syncChildContext();
+
+    const handleLocalChildChange = () => {
+      syncChildContext();
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key === null ||
+        event.key === SELECTED_CHILD_SIGNAL_KEY ||
+        event.key.startsWith(SELECTED_CHILD_STORAGE_PREFIX)
+      ) {
+        syncChildContext();
+      }
+    };
+
+    window.addEventListener(SELECTED_CHILD_LOCAL_EVENT, handleLocalChildChange);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        SELECTED_CHILD_LOCAL_EVENT,
+        handleLocalChildChange,
+      );
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [effectiveRoleScope]);
 
   useEffect(() => {
     if (!isSending) {
@@ -635,33 +785,271 @@ export function ViReadAssistantPanel({
     [effectiveBandwidth, locale, onMessagesChange, pathname],
   );
 
-  const handleNavigationDecision = useCallback(
-    (messageId: string, decision: "accepted" | "declined") => {
-      const targetMsg = messages.find((item) => item.id === messageId);
-      const offerHref = targetMsg?.navigationOffer?.href;
-      const canNavigate =
-        decision === "accepted" &&
-        isSafeAssistantNavigationHref(
-          offerHref,
-          pathname,
-          targetMsg?.roleScope,
-        );
-
+  const updateMessageNavigation = useCallback(
+    (
+      messageId: string,
+      decision: NonNullable<AssistantMessage["navigationDecision"]>,
+      overrideOffer?: AssistantNavigationOffer,
+      overrideScope?: AssistantRoleScope,
+    ) => {
       onMessagesChange((prev) =>
         prev.map((item) =>
           item.id === messageId
             ? {
                 ...item,
+                ...(overrideOffer ? { navigationOffer: overrideOffer } : {}),
+                ...(overrideScope ? { roleScope: overrideScope } : {}),
                 navigationDecision: decision,
               }
             : item,
         ),
       );
-      if (canNavigate && offerHref) {
-        router.push(offerHref);
-      }
     },
-    [messages, onMessagesChange, pathname, router],
+    [onMessagesChange],
+  );
+
+  const handleNavigationDecline = useCallback(
+    (messageId: string) => {
+      setCheckingChildMessageId((current) =>
+        current === messageId ? null : current,
+      );
+      updateMessageNavigation(messageId, "declined");
+    },
+    [updateMessageNavigation],
+  );
+
+  const runNavigationGate = useCallback(
+    async (
+      messageId: string,
+      offer: AssistantNavigationOffer,
+      msgRoleScope: AssistantRoleScope | undefined,
+      options?: {
+        readonly readingExitConfirmed?: boolean;
+        readonly forceRefresh?: boolean;
+        readonly forcePicker?: boolean;
+        readonly allowSamePath?: boolean;
+        readonly overrideOffer?: AssistantNavigationOffer;
+        readonly overrideScope?: AssistantRoleScope;
+      },
+    ) => {
+      const scopeForGate = msgRoleScope ?? effectiveRoleScope;
+      const isHrefAllowed = options?.allowSamePath
+        ? isSafeAssistantQuickActionHref(offer.href, pathname, scopeForGate)
+        : isSafeAssistantNavigationHref(offer.href, pathname, scopeForGate);
+      if (!isHrefAllowed) {
+        return;
+      }
+
+      // 1. Reading-session safety check before leaving /reading/*.
+      if (isReadingRoute && !options?.readingExitConfirmed) {
+        updateMessageNavigation(
+          messageId,
+          "needs_reading_exit_confirm",
+          options?.overrideOffer,
+          options?.overrideScope,
+        );
+        return;
+      }
+
+      // 2. Child-selection gate for child-scoped parent destinations.
+      const needsChildGate =
+        scopeForGate === "parent" &&
+        (Boolean(offer.requires_child_selection) ||
+          requiresSelectedChildForHref(offer.href));
+
+      if (needsChildGate) {
+        if (options?.forcePicker) {
+          updateMessageNavigation(
+            messageId,
+            "needs_child",
+            options?.overrideOffer,
+            options?.overrideScope,
+          );
+          if (!effectiveChildContext || effectiveChildContext.loadFailed) {
+            setCheckingChildMessageId(messageId);
+            await refreshChildContext(
+              Boolean(effectiveChildContext?.loadFailed),
+            );
+            if (mountedRef.current) {
+              setCheckingChildMessageId((current) =>
+                current === messageId ? null : current,
+              );
+            }
+          }
+          return;
+        }
+
+        if (
+          !options?.forceRefresh &&
+          hasValidSelectedChild(effectiveChildContext)
+        ) {
+          updateMessageNavigation(
+            messageId,
+            "accepted",
+            options?.overrideOffer,
+            options?.overrideScope,
+          );
+          router.push(offer.href);
+          return;
+        }
+
+        updateMessageNavigation(
+          messageId,
+          "needs_child",
+          options?.overrideOffer,
+          options?.overrideScope,
+        );
+        setCheckingChildMessageId(messageId);
+        const freshCtx = await refreshChildContext(
+          Boolean(options?.forceRefresh || effectiveChildContext?.loadFailed),
+        );
+        if (mountedRef.current) {
+          setCheckingChildMessageId((current) =>
+            current === messageId ? null : current,
+          );
+        }
+        if (hasValidSelectedChild(freshCtx)) {
+          updateMessageNavigation(messageId, "accepted");
+          router.push(offer.href);
+        }
+        return;
+      }
+
+      updateMessageNavigation(
+        messageId,
+        "accepted",
+        options?.overrideOffer,
+        options?.overrideScope,
+      );
+      router.push(offer.href);
+    },
+    [
+      effectiveChildContext,
+      effectiveRoleScope,
+      isReadingRoute,
+      pathname,
+      refreshChildContext,
+      router,
+      updateMessageNavigation,
+    ],
+  );
+
+  const handleSelectChildForOffer = useCallback(
+    (
+      messageId: string,
+      offer: AssistantNavigationOffer,
+      msgRoleScope: AssistantRoleScope | undefined,
+      child: ChildProfileDTO,
+    ) => {
+      const scopeForGate = msgRoleScope ?? effectiveRoleScope;
+      if (
+        !isSafeAssistantQuickActionHref(offer.href, pathname, scopeForGate) ||
+        (scopeForGate !== "admin" &&
+          (offer.href === "/admin" || offer.href.startsWith("/admin/")))
+      ) {
+        return;
+      }
+
+      const targetUserId = effectiveChildContext?.userId ?? child.parent_id;
+      selectChildFromAssistant(targetUserId, child);
+      setChildContext((prev) => {
+        const existing = prev?.children ?? [];
+        const hasChild = existing.some((item) => item.id === child.id);
+        return {
+          userId: targetUserId,
+          selectedChildId: child.id,
+          children: hasChild ? existing : [...existing, child],
+          selectedChild: child,
+          loadFailed: false,
+        };
+      });
+      updateMessageNavigation(messageId, "accepted");
+      router.push(offer.href);
+    },
+    [
+      effectiveChildContext?.userId,
+      effectiveRoleScope,
+      pathname,
+      router,
+      updateMessageNavigation,
+    ],
+  );
+
+  const handleOpenAuxiliaryPath = useCallback(
+    (messageId: string, targetHref: string) => {
+      updateMessageNavigation(messageId, "accepted");
+      router.push(targetHref);
+    },
+    [router, updateMessageNavigation],
+  );
+
+  const handleQuickActionClick = useCallback(
+    (
+      event: MouseEvent<HTMLAnchorElement>,
+      action: AssistantQuickAction,
+      msg?: AssistantMessage,
+    ) => {
+      const actionScope = msg?.roleScope ?? effectiveRoleScope;
+      if (!isSafeAssistantQuickActionHref(action.href, pathname, actionScope)) {
+        event.preventDefault();
+        return;
+      }
+
+      const actionNeedsChild =
+        actionScope === "parent" && requiresSelectedChildForHref(action.href);
+      const shouldGateReading = isReadingRoute && action.href !== pathname;
+      const shouldGateChild =
+        actionNeedsChild && !hasValidSelectedChild(effectiveChildContext);
+
+      if (!shouldGateReading && !shouldGateChild) {
+        return;
+      }
+
+      event.preventDefault();
+      const gateOffer: AssistantNavigationOffer = {
+        label: action.label,
+        href: action.href,
+        requires_child_selection: actionNeedsChild,
+      };
+
+      if (msg) {
+        void runNavigationGate(msg.id, gateOffer, msg.roleScope, {
+          allowSamePath: true,
+          overrideOffer: gateOffer,
+          readingExitConfirmed: false,
+        });
+        return;
+      }
+
+      const gateMsgId = `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      onMessagesChange((prev) => [
+        ...prev.slice(-20),
+        {
+          id: gateMsgId,
+          role: "assistant",
+          content: t("common.assistant.quickActionGateIntro", {
+            label: action.label,
+          }),
+          messagePath: pathname,
+          roleScope: effectiveRoleScope,
+          navigationOffer: gateOffer,
+          navigationDecision: "pending",
+        },
+      ]);
+      void runNavigationGate(gateMsgId, gateOffer, effectiveRoleScope, {
+        allowSamePath: true,
+        readingExitConfirmed: false,
+      });
+    },
+    [
+      effectiveChildContext,
+      effectiveRoleScope,
+      isReadingRoute,
+      onMessagesChange,
+      pathname,
+      runNavigationGate,
+      t,
+    ],
   );
 
   function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
@@ -802,32 +1190,59 @@ export function ViReadAssistantPanel({
           </p>
           {messages.length === 0 && pageGuide.actions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1">
-              {pageGuide.actions.slice(0, 2).map((action) => (
-                <Link
-                  className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
-                  href={action.href}
-                  key={action.href}
-                >
-                  <span>{action.label}</span>
-                  <ArrowUpRight aria-hidden="true" className="size-3" />
-                </Link>
-              ))}
+              {pageGuide.actions
+                .filter((action) =>
+                  isSafeAssistantQuickActionHref(
+                    action.href,
+                    pathname,
+                    effectiveRoleScope,
+                  ),
+                )
+                .slice(0, 2)
+                .map((action) => (
+                  <Link
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
+                    href={action.href}
+                    key={action.href}
+                    onClick={(event) => handleQuickActionClick(event, action)}
+                  >
+                    <span>{action.label}</span>
+                    <ArrowUpRight aria-hidden="true" className="size-3" />
+                  </Link>
+                ))}
             </div>
           ) : null}
         </div>
 
         {/* Conversation Messages */}
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           const isUser = msg.role === "user";
           const safeNavigationOffer =
             !isUser &&
-            isSafeAssistantNavigationHref(
+            (isSafeAssistantNavigationHref(
               msg.navigationOffer?.href,
               pathname,
               msg.roleScope,
-            )
-              ? msg.navigationOffer
+            ) ||
+              ((msg.navigationDecision === "needs_child" ||
+                msg.navigationDecision === "needs_reading_exit_confirm") &&
+                isSafeAssistantQuickActionHref(
+                  msg.navigationOffer?.href,
+                  pathname,
+                  msg.roleScope,
+                )))
+              ? msg.navigationOffer!
               : null;
+          const offerScope = msg.roleScope ?? effectiveRoleScope;
+          const offerRequiresChild =
+            Boolean(safeNavigationOffer) &&
+            offerScope === "parent" &&
+            (Boolean(safeNavigationOffer?.requires_child_selection) ||
+              requiresSelectedChildForHref(safeNavigationOffer?.href));
+          const activeChild = hasValidSelectedChild(effectiveChildContext)
+            ? effectiveChildContext.selectedChild
+            : null;
+          const isCheckingChild = checkingChildMessageId === msg.id;
 
           return (
             <div
@@ -839,104 +1254,428 @@ export function ViReadAssistantPanel({
             >
               <div
                 className={cn(
-                  "max-w-[90%] rounded-control px-2.5 py-2 shadow-2xs",
-                  isUser
-                    ? "bg-primary text-white"
-                    : "border border-border/80 bg-white text-ink",
+                  "flex w-full items-end gap-2",
+                  isUser ? "justify-end" : "justify-start",
                 )}
               >
-                {isUser ? (
-                  <p className="break-words">{msg.content}</p>
-                ) : (
-                  renderFormattedReply(msg.content)
-                )}
+                {!isUser ? (
+                  <AssistantCircularAvatar
+                    showActiveDot={index === messages.length - 1 && !isSending}
+                    testId="viread-assistant-message-avatar"
+                  />
+                ) : null}
+                <div
+                  className={cn(
+                    "min-w-0 max-w-[85%] rounded-2xl px-3 py-2 shadow-2xs",
+                    isUser
+                      ? "rounded-ee-sm bg-primary text-white"
+                      : "rounded-es-sm border border-border/80 bg-white text-ink",
+                  )}
+                >
+                  {isUser ? (
+                    <p className="break-words">{msg.content}</p>
+                  ) : (
+                    renderFormattedReply(msg.content)
+                  )}
 
-                {safeNavigationOffer ? (
-                  <div
-                    className="mt-2 rounded-control border border-primary/25 bg-sky/35 p-2 text-[11.5px]"
-                    data-testid="viread-assistant-nav-card"
-                  >
-                    <p className="font-bold text-ink">
-                      {safeNavigationOffer.label}
-                    </p>
-                    <p className="mt-0.5 text-[11px] leading-4 text-muted">
-                      {safeNavigationOffer.reason ||
-                        t("common.assistant.navConfirmPrompt")}
-                    </p>
-                    {msg.navigationDecision === "accepted" ? (
-                      <p
-                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-primary-hover"
-                        data-testid="viread-assistant-nav-status"
-                      >
-                        <Check aria-hidden="true" className="size-3" />
-                        <span>{t("common.assistant.navConfirmedStatus")}</span>
+                  {safeNavigationOffer ? (
+                    <div
+                      className="mt-2 rounded-control border border-primary/25 bg-sky/35 p-2 text-[11.5px]"
+                      data-testid="viread-assistant-nav-card"
+                    >
+                      <p className="font-bold text-ink">
+                        {safeNavigationOffer.label}
                       </p>
-                    ) : msg.navigationDecision === "declined" ? (
-                      <p
-                        className="mt-1.5 text-[11px] font-medium text-muted"
-                        data-testid="viread-assistant-nav-status"
-                      >
-                        {t("common.assistant.navDeclinedStatus")}
+                      <p className="mt-0.5 text-[11px] leading-4 text-muted">
+                        {safeNavigationOffer.reason ||
+                          t("common.assistant.navConfirmPrompt")}
                       </p>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <button
-                          className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                          data-testid="viread-assistant-nav-yes"
-                          onClick={() =>
-                            handleNavigationDecision(msg.id, "accepted")
-                          }
-                          type="button"
+
+                      {offerRequiresChild &&
+                      msg.navigationDecision !== "accepted" &&
+                      msg.navigationDecision !== "declined" ? (
+                        activeChild ? (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-white px-2 py-0.5 text-[10.5px] font-bold text-primary-hover"
+                              data-testid="viread-assistant-active-child-badge"
+                            >
+                              <UserCheck
+                                aria-hidden="true"
+                                className="size-3"
+                              />
+                              <span>
+                                {t("common.assistant.activeChildBadge", {
+                                  name: activeChild.alias,
+                                })}
+                              </span>
+                            </span>
+                            {(effectiveChildContext?.children.length ?? 0) >=
+                              2 && msg.navigationDecision !== "needs_child" ? (
+                              <button
+                                className="text-[10.5px] font-bold text-primary underline-offset-2 hover:underline"
+                                data-testid="viread-assistant-switch-child-trigger"
+                                onClick={() =>
+                                  void runNavigationGate(
+                                    msg.id,
+                                    safeNavigationOffer,
+                                    msg.roleScope,
+                                    {
+                                      readingExitConfirmed: !isReadingRoute,
+                                      forcePicker: true,
+                                    },
+                                  )
+                                }
+                                type="button"
+                              >
+                                {t("common.assistant.switchChildLink")}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : msg.navigationDecision !== "needs_child" ? (
+                          <p
+                            className="mt-1 text-[10.5px] font-semibold text-primary-hover"
+                            data-testid="viread-assistant-child-required-notice"
+                          >
+                            {t("common.assistant.childRequiredNotice")}
+                          </p>
+                        ) : null
+                      ) : null}
+
+                      {msg.navigationDecision === "accepted" ? (
+                        <p
+                          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-primary-hover"
+                          data-testid="viread-assistant-nav-status"
                         >
                           <Check aria-hidden="true" className="size-3" />
-                          <span>{t("common.assistant.navConfirmYes")}</span>
-                        </button>
-                        <button
-                          className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                          data-testid="viread-assistant-nav-no"
-                          onClick={() =>
-                            handleNavigationDecision(msg.id, "declined")
-                          }
-                          type="button"
+                          <span>
+                            {t("common.assistant.navConfirmedStatus")}
+                          </span>
+                        </p>
+                      ) : msg.navigationDecision === "declined" ? (
+                        <p
+                          className="mt-1.5 text-[11px] font-medium text-muted"
+                          data-testid="viread-assistant-nav-status"
                         >
-                          <X aria-hidden="true" className="size-3" />
-                          <span>{t("common.assistant.navConfirmNo")}</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {(() => {
-                  const safeActions = !isUser
-                    ? (msg.quickActions ?? []).filter((action) =>
-                        isSafeAssistantQuickActionHref(
-                          action.href,
-                          pathname,
-                          msg.roleScope,
-                        ),
-                      )
-                    : [];
-                  if (safeActions.length === 0) return null;
-                  return (
-                    <div className="mt-2 flex flex-wrap gap-1 border-t border-border/60 pt-1.5">
-                      {safeActions.map((action) => (
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
-                          href={action.href}
-                          key={action.href}
+                          {t("common.assistant.navDeclinedStatus")}
+                        </p>
+                      ) : msg.navigationDecision ===
+                        "needs_reading_exit_confirm" ? (
+                        <div
+                          className="mt-2 space-y-1.5 border-t border-primary/15 pt-1.5"
+                          data-testid="viread-assistant-reading-exit-confirm"
                         >
-                          <span>{action.label}</span>
-                          <ArrowUpRight aria-hidden="true" className="size-3" />
-                        </Link>
-                      ))}
+                          <p className="text-[11px] font-semibold text-ink">
+                            {t("common.assistant.readingExitConfirmTitle")}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                              data-testid="viread-assistant-nav-confirm-exit"
+                              onClick={() =>
+                                void runNavigationGate(
+                                  msg.id,
+                                  safeNavigationOffer,
+                                  msg.roleScope,
+                                  { readingExitConfirmed: true },
+                                )
+                              }
+                              type="button"
+                            >
+                              <Check aria-hidden="true" className="size-3" />
+                              <span>
+                                {t("common.assistant.readingExitConfirmButton")}
+                              </span>
+                            </button>
+                            <button
+                              className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                              data-testid="viread-assistant-nav-stay-reading"
+                              onClick={() => handleNavigationDecline(msg.id)}
+                              type="button"
+                            >
+                              <X aria-hidden="true" className="size-3" />
+                              <span>
+                                {t("common.assistant.readingExitStayButton")}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : msg.navigationDecision === "needs_child" ? (
+                        <div className="mt-2 space-y-1.5 border-t border-primary/15 pt-1.5">
+                          {isCheckingChild ? (
+                            <div
+                              className="flex items-center gap-1.5 py-1 text-[11px] font-semibold text-ink"
+                              data-testid="viread-assistant-child-loading"
+                              role="status"
+                            >
+                              <Loader2
+                                aria-hidden="true"
+                                className="size-3.5 shrink-0 animate-spin text-primary"
+                              />
+                              <span>
+                                {t("common.assistant.childLoadingChecking")}
+                              </span>
+                            </div>
+                          ) : effectiveChildContext?.loadFailed ? (
+                            <div
+                              className="space-y-1.5"
+                              data-testid="viread-assistant-child-load-failed"
+                            >
+                              <p className="text-[11px] leading-4 text-ink">
+                                {t("common.assistant.childLoadFailedDesc")}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                  data-testid="viread-assistant-child-retry"
+                                  onClick={() =>
+                                    void runNavigationGate(
+                                      msg.id,
+                                      safeNavigationOffer,
+                                      msg.roleScope,
+                                      {
+                                        readingExitConfirmed: true,
+                                        forceRefresh: true,
+                                      },
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <RotateCcw
+                                    aria-hidden="true"
+                                    className="size-3"
+                                  />
+                                  <span>
+                                    {t("common.assistant.childRetryBtn")}
+                                  </span>
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                  data-testid="viread-assistant-go-dashboard-select"
+                                  onClick={() =>
+                                    handleOpenAuxiliaryPath(
+                                      msg.id,
+                                      "/dashboard?focus=child-selection",
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <span>
+                                    {t(
+                                      "common.assistant.childGoDashboardSelect",
+                                    )}
+                                  </span>
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-semibold text-muted transition-colors hover:bg-canvas hover:text-ink"
+                                  data-testid="viread-assistant-child-later"
+                                  onClick={() =>
+                                    handleNavigationDecline(msg.id)
+                                  }
+                                  type="button"
+                                >
+                                  <span>
+                                    {t("common.assistant.laterAction")}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (effectiveChildContext?.children.length ?? 0) ===
+                            0 ? (
+                            <div
+                              className="space-y-1.5"
+                              data-testid="viread-assistant-child-empty"
+                            >
+                              <p className="text-[11px] leading-4 text-ink">
+                                {t("common.assistant.childEmptyDesc")}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                  data-testid="viread-assistant-create-child-btn"
+                                  onClick={() =>
+                                    handleOpenAuxiliaryPath(
+                                      msg.id,
+                                      "/children/new",
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <UserPlus
+                                    aria-hidden="true"
+                                    className="size-3"
+                                  />
+                                  <span>
+                                    {t("common.assistant.childCreateBtn")}
+                                  </span>
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas"
+                                  data-testid="viread-assistant-child-later"
+                                  onClick={() =>
+                                    handleNavigationDecline(msg.id)
+                                  }
+                                  type="button"
+                                >
+                                  <span>
+                                    {t("common.assistant.laterAction")}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="space-y-1.5"
+                              data-testid="viread-assistant-child-picker"
+                            >
+                              <p className="text-[11px] font-bold text-ink">
+                                {t("common.assistant.childPickerPrompt")}
+                              </p>
+                              <div className="flex max-h-32 flex-col gap-1 overflow-y-auto pe-0.5">
+                                {effectiveChildContext!.children.map(
+                                  (child) => {
+                                    const isCurrent =
+                                      effectiveChildContext?.selectedChildId ===
+                                      child.id;
+                                    return (
+                                      <button
+                                        className={cn(
+                                          "flex w-full items-center justify-between gap-2 rounded-control border px-2.5 py-1.5 text-start text-[11px] font-bold transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+                                          isCurrent
+                                            ? "border-primary bg-white text-primary-hover"
+                                            : "border-primary/25 bg-white text-ink hover:border-primary hover:bg-sky/50",
+                                        )}
+                                        data-testid={`viread-assistant-select-child-${child.id}`}
+                                        key={child.id}
+                                        onClick={() =>
+                                          handleSelectChildForOffer(
+                                            msg.id,
+                                            safeNavigationOffer,
+                                            msg.roleScope,
+                                            child,
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        <span className="truncate">
+                                          {child.alias}
+                                        </span>
+                                        <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-[10px] font-semibold text-muted">
+                                          {t(
+                                            "common.assistant.childGradeLabel",
+                                            {
+                                              grade: child.grade,
+                                            },
+                                          )}
+                                        </span>
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2.5 py-1 text-[10.5px] font-semibold text-ink transition-colors hover:bg-canvas"
+                                  data-testid="viread-assistant-go-dashboard-select"
+                                  onClick={() =>
+                                    handleOpenAuxiliaryPath(
+                                      msg.id,
+                                      "/dashboard?focus=child-selection",
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <span>
+                                    {t(
+                                      "common.assistant.childGoDashboardSelect",
+                                    )}
+                                  </span>
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2.5 py-1 text-[10.5px] font-semibold text-muted transition-colors hover:bg-canvas hover:text-ink"
+                                  data-testid="viread-assistant-child-later"
+                                  onClick={() =>
+                                    handleNavigationDecline(msg.id)
+                                  }
+                                  type="button"
+                                >
+                                  <span>
+                                    {t("common.assistant.laterAction")}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <button
+                            className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                            data-testid="viread-assistant-nav-yes"
+                            onClick={() =>
+                              void runNavigationGate(
+                                msg.id,
+                                safeNavigationOffer,
+                                msg.roleScope,
+                                { readingExitConfirmed: false },
+                              )
+                            }
+                            type="button"
+                          >
+                            <Check aria-hidden="true" className="size-3" />
+                            <span>{t("common.assistant.navConfirmYes")}</span>
+                          </button>
+                          <button
+                            className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11px] font-semibold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                            data-testid="viread-assistant-nav-no"
+                            onClick={() => handleNavigationDecline(msg.id)}
+                            type="button"
+                          >
+                            <X aria-hidden="true" className="size-3" />
+                            <span>{t("common.assistant.navConfirmNo")}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  );
-                })()}
+                  ) : null}
+
+                  {(() => {
+                    const safeActions = !isUser
+                      ? (msg.quickActions ?? []).filter((action) =>
+                          isSafeAssistantQuickActionHref(
+                            action.href,
+                            pathname,
+                            msg.roleScope,
+                          ),
+                        )
+                      : [];
+                    if (safeActions.length === 0) return null;
+                    return (
+                      <div className="mt-2 flex flex-wrap gap-1 border-t border-border/60 pt-1.5">
+                        {safeActions.map((action) => (
+                          <Link
+                            className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/60 px-2 py-0.5 text-[11px] font-bold text-primary-hover transition-colors hover:bg-sky"
+                            href={action.href}
+                            key={action.href}
+                            onClick={(event) =>
+                              handleQuickActionClick(event, action, msg)
+                            }
+                          >
+                            <span>{action.label}</span>
+                            <ArrowUpRight
+                              aria-hidden="true"
+                              className="size-3"
+                            />
+                          </Link>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
               {!isUser && msg.sourceTier ? (
-                <div className="mt-1 flex flex-wrap items-center gap-2 px-0.5 text-[10px] text-muted">
+                <div className="mt-1 flex flex-wrap items-center gap-2 ps-9 text-[10px] text-muted">
                   <span data-testid="viread-assistant-source-meta">
                     {tierLabel(msg.sourceTier, msg.providerId)}
                     {typeof msg.latencyMs === "number"
@@ -978,58 +1717,84 @@ export function ViReadAssistantPanel({
           );
         })}
 
-        {isSending ? (
-          <div
-            aria-busy="true"
-            className="rounded-control border border-primary/20 bg-white px-2.5 py-2 text-xs shadow-2xs"
-            data-testid="viread-assistant-loading-card"
-            role="status"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <Loader2
-                  aria-hidden="true"
-                  className="size-3.5 shrink-0 animate-spin text-primary"
-                />
-                <span className="font-semibold text-ink">
-                  {sendingForceLlm && sendingElapsedSeconds < 3
-                    ? t("common.assistant.thinkingDeep")
-                    : sendingElapsedSeconds < 2
-                      ? t("common.assistant.thinking")
-                      : sendingElapsedSeconds < 6
-                        ? t("common.assistant.thinkingConnectAi")
-                        : sendingElapsedSeconds < 12
-                          ? t("common.assistant.thinkingSynthesizing")
-                          : t("common.assistant.thinkingSlowReassure")}
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                {sendingElapsedSeconds >= 1 ? (
-                  <span
-                    className="rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-bold text-muted"
-                    data-testid="viread-assistant-elapsed"
-                  >
-                    {t("common.assistant.elapsedSeconds", {
-                      seconds: sendingElapsedSeconds,
-                    })}
-                  </span>
-                ) : null}
-                <button
-                  aria-label={t("common.assistant.cancelAria")}
-                  className="rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-primary"
-                  data-testid="viread-assistant-cancel"
-                  onClick={handleCancelSending}
-                  type="button"
+        {isSending
+          ? (() => {
+              const thinkingStatusText =
+                sendingForceLlm && sendingElapsedSeconds < 3
+                  ? t("common.assistant.thinkingDeep")
+                  : sendingElapsedSeconds < 2
+                    ? t("common.assistant.thinking")
+                    : sendingElapsedSeconds < 6
+                      ? t("common.assistant.thinkingConnectAi")
+                      : sendingElapsedSeconds < 12
+                        ? t("common.assistant.thinkingSynthesizing")
+                        : t("common.assistant.thinkingSlowReassure");
+
+              return (
+                <div
+                  aria-busy="true"
+                  aria-live="polite"
+                  className="viread-messenger-typing-row flex flex-col items-start gap-1"
+                  data-testid="viread-assistant-loading-card"
+                  role="status"
                 >
-                  {t("common.assistant.cancelRequest")}
-                </button>
-              </div>
-            </div>
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-canvas">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-primary/70" />
-            </div>
-          </div>
-        ) : null}
+                  <div className="flex items-end gap-2">
+                    <AssistantCircularAvatar
+                      showActiveDot
+                      testId="viread-assistant-typing-avatar"
+                    />
+                    <div
+                      className="inline-flex min-h-[34px] items-center gap-1.5 rounded-2xl rounded-es-sm border border-border/75 bg-[#EEF2F6] px-3.5 py-2.5 shadow-2xs"
+                      data-testid="viread-assistant-typing-bubble"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="viread-messenger-dot viread-messenger-dot-1"
+                        data-testid="viread-assistant-typing-dot"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="viread-messenger-dot viread-messenger-dot-2"
+                        data-testid="viread-assistant-typing-dot"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="viread-messenger-dot viread-messenger-dot-3"
+                        data-testid="viread-assistant-typing-dot"
+                      />
+                      <span className="sr-only">{thinkingStatusText}</span>
+                    </div>
+                  </div>
+                  <div className="flex w-full items-center justify-between gap-2 ps-9 text-[10.5px] text-muted">
+                    <span className="min-w-0 truncate font-medium">
+                      {thinkingStatusText}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {sendingElapsedSeconds >= 1 ? (
+                        <span
+                          className="rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-bold text-muted"
+                          data-testid="viread-assistant-elapsed"
+                        >
+                          {t("common.assistant.elapsedSeconds", {
+                            seconds: sendingElapsedSeconds,
+                          })}
+                        </span>
+                      ) : null}
+                      <button
+                        aria-label={t("common.assistant.cancelAria")}
+                        className="rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-bold text-ink transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:outline-primary"
+                        data-testid="viread-assistant-cancel"
+                        onClick={handleCancelSending}
+                        type="button"
+                      >
+                        {t("common.assistant.cancelRequest")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          : null}
 
         {rateLimitState ? (
           <div

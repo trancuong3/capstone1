@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
@@ -15,7 +16,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.reading import HistoryRepository, HistoryService, router as reading_router
-from app.api.routes.system import ProgressRepository, ProgressService, router as system_router
+from app.api.routes.system import (
+    LegacyReportService,
+    ProgressRepository,
+    ProgressService,
+    router as system_router,
+)
+from app.schemas import ProgressReportCreate
+from app.services.child_progress.metrics import MAX_SESSION_MINUTES
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
 CHILD = UUID("22222222-2222-4222-8222-222222222222")
@@ -295,6 +303,131 @@ class ParentReadHttpTests(unittest.TestCase):
     def test_limit_and_dates_are_validated_by_fastapi(self):
         self.assertEqual(self.client.get(f"/reading/history?child_id={CHILD}&limit=101").status_code, 422)
         self.assertEqual(self.client.get(f"/system/progress/{CHILD}?period_start=not-a-date").status_code, 422)
+
+
+class LegacyReportServiceTests(unittest.IsolatedAsyncioTestCase):
+    def _repo(self, sessions):
+        repo = MagicMock()
+        repo.lock_owned_child = AsyncMock(return_value=True)
+        repo.trusted_snapshot = AsyncMock(return_value=None)
+        repo.completed_sessions = AsyncMock(return_value=sessions)
+        repo.save = AsyncMock(side_effect=lambda snapshot: snapshot)
+        return repo
+
+    async def test_legacy_report_caps_multi_day_idle_sessions_and_preserves_normal_ones(self):
+        base = datetime(2026, 1, 2, 3, 0, tzinfo=timezone.utc)
+        sessions = [
+            # Normal 10-minute session -> 600,000 ms
+            (base, base + timedelta(minutes=10)),
+            # Multi-day idle/resumed session (72 hours) -> capped at MAX_SESSION_MINUTES (90m)
+            (base + timedelta(hours=1), base + timedelta(days=3, hours=1)),
+            # Exact boundary 90-minute session -> 5,400,000 ms
+            (base + timedelta(days=1), base + timedelta(days=1, minutes=MAX_SESSION_MINUTES)),
+        ]
+        repo = self._repo(sessions)
+        payload = ProgressReportCreate(
+            ChildId=CHILD,
+            PeriodStart=date(2026, 1, 1),
+            PeriodEnd=date(2026, 1, 7),
+            Summary={},
+        )
+        snapshot = await LegacyReportService(repo).create(payload, ACTOR)
+        expected_ms = (10 + MAX_SESSION_MINUTES + MAX_SESSION_MINUTES) * 60 * 1000
+        self.assertEqual(snapshot.Summary["completed_sessions"], 3)
+        self.assertEqual(snapshot.Summary["reading_duration_ms"], expected_ms)
+        self.assertEqual(snapshot.Summary["source"], "server_completed_sessions_v1")
+
+    async def test_legacy_report_sanitizes_inverted_none_and_mixed_timezone_timestamps(self):
+        aware_start = datetime(2026, 1, 3, 2, 0, tzinfo=timezone.utc)
+        naive_start = datetime(2026, 1, 4, 2, 0)
+        sessions = [
+            # Inverted timestamps -> 0 ms
+            (aware_start, aware_start - timedelta(minutes=5)),
+            # None timestamps -> 0 ms
+            (None, aware_start),
+            (aware_start, None),
+            # Mixed naive start + aware end spanning 48 hours -> capped at 90m without TypeError
+            (naive_start, datetime(2026, 1, 6, 2, 0, tzinfo=timezone.utc)),
+            # Naive start + naive end of 15 minutes -> 900,000 ms
+            (naive_start, naive_start + timedelta(minutes=15)),
+        ]
+        repo = self._repo(sessions)
+        payload = ProgressReportCreate(
+            ChildId=CHILD,
+            PeriodStart=date(2026, 1, 1),
+            PeriodEnd=date(2026, 1, 7),
+            Summary={},
+        )
+        snapshot = await LegacyReportService(repo).create(payload, ACTOR)
+        expected_ms = (MAX_SESSION_MINUTES + 15) * 60 * 1000
+        self.assertEqual(snapshot.Summary["completed_sessions"], 2)
+        self.assertEqual(snapshot.Summary["reading_duration_ms"], expected_ms)
+
+    async def test_legacy_report_rejects_only_corrupt_session_rows(self):
+        aware_start = datetime(2026, 1, 3, 2, 0, tzinfo=timezone.utc)
+        repo = self._repo(
+            [
+                (None, aware_start),
+                (aware_start, None),
+                (aware_start, aware_start - timedelta(minutes=2)),
+            ]
+        )
+        payload = ProgressReportCreate(
+            ChildId=CHILD,
+            PeriodStart=date(2026, 1, 1),
+            PeriodEnd=date(2026, 1, 7),
+            Summary={},
+        )
+        with self.assertRaises(HTTPException) as caught:
+            await LegacyReportService(repo).create(payload, ACTOR)
+        self.assertEqual(caught.exception.status_code, 409)
+        repo.save.assert_not_awaited()
+
+    async def test_duration_helpers_use_utc_elapsed_time_across_dst_transitions(self):
+        from app.services.profile_service import ProfileService
+        from app.services.reading_content_service import ReadingContentService
+
+        ny = ZoneInfo("America/New_York")
+        # Spring-forward: 01:30 EST -> 03:30 EDT is 60 real minutes (not 120m / 90m cap).
+        sf_start = datetime(2026, 3, 8, 1, 30, tzinfo=ny)
+        sf_end = datetime(2026, 3, 8, 3, 30, tzinfo=ny)
+        # Fall-back: 01:30 EDT (fold=0) -> 01:30 EST (fold=1) is 60 real minutes (not 0m).
+        fb_start = datetime(2026, 11, 1, 1, 30, fold=0, tzinfo=ny)
+        fb_end = datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny)
+
+        expected_ms = 60 * 60 * 1000
+        for label, start_dt, end_dt in (
+            ("spring_forward", sf_start, sf_end),
+            ("fall_back", fb_start, fb_end),
+        ):
+            with self.subTest(transition=label):
+                self.assertEqual(
+                    LegacyReportService._bounded_session_duration_ms(start_dt, end_dt),
+                    expected_ms,
+                )
+                row = session_row(State="COMPLETED", StartedAt=start_dt, EndedAt=end_dt)
+                self.assertEqual(HistoryService.summary(row).duration_ms, expected_ms)
+                self.assertEqual(
+                    ProfileService._serialize_latest_session(
+                        row, "Book", now=end_dt
+                    )["duration_ms"],
+                    expected_ms,
+                )
+                self.assertEqual(
+                    ReadingContentService._summary(row).duration_ms,
+                    expected_ms,
+                )
+
+        repo = self._repo([(sf_start, sf_end), (fb_start, fb_end)])
+        payload = ProgressReportCreate(
+            ChildId=CHILD,
+            PeriodStart=date(2026, 3, 1),
+            PeriodEnd=date(2026, 11, 2),
+            Summary={},
+        )
+        snapshot = await LegacyReportService(repo).create(payload, ACTOR)
+        self.assertEqual(snapshot.Summary["completed_sessions"], 2)
+        self.assertEqual(snapshot.Summary["reading_duration_ms"], 2 * expected_ms)
 
 
 if __name__ == "__main__":

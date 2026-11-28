@@ -11,7 +11,9 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
+  WandSparkles,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +27,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { FamilyStoryweaverModal } from "@/components/books/family-storyweaver-modal";
+import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
@@ -33,10 +37,14 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { CreateMicroStoryModal } from "@/components/reports/create-micro-story-modal";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useMicroStoryTranslations } from "@/messages/features/micro_story";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   DEFAULT_USER_CACHE_TTL_MS,
@@ -116,7 +124,10 @@ function ParentMyBooksContent({
   initialPage: number;
 }) {
   const t = useTranslations("books");
+  const tMicroStory = useMicroStoryTranslations();
   const service = useParentPrivateBookService();
+  const [showMicroStoryModal, setShowMicroStoryModal] = useState(false);
+  const taskCenter = useOptionalAiTaskCenter();
   const router = useRouter();
   const requestIdRef = useRef(0);
 
@@ -138,6 +149,7 @@ function ParentMyBooksContent({
   const [statusFilter, setStatusFilter] = useState<BookStatusFilter>("ALL");
 
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showStoryweaverModal, setShowStoryweaverModal] = useState(false);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [minGrade, setMinGrade] = useState<number>(1);
@@ -434,6 +446,10 @@ function ParentMyBooksContent({
             })
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
+      if (totalRecheck > 0) {
+        taskCenter?.markTargetAlertsSeen({ bookId: book.id });
+        emitStudioTasksChanged({ portal: "parent" });
+      }
       setReloadKey((prev) => prev + 1);
     } catch (error) {
       setActionError(getErrorText(error, t("myBooks.updateErrorFallback")));
@@ -448,6 +464,8 @@ function ParentMyBooksContent({
     setDeletingBookId(book.id);
     try {
       await service.delete(book.id);
+      taskCenter?.markTargetAlertsSeen({ bookId: book.id });
+      emitStudioTasksChanged({ portal: "parent" });
       setConfirmDeleteBookId(null);
       if (editingBookId === book.id) {
         setEditingBookId(null);
@@ -497,6 +515,26 @@ function ParentMyBooksContent({
           </Button>
           <Button
             className="w-auto"
+            data-testid="my-books-open-micro-story-cta"
+            fullWidth={false}
+            onClick={() => setShowMicroStoryModal(true)}
+            variant="secondary"
+          >
+            <Sparkles aria-hidden="true" className="size-4 text-primary" />
+            {tMicroStory("ctaButton")}
+          </Button>
+          <Button
+            className="w-auto"
+            data-testid="open-storyweaver-modal"
+            fullWidth={false}
+            onClick={() => setShowStoryweaverModal(true)}
+            variant="secondary"
+          >
+            <WandSparkles aria-hidden="true" className="size-4" />
+            {t("myBooks.storyweaver.openAction")}
+          </Button>
+          <Button
+            className="w-auto"
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
           >
@@ -507,6 +545,15 @@ function ParentMyBooksContent({
           </Button>
         </div>
       </header>
+
+      <FamilyStoryweaverModal
+        isOpen={showStoryweaverModal}
+        onClose={() => setShowStoryweaverModal(false)}
+        onCreated={() => {
+          setActionNotice(t("myBooks.storyweaver.createdNotice"));
+          void loadBooks();
+        }}
+      />
 
       <div
         role="note"
@@ -893,6 +940,10 @@ function ParentMyBooksContent({
                         )}{" "}
                         · {gradeLabel}
                       </p>
+                      <ReadabilityBadge
+                        className="mt-2"
+                        readability={book.readability}
+                      />
                     </div>
 
                     {isSuspended && book.suspended_reason ? (
@@ -1216,6 +1267,13 @@ function ParentMyBooksContent({
           </div>
         ) : null}
       </Modal>
+      <CreateMicroStoryModal
+        isOpen={showMicroStoryModal}
+        onClose={() => setShowMicroStoryModal(false)}
+        onStoryCreated={() => {
+          loadBooks();
+        }}
+      />
     </section>
   );
 }

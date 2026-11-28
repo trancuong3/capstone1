@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -549,7 +550,7 @@ class AiTeacherVoiceSyncTests(unittest.IsolatedAsyncioTestCase):
 
         for google_male_vid, expected_region in (
             ("google_vi_vn_neural2_d", "north"),
-            ("google_vi_vn_wavenet_b", "north"),
+            ("google_vi_vn_wavenet_b", "south"),
         ):
             region, gender = _resolve_local_voice_region_gender(google_male_vid)
             self.assertEqual(region, expected_region)
@@ -626,3 +627,88 @@ class AiTeacherVoiceSyncTests(unittest.IsolatedAsyncioTestCase):
                 normalized_text="Con tên là Minh ở Hà Nội.",
             )
         )
+
+
+    def test_resolve_local_voice_region_gender_does_not_misclassify_nam_names(self) -> None:
+        from app.services.voice_orchestrator import _resolve_local_voice_region_gender
+
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_north_hoang_nam"),
+            ("north", "female"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_north_thien_minh"),
+            ("north", "male"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_south_thai_son"),
+            ("south", "male"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("custom_mien_nam_voice"),
+            ("south", "female"),
+        )
+
+    async def test_elevenlabs_male_voice_never_silently_falls_back_to_female_default(self) -> None:
+        import httpx
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+            VoiceProviderError,
+        )
+
+        called_urls: list[str] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url: str, **kwargs):
+                called_urls.append(url)
+                return httpx.Response(status_code=404, json={"detail": {"status": "voice_not_found"}})
+
+        provider = ElevenLabsVoiceProvider()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "ELEVENLABS_API_KEY": "test-el-key",
+                    "ELEVENLABS_MALE_VOICE_ID": "male-voice-id-123",
+                },
+                clear=False,
+            ),
+            patch.object(httpx, "AsyncClient", FakeAsyncClient),
+            self.assertRaises(VoiceProviderError),
+        ):
+            await provider.synthesize(
+                text="Thầy chào con",
+                requested_voice_id="male-voice-id-123",
+                speed=1.0,
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(len(called_urls), 1)
+        self.assertIn("male-voice-id-123", called_urls[0])
+        self.assertNotIn(DEFAULT_VOICE_ID, "".join(called_urls))
+
+    def test_voice_routes_lookup_voice_gender_recognizes_elevenlabs_male_env(self) -> None:
+        from app.api.routes.voice import lookup_voice_gender
+
+        with patch.dict(
+            os.environ,
+            {
+                "ELEVENLABS_MALE_VOICE_ID": "male-env-voice",
+                "ELEVENLABS_FEMALE_VOICE_ID": "female-env-voice",
+            },
+            clear=False,
+        ):
+            self.assertEqual(lookup_voice_gender("local_north_thien_minh"), "male")
+            self.assertEqual(lookup_voice_gender("google_vi_vn_wavenet_b"), "male")
+            self.assertEqual(lookup_voice_gender("male-env-voice"), "male")
+            self.assertEqual(lookup_voice_gender("female-env-voice"), "female")

@@ -384,4 +384,104 @@ describe("useSpeechRecorder", () => {
     await expect(result.current.prepare()).rejects.toBe(denied);
     expect(FakeMediaRecorder.instances).toHaveLength(0);
   });
+
+  it("keeps action callbacks referentially stable and live getAudioLevel while throttling UI audioLevel churn", async () => {
+    let rafCallback: FrameRequestCallback | null = null;
+    const origRaf = globalThis.requestAnimationFrame;
+    const origCancelRaf = globalThis.cancelAnimationFrame;
+    let fakeNow = 1_000;
+    const nowSpy = vi
+      .spyOn(performance, "now")
+      .mockImplementation(() => fakeNow);
+    let currentAmplitude = 0;
+
+    class FakeAnalyser {
+      fftSize = 2048;
+      smoothingTimeConstant = 0.5;
+      getFloatTimeDomainData(buf: Float32Array) {
+        buf.fill(currentAmplitude);
+      }
+    }
+    class FakeAudioContext {
+      state: AudioContextState = "running";
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createAnalyser() {
+        return new FakeAnalyser();
+      }
+      resume() {
+        return Promise.resolve();
+      }
+      close() {
+        return Promise.resolve();
+      }
+    }
+
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafCallback = cb;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    let renders = 0;
+    try {
+      const { result } = renderHook(() => {
+        renders += 1;
+        return useSpeechRecorder();
+      });
+      const initialPrepare = result.current.prepare;
+      const initialStart = result.current.start;
+      const initialStop = result.current.stop;
+      const initialCancel = result.current.cancel;
+      const initialGetAudioLevel = result.current.getAudioLevel;
+
+      await act(async () => result.current.start({ mode: "short-word" }));
+      const rendersAfterStart = renders;
+
+      // First non-zero frames establish speaking + initial level (0 -> 20)
+      currentAmplitude = 0.04; // rms=0.04 => level=20
+      fakeNow = 1_020;
+      act(() => rafCallback?.(fakeNow));
+      fakeNow = 1_080;
+      act(() => rafCallback?.(fakeNow));
+      expect(result.current.isSpeaking).toBe(true);
+      expect(result.current.getAudioLevel?.()).toBe(20);
+      expect(result.current.audioLevel).toBe(20);
+
+      // Tiny 1-3 point jitter within 200ms updates live ref without re-rendering UI
+      const rendersAfterFirstLevel = renders;
+      currentAmplitude = 0.044; // level=22 (delta=2 < 4)
+      fakeNow = 1_120;
+      act(() => rafCallback?.(fakeNow));
+      currentAmplitude = 0.046; // level=23 (delta=3 < 4)
+      fakeNow = 1_180;
+      act(() => rafCallback?.(fakeNow));
+      expect(result.current.getAudioLevel?.()).toBe(23);
+      expect(result.current.audioLevel).toBe(20);
+      expect(renders).toBe(rendersAfterFirstLevel);
+
+      // After >= 200ms with >= 4 delta, UI updates once
+      currentAmplitude = 0.06; // level=30 (delta=10 >= 4)
+      fakeNow = 1_260;
+      act(() => rafCallback?.(fakeNow));
+      expect(result.current.getAudioLevel?.()).toBe(30);
+      expect(result.current.audioLevel).toBe(30);
+      expect(renders).toBeGreaterThan(rendersAfterStart);
+
+      // Action callbacks stay 100% referentially stable across audio level updates
+      expect(result.current.prepare).toBe(initialPrepare);
+      expect(result.current.start).toBe(initialStart);
+      expect(result.current.stop).toBe(initialStop);
+      expect(result.current.cancel).toBe(initialCancel);
+      expect(result.current.getAudioLevel).toBe(initialGetAudioLevel);
+
+      act(() => result.current.cancel());
+    } finally {
+      nowSpy.mockRestore();
+      vi.stubGlobal("requestAnimationFrame", origRaf);
+      vi.stubGlobal("cancelAnimationFrame", origCancelRaf);
+    }
+  });
 });

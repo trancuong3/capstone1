@@ -463,7 +463,7 @@ export function runI18nAudit(options) {
 
   const localeDirs = fs
     .readdirSync(messagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && entry.name !== "features")
     .map((entry) => entry.name)
     .sort();
 

@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  SlidersHorizontal,
+  Users,
   Volume2,
 } from "lucide-react";
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
@@ -24,13 +26,23 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import {
+  buildDuetTurnsForPage,
+  resolveActiveDuetTurn,
+} from "@/lib/reading/duet-reading";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
+import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay-modal";
+import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import {
+  coReadingEn,
+  coReadingVi,
+} from "@/messages/features/co_reading_messages";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -48,10 +60,10 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   buildPhonicsLesson,
-  READING_MASTERY_LABELS,
   type PhonicsLessonPlan,
   type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
+import { cn } from "@/lib/utils/cn";
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
@@ -66,15 +78,17 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import {
   awaitSttReadyBeforeListening,
+  awaitVoiceEnginesReadyBeforeListening,
   preloadReadingVoiceEngines,
+  warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
-  getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
-  isHostedLocalVoiceUnconfigured,
+  isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
+  markHostedLocalUnconfigured,
   recordSttEngineUsage,
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
@@ -151,6 +165,23 @@ import {
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
+import { OfflineOutboxStatusPill } from "@/components/offline/offline-pack-controls";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import {
+  buildOfflineCompletedCurrentPageProgress,
+  buildOfflineNavigatedProgress,
+  isUuidString,
+  playOfflineCachedPageAudio,
+  resolveOfflineReadingSessionFallback,
+  type OfflineReadingSessionContext,
+} from "@/lib/offline/offline-reading-bridge";
+import {
+  enqueueOfflineSessionEvent,
+  generateUuidV4,
+  installOfflineOutboxReconnectAutoDrain,
+} from "@/lib/offline/offline-session-outbox";
+import { saveOfflineSessionDescriptor } from "@/lib/offline/reading-pack-store";
 
 type ReadingDynamicPanelKey = "question" | "complete" | "phonics" | "picker";
 
@@ -505,6 +536,12 @@ interface ReadingScreenProps {
   sessionId: string;
 }
 
+const EMPTY_COMPLETION_SUMMARY: ReadingCompletionSummaryUI = {
+  duration_minutes: null,
+  pages_explored: null,
+  practiced_words: null,
+};
+
 interface ReadingScreenData {
   book: BookDetailDTO;
   child: ChildProfileDTO;
@@ -600,6 +637,52 @@ type RetryWordItem = RetryWordRecord;
 
 const RETRY_CAPTURE_POLL_MS = SHORT_WORD_CAPTURE_CONFIG.pollIntervalMs;
 
+const sessionStandbyRecognizers = new Map<
+  string,
+  LocalSegmentSpeechRecognition
+>();
+
+function setSessionStandbyRecognizer(
+  sid: string,
+  rec: LocalSegmentSpeechRecognition,
+): void {
+  const prev = sessionStandbyRecognizers.get(sid);
+  if (prev && prev !== rec) {
+    try {
+      prev.cancelStandby();
+    } catch {
+      // Ignore cleanup error
+    }
+  }
+  sessionStandbyRecognizers.set(sid, rec);
+}
+
+function getSessionStandbyRecognizer(
+  sid: string,
+): LocalSegmentSpeechRecognition | null {
+  return sessionStandbyRecognizers.get(sid) ?? null;
+}
+
+function takeSessionStandbyRecognizer(
+  sid: string,
+): LocalSegmentSpeechRecognition | null {
+  const rec = sessionStandbyRecognizers.get(sid) ?? null;
+  sessionStandbyRecognizers.delete(sid);
+  return rec;
+}
+
+function cancelSessionStandbyRecognizer(sid: string): void {
+  const rec = sessionStandbyRecognizers.get(sid);
+  sessionStandbyRecognizers.delete(sid);
+  if (rec) {
+    try {
+      rec.cancelStandby();
+    } catch {
+      // Ignore standby cancel error
+    }
+  }
+}
+
 // Measure recorder duration with a monotonic clock from capture callbacks.
 function getRetryCaptureTimeMs(): number {
   return performance.now();
@@ -652,9 +735,19 @@ function ReadingSessionScreen({
   reconnectMode,
   sessionId,
 }: ReadingScreenProps) {
-  const { formatNumber } = useI18n();
+  const { formatNumber, locale } = useI18n();
+  const coReadingCopy = locale === "vi" ? coReadingVi : coReadingEn;
   const t = useTranslations("reading");
   const tCommon = useTranslations("common");
+  const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const activeParentAccountId =
+    authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
+  const activeChildProfileId = appStore?.selectedChildId ?? null;
+  const offlineSessionCtxRef = useRef<OfflineReadingSessionContext | null>(
+    null,
+  );
+  const [isOfflinePackMode, setIsOfflinePackMode] = useState(false);
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -684,6 +777,9 @@ function ReadingSessionScreen({
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
+  const pageOptionsRef = useRef<HTMLDivElement>(null);
+  const [coReadingOpen, setCoReadingOpen] = useState(false);
+  const [duetModeEnabled, setDuetModeEnabled] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const retryOnRemountRef = useRef({
@@ -706,9 +802,7 @@ function ReadingSessionScreen({
       },
       onClosePhonics: () => {
         stopAssistantAudio();
-        setActivePhonicsLesson(null);
-        setActivePhonicsStepIndex(null);
-        setPhonicsStatusHint(null);
+        dismissPhonicsCard();
       },
       onClosePicker: closePagePicker,
     };
@@ -936,6 +1030,7 @@ function ReadingSessionScreen({
   const retryResumeAfterAssistantAudioRef = useRef<RetryWordCandidate | null>(
     null,
   );
+  const isVoicePreviewPlayingRef = useRef(false);
   const retryCaptureStartedAtRef = useRef(0);
   const retrySpeechOnsetRef = useRef<number | null>(null);
   const retrySpeechObservedRef = useRef(false);
@@ -975,6 +1070,46 @@ function ReadingSessionScreen({
   const [companionBubble, setCompanionBubble] =
     useState<CompanionBubbleState | null>(null);
   const [presencePaused, setPresencePaused] = useState(false);
+  const duetTurns = useMemo(
+    () => (page ? buildDuetTurnsForPage(page) : []),
+    [page],
+  );
+  const activeDuetTurn = useMemo(
+    () =>
+      duetModeEnabled && duetTurns.length >= 2
+        ? resolveActiveDuetTurn(
+            duetTurns,
+            previewSnapshot?.currentWordId ?? currentWordId,
+            correctWordIds,
+          )
+        : null,
+    [
+      correctWordIds,
+      currentWordId,
+      duetModeEnabled,
+      duetTurns,
+      previewSnapshot?.currentWordId,
+    ],
+  );
+  const handleCompleteParentDuetTurn = useCallback(() => {
+    if (!activeDuetTurn || activeDuetTurn.role !== "PARENT") return;
+    for (const wId of activeDuetTurn.wordIds) {
+      helpedWordIdsRef.current.add(wId);
+      correctWordIdsRef.current.add(wId);
+    }
+    setAssistedWordIds(new Set(helpedWordIdsRef.current));
+    setCorrectWordIds(new Set(correctWordIdsRef.current));
+    const snap = alignmentEngineRef.current?.advanceParentTurnWords(
+      activeDuetTurn.wordIds,
+    );
+    if (snap) {
+      setCurrentWordId(snap.currentWordId);
+      setPreviewSnapshot(snap);
+      if (snap.currentWordId === null) {
+        void autoCompletePageAfterFinalWordRef.current(snap);
+      }
+    }
+  }, [activeDuetTurn]);
   useEffect(() => {
     automationRef.current = automationPreferences;
     coachingStyleRef.current = coachingStyle;
@@ -1037,6 +1172,7 @@ function ReadingSessionScreen({
   const pageWordsByRevisionRef = useRef(
     new Map<string, readonly ReadingPageWordDTO[]>(),
   );
+  const PHONICS_AUTO_HIDE_DELAY_MS = 1800;
   const [activePhonicsLesson, setActivePhonicsLesson] = useState<{
     readonly wordId: string | null;
     readonly plan: PhonicsLessonPlan;
@@ -1049,8 +1185,57 @@ function ReadingSessionScreen({
   const [phonicsStatusHint, setPhonicsStatusHint] = useState<string | null>(
     null,
   );
+  const [isPhonicsAutoHiding, setIsPhonicsAutoHiding] = useState(false);
+  const phonicsAutoHideTimerRef = useRef<number | null>(null);
   const phonicsSpelledWordIdsRef = useRef(new Set<string>());
   const passageContainsSpellRef = useRef(false);
+
+  const clearPhonicsAutoHideTimer = useCallback(() => {
+    if (phonicsAutoHideTimerRef.current !== null) {
+      window.clearTimeout(phonicsAutoHideTimerRef.current);
+      phonicsAutoHideTimerRef.current = null;
+    }
+    setIsPhonicsAutoHiding(false);
+  }, []);
+
+  const dismissPhonicsCard = useCallback(() => {
+    clearPhonicsAutoHideTimer();
+    setActivePhonicsLesson(null);
+    setActivePhonicsStepIndex(null);
+    setPhonicsStatusHint(null);
+  }, [clearPhonicsAutoHideTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (phonicsAutoHideTimerRef.current !== null) {
+        window.clearTimeout(phonicsAutoHideTimerRef.current);
+        phonicsAutoHideTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pageOptionsOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !pageOptionsRef.current?.contains(event.target)
+      ) {
+        setPageOptionsOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPageOptionsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [pageOptionsOpen]);
 
   const finishStartedRef = useRef(false);
   const retryReportSaveStartedRef = useRef(false);
@@ -1060,6 +1245,7 @@ function ReadingSessionScreen({
   const sttNetworkErrorStreakRef = useRef(0);
   const sttRestartTimerRef = useRef<number | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const onBeforeExternalMicStartRef = useRef<(() => void) | null>(null);
   const isListeningActiveRef = useRef(false);
   const isStartingListeningRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
@@ -1196,6 +1382,10 @@ function ReadingSessionScreen({
     if (uiStateRef.current === "tts-error") {
       setUiState("reading");
     }
+    if (activePhonicsLessonRef.current) {
+      dismissPhonicsCard();
+    }
+    setCompanionBubble(null);
     setPreviewSnapshot(null);
     setCurrentWordId(word.word_id);
 
@@ -1289,8 +1479,8 @@ function ReadingSessionScreen({
   useEffect(() => {
     mountedRef.current = true;
     // Wait for /voice/status before locking session when health is not cached yet;
-    // if fresh health is already available, lock immediately with the right voice.
-    const cachedHealth = getFreshVoiceEngineHealth();
+    // if routing health is already available, lock immediately with the right voice.
+    const cachedHealth = getVoiceEngineHealthForRouting();
     if (cachedHealth) {
       const policy = getVoicePolicyPreferences();
       const ttsAllowsFallback =
@@ -1342,6 +1532,7 @@ function ReadingSessionScreen({
       if (retryRecorderActiveRef.current) {
         retryRecorderActiveRef.current = false;
       }
+      cancelSessionStandbyRecognizer(sessionId);
       try {
         recognitionRef.current?.abort?.();
       } catch {
@@ -1402,7 +1593,7 @@ function ReadingSessionScreen({
           }
           return;
         }
-        hostedLocalUnconfigured = isHostedLocalVoiceUnconfigured(health);
+        hostedLocalUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
         const policy = getVoicePolicyPreferences();
         const sttAllowsFallback =
           policy.providerMode === "local_with_google_fallback" &&
@@ -1479,8 +1670,16 @@ function ReadingSessionScreen({
           });
         }
 
+        if (localTtsDown) {
+          void warmWasmTtsIfNeeded(
+            resolveVoiceGender(getEffectiveVoiceId()),
+            health,
+          );
+        }
+
         const ttsUsingCachedAudio =
           currentTtsSnap.tier === "catalog_cache" ||
+          currentTtsSnap.tier === "browser_wasm" ||
           currentTtsSnap.provider === "precomputed_cache";
 
         if (ttsAllowsFallback && localTtsDown) {
@@ -1597,7 +1796,18 @@ function ReadingSessionScreen({
               return;
             }
             const status = getVoiceEngineStatus();
-            if (status.stt.fallbackUsed || status.tts.fallbackUsed) {
+            const routingHealth = getVoiceEngineHealthForRouting();
+            const localDegraded = Boolean(
+              routingHealth &&
+              (!routingHealth.local.available ||
+                !routingHealth.local.stt_ready ||
+                !routingHealth.local.tts_ready),
+            );
+            if (
+              status.stt.fallbackUsed ||
+              status.tts.fallbackUsed ||
+              localDegraded
+            ) {
               probeVoiceStatus();
             }
           }, 45_000)
@@ -1623,6 +1833,7 @@ function ReadingSessionScreen({
       }, 1000);
       return () => clearTimeout(timer);
     }
+    const finishDelayMs = getSessionStandbyRecognizer(sessionId) ? 0 : 400;
     const finishTimer = setTimeout(() => {
       if (assistantAudioPendingRef.current) {
         setCountdown(null);
@@ -1636,9 +1847,9 @@ function ReadingSessionScreen({
           }
         });
       }
-    }, 400);
+    }, finishDelayMs);
     return () => clearTimeout(finishTimer);
-  }, [countdown]);
+  }, [countdown, sessionId]);
 
   useEffect(() => {
     if (!page) return;
@@ -1701,11 +1912,83 @@ function ReadingSessionScreen({
     };
   }, [speechPlayer, speechRecorder]);
 
+  const offlineIdentityRef = useRef({
+    parentAccountId: activeParentAccountId,
+    childProfileId: activeChildProfileId,
+    knownChild: appStore?.validatedSelectedChild ?? null,
+  });
+  useEffect(() => {
+    offlineIdentityRef.current = {
+      parentAccountId: activeParentAccountId,
+      childProfileId: activeChildProfileId,
+      knownChild: appStore?.validatedSelectedChild ?? null,
+    };
+  }, [
+    activeChildProfileId,
+    activeParentAccountId,
+    appStore?.validatedSelectedChild,
+  ]);
+
+  useEffect(() => {
+    return installOfflineOutboxReconnectAutoDrain(() => ({
+      parentAccountId:
+        offlineSessionCtxRef.current?.parentAccountId ?? activeParentAccountId,
+      childProfileId:
+        offlineSessionCtxRef.current?.childProfileId ?? activeChildProfileId,
+    }));
+  }, [activeChildProfileId, activeParentAccountId]);
+
   useEffect(() => {
     let active = true;
+    async function tryHydrateFromOfflinePack(): Promise<boolean> {
+      const queryBookId =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("bookId")
+          : null;
+      const identity = offlineIdentityRef.current;
+      const offlineBootstrap = await resolveOfflineReadingSessionFallback({
+        sessionId,
+        initialPageId,
+        queryBookId,
+        parentAccountId: identity.parentAccountId,
+        childProfileId: identity.childProfileId,
+        knownChild: identity.knownChild,
+      });
+      if (!offlineBootstrap || !active) return false;
+      offlineSessionCtxRef.current = offlineBootstrap.context;
+      setIsOfflinePackMode(true);
+      hydrateTeacherVoiceFromChildProfile(offlineBootstrap.child);
+      setPage(offlineBootstrap.currentPage);
+      setPageProgress(offlineBootstrap.pageProgress);
+      setPageNavigationError(null);
+      setCurrentWordId(offlineBootstrap.currentPage.words[0]?.word_id ?? null);
+      setCanonicalState("PAGE_READY");
+      setLoadState({
+        status: "ready",
+        data: {
+          book: offlineBootstrap.book,
+          child: offlineBootstrap.child,
+          completion: offlineBootstrap.completion,
+        },
+      });
+      return true;
+    }
+
     async function load() {
+      if (
+        (typeof navigator !== "undefined" && navigator.onLine === false) ||
+        sessionId.startsWith("offline-")
+      ) {
+        const loadedOffline = await tryHydrateFromOfflinePack();
+        if (loadedOffline) return;
+      }
+
       try {
         const session = await services.readingService.get(sessionId);
+        const needsInitialCompletion =
+          initialUiState === "complete" ||
+          session.state === "FINISHED" ||
+          session.state === "ABORTED";
         // Batch startup reads in two smaller waves (3 + 3) instead of blasting
         // 6 concurrent DB queries on mobile cold start.
         const [book, child, currentPage] = await Promise.all([
@@ -1714,7 +1997,9 @@ function ReadingSessionScreen({
           services.readingService.getCurrentPage(sessionId),
         ]);
         const [completion, initialProgress, practice] = await Promise.all([
-          services.readingService.getCompletionSummary(sessionId),
+          needsInitialCompletion
+            ? services.readingService.getCompletionSummary(sessionId)
+            : Promise.resolve(null),
           services.readingService.getPageProgress(sessionId),
           (
             services.readingService.getPracticeState?.(sessionId) ??
@@ -1730,12 +2015,22 @@ function ReadingSessionScreen({
 
         if (!active) return;
 
-        hydrateTeacherVoiceFromChildProfile(child, {
+        const hydratedChildVoice = hydrateTeacherVoiceFromChildProfile(child, {
           syncActiveServerSessionLock:
             typeof voiceStudio.updateSessionVoiceLock === "function"
               ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
               : undefined,
         });
+        if (
+          hydratedChildVoice &&
+          getSessionVoiceAudit(sessionId).length === 0
+        ) {
+          lockSessionVoice(sessionId, {
+            voiceId: hydratedChildVoice.voiceId,
+            speed: hydratedChildVoice.speed,
+            forceUpdate: true,
+          });
+        }
 
         if (
           practice &&
@@ -1852,17 +2147,43 @@ function ReadingSessionScreen({
         );
         setCurrentWordId(currentPage.words[0]?.word_id ?? null);
         setCanonicalState(session.state);
+        offlineSessionCtxRef.current = null;
+        setIsOfflinePackMode(false);
+        const currentParentAccountId =
+          offlineIdentityRef.current.parentAccountId;
+        if (currentParentAccountId) {
+          void saveOfflineSessionDescriptor({
+            parentAccountId: currentParentAccountId,
+            childProfileId: child.id,
+            sessionId,
+            clientSessionId: isUuidString(sessionId)
+              ? sessionId
+              : generateUuidV4(),
+            bookId: book.id,
+            child,
+            startPageId: initialProgress.start_page_id,
+            endPageId: initialProgress.end_page_id,
+            currentPageId: currentPage.page_id,
+          }).catch(() => undefined);
+        }
         setLoadState({
           status: "ready",
-          data: { book, child, completion },
+          data: {
+            book,
+            child,
+            completion: completion ?? EMPTY_COMPLETION_SUMMARY,
+          },
         });
       } catch (error) {
+        const isExplicitNotFound =
+          isServiceError(error) && error.code === "RESOURCE_NOT_FOUND";
+        if (!isExplicitNotFound) {
+          const recoveredOffline = await tryHydrateFromOfflinePack();
+          if (recoveredOffline) return;
+        }
         if (active) {
           setLoadState({
-            status:
-              isServiceError(error) && error.code === "RESOURCE_NOT_FOUND"
-                ? "not-found"
-                : "error",
+            status: isExplicitNotFound ? "not-found" : "error",
           });
         }
       }
@@ -1872,7 +2193,15 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId, t, voiceStudio]);
+  }, [
+    initialPageId,
+    initialUiState,
+    loadKey,
+    services,
+    sessionId,
+    t,
+    voiceStudio,
+  ]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -2127,9 +2456,8 @@ function ReadingSessionScreen({
     setCompanionBubble(null);
     sentenceReinforcementRef.current.reset();
     setActiveSentenceReinforcement(null);
-    setActivePhonicsLesson(null);
-    setActivePhonicsStepIndex(null);
-    setPhonicsStatusHint(null);
+    dismissPhonicsCard();
+    setPageOptionsOpen(false);
     lastPreviewTranscriptRef.current = null;
     setPreviewSnapshot(null);
     lastPreviewWordIndexRef.current = -1;
@@ -2835,6 +3163,39 @@ function ReadingSessionScreen({
     let audioPlayed = false;
     let playbackFailed = false;
     let fallbackLastWordIndex = -1;
+    const offlineCtx = offlineSessionCtxRef.current;
+    if (
+      offlineCtx &&
+      page &&
+      (isOfflinePackMode ||
+        (typeof navigator !== "undefined" && navigator.onLine === false))
+    ) {
+      return playOfflineCachedPageAudio({
+        parentAccountId: offlineCtx.parentAccountId,
+        childProfileId: offlineCtx.childProfileId,
+        bookId: offlineCtx.loadedPack.book.id,
+        page,
+        onPlay: () => {
+          audioPlayed = true;
+          options.onPlay?.();
+        },
+        onWordChange: options.onWordChange,
+        onEnded: options.onEnded,
+      })
+        .then((played) => {
+          if (!played) {
+            playbackFailed = true;
+            throw new Error("OFFLINE_PAGE_AUDIO_UNAVAILABLE");
+          }
+        })
+        .finally(() => {
+          if (playbackFailed && !audioPlayed) {
+            echoGuard.discardPlayback(id);
+          } else {
+            echoGuard.playbackEnded(id, performance.now());
+          }
+        });
+    }
     const mergedOptions: WordTimedPlayOptions = {
       ...options,
       isPrivateBook,
@@ -2939,6 +3300,7 @@ function ReadingSessionScreen({
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     const fullSpoken = lesson.steps.map((s) => s.spokenText).join(" ");
     echoGuard.playbackStarted(id, fullSpoken, performance.now());
+    let playbackFailed = false;
     setIsPlayingPhonicsLesson(true);
     try {
       if (typeof speechPlayer.playPhonicsLesson === "function") {
@@ -2951,9 +3313,16 @@ function ReadingSessionScreen({
           await speechPlayer.play(step.spokenText);
         }
       }
+    } catch (err) {
+      playbackFailed = true;
+      throw err;
     } finally {
       setIsPlayingPhonicsLesson(false);
-      echoGuard.playbackEnded(id, performance.now());
+      if (playbackFailed) {
+        echoGuard.discardPlayback(id);
+      } else {
+        echoGuard.playbackEnded(id, performance.now());
+      }
     }
   }
 
@@ -2977,14 +3346,22 @@ function ReadingSessionScreen({
     // the child's immediate first spoken word as `tail-overlap`).
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     echoGuard.playbackStarted(id, spokenText, performance.now());
+    let playbackFailed = false;
     try {
       if (Object.keys(playOptions).length === 0) {
         await speechPlayer.play(spokenText);
       } else {
         await speechPlayer.play(spokenText, playOptions);
       }
+    } catch (err) {
+      playbackFailed = true;
+      throw err;
     } finally {
-      echoGuard.playbackEnded(id, performance.now());
+      if (playbackFailed) {
+        echoGuard.discardPlayback(id);
+      } else {
+        echoGuard.playbackEnded(id, performance.now());
+      }
     }
   }
 
@@ -3109,9 +3486,23 @@ function ReadingSessionScreen({
     capturePage: ReadingPageDTO | null,
     explicitWord?: { readonly word_id: string | null; readonly text: string },
     allowInterrupt = false,
+    options?: { readonly resumeRetryAfter?: boolean },
   ): Promise<void> {
-    if (listeningStopRef.current) return;
-    if (assistantAudioPendingRef.current && !allowInterrupt) return;
+    const resumeRetryAfter = Boolean(options?.resumeRetryAfter);
+    if (listeningStopRef.current) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
+    if (assistantAudioPendingRef.current && !allowInterrupt) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
     if (allowInterrupt) {
       stopAssistantAudio();
       setIsReadingWord(false);
@@ -3134,13 +3525,24 @@ function ReadingSessionScreen({
                 : null) ?? capturePage?.words[0];
             return found ? { word_id: found.word_id, text: found.text } : null;
           })());
-    if (!target) return;
+    if (!target) {
+      if (resumeRetryAfter && retryModeRef.current && mountedRef.current) {
+        retryProcessingRef.current = false;
+        setRetryFeedback("waiting");
+      }
+      return;
+    }
 
     let plan = buildPhonicsLesson(target.text);
+    clearPhonicsAutoHideTimer();
+    setCompanionBubble(null);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
     setIsAnalyzingPhonicsAi(false);
+    if (resumeRetryAfter && retryModeRef.current) {
+      setRetryFeedback("playing-sample");
+    }
 
     if (target.word_id && !retryModeRef.current) {
       helpedWordIdsRef.current.add(target.word_id);
@@ -3155,6 +3557,7 @@ function ReadingSessionScreen({
     const isCurrent = () =>
       mountedRef.current && generation === assistantAudioGenerationRef.current;
     const wasListening = isListeningActiveRef.current || isMicRecording;
+    const shouldResumeRetry = resumeRetryAfter || wasListening;
 
     try {
       await playAssistantAudio(
@@ -3163,7 +3566,9 @@ function ReadingSessionScreen({
           if (
             !plan.supported &&
             plan.canPlayWholeWord &&
-            typeof speechService.analyzePhonics === "function"
+            typeof speechService.analyzePhonics === "function" &&
+            !offlineSessionCtxRef.current &&
+            (typeof navigator === "undefined" || navigator.onLine !== false)
           ) {
             setIsAnalyzingPhonicsAi(true);
             try {
@@ -3207,18 +3612,40 @@ function ReadingSessionScreen({
         wasListening,
       );
       if (!isCurrent()) return;
+      clearPhonicsAutoHideTimer();
+      setIsPhonicsAutoHiding(true);
+      const expectedWordId = target.word_id;
+      phonicsAutoHideTimerRef.current = window.setTimeout(() => {
+        phonicsAutoHideTimerRef.current = null;
+        if (!mountedRef.current) return;
+        if (activePhonicsLessonRef.current?.wordId === expectedWordId) {
+          dismissPhonicsCard();
+        } else {
+          setIsPhonicsAutoHiding(false);
+        }
+      }, PHONICS_AUTO_HIDE_DELAY_MS);
       if (wasListening && !retryModeRef.current) {
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
-      } else if (wasListening && retryModeRef.current) {
+      } else if (shouldResumeRetry && retryModeRef.current) {
         const cand = retryCandidatesRef.current[retryPositionRef.current];
         if (cand) {
-          void startRetryRecognition(cand);
+          retryProcessingRef.current = false;
+          const restarted = await startRetryRecognition(cand);
+          if (!restarted && isCurrent()) {
+            setRetryFeedback("waiting");
+          }
+        } else if (isCurrent()) {
+          setRetryFeedback("waiting");
         }
       }
     } catch {
       if (isCurrent()) {
         setPhonicsStatusHint(t("session.phonicsLockedVoiceBusy"));
+        if (shouldResumeRetry && retryModeRef.current) {
+          retryProcessingRef.current = false;
+          setRetryFeedback("not-recognized");
+        }
       }
     }
   }
@@ -3290,13 +3717,15 @@ function ReadingSessionScreen({
       detectBrowserWasmSttSupport().supported &&
       !getBrowserWasmSttClient().isReady()
     ) {
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
       const localSttReady = Boolean(
-        freshHealth?.local.available && freshHealth.local.stt_ready,
+        !isPermanentlyHostedLocalUnconfigured(freshHealth) &&
+        freshHealth?.local.available &&
+        freshHealth.local.stt_ready,
       );
       if (!localSttReady) {
         setLatestTranscript("Đang khởi động nhận diện giọng nói...");
-        await awaitSttReadyBeforeListening(4_000);
+        await awaitSttReadyBeforeListening(1_500);
         if (!isCurrent()) return false;
         setLatestTranscript(null);
       }
@@ -3346,41 +3775,46 @@ function ReadingSessionScreen({
           AudioContext?: typeof AudioContext;
           webkitAudioContext?: typeof AudioContext;
         };
-        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
-          win,
-          speechService,
-          () => {
-            const activePage = pageRef.current;
-            const words = activePage?.words ?? [];
-            const cursorIdx = resolveWordArrayIndex(
-              words,
-              alignmentEngineRef.current?.getSnapshot(),
-              0,
-            );
-            const windowStart = Math.max(0, cursorIdx - 12);
-            const windowEnd = Math.min(words.length, cursorIdx + 48);
-            return {
-              sessionId,
-              pageId: activePage?.page_id ?? null,
-              keyterms: words
-                .slice(windowStart, windowEnd)
-                .map((w) => w.text.normalize("NFC").trim())
-                .filter(Boolean),
-            };
-          },
-          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
-          {
-            onBeforeExternalMicStart: () => {
-              if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-                isUsingRecorderRef.current = false;
-                recorderStarted = false;
-                speechRecorder.cancel({ retainStream: false });
-              }
-            },
-          },
-        ) as (new () => BrowserSpeechRecognition) | undefined;
-        if (SpeechRec) {
-          const rec = new SpeechRec();
+        onBeforeExternalMicStartRef.current = () => {
+          if (isUsingRecorderRef.current || speechRecorder.isRecording) {
+            isUsingRecorderRef.current = false;
+            recorderStarted = false;
+            speechRecorder.cancel({ retainStream: false });
+          }
+        };
+        const standbyRec = takeSessionStandbyRecognizer(sessionId);
+        const SpeechRec = standbyRec
+          ? null
+          : (resolveLocalFirstSpeechRecognitionConstructor(
+              win,
+              speechService,
+              () => {
+                const activePage = pageRef.current;
+                const words = activePage?.words ?? [];
+                const cursorIdx = resolveWordArrayIndex(
+                  words,
+                  alignmentEngineRef.current?.getSnapshot(),
+                  0,
+                );
+                const windowStart = Math.max(0, cursorIdx - 12);
+                const windowEnd = Math.min(words.length, cursorIdx + 48);
+                return {
+                  sessionId,
+                  pageId: activePage?.page_id ?? null,
+                  keyterms: words
+                    .slice(windowStart, windowEnd)
+                    .map((w) => w.text.normalize("NFC").trim())
+                    .filter(Boolean),
+                };
+              },
+              () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+              {
+                onBeforeExternalMicStart: () =>
+                  onBeforeExternalMicStartRef.current?.(),
+              },
+            ) as (new () => BrowserSpeechRecognition) | undefined);
+        if (standbyRec || SpeechRec) {
+          const rec = standbyRec ?? new SpeechRec!();
           const isLocalSegmentRec =
             rec instanceof LocalSegmentSpeechRecognition;
           if (!isLocalSegmentRec) {
@@ -3536,8 +3970,10 @@ function ReadingSessionScreen({
                     .slice(startIdx, startIdx + 6)
                     .map((w) => w.text);
                 })();
-                const isLowVolumeMatchingWindow =
-                  meta?.audioQuality?.status === "LOW_VOLUME" &&
+                const isWindowQualityMatch =
+                  (meta?.audioQuality?.status === "LOW_VOLUME" ||
+                    meta?.audioQuality?.status === "CLIPPING" ||
+                    meta?.audioQuality?.status === "AUDIO_TOO_SHORT") &&
                   Boolean(part.trim()) &&
                   hasUsableChildWindowBrowserConfidence(
                     part,
@@ -3546,7 +3982,7 @@ function ReadingSessionScreen({
                   );
                 if (
                   meta?.audioQuality &&
-                  !isLowVolumeMatchingWindow &&
+                  !isWindowQualityMatch &&
                   (meta.audioQuality.status === "LOW_VOLUME" ||
                     meta.audioQuality.status === "CLIPPING" ||
                     meta.audioQuality.status === "AUDIO_TOO_SHORT")
@@ -3851,9 +4287,7 @@ function ReadingSessionScreen({
                   scored.statusByWordId.get(currentPhonicsLesson.wordId)
                     ?.status === "MATCH"
                 ) {
-                  setPhonicsStatusHint(
-                    READING_MASTERY_LABELS.CORRECT_AFTER_SPELLING,
-                  );
+                  dismissPhonicsCard();
                 } else if (
                   currentPhonicsLesson?.plan.supported &&
                   scored.spellingInProgress &&
@@ -3992,16 +4426,38 @@ function ReadingSessionScreen({
 
               if (!result || result.isFinal) continue;
               if (!isFencedResult(result)) continue;
-              if (
+              const rawInterim = result[0]?.transcript?.trim() || "";
+              const interimQualityBad = Boolean(
                 result.audioQuality &&
                 (result.audioQuality.status === "LOW_VOLUME" ||
                   result.audioQuality.status === "CLIPPING" ||
-                  result.audioQuality.status === "AUDIO_TOO_SHORT")
-              ) {
-                continue;
+                  result.audioQuality.status === "AUDIO_TOO_SHORT"),
+              );
+              if (interimQualityBad) {
+                const activePage = pageRef.current ?? capturePage;
+                const curId = engine.getSnapshot().currentWordId;
+                const curIdx = activePage
+                  ? activePage.words.findIndex((w) => w.word_id === curId)
+                  : -1;
+                const previewWindowWords = activePage
+                  ? activePage.words
+                      .slice(
+                        Math.max(0, curIdx >= 0 ? curIdx - 1 : 0),
+                        Math.max(0, curIdx >= 0 ? curIdx - 1 : 0) + 6,
+                      )
+                      .map((w) => w.text)
+                  : [];
+                const interimMatchesWindow =
+                  Boolean(rawInterim) &&
+                  hasUsableChildWindowBrowserConfidence(
+                    rawInterim,
+                    previewWindowWords,
+                    0.9,
+                  );
+                if (!interimMatchesWindow) {
+                  continue;
+                }
               }
-
-              const rawInterim = result[0]?.transcript?.trim() || "";
               if (
                 rawInterim &&
                 !echoGuard.evaluate({
@@ -4304,6 +4760,11 @@ function ReadingSessionScreen({
       window.clearTimeout(sttRestartTimerRef.current);
       sttRestartTimerRef.current = null;
     }
+    try {
+      cancelSessionStandbyRecognizer(sessionId);
+    } catch {
+      // Ignore standby cancel errors
+    }
     const recognition = recognitionRef.current;
     if (!recognition) {
       browserTranscriptCollectorRef.current.completeRecognitionCycle();
@@ -4394,6 +4855,23 @@ function ReadingSessionScreen({
             .filter(Boolean),
         ),
       ).slice(0, 40);
+      if (
+        (offlineSessionCtxRef.current !== null ||
+          (typeof navigator !== "undefined" && navigator.onLine === false)) &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        const wasmDecoded = await getBrowserWasmSttClient().transcribeBlob(
+          recording,
+          {
+            signal: controller.signal,
+            timeoutMs,
+          },
+        );
+        if (!mountedRef.current || controller.signal.aborted) return null;
+        const wasmText = wasmDecoded.text?.trim() ?? "";
+        return wasmText ? { text: wasmText, words: null } : null;
+      }
+
       const transcript = await speechService.transcribe(recording, {
         languageCode: "vi",
         ...(pageKeyterms.length ? { keyterms: pageKeyterms } : {}),
@@ -4470,23 +4948,31 @@ function ReadingSessionScreen({
     isListeningActiveRef.current = false;
     setPreviewSnapshot(null);
 
-    await stopBrowserRecognition({
+    const stopRecognitionPromise = stopBrowserRecognition({
       nonBlockingDrain: Boolean(
         options.nonBlockingDrain ?? options.skipBlockingUpload,
       ),
     });
 
-    let recording: Blob | null = null;
-    if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-      try {
-        recording = await speechRecorder.stop();
-      } catch (error) {
-        speechRecorder.cancel();
-        console.error("Lỗi khi dừng ghi âm:", error);
-      } finally {
-        isUsingRecorderRef.current = false;
-      }
-    }
+    const stopRecorderPromise =
+      isUsingRecorderRef.current || speechRecorder.isRecording
+        ? (async (): Promise<Blob | null> => {
+            try {
+              return await speechRecorder.stop();
+            } catch (error) {
+              speechRecorder.cancel();
+              console.error("Lỗi khi dừng ghi âm:", error);
+              return null;
+            } finally {
+              isUsingRecorderRef.current = false;
+            }
+          })()
+        : Promise.resolve(null);
+
+    const [, recording] = await Promise.all([
+      stopRecognitionPromise,
+      stopRecorderPromise,
+    ]);
 
     // This text already passed the browser evidence checks and was aligned
     // live. A subsequent recorder failure cannot invalidate it.
@@ -4497,16 +4983,28 @@ function ReadingSessionScreen({
 
     const sttStatus = getVoiceEngineStatus().stt;
     const freshSttHealth = getVoiceEngineHealthForRouting();
+    const sttPolicy = getVoicePolicyPreferences();
+    const sttCloudAllowed =
+      sttPolicy.providerMode === "local_with_google_fallback" &&
+      sttPolicy.allowGoogleSttFallback;
     const elevenLabsSttUsable = Boolean(
+      sttCloudAllowed &&
       freshSttHealth?.elevenlabs?.stt_configured &&
       !freshSttHealth?.elevenlabs?.stt_cooldown,
     );
+    const googleSttUsable = Boolean(
+      sttCloudAllowed &&
+      freshSttHealth?.google.stt_configured &&
+      !freshSttHealth.google.stt_cooldown,
+    );
     const backendSttUnavailable =
-      freshSttHealth !== null &&
-      (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
-      !elevenLabsSttUsable &&
-      (!freshSttHealth.google.stt_configured ||
-        freshSttHealth.google.stt_cooldown);
+      (isPermanentlyHostedLocalUnconfigured(freshSttHealth) &&
+        !elevenLabsSttUsable &&
+        !googleSttUsable) ||
+      (freshSttHealth !== null &&
+        (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
+        !elevenLabsSttUsable &&
+        !googleSttUsable);
     const alreadyUsingEmergencyBrowserStt =
       sttStatus.tier === "android_native" ||
       sttStatus.tier === "browser_wasm" ||
@@ -4692,6 +5190,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    cancelSessionStandbyRecognizer(sessionId);
     setPreviewSnapshot(null);
     let playbackFailed = false;
     let playAborted = false;
@@ -4725,6 +5224,7 @@ function ReadingSessionScreen({
               preserveAlignment: !alignBeforePassageHelp,
               forPassageHelp: alignBeforePassageHelp,
               nonBlockingDrain: !alignBeforePassageHelp,
+              skipBlockingUpload: true,
             }),
             new Promise<void>((resolve) => {
               stopTimeoutId = window.setTimeout(() => {
@@ -4772,7 +5272,11 @@ function ReadingSessionScreen({
       assistantAudioPlayingRef.current = true;
       await play();
     } catch (error) {
-      const aborted = error instanceof Error && error.name === "AbortError";
+      const aborted =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       playAborted = aborted;
       playbackFailed = !aborted;
       throw error;
@@ -4857,37 +5361,63 @@ function ReadingSessionScreen({
     retryResumeAfterAssistantAudioRef.current = null;
     assistantAudioPendingRef.current = false;
     assistantAudioPlayingRef.current = false;
+    isVoicePreviewPlayingRef.current = false;
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
-    return playAssistantAudio(async () => {
-      const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
-      echoGuard.playbackStarted(id, sample, performance.now());
-      let audioPlayed = false;
-      let playbackFailed = false;
-      try {
-        await speechPlayer.playWithWordTimings(sample.split(" "), {
-          bookId: null,
-          pageId: null,
-          pageRevisionId: null,
-          isPrivateBook: false,
-          cacheScope: "COACHING",
-          bypassSessionLock: true,
-          utteranceKind: "voice_preview",
-          onPlay: () => {
-            audioPlayed = true;
-          },
-        });
-      } catch (error) {
-        playbackFailed = true;
-        throw error;
-      } finally {
-        if (playbackFailed && !audioPlayed) {
-          echoGuard.discardPlayback(id);
-        } else {
-          echoGuard.playbackEnded(id, performance.now());
+    if (retryModeRef.current) {
+      cancelRetryRecognition();
+    }
+    isVoicePreviewPlayingRef.current = true;
+    return playAssistantAudio(
+      async () => {
+        const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
+        echoGuard.playbackStarted(id, sample, performance.now());
+        let audioPlayed = false;
+        let playbackFailed = false;
+        try {
+          await speechPlayer.playWithWordTimings(
+            sample.split(" "),
+            {
+              text: sample,
+              bookId: null,
+              pageId: null,
+              pageRevisionId: null,
+              isPrivateBook: false,
+              cacheScope: "COACHING",
+              bypassSessionLock: true,
+              utteranceKind: "voice_preview",
+              onPlay: () => {
+                audioPlayed = true;
+              },
+            },
+            () =>
+              speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+                onPlay: () => {
+                  audioPlayed = true;
+                },
+              }),
+          );
+        } catch (error) {
+          playbackFailed = true;
+          throw error;
+        } finally {
+          if (playbackFailed && !audioPlayed) {
+            echoGuard.discardPlayback(id);
+          } else {
+            echoGuard.playbackEnded(id, performance.now());
+          }
         }
-      }
+      },
+      false,
+      false,
+    ).finally(() => {
+      isVoicePreviewPlayingRef.current = false;
     });
   }
 
@@ -4938,7 +5468,12 @@ function ReadingSessionScreen({
   }
 
   function stopAssistantAudio(): void {
-    if (retryModeRef.current && assistantAudioPlayingRef.current) {
+    if (isVoicePreviewPlayingRef.current) {
+      retryResumeAfterAssistantAudioRef.current = null;
+      if (retryModeRef.current) {
+        retryAttemptIdRef.current += 1;
+      }
+    } else if (retryModeRef.current && assistantAudioPlayingRef.current) {
       retryResumeAfterAssistantAudioRef.current =
         retryCandidatesRef.current[retryPositionRef.current] ?? null;
     }
@@ -5191,11 +5726,64 @@ function ReadingSessionScreen({
       setComparisonResult(null);
       setComparisonError(null);
 
-      // Pre-warm the microphone stream during the 3s countdown on Web (never on
+      // Pre-warm the microphone stream, standby AudioContext/AudioWorklet,
+      // and WASM STT + TTS engines during the 3s countdown on Web (never on
       // Android APK where native SpeechRecognizer owns HAL mic) so the first
-      // letter/word is captured immediately when countdown hits 0.
+      // letter/word is captured & recognized immediately when countdown hits 0.
+      void awaitVoiceEnginesReadyBeforeListening(2_800).catch(() => undefined);
       if (!shouldPreferAndroidNativeStt()) {
-        void speechRecorder.prepare().catch(() => undefined);
+        cancelSessionStandbyRecognizer(sessionId);
+        const prepPromise = speechRecorder.prepare().catch(() => undefined);
+        if (typeof window !== "undefined") {
+          const win = window as unknown as WindowWithSpeech;
+          const StandbyCtor = resolveLocalFirstSpeechRecognitionConstructor(
+            win,
+            speechService,
+            () => {
+              const activePage = pageRef.current;
+              const words = activePage?.words ?? [];
+              const cursorIdx = resolveWordArrayIndex(
+                words,
+                alignmentEngineRef.current?.getSnapshot(),
+                0,
+              );
+              const windowStart = Math.max(0, cursorIdx - 12);
+              const windowEnd = Math.min(words.length, cursorIdx + 48);
+              return {
+                sessionId,
+                pageId: activePage?.page_id ?? null,
+                keyterms: words
+                  .slice(windowStart, windowEnd)
+                  .map((w) => w.text.normalize("NFC").trim())
+                  .filter(Boolean),
+              };
+            },
+            () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+            {
+              onBeforeExternalMicStart: () =>
+                onBeforeExternalMicStartRef.current?.(),
+            },
+          );
+          if (
+            StandbyCtor &&
+            StandbyCtor.prototype instanceof LocalSegmentSpeechRecognition
+          ) {
+            const candidate =
+              new StandbyCtor() as LocalSegmentSpeechRecognition;
+            setSessionStandbyRecognizer(sessionId, candidate);
+            void prepPromise.then(() => {
+              if (
+                mountedRef.current &&
+                getSessionStandbyRecognizer(sessionId) === candidate
+              ) {
+                const track = speechRecorder
+                  .getStream?.()
+                  ?.getAudioTracks()?.[0];
+                void candidate.armStandby(track).catch(() => undefined);
+              }
+            });
+          }
+        }
       }
 
       setCountdown(3);
@@ -5273,6 +5861,7 @@ function ReadingSessionScreen({
     if (isBusy && !speechPlayer.isPlaying) return;
     setIsBusy(true);
     setCountdown(null);
+    cancelSessionStandbyRecognizer(sessionId);
     setPreviewSnapshot(null);
     listeningGenerationRef.current += 1;
     preventAssistantAudioResume();
@@ -5404,6 +5993,9 @@ function ReadingSessionScreen({
     setPageNavigationError(null);
     setCountdown(null);
     listeningGenerationRef.current += 1;
+    if (!listeningStopRef.current) {
+      transcriptionAbortRef.current?.abort();
+    }
     preventAssistantAudioResume();
     speechPlayer.stop();
     setIsPlayingPageSample(false);
@@ -5437,11 +6029,40 @@ function ReadingSessionScreen({
       }
 
       if (page) freezeCompletedPageAssessment(page);
-      const nextProgress = await services.readingService.navigateToPage(
-        sessionId,
-        target.page_id,
-      );
-      const nextPage = await services.readingService.getCurrentPage(sessionId);
+      const offlineCtx = offlineSessionCtxRef.current;
+      let nextProgress: ReadingSessionPageProgressDTO;
+      let nextPage: ReadingPageDTO;
+      if (offlineCtx && pageProgress) {
+        const offlineNav = buildOfflineNavigatedProgress(
+          pageProgress,
+          offlineCtx.loadedPack,
+          target.page_id,
+        );
+        if (!offlineNav) {
+          throw new Error("Offline page missing from pack");
+        }
+        nextProgress = offlineNav.nextProgress;
+        nextPage = offlineNav.nextPage;
+        if (page) {
+          void enqueueOfflineSessionEvent({
+            parentAccountId: offlineCtx.parentAccountId,
+            childProfileId: offlineCtx.childProfileId,
+            clientSessionId: offlineCtx.clientSessionId,
+            bookId: offlineCtx.loadedPack.book.id,
+            pageId: page.page_id,
+            pageRevisionId: page.page_revision_id,
+            eventKind: "PAGE_READ",
+            transcript:
+              transcriptsListRef.current.join(" ").trim() || undefined,
+          }).catch(() => undefined);
+        }
+      } else {
+        nextProgress = await services.readingService.navigateToPage(
+          sessionId,
+          target.page_id,
+        );
+        nextPage = await services.readingService.getCurrentPage(sessionId);
+      }
       if (!mountedRef.current) return;
       setPageProgress(nextProgress);
       resetPagePresentation();
@@ -5472,6 +6093,9 @@ function ReadingSessionScreen({
     setPageNavigationError(null);
     setCountdown(null);
     listeningGenerationRef.current += 1;
+    if (!listeningStopRef.current) {
+      transcriptionAbortRef.current?.abort();
+    }
     preventAssistantAudioResume();
     speechPlayer.stop();
     try {
@@ -5497,10 +6121,25 @@ function ReadingSessionScreen({
       }
 
       freezeCompletedPageAssessment(page);
-      const progress = await services.readingService.completeCurrentPage(
-        sessionId,
-        page.page_id,
-      );
+      const offlineCtx = offlineSessionCtxRef.current;
+      const progress = offlineCtx
+        ? buildOfflineCompletedCurrentPageProgress(pageProgress, page.page_id)
+        : await services.readingService.completeCurrentPage(
+            sessionId,
+            page.page_id,
+          );
+      if (offlineCtx) {
+        void enqueueOfflineSessionEvent({
+          parentAccountId: offlineCtx.parentAccountId,
+          childProfileId: offlineCtx.childProfileId,
+          clientSessionId: offlineCtx.clientSessionId,
+          bookId: offlineCtx.loadedPack.book.id,
+          pageId: page.page_id,
+          pageRevisionId: page.page_revision_id,
+          eventKind: "PAGE_READ",
+          transcript: transcriptsListRef.current.join(" ").trim() || undefined,
+        }).catch(() => undefined);
+      }
       if (!mountedRef.current) return;
       setPageProgress(progress);
       if (progress.current_index + 1 < progress.total_pages) {
@@ -5797,14 +6436,25 @@ function ReadingSessionScreen({
             tutorText,
             performance.now(),
           );
+          let tutorPlaybackFailed = false;
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(tutorText, {
               wordSample: isVerbatimTutorWord,
+              ...(!isVerbatimTutorWord
+                ? { coaching: true, cacheScope: "COACHING" as const }
+                : {}),
             });
+          } catch (err) {
+            tutorPlaybackFailed = true;
+            throw err;
           } finally {
             setIsPlayingTutorAudio(false);
-            echoGuard.playbackEnded(tutorPlaybackId, performance.now());
+            if (tutorPlaybackFailed) {
+              echoGuard.discardPlayback(tutorPlaybackId);
+            } else {
+              echoGuard.playbackEnded(tutorPlaybackId, performance.now());
+            }
           }
           if (
             mountedRef.current &&
@@ -5817,10 +6467,15 @@ function ReadingSessionScreen({
         false,
       );
     } catch (error) {
+      const isAbortErr =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       if (
         mountedRef.current &&
         playbackGeneration === tutorPlaybackGenerationRef.current &&
-        !(error instanceof Error && error.name === "AbortError")
+        !isAbortErr
       ) {
         setUiState("tts-error");
       }
@@ -5874,14 +6529,25 @@ function ReadingSessionScreen({
             retryTutorText,
             performance.now(),
           );
+          let retryTutorPlaybackFailed = false;
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(retryTutorText, {
               wordSample: isVerbatimRetryTutorWord,
+              ...(!isVerbatimRetryTutorWord
+                ? { coaching: true, cacheScope: "COACHING" as const }
+                : {}),
             });
+          } catch (err) {
+            retryTutorPlaybackFailed = true;
+            throw err;
           } finally {
             setIsPlayingTutorAudio(false);
-            echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
+            if (retryTutorPlaybackFailed) {
+              echoGuard.discardPlayback(retryTutorPlaybackId);
+            } else {
+              echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
+            }
           }
         },
         false,
@@ -5895,10 +6561,15 @@ function ReadingSessionScreen({
         setUiState("reading");
       }
     } catch (error) {
+      const isAbortErr =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       if (
         mountedRef.current &&
         playbackGeneration === tutorPlaybackGenerationRef.current &&
-        !(error instanceof Error && error.name === "AbortError")
+        !isAbortErr
       ) {
         setUiState("tts-error");
       }
@@ -6248,11 +6919,15 @@ function ReadingSessionScreen({
       intent.type === "SPELL" ||
       isSpellingHelpRequest(text, candidate.text)
     ) {
+      if (!isLiveMic) {
+        setRetryFeedback("playing-sample");
+      }
       void offerExplicitPhonicsHelp(
         null,
         page,
         { word_id: candidate.wordId, text: candidate.text },
-        isLiveMic,
+        true,
+        !isLiveMic ? { resumeRetryAfter: true } : undefined,
       );
       return true;
     }
@@ -6265,6 +6940,9 @@ function ReadingSessionScreen({
       return true;
     }
     if (intent.type === "STOP") {
+      if (!isLiveMic) {
+        setRetryFeedback("waiting");
+      }
       void pauseReading();
       return true;
     }
@@ -6388,33 +7066,66 @@ function ReadingSessionScreen({
     setIsBusy(true);
 
     try {
-      await services.readingService.createRetryEvent({
-        sessionId,
-        pageId: pending.candidate.pageId,
-        pageRevisionId: pending.candidate.pageRevisionId,
-        wordId: pending.candidate.wordId,
-        status: pending.status,
-        startMs: 0,
-        endMs: null,
-        metadata: {
-          retry_attempt: pending.attempt,
-          incorrect_retry_count: incorrectCount,
-          resolution_status:
-            pending.status === "CONFIRMED"
-              ? "SELF_CORRECTED"
-              : pending.status === "UNCERTAIN" || terminal
-                ? "UNRESOLVED"
-                : "RETRYING",
-          ...(pending.status === "UNCERTAIN" && !pending.transcript
-            ? { skip_reason: "TECHNICAL_OR_MANUAL" as const }
-            : {}),
-          original_status: pending.candidate.originalStatus,
-          target_word: pending.candidate.text.slice(0, 100),
-          ...(pending.transcript
-            ? { recognized_text: pending.transcript.slice(0, 200) }
-            : {}),
-        },
-      });
+      const offlineCtx = offlineSessionCtxRef.current;
+      const retryMeta = {
+        retry_attempt: pending.attempt,
+        incorrect_retry_count: incorrectCount,
+        resolution_status:
+          pending.status === "CONFIRMED"
+            ? ("SELF_CORRECTED" as const)
+            : pending.status === "UNCERTAIN" || terminal
+              ? ("UNRESOLVED" as const)
+              : ("RETRYING" as const),
+        ...(pending.status === "UNCERTAIN" && !pending.transcript
+          ? { skip_reason: "TECHNICAL_OR_MANUAL" as const }
+          : {}),
+        original_status: pending.candidate.originalStatus,
+        target_word: pending.candidate.text.slice(0, 100),
+        ...(pending.transcript
+          ? { recognized_text: pending.transcript.slice(0, 200) }
+          : {}),
+      };
+      if (
+        offlineCtx ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+        const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+        const bookIdForOutbox =
+          offlineCtx?.loadedPack.book.id ??
+          (loadState.status === "ready" ? loadState.data.book.id : "");
+        if (pid && cid && bookIdForOutbox) {
+          await enqueueOfflineSessionEvent({
+            parentAccountId: pid,
+            childProfileId: cid,
+            clientSessionId:
+              offlineCtx?.clientSessionId ??
+              (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+            bookId: bookIdForOutbox,
+            pageId: pending.candidate.pageId,
+            pageRevisionId: pending.candidate.pageRevisionId,
+            eventKind: "WORD_ATTEMPT",
+            wordId: pending.candidate.wordId,
+            wordText: pending.candidate.text,
+            transcript: pending.transcript || undefined,
+            readingEventType: "WORD_RETRY",
+            readingEventStatus: pending.status,
+            isCorrect: pending.status === "CONFIRMED",
+            metadata: retryMeta,
+          });
+        }
+      } else {
+        await services.readingService.createRetryEvent({
+          sessionId,
+          pageId: pending.candidate.pageId,
+          pageRevisionId: pending.candidate.pageRevisionId,
+          wordId: pending.candidate.wordId,
+          status: pending.status,
+          startMs: 0,
+          endMs: null,
+          metadata: retryMeta,
+        });
+      }
       if (!isActiveRetryCandidate(pending.candidate)) return false;
       pendingRetryEventRef.current = null;
       retryUnclearStreakRef.current = 0;
@@ -6533,18 +7244,29 @@ function ReadingSessionScreen({
     // The recognizer may emit its final result after stop().
     const browserFinalResult = recognition
       ? new Promise<void>((resolve) => {
-          const finish = () => {
+          let settled = false;
+          const finish = (timedOut = false) => {
+            if (settled) return;
+            settled = true;
             window.clearTimeout(timer);
+            recognition.onend = null;
+            if (timedOut) {
+              try {
+                recognition.abort?.();
+              } catch {
+                // Safe ignore abort failure on timed-out recognizer
+              }
+            }
             if (recognitionRef.current === recognition)
               recognitionRef.current = null;
             resolve();
           };
-          const timer = window.setTimeout(finish, 300);
-          recognition.onend = finish;
+          const timer = window.setTimeout(() => finish(true), 300);
+          recognition.onend = () => finish(false);
           try {
             recognition.stop();
           } catch {
-            finish();
+            finish(false);
           }
         })
       : Promise.resolve();
@@ -6700,23 +7422,35 @@ function ReadingSessionScreen({
 
       // Lần 1: STT bình thường, không dùng keyterms (tự chuyển sang Browser WASM khi Voice Worker offline).
       const submittedAt = getRetryCaptureTimeMs();
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
+      const permanentlyUnconfigured =
+        isPermanentlyHostedLocalUnconfigured(freshHealth);
       const localSttConfirmedDown =
-        freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready);
+        permanentlyUnconfigured ||
+        (freshHealth !== null &&
+          (!freshHealth.local.available || !freshHealth.local.stt_ready));
+      const retryPolicy = getVoicePolicyPreferences();
+      const cloudSttFallbackAllowed =
+        retryPolicy.providerMode === "local_with_google_fallback" &&
+        retryPolicy.allowGoogleSttFallback;
+      const wasmClient = getBrowserWasmSttClient();
+      const preparedPcm16k = recording.pcm16k ?? null;
       const tryWasmRetryTranscribe = async () => {
-        const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
-          recording,
-          {
-            signal: controller.signal,
-            timeoutMs: 12_000,
-            voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
-          },
-        );
+        const wasmOptions = {
+          signal: controller.signal,
+          initTimeoutMs: 4_000,
+          timeoutMs: 8_000,
+          voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+        };
+        const wasmRes = preparedPcm16k
+          ? await wasmClient.transcribeSamples(preparedPcm16k, wasmOptions)
+          : await wasmClient.transcribeBlob(recording, wasmOptions);
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: true,
-          fallbackReason: "LOCAL_STT_UNAVAILABLE",
+          fallbackUsed: !permanentlyUnconfigured,
+          fallbackReason: permanentlyUnconfigured
+            ? null
+            : "LOCAL_STT_UNAVAILABLE",
         });
         return {
           text: wasmRes.text.normalize("NFC"),
@@ -6724,21 +7458,31 @@ function ReadingSessionScreen({
           language_probability: 1,
           words: null,
           provider: "wasm",
-          fallback_used: true,
+          fallback_used: !permanentlyUnconfigured,
         };
       };
 
+      const skipColdWasmForCloudFallback =
+        cloudSttFallbackAllowed && !wasmClient.isReady();
+
       let transcription;
-      if (localSttConfirmedDown && detectBrowserWasmSttSupport().supported) {
+      if (
+        localSttConfirmedDown &&
+        detectBrowserWasmSttSupport().supported &&
+        !skipColdWasmForCloudFallback
+      ) {
         try {
           transcription = await tryWasmRetryTranscribe();
         } catch (wasmErr) {
           if (controller.signal.aborted) return;
+          if (permanentlyUnconfigured) {
+            throw wasmErr;
+          }
           console.warn("[RETRY WASM STT FALLBACK -> SERVER]", wasmErr);
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
             signal: controller.signal,
-            timeoutMs: 10_000,
+            timeoutMs: 7_000,
           });
         }
       } else {
@@ -6746,10 +7490,17 @@ function ReadingSessionScreen({
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
             signal: controller.signal,
-            timeoutMs: 10_000,
+            timeoutMs: 7_000,
           });
         } catch (serverErr) {
           if (controller.signal.aborted) return;
+          const serverErrText =
+            typeof serverErr === "object" && serverErr !== null
+              ? `${String((serverErr as { code?: unknown }).code ?? "")} ${String((serverErr as { providerCode?: unknown }).providerCode ?? "")} ${serverErr instanceof Error ? serverErr.message : ""}`
+              : "";
+          if (serverErrText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+            markHostedLocalUnconfigured();
+          }
           if (
             detectBrowserWasmSttSupport().supported &&
             isServiceError(serverErr) &&
@@ -6825,7 +7576,12 @@ function ReadingSessionScreen({
       ) {
         status = "CORRECT";
       }
+      const usedWasmProvider =
+        "provider" in transcription && transcription.provider === "wasm";
       if (
+        !localSttConfirmedDown &&
+        !usedWasmProvider &&
+        !isPermanentlyHostedLocalUnconfigured() &&
         (!nonViLanguage || browserStatus === "CORRECT") &&
         shouldAttemptShortWordKeytermPass2({
           status,
@@ -6842,7 +7598,7 @@ function ReadingSessionScreen({
               retryContextPhrase,
             ),
             signal: controller.signal,
-            timeoutMs: 5_000,
+            timeoutMs: 3_500,
           });
 
           if (
@@ -7078,27 +7834,35 @@ function ReadingSessionScreen({
       AudioContext?: typeof AudioContext;
       webkitAudioContext?: typeof AudioContext;
     };
-    const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
-      win,
-      speechService,
-      () => ({
-        sessionId,
-        pageId: page?.page_id ?? null,
-        keyterms: [
-          candidate.text,
-          ...(resolveRetrySentenceContext(candidate)?.split(/\s+/) ?? []),
-        ].filter(Boolean),
-      }),
-      () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
-      {
-        onBeforeExternalMicStart: () => {
-          if (retryRecorderActiveRef.current || speechRecorder.isRecording) {
-            retryRecorderActiveRef.current = false;
-            speechRecorder.cancel({ retainStream: false });
-          }
-        },
-      },
-    ) as (new () => BrowserSpeechRecognition) | undefined;
+    const injectedCtor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const allowParallelRecognition =
+      preferAndroidNativeStt || isInjectedTestSpeechRecognition(injectedCtor);
+    const SpeechRec = allowParallelRecognition
+      ? (resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: [
+              candidate.text,
+              ...(resolveRetrySentenceContext(candidate)?.split(/\s+/) ?? []),
+            ].filter(Boolean),
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+          {
+            onBeforeExternalMicStart: () => {
+              if (
+                retryRecorderActiveRef.current ||
+                speechRecorder.isRecording
+              ) {
+                retryRecorderActiveRef.current = false;
+                speechRecorder.cancel({ retainStream: false });
+              }
+            },
+          },
+        ) as (new () => BrowserSpeechRecognition) | undefined)
+      : undefined;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -7458,6 +8222,16 @@ function ReadingSessionScreen({
     setLatestTranscript(t("session.preparingMicShort"));
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    // Eagerly prefetch the retry word sample & coaching cues in parallel with
+    // microphone preparation so wrong-word retry speaks with zero inter-cue lag.
+    if (!retryPhraseRef.current) {
+      void speechPlayer.prefetch?.(candidate.text, { wordSample: true });
+      if (guidedHelp) {
+        void speechPlayer.prefetch?.("Đến lượt con đọc nhé.", {
+          coaching: true,
+        });
+      }
+    }
     if (!preferAndroidNativeStt) {
       try {
         await (permissionRequest ?? speechRecorder.prepare());
@@ -7476,6 +8250,46 @@ function ReadingSessionScreen({
       return;
     }
 
+    const RETRY_TTS_CUE_TIMEOUT_MS = 6_000;
+    const speakRetryCueBounded = async (
+      text: string,
+      options?: SpeechPlayOptions & { readonly preserveBookText?: boolean },
+    ): Promise<boolean> => {
+      const speakPromise = speakGuarded(text, options);
+      let timeoutId: number | null = null;
+      let timedOut = false;
+      try {
+        await Promise.race([
+          speakPromise,
+          new Promise<void>((resolve) => {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              speechPlayer.stop();
+              resolve();
+            }, RETRY_TTS_CUE_TIMEOUT_MS);
+          }),
+        ]);
+        return !timedOut;
+      } catch (error) {
+        const isAbortErr =
+          typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          (error as { name?: unknown }).name === "AbortError";
+        if (timedOut && isAbortErr) {
+          return false;
+        }
+        throw error;
+      } finally {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+        if (timedOut) {
+          void speakPromise.catch(() => undefined);
+        }
+      }
+    };
+
     try {
       await playAssistantAudio(async () => {
         setRetryFeedback("playing-instruction");
@@ -7483,20 +8297,20 @@ function ReadingSessionScreen({
         const phrase = retryPhraseRef.current;
         if (phrase) {
           setLatestTranscript(t("session.readWholePhrasePrompt"));
-          await speakGuarded(`Con hãy đọc cả cụm: ${phrase}.`, {
+          await speakRetryCueBounded(`Con hãy đọc cả cụm: ${phrase}.`, {
             coaching: true,
             preserveBookText: true,
           });
           return;
         }
-        await speakGuarded(
+        const introCompleted = await speakRetryCueBounded(
           guidedHelp
             ? adaptPersona("Cô đọc mẫu cho con nhé.")
             : "Con nghe từ này nhé.",
           { coaching: true },
         );
 
-        if (!isCurrent()) {
+        if (!introCompleted || !isCurrent()) {
           return;
         }
 
@@ -7506,11 +8320,14 @@ function ReadingSessionScreen({
         );
         setIsReadingWord(true);
         try {
-          await speakGuarded(candidate.text, { wordSample: true });
-          if (guidedHelp && isCurrent())
-            await speakGuarded("Đến lượt con đọc nhé.", {
+          const sampleCompleted = await speakRetryCueBounded(candidate.text, {
+            wordSample: true,
+          });
+          if (sampleCompleted && guidedHelp && isCurrent()) {
+            await speakRetryCueBounded("Đến lượt con đọc nhé.", {
               coaching: true,
             });
+          }
         } finally {
           if (isCurrent()) setIsReadingWord(false);
         }
@@ -7533,7 +8350,14 @@ function ReadingSessionScreen({
       );
     } catch (error) {
       if (!isCurrent()) return;
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError"
+      ) {
+        return;
+      }
       console.error("[RETRY TTS PLAYBACK]", error);
       if (isCurrent()) {
         setIsReadingWord(false);
@@ -7698,15 +8522,32 @@ function ReadingSessionScreen({
     speechRecorder.cancel();
 
     try {
-      // REST là nguồn dữ liệu chính thức để kết thúc session.
-      const finishedSession = await services.readingService.finish(sessionId);
+      const offlineCtx = offlineSessionCtxRef.current;
+      const isOfflineFinish =
+        offlineCtx !== null ||
+        (typeof navigator !== "undefined" && navigator.onLine === false);
+      const finishedSession = isOfflineFinish
+        ? {
+            id: offlineCtx?.clientSessionId ?? sessionId,
+            child_id: offlineCtx?.childProfileId ?? activeChildProfileId ?? "",
+            book_id:
+              offlineCtx?.loadedPack.book.id ??
+              (loadState.status === "ready" ? loadState.data.book.id : ""),
+            state: "FINISHED" as const,
+            started_at: new Date().toISOString(),
+            ended_at: new Date().toISOString(),
+            duration_ms: 60_000,
+          }
+        : await services.readingService.finish(sessionId);
 
-      // WebSocket chỉ là thông báo phụ, không ảnh hưởng kết quả REST.
-      void services.readingSocketAdapter
-        .sendControl(sessionId, "finish")
-        .catch((error: unknown) => {
-          console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
-        });
+      if (!isOfflineFinish) {
+        // WebSocket chỉ là thông báo phụ, không ảnh hưởng kết quả REST.
+        void services.readingSocketAdapter
+          .sendControl(sessionId, "finish")
+          .catch((error: unknown) => {
+            console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
+          });
+      }
 
       if (!mountedRef.current) return;
 
@@ -7715,9 +8556,16 @@ function ReadingSessionScreen({
         .filter(Boolean);
       const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
 
-      const persistedCompletion = await services.readingService
-        .getCompletionSummary(sessionId)
-        .catch(() => null);
+      const [persistedCompletion, postFinishState] = isOfflineFinish
+        ? [null, "complete" as const]
+        : await Promise.all([
+            services.readingService
+              .getCompletionSummary(sessionId)
+              .catch(() => null),
+            resolvePostFinishUiState(services.comprehensionService, sessionId),
+          ]);
+
+      if (!mountedRef.current) return;
 
       const correctWordIds = Array.from(correctWordIdsRef.current).filter(
         (wordId) =>
@@ -7774,16 +8622,35 @@ function ReadingSessionScreen({
       };
 
       setSessionSummary(updatedSummary);
+      if (isOfflineFinish) {
+        const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+        const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+        const bid =
+          offlineCtx?.loadedPack.book.id ??
+          (loadState.status === "ready" ? loadState.data.book.id : "");
+        const pg = page ?? offlineCtx?.loadedPack.pages[0] ?? null;
+        if (pid && cid && bid && pg) {
+          await enqueueOfflineSessionEvent({
+            parentAccountId: pid,
+            childProfileId: cid,
+            clientSessionId:
+              offlineCtx?.clientSessionId ??
+              (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+            bookId: bid,
+            pageId: pg.page_id,
+            pageRevisionId: pg.page_revision_id,
+            eventKind: "SESSION_FINISH",
+            score: score ?? undefined,
+            durationMs: finishedSession.duration_ms ?? undefined,
+          }).catch(() => undefined);
+        }
+      }
       setCanonicalState("FINISHED");
       setConfirmFinish(false);
       setRetryPrompt(false);
       retryModeRef.current = false;
       setRetryMode(false);
       speechRecorder.cancel();
-      const postFinishState = await resolvePostFinishUiState(
-        services.comprehensionService,
-        sessionId,
-      );
       if (postFinishState === "question") {
         automationRuntimeRef.current?.dispatch({ type: "QUIZ_START" });
       } else {
@@ -7826,33 +8693,91 @@ function ReadingSessionScreen({
       ? t("session.uncertainRecordedSeparately")
       : null;
 
-    for (const bucket of pageBuckets) {
-      const transcript = bucket.segments.join(" ").trim();
-      if (!transcript) continue;
+    const nonEmptyBuckets = pageBuckets
+      .map((bucket) => ({
+        bucket,
+        transcript: bucket.segments.join(" ").trim(),
+      }))
+      .filter((entry) => Boolean(entry.transcript));
 
-      try {
-        latestResult = await compareTranscript(
-          sessionId,
-          transcript,
-          bucket.words,
-          {
-            page_id: bucket.page_id,
-            page_revision_id: bucket.page_revision_id,
-            initial_assessment: bucket.initial_assessment,
-          },
-        );
-        savedInitialPagesRef.current.add(
-          `${bucket.page_id}:${bucket.page_revision_id}`,
-        );
-      } catch (error) {
-        allSaved = false;
-        console.error("Lỗi so sánh bài đọc:", {
-          sessionId,
-          pageId: bucket.page_id,
-          pageRevisionId: bucket.page_revision_id,
-          error,
-        });
-        firstComparisonError = t("session.saveSessionReportFailed");
+    const resultsByIndex: Array<ComparisonResult | null> = new Array(
+      nonEmptyBuckets.length,
+    ).fill(null);
+    const CONCURRENCY = 3;
+    let nextIndex = 0;
+
+    const runCompareWorker = async () => {
+      while (nextIndex < nonEmptyBuckets.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const { bucket, transcript } = nonEmptyBuckets[currentIndex];
+        if (
+          offlineSessionCtxRef.current !== null ||
+          (typeof navigator !== "undefined" && navigator.onLine === false)
+        ) {
+          const offlineCtx = offlineSessionCtxRef.current;
+          const pid =
+            offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+          const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
+          const bid =
+            offlineCtx?.loadedPack.book.id ??
+            (loadState.status === "ready" ? loadState.data.book.id : "");
+          if (pid && cid && bid) {
+            await enqueueOfflineSessionEvent({
+              parentAccountId: pid,
+              childProfileId: cid,
+              clientSessionId:
+                offlineCtx?.clientSessionId ??
+                (isUuidString(sessionId) ? sessionId : generateUuidV4()),
+              bookId: bid,
+              pageId: bucket.page_id,
+              pageRevisionId: bucket.page_revision_id,
+              eventKind: "PAGE_READ",
+              transcript,
+              metadata: { initial_assessment: bucket.initial_assessment },
+            }).catch(() => undefined);
+            savedInitialPagesRef.current.add(
+              `${bucket.page_id}:${bucket.page_revision_id}`,
+            );
+            continue;
+          }
+        }
+        try {
+          const result = await compareTranscript(
+            sessionId,
+            transcript,
+            bucket.words,
+            {
+              page_id: bucket.page_id,
+              page_revision_id: bucket.page_revision_id,
+              initial_assessment: bucket.initial_assessment,
+            },
+          );
+          resultsByIndex[currentIndex] = result;
+          savedInitialPagesRef.current.add(
+            `${bucket.page_id}:${bucket.page_revision_id}`,
+          );
+        } catch (error) {
+          allSaved = false;
+          console.error("Lỗi so sánh bài đọc:", {
+            sessionId,
+            pageId: bucket.page_id,
+            pageRevisionId: bucket.page_revision_id,
+            error,
+          });
+          firstComparisonError = t("session.saveSessionReportFailed");
+        }
+      }
+    };
+
+    const workerCount = Math.min(CONCURRENCY, nonEmptyBuckets.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, () => runCompareWorker()),
+    );
+    for (let i = resultsByIndex.length - 1; i >= 0; i -= 1) {
+      if (resultsByIndex[i]) {
+        latestResult = resultsByIndex[i];
+        break;
       }
     }
 
@@ -8311,9 +9236,12 @@ function ReadingSessionScreen({
             bookId={book.id}
             startPageId={pageProgress?.start_page_id}
             endPageId={pageProgress?.end_page_id}
+            lastPageId={page.page_id}
             child={child}
             sessionId={sessionId}
             summary={sessionSummary ?? completion}
+            referenceText={page.text || page.words.map((w) => w.text).join(" ")}
+            autoAnalyzeProsody={!isOfflinePackMode}
             reportError={comparisonError}
             onRetryReports={
               hasPageTranscripts
@@ -8327,7 +9255,19 @@ function ReadingSessionScreen({
     );
   }
 
+  const prosodyCueSourceText = (
+    page.text || page.words.map((w) => w.text).join(" ")
+  ).trim();
+  const showProsodyCuesBar = prosodyCueSourceText.length > 0 && !retryMode;
+  const showCoReadingTrigger =
+    !isOfflinePackMode && prosodyCueSourceText.length > 0 && !retryMode;
+  const canUseDuetMode = !retryMode && duetTurns.length >= 2;
+  const hasUtilityTools = Boolean(
+    showProsodyCuesBar || showCoReadingTrigger || canUseDuetMode,
+  );
   const hasTopBarContent = Boolean(
+    hasUtilityTools ||
+    isOfflinePackMode ||
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
@@ -8336,115 +9276,343 @@ function ReadingSessionScreen({
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
-      {pageProgress ? (
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
-          <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
-            <Button
-              aria-label={t("session.previousPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
-              disabled={
-                (isBusy && !speechPlayer.isPlaying) ||
-                (uiState !== "reading" && uiState !== "tts-error") ||
-                pageProgress.current_index <= 0
-              }
-              onClick={() =>
-                void navigateWithinRange(pageProgress.current_index - 1)
-              }
-              variant="secondary"
-            >
-              <ChevronLeft
-                aria-hidden="true"
-                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
-              />
-              <span className="hidden sm:inline">
-                {t("session.previousPage")}
-              </span>
-              <span className="sm:hidden">{t("session.prevPageShort")}</span>
-            </Button>
-            <Button
-              aria-label={t("session.nextPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
-              disabled={
-                (isBusy && !speechPlayer.isPlaying) ||
-                (uiState !== "reading" && uiState !== "tts-error") ||
-                pageProgress.current_index >= pageProgress.total_pages - 1
-              }
-              onClick={() =>
-                void navigateWithinRange(pageProgress.current_index + 1)
-              }
-              variant="secondary"
-            >
-              <span className="hidden sm:inline">{t("session.nextPage")}</span>
-              <span className="sm:hidden">{t("session.nextPageShort")}</span>
-              <ChevronRight
-                aria-hidden="true"
-                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
-              />
-            </Button>
-            {pageProgress.persisted &&
-            pageProgress.pages[pageProgress.current_index]?.status !==
-              "COMPLETED" ? (
-              <Button
-                aria-label={t("session.markPageDoneAria")}
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
-                disabled={isBusy || uiState !== "reading"}
-                onClick={() => void confirmCurrentPageCompleted()}
-                variant="quiet"
-              >
-                <span className="hidden sm:inline">
-                  {t("session.markPageDone")}
-                </span>
-                <span className="sm:hidden">
-                  {t("session.markPageDoneShort")}
-                </span>
-              </Button>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            aria-label={t("session.pageOptionsAria")}
-            aria-expanded={pageOptionsOpen}
-            aria-controls="reading-page-options"
-            onClick={() => setPageOptionsOpen((open) => !open)}
-            className="ms-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
-          >
-            <span>{t("session.pageOptions")}</span>
-            <ChevronDown
-              aria-hidden="true"
-              className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          <div
-            id="reading-page-options"
-            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ms-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
-          >
-            <p
-              data-reading-range-label="true"
-              className="font-semibold text-ink"
-            >
-              {t("preparation.rangeSummary", {
-                start: formatNumber(pageProgress.start_page_number),
-                end: formatNumber(pageProgress.end_page_number),
-              })}
-            </p>
-            <p
-              data-reading-page-summary="true"
-              className="text-muted"
-              aria-live="polite"
-            >
-              {t("session.pageProgressDetail", {
-                page: formatNumber(pageProgress.current_page_number),
-                index: formatNumber(pageProgress.current_index + 1),
-                total: formatNumber(pageProgress.total_pages),
-                completed: formatNumber(pageProgress.completed_pages),
-              })}
-            </p>
-          </div>
+    <div className="relative flex flex-col gap-1 border-b border-border/70 pb-1">
+      {isOfflinePackMode ? (
+        <div
+          data-testid="reading-offline-pack-banner"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-amber-200 bg-amber-50/90 px-3 py-1 text-xs text-amber-950"
+        >
+          <span className="font-bold">
+            Gói đọc ngoại tuyến ({child.alias}) — lượt đọc sẽ tự đồng bộ khi có
+            mạng.
+          </span>
+          <OfflineOutboxStatusPill
+            parentAccountId={
+              offlineSessionCtxRef.current?.parentAccountId ??
+              activeParentAccountId
+            }
+            childProfileId={
+              offlineSessionCtxRef.current?.childProfileId ??
+              activeChildProfileId
+            }
+          />
         </div>
       ) : null}
+
+      {pageProgress || hasUtilityTools ? (
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {pageProgress ? (
+            <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
+              <Button
+                aria-label={t("session.previousPage")}
+                className="h-9! min-h-9! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:h-10! sm:gap-1.5! sm:px-2.5! sm:text-sm!"
+                disabled={
+                  (isBusy && !speechPlayer.isPlaying) ||
+                  (uiState !== "reading" && uiState !== "tts-error") ||
+                  pageProgress.current_index <= 0
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index - 1)
+                }
+                variant="secondary"
+              >
+                <ChevronLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4 shrink-0"
+                />
+                <span className="hidden sm:inline">
+                  {t("session.previousPage")}
+                </span>
+                <span className="sm:hidden">{t("session.prevPageShort")}</span>
+              </Button>
+              <Button
+                aria-label={t("session.nextPage")}
+                className="h-9! min-h-9! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:h-10! sm:gap-1.5! sm:px-2.5! sm:text-sm!"
+                disabled={
+                  (isBusy && !speechPlayer.isPlaying) ||
+                  (uiState !== "reading" && uiState !== "tts-error") ||
+                  pageProgress.current_index >= pageProgress.total_pages - 1
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index + 1)
+                }
+                variant="secondary"
+              >
+                <span className="hidden sm:inline">
+                  {t("session.nextPage")}
+                </span>
+                <span className="sm:hidden">{t("session.nextPageShort")}</span>
+                <ChevronRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4 shrink-0"
+                />
+              </Button>
+              {pageProgress.persisted &&
+              pageProgress.pages[pageProgress.current_index]?.status !==
+                "COMPLETED" ? (
+                <Button
+                  aria-label={t("session.markPageDoneAria")}
+                  className="h-9! min-h-9! w-auto! min-w-0 px-2! py-1! text-xs! sm:h-10! sm:px-2.5! sm:text-sm!"
+                  disabled={isBusy || uiState !== "reading"}
+                  onClick={() => void confirmCurrentPageCompleted()}
+                  variant="quiet"
+                >
+                  <span className="hidden md:inline">
+                    {t("session.markPageDone")}
+                  </span>
+                  <span className="md:hidden">
+                    {t("session.markPageDoneShort")}
+                  </span>
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {pageProgress ? (
+            <div className="hidden min-w-0 flex-1 items-center justify-end gap-x-2.5 text-xs md:flex">
+              <p
+                data-reading-range-label="true"
+                className="truncate font-semibold text-ink"
+              >
+                {t("preparation.rangeSummary", {
+                  start: formatNumber(pageProgress.start_page_number),
+                  end: formatNumber(pageProgress.end_page_number),
+                })}
+              </p>
+              <p
+                data-reading-page-summary="true"
+                className="truncate tabular-nums text-muted"
+                aria-live="polite"
+              >
+                {t("session.pageProgressDetail", {
+                  page: formatNumber(pageProgress.current_page_number),
+                  index: formatNumber(pageProgress.current_index + 1),
+                  total: formatNumber(pageProgress.total_pages),
+                  completed: formatNumber(pageProgress.completed_pages),
+                })}
+              </p>
+              {pageProgress.current_index === pageProgress.total_pages - 1 ? (
+                <span
+                  data-reading-end-hint="true"
+                  className="hidden shrink-0 rounded-full bg-sky px-2 py-0.5 text-[11px] font-bold text-primary xl:inline-flex"
+                  role="status"
+                >
+                  {t("session.lastPageHint")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {hasUtilityTools || pageProgress ? (
+            <div
+              ref={pageOptionsRef}
+              data-reading-utility-chips="true"
+              className={cn(
+                "relative shrink-0",
+                pageProgress ? "ms-auto md:ms-0" : "ms-auto",
+                !hasUtilityTools && "md:hidden",
+              )}
+            >
+              <button
+                type="button"
+                aria-label={t("session.pageOptionsAria")}
+                aria-expanded={pageOptionsOpen}
+                aria-controls="reading-page-options"
+                data-testid="reading-tools-toggle"
+                onClick={() => setPageOptionsOpen((open) => !open)}
+                className={cn(
+                  "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-control border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-10 sm:px-3",
+                  pageOptionsOpen || duetModeEnabled
+                    ? "border-primary/40 bg-sky/70 text-primary"
+                    : "border-border bg-white text-ink hover:bg-sky/50",
+                )}
+              >
+                <SlidersHorizontal
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0"
+                />
+                <span>{t("session.pageOptions")}</span>
+                {duetModeEnabled ? (
+                  <span
+                    aria-hidden="true"
+                    className="size-2 rounded-full bg-primary"
+                  />
+                ) : null}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    pageOptionsOpen && "rotate-180",
+                  )}
+                />
+              </button>
+
+              {pageOptionsOpen ? (
+                <div
+                  id="reading-page-options"
+                  data-testid="reading-tools-popover"
+                  className="absolute end-0 top-full z-30 mt-1.5 w-[min(92vw,360px)] space-y-2.5 rounded-2xl border border-border bg-white/98 p-3 shadow-lg"
+                >
+                  {pageProgress ? (
+                    <div className="space-y-0.5 border-b border-border/70 pb-2 text-xs md:hidden">
+                      <p
+                        data-reading-range-label="true"
+                        className="font-semibold text-ink"
+                      >
+                        {t("preparation.rangeSummary", {
+                          start: formatNumber(pageProgress.start_page_number),
+                          end: formatNumber(pageProgress.end_page_number),
+                        })}
+                      </p>
+                      <p
+                        data-reading-page-summary="true"
+                        className="text-muted"
+                        aria-live="polite"
+                      >
+                        {t("session.pageProgressDetail", {
+                          page: formatNumber(pageProgress.current_page_number),
+                          index: formatNumber(pageProgress.current_index + 1),
+                          total: formatNumber(pageProgress.total_pages),
+                          completed: formatNumber(pageProgress.completed_pages),
+                        })}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {showProsodyCuesBar ? (
+                    <ProsodyBreathingCuesBar
+                      fetchRemoteOnExpand={!isOfflinePackMode}
+                      text={prosodyCueSourceText}
+                    />
+                  ) : null}
+
+                  {showCoReadingTrigger || canUseDuetMode ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {showCoReadingTrigger ? (
+                        <button
+                          type="button"
+                          data-testid="reading-open-co-reading-btn"
+                          onClick={() => {
+                            setPageOptionsOpen(false);
+                            stopAssistantAudio();
+                            setCoReadingOpen(true);
+                          }}
+                          className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50/85 px-3 py-1.5 text-xs font-bold text-sky-900 transition-colors hover:bg-sky-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        >
+                          <Users
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0 text-sky-700"
+                          />
+                          <span>{coReadingCopy.panelTitle}</span>
+                        </button>
+                      ) : null}
+                      {canUseDuetMode ? (
+                        <button
+                          aria-pressed={duetModeEnabled}
+                          className={cn(
+                            "inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                            duetModeEnabled
+                              ? "border-primary bg-primary text-white shadow-2xs"
+                              : "border-border bg-white text-ink hover:bg-sky",
+                          )}
+                          data-testid="duet-mode-toggle"
+                          onClick={() => {
+                            setDuetModeEnabled((prev) => !prev);
+                            setPageOptionsOpen(false);
+                          }}
+                          type="button"
+                        >
+                          <Users
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                          {duetModeEnabled
+                            ? t("duet.toggleActive")
+                            : t("duet.toggleLabel")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {canUseDuetMode && duetModeEnabled && activeDuetTurn ? (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-1.5 ${
+            activeDuetTurn.role === "PARENT"
+              ? "border-amber-300 bg-amber-50/90"
+              : "border-emerald-300 bg-emerald-50/90"
+          }`}
+          data-duet-role={activeDuetTurn.role}
+          data-testid="duet-turn-banner"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-extrabold ${
+                  activeDuetTurn.role === "PARENT"
+                    ? "bg-amber-200/80 text-amber-950"
+                    : "bg-emerald-200/80 text-emerald-950"
+                }`}
+              >
+                {activeDuetTurn.role === "PARENT"
+                  ? t("duet.parentTurnBadge")
+                  : t("duet.childTurnBadge")}
+              </span>
+              <span className="text-xs font-semibold text-muted">
+                {t("duet.turnCounter", {
+                  current: formatNumber(activeDuetTurn.turnIndex + 1),
+                  total: formatNumber(duetTurns.length),
+                })}
+              </span>
+              <p
+                className="viread-learning-content min-w-0 flex-1 truncate text-xs font-bold text-ink sm:text-sm"
+                dir="ltr"
+                lang="vi"
+              >
+                {activeDuetTurn.text}
+              </p>
+            </div>
+          </div>
+          {activeDuetTurn.role === "PARENT" ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                className="w-auto"
+                fullWidth={false}
+                onClick={() => {
+                  speechPlayer.stop();
+                  void speechPlayer
+                    .play(activeDuetTurn.text, {
+                      utteranceKind: "page_sample",
+                    })
+                    .catch(() => undefined);
+                }}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                <Volume2 aria-hidden="true" className="size-3.5" />
+                {t("duet.listenParentSample")}
+              </Button>
+              <Button
+                className="w-auto"
+                data-testid="duet-complete-parent-turn"
+                fullWidth={false}
+                onClick={handleCompleteParentDuetTurn}
+                size="compact"
+                type="button"
+              >
+                {t("duet.completeParentTurn")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {pageNavigationError && pickerIndex === null ? (
         <div
           data-topbar-notice-overlay="true"
@@ -8453,7 +9621,7 @@ function ReadingSessionScreen({
           <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
           {retryMode ? (
             <Button
-              className="h-11! w-auto! px-3! py-1! text-sm!"
+              className="h-10! w-auto! px-3! py-1! text-sm!"
               disabled={isBusy}
               onClick={() => void beginRetryWord(retryPositionRef.current)}
               variant="secondary"
@@ -8489,16 +9657,6 @@ function ReadingSessionScreen({
           size="compact"
           testId="reading-ai-busy-progress"
         />
-      ) : null}
-      {pageProgress &&
-      pageProgress.current_index === pageProgress.total_pages - 1 ? (
-        <p
-          data-reading-end-hint="true"
-          className="hidden text-xs font-semibold text-primary sm:block sm:text-sm"
-          role="status"
-        >
-          {t("session.lastPageHint")}
-        </p>
       ) : null}
     </div>
   ) : null;
@@ -8568,7 +9726,7 @@ function ReadingSessionScreen({
               }
               disabled={isMicRecording}
               fallbackNotice={speechPlayer.fallbackNotice}
-              isPreviewing={speechPlayer.isPlaying}
+              isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
               onPreview={handleVoicePreview}
               onStopPreview={stopAssistantAudio}
             />
@@ -8661,8 +9819,13 @@ function ReadingSessionScreen({
               >
                 <PhonicsLessonCard
                   activeStepIndex={activePhonicsStepIndex}
+                  autoHideDurationMs={PHONICS_AUTO_HIDE_DELAY_MS}
+                  bookId={book.id}
+                  childGrade={child.grade}
+                  childId={child.id}
                   compact
                   isAnalyzingAi={isAnalyzingPhonicsAi}
+                  isAutoHiding={isPhonicsAutoHiding}
                   isListeningRetry={isMicRecording}
                   isPlayingPhonics={isPlayingPhonicsLesson}
                   isPlayingWord={isReadingWord}
@@ -8674,12 +9837,12 @@ function ReadingSessionScreen({
                       : handleReadCurrentWord
                   }
                   onStopAudio={stopAssistantAudio}
+                  onUserInteract={clearPhonicsAutoHideTimer}
                   onClose={() => {
                     stopAssistantAudio();
-                    setActivePhonicsLesson(null);
-                    setActivePhonicsStepIndex(null);
-                    setPhonicsStatusHint(null);
+                    dismissPhonicsCard();
                   }}
+                  pageId={page.page_id}
                   statusHint={phonicsStatusHint}
                 />
               </ReadingSubpanelErrorBoundary>
@@ -8703,6 +9866,7 @@ function ReadingSessionScreen({
           hesitationWordIds={hesitationWordIds}
           assistedWordIds={assistedWordIds}
           companionBubble={companionBubble}
+          onDismissCompanion={() => setCompanionBubble(null)}
           isCompanionSpeaking={
             speechPlayer.isPlaying &&
             !isPlayingPageSample &&
@@ -8944,6 +10108,17 @@ function ReadingSessionScreen({
             onRetry={() => void retryTutor()}
             ttsFailed={uiState === "tts-error"}
             word={currentWord}
+          />
+        ) : null}
+
+        {coReadingOpen ? (
+          <CoReadingRolePlayModal
+            bookId={book.id}
+            childId={child.id}
+            onClose={() => setCoReadingOpen(false)}
+            pageId={page.page_id}
+            pageText={prosodyCueSourceText}
+            teacherVoiceId={getEffectiveVoiceId()}
           />
         ) : null}
 

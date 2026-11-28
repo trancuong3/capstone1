@@ -1,0 +1,20 @@
+Third-Party Software Notice — sherpa-onnx WASM TTS Runtime & Vietnamese Voices
+
+1. sherpa-onnx WebAssembly TTS & piper-phonemize Runtime (v1.13.8)
+   Files:
+     - sherpa-onnx-wasm-main-tts.wasm
+     - sherpa-onnx-wasm-main-tts-clean.js
+     - sherpa-onnx-tts.js
+     - piper-phonemize-wasm-main.wasm
+     - piper-phonemize-wasm-main-clean.js
+   Upstream Project: https://github.com/k2-fsa/sherpa-onnx
+   Copyright: Next-gen Kaldi (k2-fsa) & Xiaomi Corporation contributors
+   License: Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+2. Vietnamese TTS Model Weights (downloaded on-demand to Browser IndexedDB)
+   - Female: csukuangfj/vits-piper-vi_VN-vais1000-medium
+     Upstream: https://huggingface.co/csukuangfj/vits-piper-vi_VN-vais1000-medium (VAIS-1000 CC BY 4.0)
+   - Male: vnhellboy/vietnamese-piper-voices (vits-piper-vi_VN-diemdam-medium)
+     Upstream: https://huggingface.co/vnhellboy/vietnamese-piper-voices
+   - Minimal eSpeak-NG Vietnamese phonemization tables fetched on-demand from
+     https://huggingface.co/csukuangfj/vits-piper-vi_VN-vivos-x_low (GPL v3 data tables)

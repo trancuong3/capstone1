@@ -11,15 +11,22 @@ import {
 } from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
+  approveSessionVoiceSwitch,
+  clearPendingSessionVoiceSwitch,
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
+  isSyntheticClientVoiceSessionId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  DEFAULT_SPEED,
+  getSpeechPreferences,
+  getSpeechPreferencesMeta,
+} from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
@@ -113,6 +120,7 @@ export interface TextToSpeechOptions {
   readonly pageRevisionId?: string | null;
   readonly cacheScope?: TtsCacheScope | null;
   readonly isPrivateBook?: boolean;
+  readonly ephemeral?: boolean;
   readonly bypassSessionLock?: boolean;
   readonly timeoutMs?: number;
 }
@@ -360,6 +368,25 @@ function base64ToBlob(base64: string, contentType: string): Blob {
   return new Blob([bytes], { type: contentType });
 }
 
+function shouldResyncServerVoiceLockOn409(input: {
+  readonly error: unknown;
+  readonly sessionId: string | null;
+  readonly sentLockUpdate: boolean;
+  readonly resolvedRequestVoiceId: string | null;
+  readonly effectiveVoiceId: string;
+  readonly globalSelectionUpdatedAt: number;
+}): boolean {
+  if (!input.sessionId || input.sentLockUpdate) return false;
+  if (input.globalSelectionUpdatedAt <= 0) return false;
+  const targetVoiceId = input.resolvedRequestVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
+  if (targetVoiceId !== input.effectiveVoiceId) return false;
+  return (
+    input.error instanceof ServiceError &&
+    input.error.status === 409 &&
+    input.error.provider_code === "SESSION_VOICE_LOCKED"
+  );
+}
+
 export function createSpeechService(): SpeechService {
   return {
     async synthesize(text, options = {}) {
@@ -376,38 +403,52 @@ export function createSpeechService(): SpeechService {
       const rawSessionId = options.bypassSessionLock
         ? null
         : (options.sessionId ?? activeLock?.sessionId ?? null);
-      const sessionId = rawSessionId?.startsWith("practice_")
+      const sessionId = isSyntheticClientVoiceSessionId(rawSessionId)
         ? null
         : rawSessionId;
+      const isEphemeral = Boolean(options.ephemeral);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
+        !isEphemeral &&
         typeof indexedDB !== "undefined" &&
         shouldPersistTtsCacheEntry({
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const speechMeta = getSpeechPreferencesMeta();
+      const hasExplicitGlobalSpeed =
+        speechPrefs.speed !== DEFAULT_SPEED || speechMeta.updatedAt > 0;
+      const resolvedRequestSpeed =
+        options.speed ??
+        activeLock?.speed ??
+        (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
+      const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
-        resolvedRequestVoiceId ??
-        getEffectiveVoiceId() ??
-        DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
-          : inferModelVersionForVoiceId(cacheVoiceId);
+          : inferModelVersionForVoiceId(cacheVoiceId, policy.modelVersion);
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
             kind: options.wordSample ? "wordSample" : "short",
             textOrTokens: normalizedText,
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
+            speed: resolvedRequestSpeed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -443,47 +484,74 @@ export function createSpeechService(): SpeechService {
 
       return withRequestDeadline(
         async (signal) => {
-          const response = await speechRequest(
-            "/voice/text-to-speech",
-            "TTS_UNAVAILABLE",
-            {
-              method: "POST",
-              headers: {
-                Accept: getPreferredTtsAcceptHeader(options.audioFormat),
-                "Content-Type": "application/json",
-                ...(hasPendingSessionVoiceSwitch(sessionId)
-                  ? { "X-Voice-Lock-Update": "1" }
-                  : {}),
+          const requestBody = JSON.stringify({
+            text: normalizedText,
+            ...(resolvedRequestVoiceId
+              ? { voice_id: resolvedRequestVoiceId }
+              : {}),
+            ...(resolvedRequestSpeed !== undefined
+              ? { speed: resolvedRequestSpeed }
+              : {}),
+            ...(options.wordSample ? { word_sample: true } : {}),
+            ...(options.audioFormat
+              ? { audio_format: options.audioFormat }
+              : {}),
+            ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+            ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+            ...(sessionId ? { session_id: sessionId } : {}),
+            ...(!isEphemeral && options.bookId
+              ? { book_id: options.bookId }
+              : {}),
+            ...(!isEphemeral && options.pageId
+              ? { page_id: options.pageId }
+              : {}),
+            ...(!isEphemeral && options.pageRevisionId
+              ? { page_revision_id: options.pageRevisionId }
+              : {}),
+            ...(!isEphemeral && options.cacheScope
+              ? { cache_scope: options.cacheScope }
+              : {}),
+          });
+          const sendShortTts = (sendLockUpdate: boolean) =>
+            speechRequest(
+              "/voice/text-to-speech",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: getPreferredTtsAcceptHeader(options.audioFormat),
+                  "Content-Type": "application/json",
+                  ...(sendLockUpdate ? { "X-Voice-Lock-Update": "1" } : {}),
+                },
+                body: requestBody,
               },
-              body: JSON.stringify({
-                text: normalizedText,
-                ...(resolvedRequestVoiceId
-                  ? { voice_id: resolvedRequestVoiceId }
-                  : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : activeLock
-                    ? { speed: activeLock.speed }
-                    : {}),
-                ...(options.wordSample ? { word_sample: true } : {}),
-                ...(options.audioFormat
-                  ? { audio_format: options.audioFormat }
-                  : {}),
-                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
-                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
-                ...(sessionId ? { session_id: sessionId } : {}),
-                ...(options.bookId ? { book_id: options.bookId } : {}),
-                ...(options.pageId ? { page_id: options.pageId } : {}),
-                ...(options.pageRevisionId
-                  ? { page_revision_id: options.pageRevisionId }
-                  : {}),
-                ...(options.cacheScope
-                  ? { cache_scope: options.cacheScope }
-                  : {}),
-              }),
-            },
-            signal,
-          );
+              signal,
+            );
+          let sentLockUpdate = hasPendingSessionVoiceSwitch(sessionId);
+          let response: Response;
+          try {
+            response = await sendShortTts(sentLockUpdate);
+          } catch (error) {
+            if (
+              shouldResyncServerVoiceLockOn409({
+                error,
+                sessionId,
+                sentLockUpdate,
+                resolvedRequestVoiceId,
+                effectiveVoiceId,
+                globalSelectionUpdatedAt: speechMeta.globalSelectionUpdatedAt,
+              })
+            ) {
+              approveSessionVoiceSwitch(sessionId);
+              sentLockUpdate = true;
+              response = await sendShortTts(true);
+            } else {
+              throw error;
+            }
+          }
+          if (sentLockUpdate && sessionId) {
+            clearPendingSessionVoiceSwitch(sessionId);
+          }
           const contentType = response.headers.get("content-type") ?? "";
           if (!contentType.toLowerCase().startsWith("audio/")) {
             throw failure("TTS_UNAVAILABLE", response.status);
@@ -588,31 +656,45 @@ export function createSpeechService(): SpeechService {
       const rawSessionId = options.bypassSessionLock
         ? null
         : (options.sessionId ?? activeLock?.sessionId ?? null);
-      const sessionId = rawSessionId?.startsWith("practice_")
+      const sessionId = isSyntheticClientVoiceSessionId(rawSessionId)
         ? null
         : rawSessionId;
+      const isEphemeral = Boolean(options.ephemeral);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "COACHING");
       const canUseBrowserCache =
+        !isEphemeral &&
         typeof indexedDB !== "undefined" &&
         shouldPersistTtsCacheEntry({
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const speechMeta = getSpeechPreferencesMeta();
+      const hasExplicitGlobalSpeed =
+        speechPrefs.speed !== DEFAULT_SPEED || speechMeta.updatedAt > 0;
+      const resolvedRequestSpeed =
+        options.speed ??
+        activeLock?.speed ??
+        (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
+      const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (policy.region !== "north" ? getEffectiveVoiceId() : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
-        resolvedRequestVoiceId ??
-        getEffectiveVoiceId() ??
-        DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
-          : inferModelVersionForVoiceId(cacheVoiceId);
+          : inferModelVersionForVoiceId(cacheVoiceId, policy.modelVersion);
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
             kind: "phonics",
@@ -625,7 +707,7 @@ export function createSpeechService(): SpeechService {
             ),
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
+            speed: resolvedRequestSpeed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -664,52 +746,79 @@ export function createSpeechService(): SpeechService {
 
       return withRequestDeadline(
         async (signal) => {
-          const response = await speechRequest(
-            "/voice/text-to-speech/phonics",
-            "TTS_UNAVAILABLE",
-            {
-              method: "POST",
-              headers: {
-                Accept: options.audioFormat
-                  ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
-                  : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
-                "Content-Type": "application/json",
-                ...(hasPendingSessionVoiceSwitch(sessionId)
-                  ? { "X-Voice-Lock-Update": "1" }
-                  : {}),
+          const phonicsBody = JSON.stringify({
+            steps: steps.map((s) => ({
+              id: s.id,
+              spoken_text: s.spokenText.normalize("NFC").trim(),
+              pause_after_ms: s.pauseAfterMs ?? 420,
+            })),
+            ...(resolvedRequestVoiceId
+              ? { voice_id: resolvedRequestVoiceId }
+              : {}),
+            ...(resolvedRequestSpeed !== undefined
+              ? { speed: resolvedRequestSpeed }
+              : {}),
+            ...(options.audioFormat
+              ? { audio_format: options.audioFormat }
+              : {}),
+            ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+            ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+            ...(sessionId ? { session_id: sessionId } : {}),
+            ...(!isEphemeral && options.bookId
+              ? { book_id: options.bookId }
+              : {}),
+            ...(!isEphemeral && options.pageId
+              ? { page_id: options.pageId }
+              : {}),
+            ...(!isEphemeral && options.pageRevisionId
+              ? { page_revision_id: options.pageRevisionId }
+              : {}),
+            ...(!isEphemeral && options.cacheScope
+              ? { cache_scope: options.cacheScope }
+              : {}),
+          });
+          const sendPhonicsTts = (sendLockUpdate: boolean) =>
+            speechRequest(
+              "/voice/text-to-speech/phonics",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: options.audioFormat
+                    ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
+                    : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
+                  "Content-Type": "application/json",
+                  ...(sendLockUpdate ? { "X-Voice-Lock-Update": "1" } : {}),
+                },
+                body: phonicsBody,
               },
-              body: JSON.stringify({
-                steps: steps.map((s) => ({
-                  id: s.id,
-                  spoken_text: s.spokenText.normalize("NFC").trim(),
-                  pause_after_ms: s.pauseAfterMs ?? 420,
-                })),
-                ...(resolvedRequestVoiceId
-                  ? { voice_id: resolvedRequestVoiceId }
-                  : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : activeLock
-                    ? { speed: activeLock.speed }
-                    : {}),
-                ...(options.audioFormat
-                  ? { audio_format: options.audioFormat }
-                  : {}),
-                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
-                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
-                ...(sessionId ? { session_id: sessionId } : {}),
-                ...(options.bookId ? { book_id: options.bookId } : {}),
-                ...(options.pageId ? { page_id: options.pageId } : {}),
-                ...(options.pageRevisionId
-                  ? { page_revision_id: options.pageRevisionId }
-                  : {}),
-                ...(options.cacheScope
-                  ? { cache_scope: options.cacheScope }
-                  : {}),
-              }),
-            },
-            signal,
-          );
+              signal,
+            );
+          let sentLockUpdate = hasPendingSessionVoiceSwitch(sessionId);
+          let response: Response;
+          try {
+            response = await sendPhonicsTts(sentLockUpdate);
+          } catch (error) {
+            if (
+              shouldResyncServerVoiceLockOn409({
+                error,
+                sessionId,
+                sentLockUpdate,
+                resolvedRequestVoiceId,
+                effectiveVoiceId,
+                globalSelectionUpdatedAt: speechMeta.globalSelectionUpdatedAt,
+              })
+            ) {
+              approveSessionVoiceSwitch(sessionId);
+              sentLockUpdate = true;
+              response = await sendPhonicsTts(true);
+            } else {
+              throw error;
+            }
+          }
+          if (sentLockUpdate && sessionId) {
+            clearPendingSessionVoiceSwitch(sessionId);
+          }
           const payload: unknown = await response.json();
           signal.throwIfAborted();
           const parsed = phonicsSpeechSchema.safeParse(payload);

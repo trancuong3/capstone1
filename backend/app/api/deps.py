@@ -58,10 +58,10 @@ def _auth_token_cache_ttl_seconds() -> float:
     raw = os.getenv("AUTH_TOKEN_CACHE_TTL_SECONDS")
     if raw is not None and raw.strip() != "":
         try:
-            return max(0.0, min(60.0, float(raw.strip())))
+            return max(0.0, min(300.0, float(raw.strip())))
         except ValueError:
             return 0.0
-    return 0.0 if APP_ENVIRONMENT == "test" else 45.0
+    return 0.0 if APP_ENVIRONMENT == "test" else 180.0
 
 
 def _jwt_exp_epoch(token: str) -> float | None:

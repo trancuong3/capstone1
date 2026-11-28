@@ -3,7 +3,18 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
@@ -36,6 +47,9 @@ from app.schemas.parent_private_book import (
     ParentPrivatePageEditRequest,
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
+    ParentSaveFromScanResponse,
+    ParentStoryweaverRequest,
+    ParentStoryweaverResponse,
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
 )
@@ -117,6 +131,86 @@ async def list_my_private_books_paged(
         search=search,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post(
+    "/my-books/from-scan",
+    response_model=ParentSaveFromScanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def save_my_private_book_from_scan(
+    response: Response,
+    image: UploadFile = File(...),
+    ocr_text: str = Form(...),
+    mode: str = Form(default="create_book"),
+    title: str | None = Form(default=None, max_length=200),
+    grade_level: int | None = Form(default=None),
+    target_book_id: UUID | None = Form(default=None),
+    words_json: str | None = Form(default=None),
+    source_type: str = Form(default="OWNED_PHYSICAL_BOOK"),
+    source_note: str | None = Form(default=None, max_length=1000),
+    actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("private_book_upload", default_max=60, default_window=60.0)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    mode = mode if isinstance(mode, str) else "create_book"
+    title = title if isinstance(title, str) else None
+    grade_level = (
+        grade_level
+        if isinstance(grade_level, int) and not isinstance(grade_level, bool)
+        else None
+    )
+    target_book_id = target_book_id if isinstance(target_book_id, UUID) else None
+    words_json = words_json if isinstance(words_json, str) else None
+    source_type = source_type if isinstance(source_type, str) else "OWNED_PHYSICAL_BOOK"
+    source_note = source_note if isinstance(source_note, str) else None
+    try:
+        return await ParentPrivateBookService(db).save_from_scan(
+            actor_id,
+            image,
+            ocr_text=ocr_text,
+            mode=mode,
+            title=title,
+            grade_level=grade_level,
+            target_book_id=target_book_id,
+            words_json=words_json,
+            source_type=source_type,
+            source_note=source_note,
+        )
+    except HTTPException as exc:
+        merged_headers = {**_PRIVATE_NO_STORE_HEADERS, **(exc.headers or {})}
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            headers=merged_headers,
+        ) from exc
+    finally:
+        await image.close()
+
+
+@router.post(
+    "/my-books/storyweaver",
+    response_model=ParentStoryweaverResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("parent_storyweaver", default_max=15, default_window=60.0))],
+)
+async def create_storyweaver_private_book(
+    payload: ParentStoryweaverRequest,
+    request: Request,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    from app.services.family_storyweaver_service import FamilyStoryweaverService
+
+    base_url = str(request.base_url) if hasattr(request, "base_url") else None
+    return await FamilyStoryweaverService(db).create_storyweaver_book(
+        actor_id, payload, base_url=base_url
     )
 
 
