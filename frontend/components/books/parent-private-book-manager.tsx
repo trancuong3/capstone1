@@ -56,6 +56,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
 import type { BookPresentationAssetDTO } from "@/types/book-assets";
+import type { GlobalTaskStatus } from "@/types/global-tasks";
 import {
   SOURCE_USAGE_OPTIONS,
   type ParentPageSubmissionDTO,
@@ -94,6 +95,30 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   FAILED: "privateManager.statusLabels.FAILED",
 };
 
+function mapSubmissionStatusToGlobalTaskStatus(
+  status: SubmissionWorkflowStatus | undefined,
+): GlobalTaskStatus | undefined {
+  switch (status) {
+    case "PASSED_READY_TO_ADD":
+    case "APPROVED_READY_TO_ADD":
+    case "ADDED_TO_BOOK":
+      return "SUCCEEDED";
+    case "NEEDS_ADMIN_REVIEW":
+    case "PENDING_ADMIN":
+    case "NEEDS_RECHECK":
+      return "WAITING_FOR_REVIEW";
+    case "CHECK_FAILED":
+    case "REJECTED":
+      return "FAILED";
+    case "CANCELLED":
+      return "CANCELLED";
+    case "CHECKING":
+      return "RUNNING";
+    default:
+      return undefined;
+  }
+}
+
 function generateClientKey(): string {
   if (
     typeof crypto !== "undefined" &&
@@ -109,6 +134,75 @@ function errorText(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+function isOcrQueueFullError(error: unknown): boolean {
+  if (!isServiceError(error)) return false;
+  return error.status === 429 || error.provider_code === "OCR_QUEUE_FULL";
+}
+
+function extractRetryAfterSeconds(error: unknown): number {
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    for (const key of ["retry_after_seconds", "retryAfterSeconds"]) {
+      const val = record[key];
+      if (typeof val === "number" && Number.isFinite(val) && val > 0) {
+        return Math.ceil(val);
+      }
+    }
+  }
+  if (isServiceError(error) && error.message) {
+    const match = error.message.match(/(\d+)\s*(?:s|sec|giây)/i);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return 30;
+}
+
+function formatActionError(
+  error: unknown,
+  fallback: string,
+  t: BooksTranslateFn,
+): string {
+  if (isOcrQueueFullError(error)) {
+    return t("privateManager.queueFullNotice", {
+      seconds: extractRetryAfterSeconds(error),
+    });
+  }
+  return errorText(error, fallback);
+}
+
+function buildSubmissionTransitionSignature(
+  data: ParentPrivateBookDetailDTO,
+): string {
+  const subs = data.submissions
+    .map((s) => `${s.id}:${s.workflow_status}:${s.committed_page_id ?? ""}`)
+    .join(",");
+  return `${data.pages.length}|${subs}`;
+}
+
+function mergeSummaryOnlyDetail(
+  prev: ParentPrivateBookDetailDTO | null,
+  next: ParentPrivateBookDetailDTO,
+): ParentPrivateBookDetailDTO {
+  if (!prev || prev.book.id !== next.book.id) return next;
+  const prevPageReadability = new Map(
+    prev.pages.map((p) => [p.page_id, p.readability ?? null]),
+  );
+  return {
+    ...next,
+    book: {
+      ...next.book,
+      readability: next.book.readability ?? prev.book.readability ?? null,
+    },
+    pages: next.pages.map((page) => ({
+      ...page,
+      readability:
+        page.readability ?? prevPageReadability.get(page.page_id) ?? null,
+    })),
+  };
 }
 
 const VALID_SOURCE_TYPES = new Set<string>(
@@ -309,7 +403,9 @@ function describeStageErrorHint(
   if (
     upper.includes("BUSY") ||
     upper.includes("RATE") ||
-    upper.includes("429")
+    upper.includes("429") ||
+    upper.includes("QUOTA") ||
+    upper.includes("ALL_PROVIDERS_SKIPPED")
   ) {
     return t("privateManager.workerErrorOverloaded");
   }
@@ -435,6 +531,7 @@ function ParentPrivateBookManagerContent({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detailRequestIdRef = useRef(0);
+  const submissionSignatureRef = useRef<string | null>(null);
   const backHref =
     returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
@@ -445,6 +542,11 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [retryingAllFailed, setRetryingAllFailed] = useState(false);
+  const retryAllProgress = useAiProgress({
+    active: retryingAllFailed,
+    expectedDurationMs: 6_000,
+  });
   const [statusFilter, setStatusFilter] =
     useState<SubmissionFilterGroup>("ALL");
   const [overviewPage, setOverviewPage] = useState(1);
@@ -523,7 +625,7 @@ function ParentPrivateBookManagerContent({
   const [smartOcrPageId, setSmartOcrPageId] = useState<string | null>(null);
 
   const loadDetail = useCallback(
-    async (silent = false) => {
+    async (silent = false, options?: { readonly summaryOnly?: boolean }) => {
       const requestId = ++detailRequestIdRef.current;
       if (!silent) {
         setLoading(true);
@@ -531,9 +633,29 @@ function ParentPrivateBookManagerContent({
       setLoadError(null);
       setNotFound(false);
       try {
-        const data = await service.get(bookId);
+        const useSummaryOnly = Boolean(options?.summaryOnly);
+        const data = await service.get(
+          bookId,
+          undefined,
+          useSummaryOnly ? { summaryOnly: true } : undefined,
+        );
         if (requestId !== detailRequestIdRef.current) return;
-        setDetail(data);
+        const nextSignature = buildSubmissionTransitionSignature(data);
+        const transitioned =
+          useSummaryOnly &&
+          submissionSignatureRef.current !== null &&
+          submissionSignatureRef.current !== nextSignature;
+        submissionSignatureRef.current = nextSignature;
+        setDetail((prev) =>
+          useSummaryOnly ? mergeSummaryOnlyDetail(prev, data) : data,
+        );
+        if (transitioned) {
+          const fullData = await service.get(bookId);
+          if (requestId !== detailRequestIdRef.current) return;
+          submissionSignatureRef.current =
+            buildSubmissionTransitionSignature(fullData);
+          setDetail(fullData);
+        }
       } catch (error) {
         if (requestId !== detailRequestIdRef.current) return;
         if (isServiceError(error) && error.status === 404) {
@@ -553,12 +675,15 @@ function ParentPrivateBookManagerContent({
 
   useEffect(() => {
     clearPrivateMediaMemoryCache();
+    submissionSignatureRef.current = null;
     const requestId = ++detailRequestIdRef.current;
     const controller = new AbortController();
     void service
       .get(bookId, controller.signal)
       .then((data) => {
         if (requestId !== detailRequestIdRef.current) return;
+        submissionSignatureRef.current =
+          buildSubmissionTransitionSignature(data);
         setDetail(data);
         setNotFound(false);
         setLoadError(null);
@@ -661,7 +786,7 @@ function ParentPrivateBookManagerContent({
       }
       pollInFlightRef.current = true;
       try {
-        await loadDetail(true);
+        await loadDetail(true, { summaryOnly: true });
         idleTicks += 1;
       } finally {
         pollInFlightRef.current = false;
@@ -733,7 +858,7 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, t("privateManager.uploadFailedFallback")),
+        formatActionError(error, t("privateManager.uploadFailedFallback"), t),
       );
     } finally {
       setUploading(false);
@@ -746,7 +871,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.acceptSpelling(
+      const updated = await service.acceptSpelling(
         bookId,
         sub.id,
         sub.submission_version,
@@ -757,7 +882,18 @@ function ParentPrivateBookManagerContent({
           page: sub.source_page_number,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status: mapSubmissionStatusToGlobalTaskStatus(
+                updated.workflow_status,
+              ),
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -789,7 +925,20 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: result.submission?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  result.submission.workflow_status,
+                ) ?? "SUCCEEDED",
+              updated_at: result.submission.updated_at,
+              completed_at: result.submission.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -806,7 +955,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.requestAdminReview(bookId, sub.id, {
+      const updated = await service.requestAdminReview(bookId, sub.id, {
         expected_submission_version: sub.submission_version,
         expected_candidate_hash: sub.candidate_hash,
         source_type: reviewSourceType,
@@ -820,7 +969,19 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  updated.workflow_status,
+                ) ?? "WAITING_FOR_REVIEW",
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -847,8 +1008,100 @@ function ParentPrivateBookManagerContent({
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
-      setActionError(errorText(error, t("privateManager.retryErrorFallback")));
+      setActionError(
+        formatActionError(error, t("privateManager.retryErrorFallback"), t),
+      );
     } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleRetryAllFailed(
+    retryableSubs: readonly ParentPageSubmissionDTO[],
+  ) {
+    if (retryableSubs.length === 0) return;
+    setRetryingAllFailed(true);
+    setBusyKey("retry:all");
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      let result: {
+        readonly retried_count: number;
+        readonly skipped_count: number;
+        readonly failed_count: number;
+        readonly queue_full_retry_after_seconds: number | null;
+      };
+      if (service.retryAllFailedSubmissions) {
+        result = await service.retryAllFailedSubmissions(bookId);
+      } else {
+        let retried = 0;
+        let failed = 0;
+        for (const sub of retryableSubs) {
+          try {
+            await service.retrySubmission(bookId, sub.id, "AUTO");
+            retried += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        result = {
+          retried_count: retried,
+          skipped_count: 0,
+          failed_count: failed,
+          queue_full_retry_after_seconds: null,
+        };
+      }
+
+      if (result.retried_count > 0) {
+        for (const sub of retryableSubs) {
+          taskCenter?.markTaskAlertSeen(sub.id);
+        }
+        emitStudioTasksChanged({ portal: "parent" });
+      }
+
+      if (result.queue_full_retry_after_seconds !== null) {
+        if (result.retried_count > 0) {
+          setActionNotice(
+            t("privateManager.retryAllPartialQueueFullNotice", {
+              retried: result.retried_count,
+              skipped: result.skipped_count,
+              seconds: result.queue_full_retry_after_seconds,
+            }),
+          );
+        } else {
+          setActionError(
+            t("privateManager.queueFullNotice", {
+              seconds: result.queue_full_retry_after_seconds,
+            }),
+          );
+        }
+      } else if (result.failed_count > 0) {
+        setActionNotice(
+          t("privateManager.retryAllPartialFailedNotice", {
+            retried: result.retried_count,
+            failed: result.failed_count,
+          }),
+        );
+      } else if (result.retried_count > 0) {
+        setActionNotice(
+          ocrWorkerOffline
+            ? t("privateManager.retryAllQueuedOfflineNotice", {
+                count: result.retried_count,
+              })
+            : t("privateManager.retryAllSuccessNotice", {
+                count: result.retried_count,
+              }),
+        );
+      } else {
+        setActionNotice(t("privateManager.retryAllNoneNotice"));
+      }
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        formatActionError(error, t("privateManager.retryErrorFallback"), t),
+      );
+    } finally {
+      setRetryingAllFailed(false);
       setBusyKey(null);
     }
   }
@@ -871,7 +1124,18 @@ function ParentPrivateBookManagerContent({
         sub.id,
         updated?.workflow_status === "CHECKING"
           ? undefined
-          : { includeNextSync: true },
+          : {
+              includeNextSync: true,
+              optimisticTask: updated?.updated_at
+                ? {
+                    source: "parent_submission",
+                    status: mapSubmissionStatusToGlobalTaskStatus(
+                      updated.workflow_status,
+                    ),
+                    updated_at: updated.updated_at,
+                  }
+                : undefined,
+            },
       );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
@@ -932,6 +1196,7 @@ function ParentPrivateBookManagerContent({
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
       if (updated.pending_submission_count > 0) {
+        taskCenter?.markTargetAlertsSeen({ bookId });
         emitStudioTasksChanged({ portal: "parent" });
       }
       await loadDetail(true);
@@ -977,7 +1242,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.editCommittedPage(bookId, page.page_id, {
+      const updated = await service.editCommittedPage(bookId, page.page_id, {
         candidate_text: editPageText,
         page_number: editPageNumber,
         source_type: editPageSourceType,
@@ -989,6 +1254,25 @@ function ParentPrivateBookManagerContent({
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(
+          updated.id,
+          updated.workflow_status === "CHECKING"
+            ? undefined
+            : {
+                includeNextSync: true,
+                optimisticTask: updated.updated_at
+                  ? {
+                      source: "parent_submission",
+                      status: mapSubmissionStatusToGlobalTaskStatus(
+                        updated.workflow_status,
+                      ),
+                      updated_at: updated.updated_at,
+                    }
+                  : undefined,
+              },
+        );
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1008,7 +1292,11 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.replaceCommittedPageFile(bookId, page.page_id, file);
+      const updated = await service.replaceCommittedPageFile(
+        bookId,
+        page.page_id,
+        file,
+      );
       setEditingPageId(null);
       setActionNotice(
         ocrWorkerOffline
@@ -1020,11 +1308,18 @@ function ParentPrivateBookManagerContent({
             }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(updated.id);
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, t("privateManager.replaceImageErrorFallback")),
+        formatActionError(
+          error,
+          t("privateManager.replaceImageErrorFallback"),
+          t,
+        ),
       );
     } finally {
       setBusyKey(null);
@@ -1079,9 +1374,10 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(
+        formatActionError(
           error,
           t("privateManager.replaceSubmissionImageErrorFallback"),
+          t,
         ),
       );
     } finally {
@@ -1112,7 +1408,7 @@ function ParentPrivateBookManagerContent({
     return (
       <section
         aria-busy="true"
-        className="mx-auto flex w-full max-w-[1200px] flex-col gap-5 px-4 py-6 sm:px-8"
+        className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-5 sm:px-8 sm:py-8"
       >
         <Skeleton className="h-12 w-72 rounded-card" />
         <Skeleton className="h-44 w-full rounded-card" />
@@ -1123,7 +1419,7 @@ function ParentPrivateBookManagerContent({
 
   if (notFound) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
         <EmptyState
           action={
             <ButtonLink
@@ -1147,7 +1443,7 @@ function ParentPrivateBookManagerContent({
 
   if (loadError || !detail) {
     return (
-      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
+      <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-3.5 py-6 pb-24 sm:px-8 sm:py-10">
         <StatusMessage title={t("privateManager.loadErrorTitle")} tone="error">
           {loadError ?? t("privateManager.loadDataFallback")}
         </StatusMessage>
@@ -1191,6 +1487,9 @@ function ParentPrivateBookManagerContent({
       Boolean(item.tool_check_error_code) ||
       item.workflow_status === "CHECK_FAILED",
   ).length;
+  const retryableFailedSubmissions = activeSubmissions.filter(
+    (item) => item.workflow_status === "CHECK_FAILED" && item.can_retry,
+  );
   const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
@@ -1236,8 +1535,8 @@ function ParentPrivateBookManagerContent({
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
         <Link
           href={backHref}
           className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
@@ -1248,7 +1547,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            className="w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
@@ -1259,14 +1558,19 @@ function ParentPrivateBookManagerContent({
           {book.readable_for_children && !isSuspended ? (
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
-              className="w-auto"
+              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
               fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
               {t("myBooks.openReadWithChild")}
             </ButtonLink>
           ) : (
-            <Button className="w-auto" disabled fullWidth={false} type="button">
+            <Button
+              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+              disabled
+              fullWidth={false}
+              type="button"
+            >
               <BookOpen aria-hidden="true" className="size-4" />
               {t("myBooks.notOpenReadYet")}
             </Button>
@@ -1274,9 +1578,9 @@ function ParentPrivateBookManagerContent({
         </div>
       </div>
 
-      <header className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 items-start gap-4">
+      <header className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
             <BookCover
               author={book.author}
               book={{
@@ -1294,8 +1598,8 @@ function ParentPrivateBookManagerContent({
               size="small"
             />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 sm:px-3">
                   <Lock aria-hidden="true" className="size-3" />
                   {t("card.privateFamilyBadge")}
                 </span>
@@ -1315,31 +1619,33 @@ function ParentPrivateBookManagerContent({
                 </span>
               </div>
               <h1
-                className="book-title viread-learning-content mt-2 break-words text-3xl text-ink sm:text-4xl"
+                className="book-title viread-learning-content mt-1.5 break-words text-xl text-ink sm:mt-2 sm:text-4xl"
                 dir="ltr"
                 lang="vi"
               >
                 {book.title}
               </h1>
               {book.author ? (
-                <p className="mt-1 break-words text-sm text-muted">
+                <p className="mt-0.5 break-words text-xs text-muted sm:mt-1 sm:text-sm">
                   {t("privateManager.authorPrefix", { author: book.author })}
                 </p>
               ) : null}
-              <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
+              <p className="mt-1.5 text-xs text-muted sm:mt-2">
+                {book.privacy_notice}
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Link
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary sm:min-h-11 sm:px-3"
               href="/studio/tasks"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />
               {t("privateManager.taskCenterLink")}
             </Link>
             <Button
-              className="min-h-11 w-auto px-3 text-xs"
+              className="min-h-10 w-auto px-2.5 text-xs sm:min-h-11 sm:px-3"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowEditBookForm(false);
@@ -1355,7 +1661,7 @@ function ParentPrivateBookManagerContent({
                 : t("privateManager.changeCoverAction")}
             </Button>
             <Button
-              className="min-h-10 w-auto px-3 text-xs"
+              className="min-h-10 w-auto px-2.5 text-xs sm:px-3"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1373,7 +1679,7 @@ function ParentPrivateBookManagerContent({
             </Button>
             <button
               aria-label={t("myBooks.deleteBookAria", { title: book.title })}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
               disabled={busyKey !== null}
               onClick={() => {
                 setShowCoverStudio(false);
@@ -1617,11 +1923,11 @@ function ParentPrivateBookManagerContent({
       {/* Upload Section */}
       <form
         aria-label={t("privateManager.uploadSectionAria")}
-        className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+        className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-4 sm:p-5"
         onSubmit={(event) => void handleUpload(event)}
       >
         <div>
-          <h2 className="text-xl font-extrabold text-ink">
+          <h2 className="text-lg font-extrabold text-ink sm:text-xl">
             {t("privateManager.uploadTitle")}
           </h2>
           <p className="mt-1 text-sm text-muted">
@@ -1766,7 +2072,7 @@ function ParentPrivateBookManagerContent({
           <>
             <div
               aria-label={t("privateManager.filterAria")}
-              className="flex flex-wrap items-center gap-2"
+              className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:gap-2 sm:overflow-visible sm:pb-0"
               role="group"
             >
               {(
@@ -1814,7 +2120,7 @@ function ParentPrivateBookManagerContent({
                   <button
                     key={pill.key}
                     aria-pressed={isSelected}
-                    className={`min-h-9 rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                    className={`min-h-10 shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold transition-colors sm:min-h-9 sm:py-1 ${
                       isSelected
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-canvas text-ink hover:bg-sky/50"
@@ -1898,11 +2204,48 @@ function ParentPrivateBookManagerContent({
                 data-testid="private-book-ocr-queue-banner"
               >
                 {workerFailureCount > 0 ? (
-                  <p className="font-semibold">
-                    {t("privateManager.workerFailuresSummary", {
-                      count: workerFailureCount,
-                    })}
-                  </p>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold">
+                        {t("privateManager.workerFailuresSummary", {
+                          count: workerFailureCount,
+                        })}
+                      </p>
+                      {retryableFailedSubmissions.length >= 1 &&
+                      !isSuspended ? (
+                        <Button
+                          className="min-h-9 w-auto px-3 text-xs"
+                          data-testid="retry-all-failed-submissions"
+                          disabled={busyKey !== null || retryingAllFailed}
+                          isLoading={retryingAllFailed}
+                          onClick={() =>
+                            void handleRetryAllFailed(
+                              retryableFailedSubmissions,
+                            )
+                          }
+                          type="button"
+                          variant="secondary"
+                        >
+                          <RotateCcw aria-hidden="true" className="size-3.5" />
+                          {retryingAllFailed
+                            ? t("privateManager.retryingAllFailedButton")
+                            : t("privateManager.retryAllFailedAction", {
+                                count: retryableFailedSubmissions.length,
+                              })}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {retryingAllFailed ? (
+                      <AiProgressBar
+                        active
+                        elapsedSeconds={retryAllProgress.elapsedSeconds}
+                        label={t("privateManager.retryingAllFailedButton")}
+                        percent={retryAllProgress.percent}
+                        size="sm"
+                        testId="private-book-retry-all-progress"
+                      />
+                    ) : null}
+                  </div>
                 ) : ocrWorkerOffline && pendingOcrCount > 0 ? (
                   <p className="font-semibold">
                     {t("privateManager.windowsOcrQueueWaiting", {
@@ -1971,6 +2314,11 @@ function ParentPrivateBookManagerContent({
                   sub.tool_check_error_code,
                   t,
                 );
+                const parentNotice =
+                  sub.tool_check_parent_notice ||
+                  sub.tool_check_findings_count > 0
+                    ? parentNoticeMeta(sub, t)
+                    : null;
 
                 return (
                   <article
@@ -2138,41 +2486,52 @@ function ParentPrivateBookManagerContent({
                         </p>
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
-                        {sub.tool_check_parent_notice ||
-                        sub.tool_check_findings_count > 0
-                          ? (() => {
-                              const notice = parentNoticeMeta(sub, t);
-                              return (
-                                <div
-                                  className={`rounded-control border p-3 text-xs ${notice.className}`}
+                        {parentNotice ? (
+                          <div
+                            className={`rounded-control border p-3 text-xs ${parentNotice.className}`}
+                          >
+                            <p className="flex items-center gap-1.5 font-bold">
+                              {sub.workflow_status === "PASSED_READY_TO_ADD" ||
+                              sub.workflow_status === "APPROVED_READY_TO_ADD" ||
+                              sub.workflow_status === "ADDED_TO_BOOK" ? (
+                                <ShieldCheck
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              ) : (
+                                <AlertTriangle
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              )}
+                              {parentNotice.title}
+                            </p>
+                            {sub.tool_check_parent_notice ? (
+                              <p className="mt-1">
+                                {sub.tool_check_parent_notice}
+                              </p>
+                            ) : null}
+                            {sub.workflow_status === "CHECK_FAILED" &&
+                            sub.can_retry ? (
+                              <div className="mt-2.5">
+                                <Button
+                                  className="min-h-10 w-auto px-3.5 text-xs"
+                                  disabled={isSubBusy || isSuspended}
+                                  isLoading={busyKey === `retry:${sub.id}`}
+                                  onClick={() => void handleRetry(sub)}
+                                  type="button"
+                                  variant="secondary"
                                 >
-                                  <p className="flex items-center gap-1.5 font-bold">
-                                    {sub.workflow_status ===
-                                      "PASSED_READY_TO_ADD" ||
-                                    sub.workflow_status ===
-                                      "APPROVED_READY_TO_ADD" ||
-                                    sub.workflow_status === "ADDED_TO_BOOK" ? (
-                                      <ShieldCheck
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    ) : (
-                                      <AlertTriangle
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    )}
-                                    {notice.title}
-                                  </p>
-                                  {sub.tool_check_parent_notice ? (
-                                    <p className="mt-1">
-                                      {sub.tool_check_parent_notice}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              );
-                            })()
-                          : null}
+                                  <RotateCcw
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                  {t("privateManager.retryCheckAction")}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
 
                         {/* Candidate Text Preview */}
                         {sub.candidate_text ? (
@@ -2492,8 +2851,13 @@ function ParentPrivateBookManagerContent({
                             </Button>
                           ) : null}
 
-                          {/* Stage-preserving Retry */}
-                          {sub.can_retry ? (
+                          {/* Stage-preserving Retry (avoid duplicating when already shown in the top error notice) */}
+                          {sub.can_retry &&
+                          !(
+                            sub.workflow_status === "CHECK_FAILED" &&
+                            (sub.tool_check_parent_notice ||
+                              sub.tool_check_findings_count > 0)
+                          ) ? (
                             <Button
                               className="min-h-11 w-auto px-4 text-sm"
                               disabled={isSubBusy || isSuspended}
@@ -2609,7 +2973,7 @@ function ParentPrivateBookManagerContent({
           </p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               {visibleCommittedPages.map((page) => {
                 const isEditingPage = editingPageId === page.page_id;
                 const isConfirmingDelete = confirmDeletePageId === page.page_id;
@@ -2622,9 +2986,9 @@ function ParentPrivateBookManagerContent({
                   <article
                     key={page.page_id}
                     data-committed-page-id={page.page_id}
-                    className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm"
+                    className="flex flex-col gap-2.5 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-3 sm:p-4"
                   >
-                    <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
+                    <div className="h-32 w-full overflow-hidden rounded-control bg-cream sm:h-40">
                       <AuthenticatedImage
                         alt={t("privateManager.pageNumberHeading", {
                           page: page.page_number,
@@ -2653,7 +3017,7 @@ function ParentPrivateBookManagerContent({
                       </p>
                     ) : null}
 
-                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                    <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5 sm:gap-2">
                       {!isSuspended ? (
                         <>
                           <button
@@ -2661,7 +3025,7 @@ function ParentPrivateBookManagerContent({
                               "privateManager.editCommittedPageAria",
                               { page: page.page_number },
                             )}
-                            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
+                            className="inline-flex min-h-10 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50 sm:min-h-9"
                             disabled={isPageBusy || busyKey !== null}
                             onClick={() =>
                               isEditingPage
@@ -2673,7 +3037,7 @@ function ParentPrivateBookManagerContent({
                             <Pencil aria-hidden="true" className="size-3.5" />
                             {t("privateManager.editPageAction")}
                           </button>
-                          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
+                          <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-9">
                             <Upload aria-hidden="true" className="size-3.5" />
                             {t("privateManager.replaceImageAction")}
                             <input
@@ -2750,7 +3114,7 @@ function ParentPrivateBookManagerContent({
                           "privateManager.deleteCommittedPageAria",
                           { page: page.page_number },
                         )}
-                        className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 sm:min-h-9"
                         disabled={isPageBusy || busyKey !== null}
                         onClick={() => {
                           setEditingPageId(null);

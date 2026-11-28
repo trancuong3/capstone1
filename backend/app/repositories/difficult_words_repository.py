@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -19,6 +20,32 @@ from app.models import (
     ReadingSession,
 )
 from app.models.difficult_word_practice import DifficultWordPracticeAttempt
+
+_STORAGE_READY_LOCK = threading.Lock()
+_STORAGE_READY_CACHE: dict[int, bool] = {}
+
+
+def _db_bind_cache_key(db: AsyncSession | None) -> int:
+    if db is None:
+        return 0
+    bind = getattr(db, "bind", None)
+    if bind is None:
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+    return id(bind) if bind is not None else 0
+
+
+def clear_practice_storage_ready_cache() -> None:
+    """Clear the process-local difficult_word_practice_attempts readiness cache."""
+    with _STORAGE_READY_LOCK:
+        _STORAGE_READY_CACHE.clear()
+
+
+def _should_refresh_after_commit(db: AsyncSession) -> bool:
+    sync_session = getattr(db, "sync_session", None)
+    return bool(getattr(sync_session, "expire_on_commit", True))
 
 
 class DifficultWordsRepository:
@@ -38,10 +65,19 @@ class DifficultWordsRepository:
 
     async def is_practice_storage_ready(self) -> bool:
         """Safely probe table existence without aborting the current PostgreSQL transaction."""
+        bind_key = _db_bind_cache_key(self.db)
+        if bind_key:
+            with _STORAGE_READY_LOCK:
+                if _STORAGE_READY_CACHE.get(bind_key) is True:
+                    return True
         table_name = await self.db.scalar(
             select(text("to_regclass('public.difficult_word_practice_attempts')"))
         )
-        return table_name is not None
+        ready = table_name is not None
+        if ready and bind_key:
+            with _STORAGE_READY_LOCK:
+                _STORAGE_READY_CACHE[bind_key] = True
+        return ready
 
     async def saved_progress_report(
         self,
@@ -225,10 +261,20 @@ class DifficultWordsRepository:
         self,
         attempt: DifficultWordPracticeAttempt,
     ) -> DifficultWordPracticeAttempt:
+        now = datetime.now(timezone.utc)
+        if attempt.Id is None:
+            attempt.Id = uuid4()
+        if attempt.StartedAt is None:
+            attempt.StartedAt = now
+        if attempt.CreatedAt is None:
+            attempt.CreatedAt = now
+        if attempt.UpdatedAt is None:
+            attempt.UpdatedAt = now
         self.db.add(attempt)
         try:
             await self.db.commit()
-            await self.db.refresh(attempt)
+            if _should_refresh_after_commit(self.db):
+                await self.db.refresh(attempt)
         except Exception:
             await self.db.rollback()
             raise
@@ -240,7 +286,8 @@ class DifficultWordsRepository:
     ) -> DifficultWordPracticeAttempt:
         try:
             await self.db.commit()
-            await self.db.refresh(attempt)
+            if _should_refresh_after_commit(self.db):
+                await self.db.refresh(attempt)
         except Exception:
             await self.db.rollback()
             raise
@@ -285,9 +332,10 @@ class DifficultWordsRepository:
         child_id: UUID,
         actor_id: UUID,
         *,
+        normalized_word: str | None = None,
         limit: int = 2000,
     ) -> list[ReadingEvent]:
-        result = await self.db.execute(
+        query = (
             select(ReadingEvent)
             .join(ReadingSession, ReadingSession.Id == ReadingEvent.SessionId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
@@ -296,7 +344,18 @@ class DifficultWordsRepository:
                 ChildProfile.ParentId == actor_id,
                 ReadingEvent.Type == "WORD_RETRY",
             )
-            .order_by(ReadingEvent.CreatedAt.desc(), ReadingEvent.Id.desc())
+        )
+        if normalized_word is not None:
+            query = query.where(
+                or_(
+                    ReadingEvent.Metadata["normalized_word"].as_string() == normalized_word,
+                    func.lower(ReadingEvent.Metadata["target_word"].as_string()).contains(
+                        normalized_word
+                    ),
+                )
+            )
+        result = await self.db.execute(
+            query.order_by(ReadingEvent.CreatedAt.desc(), ReadingEvent.Id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
@@ -331,9 +390,11 @@ class DifficultWordsRepository:
         page_id: UUID | None = None,
         page_revision_id: UUID | None = None,
         word_id: UUID | None = None,
+        validated_session: ReadingSession | None = None,
+        word_validated: bool = False,
     ) -> tuple[UUID, UUID, UUID, UUID | None] | None:
-        session_row: ReadingSession | None = None
-        if session_id is not None:
+        session_row: ReadingSession | None = validated_session
+        if session_row is None and session_id is not None:
             session_row = await self.db.scalar(
                 select(ReadingSession)
                 .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
@@ -414,15 +475,18 @@ class DifficultWordsRepository:
 
         resolved_word_id: UUID | None = None
         if word_id is not None:
-            found_word_id = await self.db.scalar(
-                select(PageRevisionWord.Id)
-                .where(
-                    PageRevisionWord.Id == word_id,
-                    PageRevisionWord.PageRevisionId == resolved_rev_id,
+            if word_validated and page_revision_id is not None and resolved_rev_id == page_revision_id:
+                resolved_word_id = word_id
+            else:
+                found_word_id = await self.db.scalar(
+                    select(PageRevisionWord.Id)
+                    .where(
+                        PageRevisionWord.Id == word_id,
+                        PageRevisionWord.PageRevisionId == resolved_rev_id,
+                    )
+                    .limit(1)
                 )
-                .limit(1)
-            )
-            resolved_word_id = found_word_id
+                resolved_word_id = found_word_id
 
         return (session_row.Id, resolved_page_id, resolved_rev_id, resolved_word_id)
 
@@ -455,11 +519,72 @@ class DifficultWordsRepository:
         return max_attempt + 1, incorrect_count
 
     async def create_retry_event(self, event: ReadingEvent) -> ReadingEvent:
+        if event.Id is None:
+            event.Id = uuid4()
+        if event.CreatedAt is None:
+            event.CreatedAt = datetime.now(timezone.utc)
         self.db.add(event)
         try:
             await self.db.commit()
-            await self.db.refresh(event)
+            if _should_refresh_after_commit(self.db):
+                await self.db.refresh(event)
         except Exception:
             await self.db.rollback()
             raise
         return event
+
+    async def save_practice_attempt_and_retry_event(
+        self,
+        attempt: DifficultWordPracticeAttempt | None,
+        event: ReadingEvent | None,
+    ) -> tuple[DifficultWordPracticeAttempt | None, ReadingEvent | None]:
+        """Persist practice attempt + mirrored WORD_RETRY event in a single atomic commit."""
+        now = datetime.now(timezone.utc)
+        saved_attempt = attempt
+        saved_event = event
+        if attempt is not None:
+            if attempt.Id is None:
+                attempt.Id = uuid4()
+            if attempt.StartedAt is None:
+                attempt.StartedAt = now
+            if attempt.CreatedAt is None:
+                attempt.CreatedAt = now
+            if attempt.UpdatedAt is None:
+                attempt.UpdatedAt = now
+        if event is not None:
+            if event.Id is None:
+                event.Id = uuid4()
+            if event.CreatedAt is None:
+                event.CreatedAt = now
+
+        try:
+            if saved_attempt is not None:
+                self.db.add(saved_attempt)
+            if saved_attempt is not None and saved_event is not None:
+                begin_nested = getattr(self.db, "begin_nested", None)
+                if callable(begin_nested):
+                    flush_fn = getattr(self.db, "flush", None)
+                    if callable(flush_fn):
+                        await flush_fn()
+                    try:
+                        async with begin_nested():
+                            self.db.add(saved_event)
+                            if callable(flush_fn):
+                                await flush_fn()
+                    except Exception:
+                        saved_event = None
+                else:
+                    self.db.add(saved_event)
+            elif saved_event is not None:
+                self.db.add(saved_event)
+
+            await self.db.commit()
+            if _should_refresh_after_commit(self.db):
+                if saved_attempt is not None:
+                    await self.db.refresh(saved_attempt)
+                if saved_event is not None:
+                    await self.db.refresh(saved_event)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return saved_attempt, saved_event

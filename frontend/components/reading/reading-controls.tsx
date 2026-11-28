@@ -25,7 +25,7 @@ interface ReadingControlsProps {
 }
 
 const dockButtonClass =
-  "min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
+  "min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-11 lg:flex-row lg:gap-1.5 lg:px-2.5 lg:py-1.5 lg:text-sm";
 
 export function ReadingControls({
   audioLevel,

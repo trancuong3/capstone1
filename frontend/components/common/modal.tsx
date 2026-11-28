@@ -144,7 +144,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 p-0 sm:items-center sm:p-4"
       data-modal-backdrop="true"
       onClick={(event) => {
         if (closeOnBackdropClick && event.target === event.currentTarget) {
@@ -156,7 +156,7 @@ export function Modal({
         aria-labelledby={titleId}
         aria-modal="true"
         className={cn(
-          "flex max-h-[calc(100dvh-2rem)] w-full max-w-[640px] flex-col overflow-hidden rounded-card shadow-xl outline-none",
+          "flex max-h-[88dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[20px] rounded-b-none shadow-xl outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-card",
           surfaceClass,
         )}
         onKeyDown={handleKeyDown}
@@ -164,13 +164,17 @@ export function Modal({
         role={role}
         tabIndex={-1}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/70 px-4 py-4 sm:px-8 sm:py-6">
+        <div
+          aria-hidden="true"
+          className="mx-auto mt-2.5 h-1.5 w-10 shrink-0 rounded-full bg-border sm:hidden"
+        />
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-4 py-3 sm:items-start sm:gap-4 sm:px-8 sm:py-6">
           <h2
             className={cn(
               "min-w-0 break-words",
               tone === "paper"
-                ? "text-2xl font-extrabold text-ink"
-                : "text-heading font-semibold text-ink",
+                ? "text-lg font-extrabold text-ink sm:text-2xl"
+                : "text-lg font-extrabold text-ink sm:text-heading sm:font-semibold",
             )}
             id={titleId}
           >
@@ -179,7 +183,7 @@ export function Modal({
           {showCloseButton ? (
             <Button
               aria-label={tA11y("closeDialog")}
-              className="size-12! shrink-0 p-0!"
+              className="size-11! shrink-0 p-0! sm:size-12!"
               fullWidth={false}
               onClick={onClose}
               variant="quiet"
@@ -188,13 +192,13 @@ export function Modal({
             </Button>
           ) : null}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-8 sm:py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 sm:px-8 sm:py-6">
           {children}
         </div>
         {footer ? (
           <div
             className={cn(
-              "shrink-0 border-t border-border px-4 py-3 sm:px-8 sm:py-4",
+              "shrink-0 border-t border-border px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-4 sm:pb-4",
               surfaceClass,
             )}
             data-modal-footer="true"

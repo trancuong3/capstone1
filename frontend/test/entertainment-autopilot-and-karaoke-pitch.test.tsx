@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +7,7 @@ import { PictureDescriptionScreen } from "@/components/entertainment/picture-des
 import { KaraokeStage } from "@/components/karaoke/karaoke-stage";
 import { foldMidiNearTarget } from "@/components/karaoke/pitch-highway-canvas";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import * as karaokeScoringHook from "@/hooks/use-karaoke-scoring";
 import { MusicalDspAnalyzer } from "@/lib/karaoke/musical-dsp";
 import type { TargetNoteSpan } from "@/lib/karaoke/pro-karaoke-scoring";
 import {
@@ -538,6 +540,109 @@ describe("PictureDescriptionScreen 3-2-1 Auto-Mic Countdown & Cancellation", () 
           words: [],
         });
       }
+      if (
+        path === `/games/memory/sessions/${TEST_SESSION_ID}/attempts` &&
+        init?.method === "POST"
+      ) {
+        return Response.json({
+          attempt: {
+            id: "33000000-0000-4000-8000-000000000009",
+            session_id: TEST_SESSION_ID,
+            attempt_number: 1,
+            stage: "RECALL",
+            input_mode: "VOICE",
+            response_text: "Bé thấy diều giấy màu đỏ bay cao",
+            factual_score: 92,
+            creative_score: 0,
+            stars: 3,
+            evaluation: {
+              stage: "RECALL",
+              factual_score: 92,
+              creative_score: 0,
+              stars: 3,
+              matched_facts: [],
+              missed_facts: [],
+              creative_highlights: [],
+              story_anchors: [],
+              used_focus_words: ["diều giấy"],
+              praise_message_vi: "",
+              story_praise_vi: "",
+              next_tip_vi: "Tuyệt lắm!",
+              creative_followup_vi: "Chiếc diều bay đi đâu tiếp nhỉ?",
+              support_summary_vi: null,
+              ai_provider: "deterministic",
+            },
+            ai_provider: "deterministic",
+            created_at: "2026-11-28T08:01:00Z",
+          },
+          session: {
+            id: TEST_SESSION_ID,
+            child_id: TEST_CHILD_ID,
+            child_grade: 2,
+            theme_key: "sunny_garden",
+            theme_name_vi: "Khu vườn nắng mai",
+            difficulty_level: 2,
+            scene_seed: 42,
+            timer_mode: "UNLIMITED",
+            timer_seconds: null,
+            recall_mode: "FREE_RECALL",
+            status: "CREATIVE",
+            hints_used: 0,
+            peek_count: 0,
+            best_factual_score: 92,
+            best_creative_score: 0,
+            stars: 3,
+            attempts_count: 1,
+            scene_spec: {
+              schema_version: "v4.0",
+              theme_key: "sunny_garden",
+              theme_name_vi: "Khu vườn nắng mai",
+              child_grade: 2,
+              difficulty_level: 2,
+              scene_seed: 42,
+              canvas_width: 800,
+              canvas_height: 500,
+              backdrop: {
+                theme_key: "sunny_garden",
+                sky_top_hex: "#BCE8FF",
+                sky_bottom_hex: "#FFF8D9",
+                horizon_hex: "#A4E48E",
+                ground_hex: "#73C66A",
+                accent_hex: "#F7B731",
+                mood_vi: "Nắng sớm",
+              },
+              objects: [
+                {
+                  id: "obj_1",
+                  sprite_key: "paper_kite",
+                  name_vi: "diều giấy",
+                  category_vi: "đồ chơi",
+                  aliases_vi: ["diều"],
+                  color_vi: "đỏ",
+                  color_hex: "#D63031",
+                  color_stroke_hex: "#8E1B1B",
+                  color_light_hex: "#FF8A8A",
+                  shape_cue: "circle",
+                  count: 1,
+                  position_zone: "trên trái",
+                  bbox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+                  action_vi: "bay cao",
+                  hint_tiers: { tier_1: "h1", tier_2: "h2", tier_3: "h3" },
+                  is_focus_word: true,
+                },
+              ],
+              observation_tips_vi: [],
+              guided_questions_vi: [],
+              creative_prompt_vi: "Kể tiếp câu chuyện nhé!",
+              matched_focus_words: ["diều giấy"],
+              creative_focus_words: ["lung linh"],
+            },
+            attempts: [],
+            created_at: "2026-11-28T08:00:00Z",
+            updated_at: "2026-11-28T08:01:00Z",
+          },
+        });
+      }
       throw new Error(`Unexpected MemoryGame test route ${path}`);
     });
 
@@ -593,6 +698,26 @@ describe("PictureDescriptionScreen 3-2-1 Auto-Mic Countdown & Cancellation", () 
     expect(
       (screen.getByTestId("recall-textarea") as HTMLTextAreaElement).value,
     ).toContain("diều giấy");
+
+    // Submitting voice RECALL enters REVEAL with 6s Autopilot Round-2 countdown -> auto-opens CREATIVE + 3-2-1 mic countdown!
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("submit-recall-btn"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByTestId("memory-autopilot-reveal-coach"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("memory-reveal-autopilot-countdown"),
+    ).toHaveTextContent("6");
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("creative-stage")).toBeInTheDocument();
+    expect(screen.getByTestId("memory-mic-countdown")).toBeInTheDocument();
   });
 
   it("exposes KaraokeStage Autopilot toggle that arms reference melody guide and focus word badges", async () => {
@@ -716,5 +841,423 @@ describe("PictureDescriptionScreen 3-2-1 Auto-Mic Countdown & Cancellation", () 
 
     expect(autopilotToggle).toHaveAttribute("aria-pressed", "true");
     expect(melodyToggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("settles warmup Promise and resets step label cleanly when ReferenceMelodySynth.stop() interrupts warmup", async () => {
+    vi.useFakeTimers();
+    const synth = createReferenceMelodySynth();
+    const steps: Array<[string | null, string | null]> = [];
+    let resolved = false;
+    const promise = synth
+      .playWarmupSequence(0, (step, labelVi) => {
+        steps.push([step, labelVi]);
+      })
+      .then(() => {
+        resolved = true;
+      });
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(steps.at(-1)).toEqual(["low", "Thấp · Đô 4"]);
+    expect(resolved).toBe(false);
+
+    // Interrupting mid-warmup must reset step to (null, null) and settle the Promise immediately!
+    synth.stop();
+    await Promise.resolve();
+    await promise;
+    expect(resolved).toBe(true);
+    expect(steps.at(-1)).toEqual([null, null]);
+    synth.dispose();
+  });
+
+  it("completes KaraokeStage Post-Song Autopilot Coach 5 -> 0s into 0.85x slow segment practice even when suggestedKeyShift re-renders player", async () => {
+    vi.useFakeTimers();
+    const armSpy = vi.fn(async () => true);
+    const setRateSpy = vi.fn();
+    const setKeyShiftSpy = vi.fn();
+    const lineId = "94000000-0000-4000-8000-000000000001";
+
+    const scoringSpy = vi
+      .spyOn(karaokeScoringHook, "useKaraokeScoring")
+      .mockReturnValue({
+        supported: true,
+        listening: false,
+        status: "scored",
+        score: null,
+        liveScore: null,
+        songScore: null,
+        musicalScore: {
+          overallScore: 68,
+          stars: 2,
+          rhythmScore: 70,
+          pitchScore: 62,
+          lyricsScore: 74,
+          fluencyScore: 68,
+          scoringMode: "FULL_MUSICAL",
+          scoringModeLabelVi: "Chấm nhạc đầy đủ",
+          pitchBasis: "REFERENCE_MELODY",
+          pitchBasisLabelVi: "Theo giai điệu chuẩn",
+          speakerBleedSuspected: false,
+          practiceMode: "FULL_SONG",
+          weightsUsed: { rhythm: 0.3, pitch: 0.35, lyrics: 0.25, fluency: 0.1 },
+          activeVocalCoverage: 0.85,
+          voicedCoverage: 0.85,
+          meanCentsError: 18,
+          meanSignedTimingOffsetMs: 0,
+          meanAbsTimingErrorMs: 25,
+          gateReason: "OK",
+          guidanceVi: "Tập chậm câu 1 nhé!",
+          encouragementVi: "Bé hát tốt lắm!",
+          segments: [
+            {
+              lineIndex: 0,
+              lineId,
+              text: "Lung linh giọt sương",
+              startMs: 1000,
+              endMs: 3500,
+              rhythmScore: 60,
+              pitchScore: 48,
+              lyricsScore: 58,
+              vocalCoverage: 0.9,
+              lineOverallScore: 54,
+              status: "PRACTICE",
+              tipVi: "Ngân cao hơn một chút ở chữ linh nhé!",
+            },
+          ],
+          weakestSegment: {
+            lineIndex: 0,
+            lineId,
+            text: "Lung linh giọt sương",
+            startMs: 1000,
+            endMs: 3500,
+            rhythmScore: 60,
+            pitchScore: 48,
+            lyricsScore: 58,
+            vocalCoverage: 0.9,
+            lineOverallScore: 54,
+            status: "PRACTICE",
+            tipVi: "Ngân cao hơn một chút ở chữ linh nhé!",
+          },
+        },
+        songMusicalScore: null,
+        proScore: {
+          kind: "scored",
+          totalScore: 68,
+          rank: "A",
+          stars: 2,
+          pitchScore: 62,
+          rhythmScore: 70,
+          lyricsScore: 74,
+          weights: { pitch: 0.45, rhythm: 0.3, lyrics: 0.25 },
+          activePillars: { pitch: true, rhythm: true, lyrics: true },
+          hasReferenceMelody: true,
+          keyShift: 0,
+          suggestedKeyShift: -2,
+          relativeMelodyScore: 62,
+          pitchStabilityBonus: 0,
+          meanCentsError: 18,
+          timingBias: "on_beat",
+          meanTimingDeltaMs: 0,
+          meanAbsTimingErrorMs: 25,
+          sustainCoverage: 0.8,
+          maxCombo: 2,
+          perfectNotes: 1,
+          greatNotes: 1,
+          goodNotes: 0,
+          offPitchNotes: 1,
+          gateReason: "OK",
+          headlineVi: "Bé hát tốt lắm!",
+          pitchInsightVi: "Hạ nhẹ 2 bán cung cho vừa giọng bé nhé!",
+          rhythmInsightVi: "Giữ nhịp tốt!",
+          lyricsInsightVi: "Rõ lời!",
+          lineScores: [],
+          worstLine: null,
+        },
+        songProScore: null,
+        replayAudioUrl: null,
+        dspFrames: [],
+        sttAvailable: true,
+        liveTelemetry: null,
+        error: null,
+        previewWords: new Map(),
+        liveTranscript: "",
+        signal: "voice",
+        arm: armSpy,
+        getPitchRing: () => [],
+        getLatestPitchSample: () => null,
+        observePlayback: vi.fn(),
+        endPractice: vi.fn(),
+        seekBoundary: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        finish: vi.fn(),
+        reset: vi.fn(),
+      });
+
+    function StatefulStageHarness() {
+      const [keyShift, setKeyShift] = useState(0);
+      const [ended, setEnded] = useState(true);
+      const [rate, setRate] = useState(1);
+      // Fresh player object literal on every render — mirrors real `useKaraokePlayer`!
+      const player = {
+        ready: true,
+        playing: false,
+        waiting: false,
+        ended,
+        segmentFinished: false,
+        loopPass: 0,
+        currentMs: ended ? 10000 : 1000,
+        durationMs: 10000,
+        volume: 0.7,
+        muted: false,
+        rate,
+        keyShift,
+        error: "",
+        getCurrentMs: () => (ended ? 10000 : 1000),
+        subscribeClock: () => () => {},
+        play: vi.fn(async () => {}),
+        pause: vi.fn(),
+        seek: vi.fn(() => setEnded(false)),
+        setVolume: vi.fn(),
+        setMuted: vi.fn(),
+        setRate: (r: number) => {
+          setRateSpy(r);
+          setRate(r);
+        },
+        setKeyShift: (s: number) => {
+          setKeyShiftSpy(s);
+          setKeyShift(s);
+        },
+      };
+      return (
+        <KaraokeStage
+          source={{
+            song_id: "91000000-0000-4000-8000-000000000001",
+            version_id: "92000000-0000-4000-8000-000000000001",
+            title: "Vườn xuân lung linh",
+            author: "ViRead CC0",
+            duration_ms: 10000,
+            audio_url: "http://127.0.0.1:8000/mock.mp3",
+            audio_url_expires_at: "2099-01-01T00:00:00Z",
+            cover_url: null,
+            lyrics: {
+              format_version: 2,
+              lines: [
+                {
+                  id: lineId,
+                  text: "Lung linh giọt sương",
+                  start_ms: 1000,
+                  end_ms: 3500,
+                  syllables: [],
+                },
+              ],
+            },
+            melody_profile: null,
+          }}
+          player={player}
+          childAlias="Bé An"
+          label="Sân khấu Karaoke của Bé An"
+          initialAutopilot
+        />
+      );
+    }
+
+    try {
+      await act(async () => {
+        render(<StatefulStageHarness />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(setKeyShiftSpy).toHaveBeenCalledWith(-2);
+      expect(
+        screen.getByTestId("karaoke-autopilot-keyshift-note"),
+      ).toHaveTextContent("-2 bán cung");
+      expect(
+        screen.getByTestId("karaoke-autopilot-countdown"),
+      ).toHaveTextContent("5");
+
+      // Advance 1s at a time: countdown must NOT freeze after setKeyShift(-2) re-rendered player!
+      for (const expectedRemaining of ["4", "3", "2", "1"]) {
+        await act(async () => {
+          vi.advanceTimersByTime(1000);
+          await Promise.resolve();
+        });
+        expect(
+          screen.getByTestId("karaoke-autopilot-countdown"),
+        ).toHaveTextContent(expectedRemaining);
+      }
+
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+      expect(setRateSpy).toHaveBeenCalledWith(0.85);
+      expect(armSpy).toHaveBeenCalledWith(lineId);
+    } finally {
+      scoringSpy.mockRestore();
+    }
+  });
+
+  it("cancels KaraokeStage Post-Song Autopilot Coach cleanly when switching to Gõ nhịp at 1s", async () => {
+    vi.useFakeTimers();
+    const setRateSpy = vi.fn();
+    const lineId = "94000000-0000-4000-8000-000000000001";
+    const scoringSpy = vi
+      .spyOn(karaokeScoringHook, "useKaraokeScoring")
+      .mockReturnValue({
+        supported: true,
+        listening: false,
+        status: "scored",
+        score: null,
+        liveScore: null,
+        songScore: null,
+        musicalScore: {
+          overallScore: 68,
+          stars: 2,
+          rhythmScore: 70,
+          pitchScore: 62,
+          lyricsScore: 74,
+          fluencyScore: 68,
+          scoringMode: "FULL_MUSICAL",
+          scoringModeLabelVi: "Chấm nhạc đầy đủ",
+          pitchBasis: "REFERENCE_MELODY",
+          pitchBasisLabelVi: "Theo giai điệu chuẩn",
+          speakerBleedSuspected: false,
+          practiceMode: "FULL_SONG",
+          weightsUsed: { rhythm: 0.3, pitch: 0.35, lyrics: 0.25, fluency: 0.1 },
+          activeVocalCoverage: 0.85,
+          voicedCoverage: 0.85,
+          meanCentsError: 18,
+          meanSignedTimingOffsetMs: 0,
+          meanAbsTimingErrorMs: 25,
+          gateReason: "OK",
+          guidanceVi: "Tập chậm câu 1 nhé!",
+          encouragementVi: "Bé hát tốt lắm!",
+          segments: [],
+          weakestSegment: {
+            lineIndex: 0,
+            lineId,
+            text: "Lung linh giọt sương",
+            startMs: 1000,
+            endMs: 3500,
+            rhythmScore: 60,
+            pitchScore: 48,
+            lyricsScore: 58,
+            vocalCoverage: 0.9,
+            lineOverallScore: 54,
+            status: "PRACTICE",
+            tipVi: "Ngân cao hơn một chút!",
+          },
+        },
+        songMusicalScore: null,
+        proScore: null,
+        songProScore: null,
+        replayAudioUrl: null,
+        dspFrames: [],
+        sttAvailable: true,
+        liveTelemetry: null,
+        error: null,
+        previewWords: new Map(),
+        liveTranscript: "",
+        signal: "voice",
+        arm: vi.fn(async () => true),
+        getPitchRing: () => [],
+        getLatestPitchSample: () => null,
+        observePlayback: vi.fn(),
+        endPractice: vi.fn(),
+        seekBoundary: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        finish: vi.fn(),
+        reset: vi.fn(),
+      });
+
+    try {
+      await act(async () => {
+        render(
+          <KaraokeStage
+            source={{
+              song_id: "91000000-0000-4000-8000-000000000001",
+              version_id: "92000000-0000-4000-8000-000000000001",
+              title: "Vườn xuân lung linh",
+              author: "ViRead CC0",
+              duration_ms: 10000,
+              audio_url: "http://127.0.0.1:8000/mock.mp3",
+              audio_url_expires_at: "2099-01-01T00:00:00Z",
+              cover_url: null,
+              lyrics: {
+                format_version: 2,
+                lines: [
+                  {
+                    id: lineId,
+                    text: "Lung linh giọt sương",
+                    start_ms: 1000,
+                    end_ms: 3500,
+                    syllables: [],
+                  },
+                ],
+              },
+              melody_profile: null,
+            }}
+            player={{
+              ready: true,
+              playing: false,
+              waiting: false,
+              ended: true,
+              segmentFinished: false,
+              loopPass: 0,
+              currentMs: 10000,
+              volume: 0.7,
+              rate: 1,
+              keyShift: 0,
+              error: "",
+              getCurrentMs: () => 10000,
+              subscribeClock: () => () => {},
+              play: vi.fn(async () => {}),
+              pause: vi.fn(),
+              seek: vi.fn(),
+              setVolume: vi.fn(),
+              setMuted: vi.fn(),
+              setRate: setRateSpy,
+              setKeyShift: vi.fn(),
+            }}
+            childAlias="Bé An"
+            label="Sân khấu Karaoke của Bé An"
+            initialAutopilot
+          />,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Advance down to 1s remaining on `karaoke-autopilot-coach`
+      await act(async () => {
+        vi.advanceTimersByTime(4000);
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByTestId("karaoke-autopilot-countdown"),
+      ).toHaveTextContent("1");
+
+      // Switch tab to "Gõ nhịp" right at 1s
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Gõ nhịp/i }));
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByTestId("karaoke-autopilot-coach"),
+      ).not.toBeInTheDocument();
+
+      // Even after 10 more seconds, timer never fires late SEGMENT 0.85x!
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+        await Promise.resolve();
+      });
+      expect(setRateSpy).not.toHaveBeenCalledWith(0.85);
+    } finally {
+      scoringSpy.mockRestore();
+    }
   });
 });

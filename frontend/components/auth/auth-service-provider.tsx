@@ -24,6 +24,8 @@ import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
 import { clearStoredScanJobIds } from "@/lib/cache/scan-job-storage";
 import { clearPersistedSelectedChild } from "@/lib/cache/selected-child-storage";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
+import { registerOfflineServiceWorker } from "@/lib/offline/register-offline-sw";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
 import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 
@@ -93,7 +95,12 @@ export function AuthServiceProvider({
 
       const nextUserId = session?.user?.id ?? null;
       if (event === "SIGNED_OUT" || !nextUserId) {
-        const hadPreviousUser = lastUserIdRef.current !== null;
+        const previousUserId = lastUserIdRef.current;
+        const hadPreviousUser = previousUserId !== null;
+        void wipeOfflineAccountData({
+          parentAccountId: previousUserId,
+          reason: event === "SIGNED_OUT" ? "logout" : "auth_clear",
+        }).catch(() => undefined);
         clearUserCache();
         clearPersistedSelectedChild();
         clearStoredScanJobIds();
@@ -111,6 +118,10 @@ export function AuthServiceProvider({
         lastUserIdRef.current &&
         lastUserIdRef.current !== nextUserId
       ) {
+        void wipeOfflineAccountData({
+          parentAccountId: lastUserIdRef.current,
+          reason: "account_switch",
+        }).catch(() => undefined);
         clearUserCache(lastUserIdRef.current);
         clearPersistedSelectedChild(nextUserId);
         clearStoredScanJobIds(nextUserId);
@@ -119,8 +130,10 @@ export function AuthServiceProvider({
         resetApiReadCacheForActorSwitch();
         broadcastActorSwitch();
         lastUserIdRef.current = nextUserId;
+        void registerOfflineServiceWorker();
       } else {
         lastUserIdRef.current = nextUserId;
+        void registerOfflineServiceWorker();
       }
 
       setRuntime((current) => ({

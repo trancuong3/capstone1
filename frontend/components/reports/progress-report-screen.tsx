@@ -9,13 +9,14 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useContext, useEffect, useRef, useState } from "react";
-import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
@@ -793,6 +794,14 @@ function ProgressReportContent({
           />
         </div>
       </header>
+
+      <FiveMinuteTrainCtaCard
+        childAlias={child.alias}
+        childId={child.id}
+        compact
+        focusWords={allDifficultWords.slice(0, 3).map((w) => w.display_text)}
+        sourceSurface="reports"
+      />
 
       {state.periodsError ? (
         <StatusMessage title={t("overview.periodListErrorTitle")} tone="error">

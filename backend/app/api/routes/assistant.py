@@ -54,22 +54,25 @@ async def _lookup_active_role(request: Request, actor_uuid: UUID) -> str | None:
     db_override = overrides.get(get_db)
     if db_override is not None:
         produced = db_override()
-        if inspect.isasyncgen(produced):
-            try:
-                db_session = await produced.__anext__()
+        try:
+            if inspect.isasyncgen(produced):
+                try:
+                    db_session = await produced.__anext__()
+                    return await get_cached_profile_role(db_session, actor_uuid)
+                finally:
+                    await produced.aclose()
+            if inspect.isgenerator(produced):
+                try:
+                    db_session = next(produced)
+                    return await get_cached_profile_role(db_session, actor_uuid)
+                finally:
+                    produced.close()
+            if inspect.isawaitable(produced):
+                db_session = await produced
                 return await get_cached_profile_role(db_session, actor_uuid)
-            finally:
-                await produced.aclose()
-        if inspect.isgenerator(produced):
-            try:
-                db_session = next(produced)
-                return await get_cached_profile_role(db_session, actor_uuid)
-            finally:
-                produced.close()
-        if inspect.isawaitable(produced):
-            db_session = await produced
-            return await get_cached_profile_role(db_session, actor_uuid)
-        return await get_cached_profile_role(produced, actor_uuid)
+            return await get_cached_profile_role(produced, actor_uuid)
+        except Exception:
+            return None
 
     if (
         APP_ENVIRONMENT == "test"
@@ -78,7 +81,7 @@ async def _lookup_active_role(request: Request, actor_uuid: UUID) -> str | None:
     ):
         cached = peek_cached_profile_role(actor_uuid)
         if cached is _ROLE_CACHE_MISSING:
-            return "parent"
+            return None
         return cached if isinstance(cached, str) else None
 
     try:

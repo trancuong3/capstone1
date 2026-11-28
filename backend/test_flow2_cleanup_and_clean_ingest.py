@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -318,7 +319,15 @@ class Flow2CleanupAndCleanIngestTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pending[0].reason_code, "NOT_ADMIN_VERIFIED")
 
     async def test_4_e2e_idempotent_ingest_to_drive_and_clean_manifest_creation(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+            return_value=fake_disk_usage,
+        ):
             base = Path(tmp)
             drive_root = base / "mock_drive"
             drive_root.mkdir()

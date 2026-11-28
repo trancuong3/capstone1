@@ -575,10 +575,11 @@ _OCR_WORKER_QUEUE_BRANCH: tuple[str, str] = (
     """
     SELECT
         'ocr_worker'::text AS worker_key,
-        COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')), 0)::int AS queue_depth,
-        MIN(created_at) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING'))::timestamptz AS oldest_pending,
-        MAX(completed_at) FILTER (WHERE status = 'SUCCEEDED')::timestamptz AS last_success
+        COALESCE(COUNT(*), 0)::int AS queue_depth,
+        MIN(created_at)::timestamptz AS oldest_pending,
+        (SELECT MAX(completed_at) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED')::timestamptz AS last_success
     FROM public.ocr_inference_jobs
+    WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')
     """,
 )
 
@@ -793,6 +794,46 @@ def is_ocr_engine_ready_status(detail_status: object) -> bool:
     return str(detail_status or "").strip().lower() in READY_OCR_DETAIL_STATUSES
 
 
+def _is_single_ocr_engine_ready(info: Any) -> bool:
+    if not isinstance(info, dict):
+        return False
+    if info.get("error"):
+        return False
+    status_upper = str(info.get("status") or "").strip().upper()
+    if status_upper in {"UNAVAILABLE", "FAILED"}:
+        return False
+    detail = str(info.get("detail_status") or "").strip().lower()
+    verified = info.get("inference_verified") is True
+    raw_loaded = info.get("loaded")
+    loaded = raw_loaded is True
+    if verified:
+        return True
+    if raw_loaded is False:
+        return False
+    if detail in {"failed", "unavailable", "not_installed", "installed", "disabled"}:
+        return False
+    if loaded:
+        return True
+    return is_ocr_engine_ready_status(detail)
+
+
+def _worker_has_ready_engine(raw_engines: Any) -> bool:
+    """Require every present primary neural engine (paddleocr, vietocr) to be ready."""
+    if not isinstance(raw_engines, dict) or not raw_engines:
+        return True
+    primary_ids = ("paddleocr", "vietocr")
+    if any(eng_id in raw_engines for eng_id in primary_ids):
+        for eng_id in primary_ids:
+            if eng_id in raw_engines and not _is_single_ocr_engine_ready(raw_engines.get(eng_id)):
+                return False
+        return True
+    return any(
+        _is_single_ocr_engine_ready(info)
+        for info in raw_engines.values()
+        if isinstance(info, dict)
+    )
+
+
 async def collect_remote_ocr_health() -> dict[str, Any]:
     """Collect remote Windows OCR worker heartbeats, engine states, and durable queue depth."""
     from datetime import datetime, timedelta, timezone
@@ -861,17 +902,27 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                                     SELECT row_to_json(q)
                                     FROM (
                                         SELECT
-                                            COALESCE(SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END), 0)::int AS queued,
-                                            COALESCE(SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END), 0)::int AS claimed,
-                                            COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0)::int AS running,
-                                            COALESCE(SUM(CASE WHEN status = 'FAILED_RETRYABLE' THEN 1 ELSE 0 END), 0)::int AS failed_retryable,
-                                            COALESCE(SUM(CASE WHEN status = 'DEAD_LETTER' THEN 1 ELSE 0 END), 0)::int AS dead_letter,
-                                            COALESCE(SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END), 0)::int AS succeeded,
-                                            COALESCE(SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END), 0)::int AS cancelled,
-                                            COALESCE(SUM(CASE WHEN status IN ('CLAIMED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= :now_ts THEN 1 ELSE 0 END), 0)::int AS expired_leases,
-                                            MIN(CASE WHEN status IN ('QUEUED', 'FAILED_RETRYABLE', 'CLAIMED', 'RUNNING') THEN created_at ELSE NULL END) AS oldest_pending_created,
-                                            MAX(CASE WHEN status = 'SUCCEEDED' THEN completed_at ELSE NULL END) AS latest_succeeded_at
-                                        FROM public.ocr_inference_jobs
+                                            COALESCE(a.queued, 0)::int AS queued,
+                                            COALESCE(a.claimed, 0)::int AS claimed,
+                                            COALESCE(a.running, 0)::int AS running,
+                                            COALESCE(a.failed_retryable, 0)::int AS failed_retryable,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'DEAD_LETTER'), 0)::int AS dead_letter,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED'), 0)::int AS succeeded,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'CANCELLED'), 0)::int AS cancelled,
+                                            COALESCE(a.expired_leases, 0)::int AS expired_leases,
+                                            a.oldest_pending_created,
+                                            (SELECT MAX(completed_at) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED') AS latest_succeeded_at
+                                        FROM (
+                                            SELECT
+                                                COALESCE(SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END), 0)::int AS queued,
+                                                COALESCE(SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END), 0)::int AS claimed,
+                                                COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0)::int AS running,
+                                                COALESCE(SUM(CASE WHEN status = 'FAILED_RETRYABLE' THEN 1 ELSE 0 END), 0)::int AS failed_retryable,
+                                                COALESCE(SUM(CASE WHEN status IN ('CLAIMED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= :now_ts THEN 1 ELSE 0 END), 0)::int AS expired_leases,
+                                                MIN(created_at) AS oldest_pending_created
+                                            FROM public.ocr_inference_jobs
+                                            WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'FAILED_RETRYABLE')
+                                        ) a
                                     ) q
                                 ) AS queue_json
                             """
@@ -949,7 +1000,6 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
 
         raw_engines = dict(worker.Engines or {})
         engine_summary: dict[str, dict[str, Any]] = {}
-        worker_has_ready_engine = False
         for eng_id in ("paddleocr", "vietocr", "tesseract_vie"):
             info = raw_engines.get(eng_id)
             if isinstance(info, dict):
@@ -963,8 +1013,7 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                     "loaded": loaded,
                     "inference_verified": verified,
                 }
-                if (is_ocr_engine_ready_status(detail) and (loaded or verified or detail == "healthy")) or verified:
-                    worker_has_ready_engine = True
+        worker_has_ready_engine = _worker_has_ready_engine(raw_engines)
 
         worker_entry = {
             "worker_id": worker.WorkerId,
@@ -1021,7 +1070,7 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                     serialized_workers[existing_idx] = passive_probe
 
             probe_engines = dict(passive_probe.get("engines") or {})
-            if bool(passive_probe.get("ready")):
+            if bool(passive_probe.get("ready")) and _worker_has_ready_engine(probe_engines):
                 any_online_ready = True
                 if not latest_online_engines and probe_engines:
                     latest_online_engines = probe_engines

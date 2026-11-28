@@ -2316,9 +2316,14 @@ class GeminiPictureDescriptionAI:
             if context_hint
             else ""
         )
+        safe_targets = [
+            _escape_prompt_fence(_clean_text(word, max_len=40))
+            for word in cleaned_targets
+            if _clean_text(word, max_len=40)
+        ]
         target_words_line = (
-            f"\nTừ khó bé đang luyện tập (ưu tiên gợi ý tự nhiên nếu hợp với tranh): {', '.join(cleaned_targets)}"
-            if cleaned_targets
+            f"\nTừ khó bé đang luyện tập (ưu tiên gợi ý tự nhiên nếu hợp với tranh): {', '.join(safe_targets)}"
+            if safe_targets
             else ""
         )
         prompt = (
@@ -2460,11 +2465,23 @@ class GeminiPictureDescriptionAI:
 
         target_words_block = ""
         if cleaned_targets:
-            used_preview = ", ".join(used_target_words) if used_target_words else "chưa dùng"
-            target_words_block = (
-                f"\nTừ khó mục tiêu của bé: {', '.join(cleaned_targets)} "
-                f"(bé đã dùng trong lượt này: {used_preview}).\n"
-            )
+            safe_targets = [
+                _escape_prompt_fence(_clean_text(word, max_len=40))
+                for word in cleaned_targets
+                if _clean_text(word, max_len=40)
+            ]
+            safe_used = [
+                _escape_prompt_fence(_clean_text(word, max_len=40))
+                for word in used_target_words
+                if _clean_text(word, max_len=40)
+            ]
+            if safe_targets:
+                used_preview = ", ".join(safe_used) if safe_used else "chưa dùng"
+                target_words_block = (
+                    f"\nTừ khó mục tiêu của bé: {', '.join(safe_targets)} "
+                    f"(bé đã dùng trong lượt này: {used_preview}). "
+                    "Nếu bé dùng tự nhiên từ mục tiêu trong câu mô tả đúng tranh, hãy khen ngợi nhẹ nhàng trong praise_message.\n"
+                )
 
         min_words_for_3_stars = 7 if grade >= 3 else 5
         prompt = (

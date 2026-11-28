@@ -164,7 +164,10 @@
     "childEmptyDesc": "Aún no tienes ningún perfil infantil. ¡Crea uno para guardar libros, voz y progreso por separado!",
     "childCreateBtn": "Crear perfil infantil",
     "childPickerPrompt": "¿Para qué niño quieres abrir esta página?",
-    "quickActionGateIntro": "Antes de abrir **{label}**, comprobemos el perfil infantil seleccionado."
+    "quickActionGateIntro": "Antes de abrir **{label}**, comprobemos el perfil infantil seleccionado.",
+    "scopePublic": "Ayuda de invitados",
+    "scopeParent": "Ayuda para padres",
+    "scopeAdmin": "Ayuda de administración"
   },
   "taskCenter": {
     "backgroundProcessing": "Procesando en segundo plano…",

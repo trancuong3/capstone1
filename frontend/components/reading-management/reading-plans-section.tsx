@@ -3,6 +3,7 @@
 import { CalendarDays, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/common/button";
+import { OfflinePackControls } from "@/components/offline/offline-pack-controls";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { PlanInsights } from "@/components/reading-management/reading-management-insights";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -75,6 +76,12 @@ export function ReadingPlansSection({
           {t("readingManagement.addPlan")}
         </Button>
       </div>
+
+      <OfflinePackControls
+        mode="weekly-plan"
+        plans={plans}
+        childProfileId={plans[0]?.child_id ?? null}
+      />
 
       {plans.length === 0 ? (
         <div className="mt-2 rounded-control border border-dashed border-border/80 bg-canvas/50 px-3 py-3 text-center">

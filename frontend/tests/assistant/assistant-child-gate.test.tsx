@@ -129,6 +129,10 @@ describe("assistant child-gate & local selection sync bridge", () => {
       requiresSelectedChildForHref("/entertainment/picture-description"),
     ).toBe(true);
     expect(requiresSelectedChildForHref("/karaoke/song-1")).toBe(true);
+    expect(requiresSelectedChildForHref("/achievements")).toBe(true);
+    expect(requiresSelectedChildForHref("/achievements?childId=c1")).toBe(true);
+    expect(requiresSelectedChildForHref("/learning-train")).toBe(true);
+    expect(requiresSelectedChildForHref("/learning-train/step-1")).toBe(true);
 
     expect(requiresSelectedChildForHref("/reports")).toBe(false);
     expect(requiresSelectedChildForHref("/reports/difficult-words")).toBe(
@@ -147,6 +151,8 @@ describe("assistant child-gate & local selection sync bridge", () => {
     expect(requiresAnyChildProfileForHref("/sessions?page=2")).toBe(true);
     expect(requiresAnyChildProfileForHref("/reading-management")).toBe(true);
     expect(requiresAnyChildProfileForHref("/books")).toBe(true);
+    expect(requiresAnyChildProfileForHref("/achievements")).toBe(true);
+    expect(requiresAnyChildProfileForHref("/learning-train")).toBe(true);
     expect(requiresAnyChildProfileForHref("/settings")).toBe(false);
     expect(requiresAnyChildProfileForHref("/children/new")).toBe(false);
   });

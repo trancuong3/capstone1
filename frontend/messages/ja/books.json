@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "{page}ページのOCRテキストブロックを表示",
     "closePageOcrBlocksAria": "{page}ページのOCRテキストブロックを閉じる",
     "openPageOcrBlocksAction": "OCRテキスト枠",
-    "closePageOcrBlocksAction": "OCR枠を閉じる"
+    "closePageOcrBlocksAction": "OCR枠を閉じる",
+    "retryAllFailedAction": "失敗したページをすべて再試行 ({count})",
+    "retryingAllFailedButton": "失敗したページを再試行キューに追加中…",
+    "retryAllSuccessNotice": "失敗した {count} ページを再試行キューに追加しました（完了済みの手順は保持されます）。",
+    "retryAllQueuedOfflineNotice": "失敗した {count} ページの再試行リクエストをOCRキューに保存しました。OCRサービスが再開され次第、自動的に処理されます。",
+    "retryAllPartialQueueFullNotice": "{retried} ページを再試行キューに追加しました。OCRキューが満杯のため残り {skipped} ページは一時停止しています。約 {seconds} 秒後に再試行してください。",
+    "retryAllPartialFailedNotice": "{retried} ページを再試行キューに追加しました。{failed} ページは現在キューに追加できませんでした。",
+    "retryAllNoneNotice": "現在再試行できる失敗ページはありません。",
+    "queueFullNotice": "現在OCRキューが満杯です。約 {seconds} 秒後にもう一度お試しください。"
   },
   "ocrContribution": {
     "cardAria": "「{title}」の文字読み取り精度向上への協力",
@@ -576,5 +584,35 @@
     "tooEasy": "やさしい導入（{min}〜{max}年生相当）",
     "estimatedGrade": "推定 {min}〜{max}年生",
     "phonicsScore": "フォニックス適合 {score}%"
+  },
+  "offlinePack": {
+    "heading": "オフライン読書パックと印刷用QRカード",
+    "description": "確認済みのページを端末に保存してオフラインで読むか、紙の本に挟めるQRカードを印刷できます。",
+    "readyBadge": "保存済み ({count}ページ)",
+    "downloadButton": "オフラインパックを保存",
+    "openOfflineReader": "オフラインで読む",
+    "removeButton": "パックを削除",
+    "syncPendingButton": "同期 ({count})",
+    "stageDownloadingPages": "確認済みページとお手本音声を取得中…",
+    "stageSavingDevice": "端末ストレージへ安全に保存中…",
+    "savedNotice": "オフライン読書パック（{count}ページ）を端末に保存しました。",
+    "removedNotice": "この本のオフラインパックを削除しました。",
+    "downloadError": "現在オフラインパックを保存できません。通信環境の良い場所で再試行してください。",
+    "syncedNotice": "{count}件のオフライン読書記録を同期しました。",
+    "syncDeferredNotice": "通信が不安定です。記録は安全に保持され、オンライン復帰後に自動同期されます。",
+    "queuedOfflineNotice": "読書記録を端末に保存しました。オンライン時に自動同期されます。",
+    "readerHeaderBadge": "オフラインモード · {page}/{total}ページ",
+    "listenCachedAudio": "お手本を聞く",
+    "tapWordsHint": "正しく読めた単語をタップしてオフライン学習を記録しましょう：",
+    "prevPage": "前のページ",
+    "nextPage": "次のページ",
+    "finishAndQueueSync": "完了して同期予約"
+  },
+  "qrCard": {
+    "openButton": "印刷用QRカード",
+    "modalTitle": "ViRead 印刷用QR読書カード",
+    "eyebrow": "紙の本用QRしおり",
+    "scanInstruction": "スマートフォンのカメラでこのQRコードを読み取ると、ViReadでこの本をすぐに開けます。",
+    "printButton": "QRカードを印刷"
   }
 }

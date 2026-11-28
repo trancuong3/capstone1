@@ -409,3 +409,37 @@ class BookQualityBookDecisionRead(BaseModel):
     book_id: UUID
     assessment: BookApprovalAssessment
     decision_history: list[dict] = Field(default_factory=list)
+
+
+class AdminOcrHardSampleItemRead(BaseModel):
+    book_id: UUID
+    book_title: str
+    visibility_scope: Literal["CATALOG", "PARENT_PRIVATE"]
+    training_rights_basis: str
+    page_id: UUID
+    page_number: int = Field(ge=1)
+    page_revision_id: UUID
+    line_index: int = Field(ge=0)
+    word_id: UUID
+    word_index: int = Field(ge=0)
+    word_text: str
+    line_text: str
+    ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    retry_fail_count: int = Field(default=0, ge=0)
+    comparison_mismatch_count: int = Field(default=0, ge=0)
+    distinct_session_count: int = Field(default=0, ge=0)
+    hard_sample_score: float = Field(ge=0.0, le=100.0)
+    recommended_action: Literal[
+        "PRIORITIZE_FLOW2_CROP_REVIEW",
+        "INSPECT_CATALOG_PAGE_OCR",
+        "MONITOR_PHONICS_VS_OCR",
+    ]
+
+
+class AdminOcrHardSampleRadarResponse(BaseModel):
+    generated_at: datetime
+    total_candidates: int = Field(ge=0)
+    catalog_count: int = Field(ge=0)
+    consented_private_count: int = Field(ge=0)
+    privacy_policy_version: str = "FLOW2_OPT_IN_STRICT_V1"
+    items: list[AdminOcrHardSampleItemRead] = Field(default_factory=list)

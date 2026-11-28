@@ -640,4 +640,344 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     expect(await second.text()).toBe("cached-1p00-word");
     expect(getSynthesizedAudioMeta(second)?.cachedSpeed).toBe(1.0);
   });
+
+  it("rejects caller immediately on initTimeoutMs or AbortSignal during cold WASM init without tearing down background warmup", async () => {
+    const initResolvers: Array<() => void> = [];
+    let terminatedCount = 0;
+    let initCount = 0;
+
+    class SlowInitWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type: string; id: string }) {
+        if (msg.type === "init") {
+          initCount += 1;
+          initResolvers.push(() => {
+            this.onmessage?.({
+              data: { type: "ready", id: msg.id },
+            } as MessageEvent);
+          });
+        } else if (msg.type === "transcribe") {
+          queueMicrotask(() => {
+            this.onmessage?.({
+              data: {
+                type: "result",
+                id: msg.id,
+                text: "bông hoa",
+                decodeMs: 14,
+              },
+            } as MessageEvent);
+          });
+        }
+      }
+      terminate() {
+        terminatedCount += 1;
+      }
+    }
+
+    vi.stubGlobal("Worker", SlowInitWorker);
+    if (!globalThis.crypto?.subtle) {
+      vi.stubGlobal("crypto", { subtle: { digest: vi.fn() } });
+    }
+    const client = new BrowserWasmSttClient();
+
+    // 1. Caller 1 hits bounded initTimeoutMs (30ms) on transcribeBlob
+    const { encodeFloat32ToWav16kBlob } =
+      await import("@/lib/reading/local-segment-speech-recognition");
+    const wavBlob = encodeFloat32ToWav16kBlob(new Float32Array(1600).fill(0.1));
+    await expect(
+      client.transcribeBlob(wavBlob, { initTimeoutMs: 30, timeoutMs: 2_000 }),
+    ).rejects.toThrow(/timed out/i);
+
+    // 2. Caller 2 aborts via AbortSignal during still-running cold init
+    const ac = new AbortController();
+    const abortedCall = client.transcribeSamples(
+      new Float32Array(1600).fill(0.1),
+      { initTimeoutMs: 5_000, timeoutMs: 2_000, signal: ac.signal },
+    );
+    ac.abort();
+    await expect(abortedCall).rejects.toMatchObject({ name: "AbortError" });
+
+    // Background worker MUST NOT have been terminated or re-initialized!
+    expect(terminatedCount).toBe(0);
+    expect(initCount).toBe(1);
+    expect(client.isReady()).toBe(false);
+
+    // 3. Background warmup finishes -> next turn decodes immediately with zero re-init!
+    initResolvers.forEach((fn) => fn());
+    await Promise.resolve();
+    const decoded = await client.transcribeSamples(
+      new Float32Array(1600).fill(0.1),
+      { initTimeoutMs: 30, timeoutMs: 2_000 },
+    );
+    expect(decoded.text).toBe("bông hoa");
+    expect(initCount).toBe(1);
+    expect(client.isReady()).toBe(true);
+    client.dispose();
+  });
+
+  it("retains LOCAL_VOICE_UNAVAILABLE/TIMEOUT in getVoiceEngineHealthForRouting() for 2 min with non-blocking refresh and caps awaitSttReadyBeforeListening()", async () => {
+    const {
+      getVoiceEngineHealthForRouting,
+      VOICE_UNAVAILABLE_ROUTING_TTL_MS,
+      VOICE_UNCONFIGURED_ROUTING_TTL_MS,
+    } = await import("@/lib/reading/voice-engine-status");
+    const { awaitSttReadyBeforeListening, resetVoicePreloaderForTests } =
+      await import("@/lib/reading/voice-preloader");
+
+    resetVoicePreloaderForTests();
+    const now = Date.now();
+    // 1. LOCAL_VOICE_UNAVAILABLE aged 45s (> 30s freshness, <= 120s TTL) is retained
+    //    AND triggers a single non-blocking background /voice/status refresh.
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          default_mode: "local_only",
+          default_voice_id: "local_north_truc_ly",
+          local: {
+            configured: true,
+            available: false,
+            stt_ready: false,
+            tts_ready: false,
+            error_code: "LOCAL_VOICE_UNAVAILABLE",
+          },
+          google: {
+            stt_configured: false,
+            tts_configured: false,
+            stt_cooldown: false,
+            tts_cooldown: false,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    setCachedVoiceEngineHealth(
+      {
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          configured: true,
+          available: false,
+          stt_ready: false,
+          tts_ready: false,
+          error_code: "LOCAL_VOICE_UNAVAILABLE",
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      },
+      now - 45_000,
+    );
+    const retained = getVoiceEngineHealthForRouting();
+    expect(retained?.local.error_code).toBe("LOCAL_VOICE_UNAVAILABLE");
+    // Repeat call immediately must be deduplicated/cooled-down
+    expect(getVoiceEngineHealthForRouting()?.local.error_code).toBe(
+      "LOCAL_VOICE_UNAVAILABLE",
+    );
+    await new Promise((r) => setTimeout(r, 25));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 2. Expired beyond 2-minute TTL returns null
+    setCachedVoiceEngineHealth(
+      {
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          configured: true,
+          available: false,
+          stt_ready: false,
+          tts_ready: false,
+          error_code: "LOCAL_VOICE_TIMEOUT",
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      },
+      Date.now() - VOICE_UNAVAILABLE_ROUTING_TTL_MS - 1_000,
+    );
+    expect(getVoiceEngineHealthForRouting()).toBeNull();
+
+    // 3. LOCAL_VOICE_UNCONFIGURED retains up to 10 min
+    setCachedVoiceEngineHealth(
+      {
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          configured: false,
+          available: false,
+          stt_ready: false,
+          tts_ready: false,
+          error_code: "LOCAL_VOICE_UNCONFIGURED",
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      },
+      Date.now() - (VOICE_UNCONFIGURED_ROUTING_TTL_MS - 30_000),
+    );
+    expect(getVoiceEngineHealthForRouting()?.local.error_code).toBe(
+      "LOCAL_VOICE_UNCONFIGURED",
+    );
+
+    // 4. awaitSttReadyBeforeListening returns immediately when local STT is healthy
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const t0 = performance.now();
+    expect(await awaitSttReadyBeforeListening(4_000)).toBe(true);
+    expect(performance.now() - t0).toBeLessThan(100);
+    resetVoicePreloaderForTests();
+  });
+
+  it("fast-skips dead backend TTS for dynamic uncached practice prompts when device fallback is permitted and sends include_next_recommended=false on evaluatePracticeWord", async () => {
+    const { resetVoiceLockAndPolicyForTests, setVoicePolicyPreferences } =
+      await import("@/lib/reading/session-voice-lock");
+    const { clearPinnedBrowserVoices, TtsPlayback } =
+      await import("@/lib/reading/tts-playback");
+    const { createDifficultWordService } =
+      await import("@/lib/api/difficult-word-service");
+
+    resetVoiceLockAndPolicyForTests();
+    clearPinnedBrowserVoices();
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_with_google_fallback",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: true,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNAVAILABLE",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const speakMock = vi.fn(
+      (utt: { onstart?: () => void; onend?: () => void }) => {
+        utt.onstart?.();
+        utt.onend?.();
+      },
+    );
+    vi.stubGlobal("speechSynthesis", {
+      speak: speakMock,
+      cancel: vi.fn(),
+      getVoices: () => [{ lang: "vi-VN", name: "Vietnamese" }],
+    });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        lang = "";
+        rate = 1;
+        voice: unknown = null;
+        onstart?: () => void;
+        onend?: () => void;
+        onerror?: () => void;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    const synthesizeMock = vi
+      .fn()
+      .mockRejectedValue(new Error("should not call"));
+    const player = new TtsPlayback(
+      { synthesize: synthesizeMock, transcribe: vi.fn() } as never,
+      { listVoices: vi.fn(), synthesizeTimed: vi.fn() } as never,
+    );
+    player.setCacheContext({ bookId: "book-1", pageId: "page-1" });
+
+    // Dynamic practice prompt skips dead backend TTS immediately (0 backend calls)
+    await player.play("Mình chưa nghe rõ. Con đọc lại từ mèo một lần nhé!", {
+      coaching: true,
+    });
+    expect(synthesizeMock).not.toHaveBeenCalled();
+    expect(speakMock).toHaveBeenCalledTimes(1);
+    player.dispose();
+    resetVoiceLockAndPolicyForTests();
+
+    // evaluatePracticeWord sends include_next_recommended=false and omits file when audio is undefined
+    const childId = "10000000-0000-4000-8000-000000000001";
+    const reqId = "20000000-0000-4000-8000-000000000002";
+    const attemptId = "30000000-0000-4000-8000-000000000003";
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        attempt_id: attemptId,
+        child_id: childId,
+        normalized_word: "mèo",
+        display_text: "mèo",
+        attempt_number: 1,
+        state: "COMPLETED",
+        assessment_status: "CORRECT",
+        recognition_source: "BROWSER_SPEECH",
+        spoken_transcript: "mèo",
+        confidence: 0.95,
+        audio_duration_ms: 420,
+        assessment_version: 1,
+        evidence_word_ids: [],
+        started_at: "2026-11-28T08:00:00Z",
+        completed_at: "2026-11-28T08:00:01Z",
+        feedback_message: "Giỏi lắm!",
+        word_progress: {
+          normalized_word: "mèo",
+          practice_status: "COMPLETED",
+          practice_attempts_count: 1,
+          practice_correct_count: 1,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: 1,
+          required_consecutive_correct: 1,
+          last_practiced_at: "2026-11-28T08:00:01Z",
+          last_practice_status: "CORRECT",
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      }),
+    );
+
+    const svc = createDifficultWordService();
+    await svc.evaluatePracticeWord!(childId, {
+      request_id: reqId,
+      normalized_word: "mèo",
+      display_text: "mèo",
+      audio: undefined,
+      audio_quality_status: "BROWSER_WASM_VERIFIED",
+      browser_transcript: "mèo",
+      browser_confidence: 0.95,
+      includeNextRecommended: false,
+      timeoutMs: 11_000,
+    });
+    const lastInit = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+    const sentForm = lastInit.body as FormData;
+    expect(sentForm.get("include_next_recommended")).toBe("false");
+    expect(sentForm.get("file")).toBeNull();
+    expect(sentForm.get("audio_quality_status")).toBe("BROWSER_WASM_VERIFIED");
+  });
 });

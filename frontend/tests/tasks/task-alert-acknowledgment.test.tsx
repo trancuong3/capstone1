@@ -1533,4 +1533,339 @@ describe("AI Task Center alert acknowledgment after reading & interacting", () =
     });
     await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ lỗi (1)"));
   });
+
+  it("never lets an in-flight pre-action sync steal a newer includeNextSync rule", async () => {
+    const subV1 = makeTask({
+      id: "sub-seq-1",
+      source: "parent_submission",
+      actor_id: "parent-seq",
+      actor_role: "parent",
+      portal: "parent",
+      status: "SUCCEEDED",
+      status_label_vi: "Bản đọc đã sẵn sàng để xem",
+      can_retry: false,
+      error_message_vi: null,
+      updated_at: "2026-11-28T10:00:00.000Z",
+    });
+    const subV2 = makeTask({
+      ...subV1,
+      updated_at: "2026-11-28T10:02:00.000Z",
+    });
+
+    let resolveStaleSync!: (value: GlobalTaskListResponse) => void;
+    const staleSyncPromise = new Promise<GlobalTaskListResponse>((resolve) => {
+      resolveStaleSync = resolve;
+    });
+
+    const service = createMockService(
+      makeFeed([subV1], {
+        actor_id: "parent-seq",
+        actor_role: "parent",
+        portal: "parent",
+      }),
+    );
+    // Call 1 (initial mount): V1
+    // Call 2 (pre-action focus poll): pending promise returning stale V1
+    // Call 3 (post-action sync): bumped V2
+    service.listTasks
+      .mockResolvedValueOnce(
+        makeFeed([subV1], {
+          actor_id: "parent-seq",
+          actor_role: "parent",
+          portal: "parent",
+        }),
+      )
+      .mockImplementationOnce(() => staleSyncPromise)
+      .mockResolvedValueOnce(
+        makeFeed([subV2], {
+          actor_id: "parent-seq",
+          actor_role: "parent",
+          portal: "parent",
+        }),
+      );
+
+    function SeqHarness() {
+      const { markTaskAlertSeen, unreadCompletedCount } = useAiTaskCenter();
+      return (
+        <div>
+          <span data-testid="seq-unread">{unreadCompletedCount}</span>
+          <button
+            onClick={() =>
+              markTaskAlertSeen("sub-seq-1", { includeNextSync: true })
+            }
+            type="button"
+          >
+            Register includeNextSync
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <AiTaskCenterProvider
+        actorId="parent-seq"
+        actorRole="parent"
+        service={service}
+      >
+        <SeqHarness />
+      </AiTaskCenterProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("seq-unread")).toHaveTextContent("1"),
+    );
+
+    // Start a pre-action sync (Call #2, reqSeq = 2) before the action registers its rule.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(service.listTasks).toHaveBeenCalledTimes(2);
+
+    // Direct action finishes and registers includeNextSync (minSyncSeq = 3) BEFORE Call #2 resolves.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Register includeNextSync" }),
+    );
+    expect(screen.getByTestId("seq-unread")).toHaveTextContent("0");
+
+    // Pre-action Call #2 now resolves with stale V1 -> MUST NOT steal the minSyncSeq=3 rule!
+    await act(async () => {
+      resolveStaleSync(
+        makeFeed([subV1], {
+          actor_id: "parent-seq",
+          actor_role: "parent",
+          portal: "parent",
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("seq-unread")).toHaveTextContent("0");
+
+    // Post-action sync (Call #3, reqSeq = 3) arrives with bumped V2 -> rule is STILL intact and consumes V2!
+    await act(async () => {
+      emitStudioTasksChanged({ portal: "parent" });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(service.listTasks).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId("seq-unread")).toHaveTextContent("0");
+  });
+
+  it("persists optimisticTask post-action signatures synchronously so immediate reload before sync stays suppressed without flicker", async () => {
+    const subV1 = makeTask({
+      id: "sub-opt-1",
+      source: "parent_submission",
+      actor_id: "parent-opt",
+      actor_role: "parent",
+      portal: "parent",
+      status: "SUCCEEDED",
+      status_label_vi: "Bản đọc đã sẵn sàng để xem",
+      can_retry: false,
+      error_message_vi: null,
+      attempt_count: 1,
+      updated_at: "2026-11-28T10:00:00.000Z",
+    });
+    const subV2 = makeTask({
+      ...subV1,
+      updated_at: "2026-11-28T10:05:00.000Z",
+    });
+    const newWf = makeTask({
+      id: "wf-brand-new",
+      source: "admin_ai_workflow",
+      actor_id: "parent-opt",
+      actor_role: "parent",
+      portal: "parent",
+      status: "WAITING_FOR_REVIEW",
+      status_label_vi: "Cần xác minh",
+      can_retry: false,
+      error_message_vi: null,
+      attempt_count: 1,
+      updated_at: "2026-11-28T10:06:00.000Z",
+    });
+
+    const service = createMockService(
+      makeFeed([subV1], {
+        actor_id: "parent-opt",
+        actor_role: "parent",
+        portal: "parent",
+      }),
+    );
+
+    function OptimisticHarness() {
+      const { markTaskAlertSeen, unreadAlertCount } = useAiTaskCenter();
+      return (
+        <div>
+          <span data-testid="opt-unread">{unreadAlertCount}</span>
+          <button
+            onClick={() => {
+              markTaskAlertSeen("sub-opt-1", {
+                includeNextSync: true,
+                optimisticTask: {
+                  source: "parent_submission",
+                  status: "SUCCEEDED",
+                  updated_at: "2026-11-28T10:05:00.000Z",
+                },
+              });
+              markTaskAlertSeen("wf-brand-new", {
+                includeNextSync: true,
+                optimisticTask: {
+                  source: "admin_ai_workflow",
+                  status: "WAITING_FOR_REVIEW",
+                  updated_at: "2026-11-28T10:06:00.000Z",
+                  attempt_count: 1,
+                },
+              });
+              emitStudioTasksChanged({ portal: "parent" });
+            }}
+            type="button"
+          >
+            Act then reload immediately
+          </button>
+        </div>
+      );
+    }
+
+    const { unmount } = render(
+      <AiTaskCenterProvider
+        actorId="parent-opt"
+        actorRole="parent"
+        service={service}
+      >
+        <OptimisticHarness />
+      </AiTaskCenterProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("opt-unread")).toHaveTextContent("1"),
+    );
+
+    // Hang the follow-up sync so it NEVER returns before reload!
+    service.listTasks.mockImplementationOnce(() => new Promise(() => {}));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Act then reload immediately" }),
+    );
+    // Zero flicker immediately before sync resolves!
+    expect(screen.getByTestId("opt-unread")).toHaveTextContent("0");
+
+    // Reload immediately BEFORE the hanging sync returns!
+    unmount();
+    clearGlobalTasksMemoryCache();
+    service.listTasks.mockResolvedValue(
+      makeFeed([subV2, newWf], {
+        actor_id: "parent-opt",
+        actor_role: "parent",
+        portal: "parent",
+      }),
+    );
+
+    render(
+      <AiTaskCenterProvider
+        actorId="parent-opt"
+        actorRole="parent"
+        service={service}
+      >
+        <OptimisticHarness />
+      </AiTaskCenterProvider>,
+    );
+
+    await waitFor(() => expect(service.listTasks).toHaveBeenCalledTimes(3));
+    // Both existing bumped subV2 AND brand-new wf-brand-new stay suppressed across immediate reload!
+    expect(screen.getByTestId("opt-unread")).toHaveTextContent("0");
+
+    // A genuinely later server update (V3) MUST still re-alert!
+    service.listTasks.mockResolvedValue(
+      makeFeed(
+        [
+          makeTask({
+            ...subV2,
+            updated_at: "2026-11-28T10:20:00.000Z",
+          }),
+          newWf,
+        ],
+        {
+          actor_id: "parent-opt",
+          actor_role: "parent",
+          portal: "parent",
+        },
+      ),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("opt-unread")).toHaveTextContent("1"),
+    );
+  });
+
+  it("filters markTargetAlertsSeen by jobTypes so cover/illustration actions never silence unrelated page alerts on the same book", async () => {
+    const coverFailed = makeTask({
+      id: "cover-job-1",
+      source: "smart_studio_job",
+      job_type: "COVER_GENERATE",
+      book_id: "book-shared",
+      book_page_id: null,
+      status: "FAILED",
+      updated_at: "2026-11-28T10:00:00.000Z",
+    });
+    const pageReview = makeTask({
+      id: "sub-page-1",
+      source: "parent_submission",
+      job_type: "PARENT_PAGE_PIPELINE",
+      book_id: "book-shared",
+      book_page_id: null,
+      status: "WAITING_FOR_REVIEW",
+      status_label_vi: "Cần xác minh",
+      can_retry: false,
+      error_message_vi: null,
+      updated_at: "2026-11-28T10:00:05.000Z",
+    });
+    const service = createMockService(makeFeed([coverFailed, pageReview]));
+
+    function ScopedJobTypeHarness() {
+      const {
+        markTargetAlertsSeen,
+        unreadFailedCount,
+        unreadWaitingReviewCount,
+      } = useAiTaskCenter();
+      return (
+        <div>
+          <span data-testid="jt-failed">{unreadFailedCount}</span>
+          <span data-testid="jt-review">{unreadWaitingReviewCount}</span>
+          <button
+            onClick={() =>
+              markTargetAlertsSeen({
+                bookId: "book-shared",
+                jobTypes: ["COVER_GENERATE", "STYLE_BIBLE"],
+              })
+            }
+            type="button"
+          >
+            Clear cover alerts only
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <AiTaskCenterProvider
+        actorId="admin-1"
+        actorRole="admin"
+        service={service}
+      >
+        <ScopedJobTypeHarness />
+      </AiTaskCenterProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("jt-failed")).toHaveTextContent("1"),
+    );
+    expect(screen.getByTestId("jt-review")).toHaveTextContent("1");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear cover alerts only" }),
+    );
+    expect(screen.getByTestId("jt-failed")).toHaveTextContent("0");
+    // Unrelated page review alert on the same book MUST remain unread!
+    expect(screen.getByTestId("jt-review")).toHaveTextContent("1");
+  });
 });

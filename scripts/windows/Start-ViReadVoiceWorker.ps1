@@ -58,17 +58,26 @@ function Resolve-VoiceWorkerToken([string]$explicitToken) {
     if ($legacyToken -and $legacyToken.Trim()) {
         return $legacyToken.Trim()
     }
-    $backendEnv = Join-Path $repoRoot "backend\.env"
-    if (Test-Path $backendEnv) {
-        foreach ($line in (Get-Content $backendEnv -Encoding UTF8)) {
-            $trimmed = $line.Trim()
-            if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
-            if ($trimmed -match "^VIREAD_VOICE_WORKER_TOKEN\s*=\s*(.*)$") {
-                $val = $Matches[1].Trim()
-                if (($val.StartsWith('"') -and $val.EndsWith('"')) -or ($val.StartsWith("'") -and $val.EndsWith("'"))) {
-                    $val = $val.Substring(1, $val.Length - 2)
+    $envFiles = @(
+        (Join-Path $repoRoot "backend\.env"),
+        "F:\c1\tools\viread-workers.env",
+        "F:\c1\capstone1\backend\.env"
+    ) | Select-Object -Unique
+    foreach ($candidateKey in @("VIREAD_VOICE_WORKER_TOKEN", "VIREAD_LOCAL_VOICE_WORKER_TOKEN")) {
+        foreach ($envFile in $envFiles) {
+            if (-not (Test-Path -LiteralPath $envFile)) { continue }
+            foreach ($rawLine in [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8)) {
+                if ($null -eq $rawLine) { continue }
+                $trimmed = $rawLine.TrimStart([char]0xFEFF).Trim()
+                if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+                if ($trimmed -match "^(?:export\s+)?$([regex]::Escape($candidateKey))\s*=\s*(.*)$") {
+                    $val = $Matches[1].Trim()
+                    if (($val.StartsWith('"') -and $val.EndsWith('"') -and $val.Length -ge 2) -or
+                        ($val.StartsWith("'") -and $val.EndsWith("'") -and $val.Length -ge 2)) {
+                        $val = $val.Substring(1, $val.Length - 2)
+                    }
+                    if ($val.Trim()) { return $val.Trim() }
                 }
-                if ($val.Trim()) { return $val.Trim() }
             }
         }
     }

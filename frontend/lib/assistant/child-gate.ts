@@ -21,6 +21,8 @@ export const CHILD_REQUIRED_ASSISTANT_PATHS = new Set<string>([
   "/entertainment/sentence-shooter",
   "/entertainment/picture-description",
   "/karaoke",
+  "/achievements",
+  "/learning-train",
 ]);
 
 export const CHILD_BENEFICIAL_ASSISTANT_PATHS = new Set<string>([

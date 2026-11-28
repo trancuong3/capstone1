@@ -1,7 +1,7 @@
 "use client";
 
 import { BookOpen, Sparkles, WandSparkles } from "lucide-react";
-import { useContext, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
 import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
@@ -12,6 +12,7 @@ import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
+import { createChildService } from "@/lib/api/child-service";
 import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { createParentPrivateBookService } from "@/lib/api/parent-private-book-service";
 import { isServiceError } from "@/lib/api/service-error";
@@ -46,7 +47,12 @@ export function FamilyStoryweaverModal({
   const currentUserId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
   const validatedChild = appStore?.validatedSelectedChild ?? null;
-  const childrenProfiles = useMemo<readonly ChildProfileDTO[]>(() => {
+  const [fetchedChildren, setFetchedChildren] = useState<
+    readonly ChildProfileDTO[]
+  >([]);
+  const childService = useMemo(() => createChildService(), []);
+
+  const cachedChildren = useMemo<readonly ChildProfileDTO[]>(() => {
     const cached =
       readUserCacheWithStale<ChildProfileDTO[]>(
         currentUserId,
@@ -57,6 +63,25 @@ export function FamilyStoryweaverModal({
     if (cached.length > 0) return cached;
     return validatedChild ? [validatedChild] : [];
   }, [currentUserId, validatedChild]);
+
+  useEffect(() => {
+    if (!isOpen || cachedChildren.length > 0) return;
+    let active = true;
+    void childService
+      .list()
+      .then((items) => {
+        if (active && items.length > 0) {
+          setFetchedChildren(items);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [cachedChildren.length, childService, isOpen]);
+
+  const childrenProfiles =
+    cachedChildren.length > 0 ? cachedChildren : fetchedChildren;
   const defaultChildId =
     appStore?.selectedChildId ?? childrenProfiles[0]?.id ?? "";
 

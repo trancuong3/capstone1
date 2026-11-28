@@ -17,6 +17,7 @@ import {
   parentPrivateBookSummarySchema,
   parentStoryweaverResponseSchema,
   parentSubmitPagesResponseSchema,
+  saveScanToMyBooksResponseSchema,
   type AdminFlow2CandidateDecisionResponseDTO,
   type AdminFlow2CandidatePageDTO,
   type AdminUserBookDecisionResponseDTO,
@@ -37,8 +38,30 @@ import {
   type ParentStoryweaverInput,
   type ParentStoryweaverResponseDTO,
   type ParentSubmitPagesResponseDTO,
+  type SaveScanToMyBooksResponseDTO,
+  type ScanSaveMode,
   type SourceUsageType,
 } from "@/types/parent-private-book";
+
+export interface SaveScanToMyBooksInput {
+  readonly image: File;
+  readonly fileName?: string;
+  readonly ocr_text: string;
+  readonly mode: ScanSaveMode;
+  readonly title?: string | null;
+  readonly grade_level?: number | null;
+  readonly target_book_id?: string | null;
+  readonly words?: ReadonlyArray<{
+    readonly word_index?: number;
+    readonly line_index?: number;
+    readonly text: string;
+    readonly normalized_text?: string;
+    readonly bbox?: readonly [number, number, number, number];
+    readonly ocr_confidence?: number | null;
+  }> | null;
+  readonly source_type?: SourceUsageType;
+  readonly source_note?: string | null;
+}
 
 export interface CreateParentPrivateBookInput {
   readonly title: string;
@@ -104,6 +127,21 @@ export interface ParentPrivateBookListPageQuery {
   readonly search?: string;
 }
 
+export interface ParentPrivateBookGetOptions {
+  readonly summaryOnly?: boolean;
+}
+
+export const parentRetryFailedSubmissionsResponseSchema = z.object({
+  retried_count: z.number().int().nonnegative(),
+  skipped_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  queue_full_retry_after_seconds: z.number().int().positive().nullable(),
+});
+
+export type ParentRetryFailedSubmissionsResponseDTO = z.infer<
+  typeof parentRetryFailedSubmissionsResponseSchema
+>;
+
 export interface ParentPrivateBookService {
   list(
     readyOnly?: boolean,
@@ -116,6 +154,7 @@ export interface ParentPrivateBookService {
   get(
     bookId: string,
     signal?: AbortSignal,
+    options?: ParentPrivateBookGetOptions,
   ): Promise<ParentPrivateBookDetailDTO>;
   create(
     input: CreateParentPrivateBookInput,
@@ -172,6 +211,9 @@ export interface ParentPrivateBookService {
     submissionId: string,
     stage?: "AUTO" | "OCR" | "PROOFREADING" | "TOOL_CHECK",
   ): Promise<ParentPageSubmissionDTO>;
+  retryAllFailedSubmissions?(
+    bookId: string,
+  ): Promise<ParentRetryFailedSubmissionsResponseDTO>;
   cancelSubmission(bookId: string, submissionId: string): Promise<void>;
   requestAdminReview(
     bookId: string,
@@ -183,6 +225,10 @@ export interface ParentPrivateBookService {
     submissionId: string,
     input: AddPrivatePageInput,
   ): Promise<ParentAddPageResponseDTO>;
+  saveFromScan?(
+    input: SaveScanToMyBooksInput,
+    signal?: AbortSignal,
+  ): Promise<SaveScanToMyBooksResponseDTO>;
   createStoryweaverBook?(
     input: ParentStoryweaverInput,
     signal?: AbortSignal,
@@ -231,9 +277,11 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         parentPrivateBookPageSchema,
         signal,
       ),
-    get: (bookId, signal) =>
+    get: (bookId, signal, options) =>
       requestApi(
-        `/books/my-books/${encodeURIComponent(bookId)}`,
+        `/books/my-books/${encodeURIComponent(bookId)}${apiQuery({
+          summary_only: options?.summaryOnly ? "true" : undefined,
+        })}`,
         parentPrivateBookDetailSchema,
         signal,
         { method: "GET", bypassCache: true },
@@ -257,6 +305,7 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         signal,
         {
           method: "POST",
+          timeoutMs: 60_000,
           body: {
             child_id: input.child_id ?? null,
             title: input.title?.trim() || null,
@@ -399,6 +448,13 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "POST", body: { stage } },
       ),
+    retryAllFailedSubmissions: (bookId) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/submissions/retry-failed`,
+        parentRetryFailedSubmissionsResponseSchema,
+        undefined,
+        { method: "POST" },
+      ),
     cancelSubmission: async (bookId, submissionId) => {
       await requestApi(
         `/books/my-books/${encodeURIComponent(bookId)}/submissions/${encodeURIComponent(submissionId)}`,
@@ -421,6 +477,43 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "POST", body: input },
       ),
+    saveFromScan: (input, signal) => {
+      const form = new FormData();
+      form.append(
+        "image",
+        input.image,
+        input.fileName || input.image.name || "scan-page.jpg",
+      );
+      form.append("ocr_text", input.ocr_text);
+      form.append("mode", input.mode);
+      if (input.title?.trim()) {
+        form.append("title", input.title.trim());
+      }
+      if (
+        typeof input.grade_level === "number" &&
+        Number.isFinite(input.grade_level)
+      ) {
+        form.append("grade_level", String(Math.trunc(input.grade_level)));
+      }
+      if (input.target_book_id?.trim()) {
+        form.append("target_book_id", input.target_book_id.trim());
+      }
+      if (input.words && input.words.length > 0) {
+        form.append("words_json", JSON.stringify(input.words));
+      }
+      if (input.source_type) {
+        form.append("source_type", input.source_type);
+      }
+      if (input.source_note?.trim()) {
+        form.append("source_note", input.source_note.trim());
+      }
+      return requestApi(
+        "/books/my-books/from-scan",
+        saveScanToMyBooksResponseSchema,
+        signal,
+        { method: "POST", body: form },
+      );
+    },
     getOcrContribution: (bookId) =>
       requestApi(
         `/books/my-books/${encodeURIComponent(bookId)}/ocr-contribution`,

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unicodedata
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -238,7 +239,15 @@ class Flow2HygieneAndTrainingFixesTests(unittest.TestCase):
         self.assertEqual(all_splits, {"train", "validation"})
 
     def test_drive_desktop_store_blocks_production_and_cleans_resume_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+            return_value=fake_disk_usage,
+        ):
             store = GoogleDriveDesktopStore(root_dir=tmp)
             with patch.dict(os.environ, {"RENDER": "true"}):
                 with self.assertRaises(DriveNotConnectedError):
@@ -317,7 +326,15 @@ class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestC
         from app.services.training_storage.base import StorageProvider
         from app.services.training_storage.router import TrainingArtifactStoreRouter
 
-        with tempfile.TemporaryDirectory() as tmp:
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+            return_value=fake_disk_usage,
+        ):
             store = GoogleDriveDesktopStore(root_dir=tmp)
             router = TrainingArtifactStoreRouter(
                 drive_store_factory=lambda: store,

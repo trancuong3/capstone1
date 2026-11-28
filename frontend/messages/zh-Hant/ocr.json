@@ -102,7 +102,12 @@
     "captureAndScan": "立即拍攝與掃描",
     "autoScanOn": "自動掃描：已開啟",
     "autoScanOff": "自動掃描：已關閉",
-    "fallbackUploadAction": "使用相機拍照 / 選擇清晰圖片"
+    "fallbackUploadAction": "使用相機拍照 / 選擇清晰圖片",
+    "spotlightModeOn": "紙本書逐行聚光燈：已開啟",
+    "spotlightModeOff": "紙本書逐行聚光燈：已關閉",
+    "spotlightLineBadge": "第 {current}/{total} 行聚光",
+    "spotlightPrevLine": "上一行",
+    "spotlightNextLine": "下一行"
   },
   "review": {
     "title": "核對書頁內容",

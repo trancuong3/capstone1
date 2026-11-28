@@ -6,6 +6,7 @@ import {
   type AdminUserBooksQualityApi,
 } from "@/lib/api/parent-private-book-service";
 import {
+  adminOcrHardSampleRadarResponseSchema,
   bookContentReportDetailSchema,
   bookQualityBookDetailSchema,
   bookQualityBookDecisionReadSchema,
@@ -15,6 +16,7 @@ import {
   bookQualityScanDetailSchema,
   bookQualityScanSchema,
   bookRightsEvidenceSchema,
+  type AdminOcrHardSampleRadarResponseDTO,
   type BookContentReportDetailDTO,
   type BookContentReportStatus,
   type BookQualityBookDetailDTO,
@@ -83,6 +85,10 @@ export interface AdminBookContentQualityService {
   suspendUserBook?: AdminUserBooksQualityApi["suspendUserBook"];
   listFlow2Candidates?: AdminUserBooksQualityApi["listFlow2Candidates"];
   decideFlow2Candidate?: AdminUserBooksQualityApi["decideFlow2Candidate"];
+  getOcrHardSampleRadar?(query?: {
+    limit?: number;
+    max_ocr_confidence?: number;
+  }): Promise<AdminOcrHardSampleRadarResponseDTO>;
 }
 
 export function createAdminBookContentQualityService(): AdminBookContentQualityService {
@@ -188,6 +194,16 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
         bookQualityScanSchema,
         undefined,
         { method: "POST" },
+      ),
+    getOcrHardSampleRadar: (query) =>
+      requestApi(
+        `/books/admin/quality/ocr-hard-samples${apiQuery({
+          limit: query?.limit,
+          max_ocr_confidence: query?.max_ocr_confidence,
+        })}`,
+        adminOcrHardSampleRadarResponseSchema,
+        undefined,
+        { method: "GET", bypassCache: true },
       ),
     ...userBooks,
   };

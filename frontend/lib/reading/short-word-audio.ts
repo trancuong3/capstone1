@@ -53,11 +53,61 @@ function encodeMonoWav(
   return new Blob([wav.buffer], { type: "audio/wav" });
 }
 
+export type PreparedShortWordAudio = Blob & {
+  readonly blob: Blob;
+  readonly pcm16k: Float32Array | null;
+};
+
+function attachShortWordAudioMeta(
+  blob: Blob,
+  pcm16k: Float32Array | null,
+): PreparedShortWordAudio {
+  try {
+    Object.defineProperties(blob, {
+      blob: { value: blob, enumerable: true, configurable: true },
+      pcm16k: { value: pcm16k, enumerable: true, configurable: true },
+    });
+    return blob as PreparedShortWordAudio;
+  } catch {
+    const copy = new Blob([blob], { type: blob.type });
+    Object.defineProperties(copy, {
+      blob: { value: copy, enumerable: true, configurable: true },
+      pcm16k: { value: pcm16k, enumerable: true, configurable: true },
+    });
+    return copy as PreparedShortWordAudio;
+  }
+}
+
+function encodeConditionedMonoWav(samples: Float32Array, sampleRate: number) {
+  const pcmBytes = samples.length * 2;
+  const wav = new DataView(new ArrayBuffer(44 + pcmBytes));
+  wav.setUint32(0, 0x52494646); // RIFF
+  wav.setUint32(4, 36 + pcmBytes, true);
+  wav.setUint32(8, 0x57415645); // WAVE
+  wav.setUint32(12, 0x666d7420); // fmt
+  wav.setUint32(16, 16, true);
+  wav.setUint16(20, 1, true); // PCM
+  wav.setUint16(22, 1, true); // mono
+  wav.setUint32(24, sampleRate, true);
+  wav.setUint32(28, sampleRate * 2, true);
+  wav.setUint16(32, 2, true);
+  wav.setUint16(34, 16, true);
+  wav.setUint32(36, 0x64617461); // data
+  wav.setUint32(40, pcmBytes, true);
+  for (let i = 0; i < samples.length; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    wav.setInt16(44 + i * 2, Math.round(clamped * 32767), true);
+  }
+  return new Blob([wav.buffer], { type: "audio/wav" });
+}
+
 /** Condition the signal without cutting the child's initial or final consonants. */
-export async function prepareShortWordAudio(blob: Blob): Promise<Blob | null> {
+export async function prepareShortWordAudio(
+  blob: Blob,
+): Promise<PreparedShortWordAudio | null> {
   const sampleRate = 16_000;
   const audio = await decodeAudio(blob, sampleRate);
-  if (!audio) return blob;
+  if (!audio) return attachShortWordAudioMeta(blob, null);
   if (audio.peak < 0.00015) return null;
 
   const frameLength = sampleRate / 50; // 20ms (320 samples)
@@ -138,7 +188,13 @@ export async function prepareShortWordAudio(blob: Blob): Promise<Blob | null> {
 
   const gain =
     speechLevel >= 0.065 ? 1 : Math.max(1, Math.min(12, 0.085 / speechLevel));
-  return encodeMonoWav(prepared, sampleRate, gain, true);
+  const conditioned = new Float32Array(prepared.length);
+  for (let i = 0; i < prepared.length; i++) {
+    const scaled = prepared[i] * gain;
+    conditioned[i] = 0.94 * Math.tanh(scaled / 0.94);
+  }
+  const wavBlob = encodeConditionedMonoWav(conditioned, sampleRate);
+  return attachShortWordAudioMeta(wavBlob, conditioned);
 }
 
 export interface PrepareWordSampleOptions {

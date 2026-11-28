@@ -689,10 +689,14 @@ class RouteDirectCallDefaultsTests(unittest.IsolatedAsyncioTestCase):
                 teaching_mode="OBSERVE",
                 target_words=[],
                 refresh_ai_guide=False,
+                auto_select=False,
                 teacher_gender=None,
             )
             self.assertIs(
                 pd_svc.create_session.await_args.kwargs["refresh_ai_guide"], False
+            )
+            self.assertIs(
+                pd_svc.create_session.await_args.kwargs["auto_select"], False
             )
 
     async def test_karaoke_catalog_and_simple_import_direct_call_unwrap_defaults(self):

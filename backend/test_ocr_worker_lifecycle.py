@@ -445,6 +445,379 @@ class TestOcrWorkerLifecycleAndDetection(unittest.TestCase):
         assert offline_timeout is not None
         self.assertLessEqual(offline_timeout, 3.0)
 
+    def test_degraded_heartbeat_and_partial_neural_engine_block_readiness_and_claim_next_job(self) -> None:
+        from app.services.global_tasks_service import GlobalTasksService
+        from app.services.ocr_inference_job_service import JOB_KIND_LOCAL_SCAN, PRIORITY_LOCAL_SCAN
+
+        class _SessionCtx:
+            def __init__(self, state: InMemoryDbState):
+                self._state = state
+
+            async def __aenter__(self) -> FakeAsyncSession:
+                return FakeAsyncSession(self._state)
+
+            async def __aexit__(self, *_args: Any) -> bool:
+                return False
+
+        async def _scenario() -> None:
+            now = datetime.now(timezone.utc)
+            paddle_unloaded_engines = {
+                "paddleocr": {
+                    "status": "DEGRADED",
+                    "detail_status": "installed",
+                    "installed": True,
+                    "loaded": False,
+                    "inference_verified": False,
+                },
+                "vietocr": {
+                    "status": "HEALTHY",
+                    "detail_status": "inference_verified",
+                    "installed": True,
+                    "loaded": True,
+                    "inference_verified": True,
+                },
+                "tesseract_vie": {
+                    "status": "HEALTHY",
+                    "detail_status": "inference_verified",
+                    "installed": True,
+                    "loaded": True,
+                    "inference_verified": True,
+                },
+            }
+
+            # 1. paddleocr.loaded=False MUST fail _worker_has_ready_engine even when vietocr & tesseract_vie are ready
+            self.assertFalse(OcrInferenceJobService._worker_has_ready_engine(paddle_unloaded_engines))
+            viet_unloaded_engines = {
+                "paddleocr": {
+                    "status": "HEALTHY",
+                    "detail_status": "inference_verified",
+                    "installed": True,
+                    "loaded": True,
+                    "inference_verified": True,
+                },
+                "vietocr": {
+                    "status": "DEGRADED",
+                    "detail_status": "installed",
+                    "installed": True,
+                    "loaded": False,
+                    "inference_verified": False,
+                },
+            }
+            self.assertFalse(OcrInferenceJobService._worker_has_ready_engine(viet_unloaded_engines))
+
+            hb = OcrWorkerHeartbeat(
+                WorkerId="win-degraded-1",
+                Hostname="win-laptop",
+                Status="BUSY",
+                Engines=paddle_unloaded_engines,
+                LastHeartbeatAt=now,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            self.state.tables[OcrWorkerHeartbeat].append(hb)
+            await self.db.commit()
+
+            with (
+                patch(
+                    "app.services.remote_ocr_wakeup.is_remote_worker_wakeup_configured",
+                    return_value=False,
+                ),
+                patch("app.database.session.AsyncSessionLocal", side_effect=lambda: _SessionCtx(self.state)),
+                patch(
+                    "app.repositories.ocr_inference_job_repository.OcrInferenceJobRepository.queue_depth_counts",
+                    return_value={
+                        "queued": 1,
+                        "claimed": 0,
+                        "running": 0,
+                        "failed_retryable": 0,
+                        "dead_letter": 0,
+                        "succeeded": 0,
+                        "cancelled": 0,
+                        "expired_leases": 0,
+                        "pending_total": 1,
+                        "active_total": 0,
+                        "oldest_pending_job_age_seconds": 1.0,
+                        "latest_succeeded_at": None,
+                    },
+                ),
+            ):
+                # Even on BUSY status, paddleocr.loaded=False reports NOT ready / NOT online
+                self.assertFalse(await self.svc.has_online_worker())
+                diag = await collect_remote_ocr_health()
+                self.assertFalse(diag["ready"])
+                self.assertEqual(len(diag["workers"]), 1)
+                self.assertTrue(diag["workers"][0]["online"])
+
+                # 2. Enqueue a job and verify claim_next_job refuses DEGRADED / STARTING / OFFLINE and unready engines
+                enqueued = await self.svc.enqueue_job(
+                    job_kind=JOB_KIND_LOCAL_SCAN,
+                    owner_user_id=uuid4(),
+                    local_scan_request_id="scan-guard-1",
+                    image_path="local-scans/guard-1.png",
+                    image_sha256=hashlib.sha256(b"guard-1").hexdigest(),
+                    priority=PRIORITY_LOCAL_SCAN,
+                )
+                await self.db.commit()
+
+                # BUSY + paddleocr.loaded=False -> blocked!
+                self.assertIsNone(await self.svc.claim_next_job(worker_id="win-degraded-1", lease_seconds=60))
+                self.assertEqual(enqueued.Status, "QUEUED")
+
+                # DEGRADED status (even with empty engines) -> blocked!
+                hb.Status = "DEGRADED"
+                hb.Engines = {}
+                await self.db.commit()
+                self.assertIsNone(await self.svc.claim_next_job(worker_id="win-degraded-1", lease_seconds=60))
+                self.assertEqual(enqueued.Status, "QUEUED")
+
+                # STARTING & OFFLINE statuses -> blocked!
+                for blocked_status in ("STARTING", "OFFLINE"):
+                    hb.Status = blocked_status
+                    await self.db.commit()
+                    self.assertIsNone(await self.svc.claim_next_job(worker_id="win-degraded-1", lease_seconds=60))
+                    self.assertEqual(enqueued.Status, "QUEUED")
+
+                # Worker WITHOUT a pre-seeded heartbeat row is still allowed (unit test compat)
+                claimed_no_hb = await self.svc.claim_next_job(worker_id="direct-unit-worker", lease_seconds=60)
+                self.assertIsNotNone(claimed_no_hb)
+                assert claimed_no_hb is not None
+                self.assertEqual(claimed_no_hb["job_id"], str(enqueued.Id))
+
+                # Enqueue second job and verify win-degraded-1 CAN claim once IDLE + both neural engines ready
+                enqueued_2 = await self.svc.enqueue_job(
+                    job_kind=JOB_KIND_LOCAL_SCAN,
+                    owner_user_id=uuid4(),
+                    local_scan_request_id="scan-guard-2",
+                    image_path="local-scans/guard-2.png",
+                    image_sha256=hashlib.sha256(b"guard-2").hexdigest(),
+                    priority=PRIORITY_LOCAL_SCAN,
+                )
+                hb.Status = "IDLE"
+                hb.Engines = {
+                    "paddleocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "installed": True,
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                    "vietocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "installed": True,
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                }
+                await self.db.commit()
+                self.assertTrue(await self.svc.has_online_worker())
+                diag_ready = await collect_remote_ocr_health()
+                self.assertTrue(diag_ready["ready"])
+                claimed_ready = await self.svc.claim_next_job(worker_id="win-degraded-1", lease_seconds=60)
+                self.assertIsNotNone(claimed_ready)
+                assert claimed_ready is not None
+                self.assertEqual(claimed_ready["job_id"], str(enqueued_2.Id))
+
+            # 3. GlobalTasksService._resolve_worker_online rejects online=True, ready=False probe (uncached + cached)
+            hb.Status = "DEGRADED"
+            hb.Engines = paddle_unloaded_engines
+            await self.db.commit()
+
+            async def _degraded_local_probe(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={"ready": False, "worker_status": "DEGRADED", "worker_id": "win-degraded-1"},
+                )
+
+            set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(_degraded_local_probe))
+            gts = GlobalTasksService(self.db)  # type: ignore[arg-type]
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_OCR_REMOTE_WORKER_URL": "https://ocr.example.internal",
+                        "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "false",
+                        "VIREAD_OCR_WORKER_TOKEN": "x" * 40,
+                    },
+                    clear=False,
+                ),
+                patch.object(gts.repo, "is_remote_ocr_worker_online", return_value=False),
+            ):
+                invalidate_remote_ocr_health_cache()
+                self.assertFalse(await gts._resolve_worker_online(was_in_tx=False))
+                # Cached probe path must also reject online=True, ready=False
+                self.assertTrue(peek_cached_remote_ocr_worker_health()[0])
+                self.assertFalse(await gts._resolve_worker_online(was_in_tx=True))
+
+        asyncio.run(_scenario())
+
+    def test_fail_job_honors_retry_delay_seconds_and_preserves_degraded_or_offline_worker_status(self) -> None:
+        from fastapi.testclient import TestClient
+
+        import app.sever as sever_mod
+        from app.api.deps import get_db
+        from app.repositories.ocr_inference_job_repository import reset_ocr_queue_repo_state_for_tests
+        from app.services.ocr_inference_job_service import (
+            JOB_KIND_LOCAL_SCAN,
+            PRIORITY_LOCAL_SCAN,
+        )
+
+        async def _scenario() -> None:
+            reset_ocr_queue_repo_state_for_tests()
+            now = datetime.now(timezone.utc)
+            hb = OcrWorkerHeartbeat(
+                WorkerId="win-gpu-1",
+                Hostname="win-gpu",
+                Status="IDLE",
+                Engines={
+                    "paddleocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                    "vietocr": {
+                        "status": "HEALTHY",
+                        "detail_status": "inference_verified",
+                        "loaded": True,
+                        "inference_verified": True,
+                    },
+                },
+                LastHeartbeatAt=now,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            self.state.tables[OcrWorkerHeartbeat].append(hb)
+
+            job1 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/cuda-oom.png",
+                image_sha256="a" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+                max_attempts=3,
+            )
+            await self.db.commit()
+
+            claim1 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim1 is not None
+
+            # 1. CUDA_OOM with retry_delay_seconds=30 honors 30s delay AND marks worker DEGRADED (not IDLE!)
+            fail_res = await self.svc.fail_job(
+                job_id=job1.Id,
+                worker_id="win-gpu-1",
+                fencing_token=int(claim1["fencing_token"]),
+                error_code="CUDA_OOM",
+                error_message="CUDA out of memory",
+                retryable=True,
+                retry_delay_seconds=30,
+            )
+            self.assertEqual(fail_res["status"], "FAILED_RETRYABLE")
+            self.assertEqual(job1.RetryDelaySeconds, 30)
+            self.assertEqual(hb.Status, "DEGRADED")
+
+            # 2. Existing DEGRADED / OFFLINE status is NEVER overwritten back to IDLE by complete_job or fail_job
+            job2 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/preserve-degraded.png",
+                image_sha256="b" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            # Claim while IDLE, then simulate background heartbeat marking worker DEGRADED mid-job
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim2 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim2 is not None
+            hb.Status = "DEGRADED"
+            await self.db.commit()
+
+            with patch("app.services.ocr_inference_job_service.storage_service.delete_object"):
+                done2 = await self.svc.complete_job(
+                    job_id=job2.Id,
+                    worker_id="win-gpu-1",
+                    fencing_token=int(claim2["fencing_token"]),
+                    source_sha256="b" * 64,
+                    full_text="Xin chào",
+                    words=[{"word_index": 0, "line_index": 0, "text": "Xin", "bbox": [0.1, 0.1, 0.1, 0.05]}],
+                    ocr_meta={},
+                    no_text_detected=False,
+                    model_profile="ORIGINAL",
+                    model_sha256="380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59",
+                    engine_diagnostics={},
+                    duration_ms=50,
+                    schedule_post_ocr=False,
+                )
+            self.assertEqual(done2["status"], "SUCCEEDED")
+            self.assertEqual(hb.Status, "DEGRADED")
+
+            # 3. OFFLINE status is also preserved on normal fail_job
+            job3 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/preserve-offline.png",
+                image_sha256="c" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim3 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim3 is not None
+            hb.Status = "OFFLINE"
+            await self.db.commit()
+
+            await self.svc.fail_job(
+                job_id=job3.Id,
+                worker_id="win-gpu-1",
+                fencing_token=int(claim3["fencing_token"]),
+                error_code="SOURCE_DOWNLOAD_TIMEOUT",
+                retryable=True,
+                retry_delay_seconds=45,
+            )
+            self.assertEqual(job3.RetryDelaySeconds, 45)
+            self.assertEqual(hb.Status, "OFFLINE")
+
+            # 4. Verify POST /internal/ocr-jobs/{job_id}/fail forwards retry_delay_seconds through Pydantic
+            job4 = await self.svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=uuid4(),
+                image_path="local-scans/route-delay.png",
+                image_sha256="d" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            hb.Status = "IDLE"
+            await self.db.commit()
+            claim4 = await self.svc.claim_next_job(worker_id="win-gpu-1", lease_seconds=60)
+            assert claim4 is not None
+
+            async def _fake_get_db():
+                yield FakeAsyncSession(self.state)
+
+            sever_mod.app.dependency_overrides[get_db] = _fake_get_db
+            try:
+                client = TestClient(sever_mod.app)
+                worker_tok = "ocr-worker-staging-test-token-0123456789abcdef"
+                with patch.dict(os.environ, {"VIREAD_OCR_WORKER_TOKEN": worker_tok}, clear=False):
+                    resp = client.post(
+                        f"/internal/ocr-jobs/{job4.Id}/fail",
+                        json={
+                            "worker_id": "win-gpu-1",
+                            "fencing_token": int(claim4["fencing_token"]),
+                            "error_code": "CUDA_OOM",
+                            "error_message": "OOM during inference",
+                            "retryable": True,
+                            "retry_delay_seconds": 35,
+                        },
+                        headers={"X-ViRead-Ocr-Worker-Token": worker_tok},
+                    )
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(job4.RetryDelaySeconds, 35)
+                self.assertEqual(hb.Status, "DEGRADED")
+            finally:
+                sever_mod.app.dependency_overrides.clear()
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

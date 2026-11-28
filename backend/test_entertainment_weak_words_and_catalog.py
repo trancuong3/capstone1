@@ -17,6 +17,7 @@ from app.services.karaoke_children_catalog import (
     build_melody_profile_for_v2_lyrics,
     build_ngoi_sao_nho_melody_profile,
     build_timed_lyrics_for_spec,
+    render_ngoi_sao_nho_cover_webp,
 )
 from app.services.karaoke_service import content_issues
 
@@ -360,6 +361,17 @@ class EntertainmentWeakWordsAndCatalogTests(unittest.TestCase):
         )
         self.assertEqual(len(demo_melody.notes), 8)
         self.assertGreaterEqual(demo_melody.min_midi, 60.0)
+
+        # Grade 2 children ('Bé An') must see all 7 pack songs (+ Ngôi sao nhỏ = 8 total),
+        # including 'Vườn xuân lung linh' widened to Grades 1–5, and 'Ngôi sao nhỏ' has a WebP cover.
+        grade_2_visible = [spec.slug for spec in CHILDREN_KARAOKE_PACK if spec.min_grade <= 2 <= spec.max_grade]
+        self.assertEqual(len(grade_2_visible), 7)
+        vuon_xuan = next(spec for spec in CHILDREN_KARAOKE_PACK if spec.slug == "vuon-xuan-lung-linh")
+        self.assertEqual((vuon_xuan.min_grade, vuon_xuan.max_grade), (1, 5))
+        demo_cover = render_ngoi_sao_nho_cover_webp()
+        self.assertGreater(len(demo_cover), 500)
+        self.assertEqual(demo_cover[:4], b"RIFF")
+        self.assertEqual(demo_cover[8:12], b"WEBP")
 
 
 if __name__ == "__main__":

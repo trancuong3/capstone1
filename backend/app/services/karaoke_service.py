@@ -1,6 +1,7 @@
 """Karaoke business rules, authorization and media/transaction coordination."""
 from copy import deepcopy
 from datetime import timedelta
+import inspect
 import logging
 from uuid import uuid4
 
@@ -18,6 +19,10 @@ from app.schemas.karaoke import (
 from app.services.karaoke_media_service import inspect_audio, normalize_cover, read_upload
 from app.services.karaoke_storage_service import KaraokeStorage, URL_TTL
 from app.services.karaoke_lyrics import clear_timings, timing_issues
+from app.services.difficult_words_service import (
+    normalize_vietnamese_practice_word,
+    tokenize_vietnamese_practice_text,
+)
 from app.services.karaoke_processing_review import (
     clear_review, content_fingerprint, fingerprint, quality_flags, reviewed_current,
 )
@@ -52,6 +57,64 @@ def content_issues(version, *, require_binding=True):
     if require_binding and version.audio_sha256 != version.timed_audio_sha256:
         issue("TIMING_AUDIO_MISMATCH", "lyrics")
     return issues
+
+
+def _extract_lyrics_search_text(lyrics) -> str:
+    """Read-only lyric text extraction for matching difficult words without altering lyrics."""
+    if not isinstance(lyrics, dict):
+        return ""
+    lines = lyrics.get("lines")
+    if not isinstance(lines, list):
+        return ""
+    parts: list[str] = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        line_text = line.get("text")
+        if isinstance(line_text, str) and line_text.strip():
+            parts.append(line_text)
+            continue
+        tokens = line.get("tokens")
+        if isinstance(tokens, list):
+            token_texts = [
+                str(tok.get("text")).strip()
+                for tok in tokens
+                if isinstance(tok, dict)
+                and isinstance(tok.get("text"), str)
+                and str(tok.get("text")).strip()
+            ]
+            if token_texts:
+                parts.append(" ".join(token_texts))
+    return " ".join(parts)
+
+
+def _match_song_difficult_words(lyrics, difficult_words: list[str]) -> list[str]:
+    if not difficult_words:
+        return []
+    raw_text = _extract_lyrics_search_text(lyrics)
+    if not raw_text:
+        return []
+    tokens = [
+        normalize_vietnamese_practice_word(token)
+        for token in tokenize_vietnamese_practice_text(raw_text)
+    ]
+    cleaned_tokens = [token for token in tokens if token]
+    if not cleaned_tokens:
+        return []
+    token_set = set(cleaned_tokens)
+    padded = f" {' '.join(cleaned_tokens)} "
+
+    matched: list[str] = []
+    seen: set[str] = set()
+    for word in difficult_words:
+        norm = normalize_vietnamese_practice_word(word)
+        if not norm or norm in seen:
+            continue
+        hit = norm in token_set if " " not in norm else f" {norm} " in padded
+        if hit:
+            seen.add(norm)
+            matched.append(word)
+    return matched
 
 
 class KaraokeService:
@@ -437,22 +500,75 @@ class KaraokeService:
         return DraftPreview(revision=snapshot.song.revision,
                             **await self._media_dto(song_id, snapshot.draft, melody_profile=melody))
 
+    async def _load_child_difficult_words(self, actor_id, child_id, *, limit: int = 12) -> list[str]:
+        custom_fn = getattr(self.repository, "difficult_words", None)
+        if custom_fn is not None:
+            try:
+                maybe_words = custom_fn(child_id, actor_id, limit=limit)
+                if inspect.isawaitable(maybe_words):
+                    maybe_words = await maybe_words
+                if isinstance(maybe_words, (list, tuple)):
+                    return [str(word) for word in maybe_words if str(word).strip()]
+            except Exception:
+                return []
+        db = getattr(self.repository, "db", None)
+        if db is None:
+            return []
+        try:
+            from app.services.child_difficult_word_feed import ChildDifficultWordFeed
+
+            return await ChildDifficultWordFeed(db).list_words(child_id, actor_id, limit=limit)
+        except Exception:
+            return []
+
     async def catalog(self, actor_id, child_id, *, search="", limit=12, offset=0):
         async with self.repository.read():
             grade = await self._grade(actor_id, child_id)
-            states, total = await self.repository.list_states(
-                search=search, status=None, grade=grade, limit=limit, offset=offset,
-            )
+            difficult_words = await self._load_child_difficult_words(actor_id, child_id)
+            if difficult_words:
+                candidate_limit = max(int(limit) + int(offset), 200)
+                all_states, total = await self.repository.list_states(
+                    search=search, status=None, grade=grade, limit=candidate_limit, offset=0,
+                )
+                scored = [
+                    (
+                        state,
+                        _match_song_difficult_words(
+                            getattr(state.published, "lyrics", None),
+                            difficult_words,
+                        )
+                        if state.published is not None
+                        else [],
+                    )
+                    for state in all_states
+                ]
+                scored.sort(key=lambda pair: -len(pair[1]))
+                sliced = scored[offset : offset + limit]
+            else:
+                states, total = await self.repository.list_states(
+                    search=search, status=None, grade=grade, limit=limit, offset=offset,
+                )
+                sliced = [(state, []) for state in states]
         items = []
-        for state in states:
+        for state, matched_words in sliced:
             version = state.published
             cover_url = (await run_in_threadpool(self.storage.sign, version.cover_path, state.song.id)
                          if version.cover_path else None)
             items.append(SongCard(song_id=state.song.id, version_id=version.id,
                                   title=version.title, author=version.author,
                                   min_grade=version.min_grade, max_grade=version.max_grade,
-                                  duration_ms=version.duration_ms, cover_url=cover_url))
+                                  duration_ms=version.duration_ms, cover_url=cover_url,
+                                  matched_difficult_words=matched_words))
         return SongList(items=items, total=total, limit=limit, offset=offset)
+
+    async def list_songs(self, actor_id, child_id, *, search="", limit=12, offset=0):
+        return await self.catalog(
+            actor_id,
+            child_id,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
 
     async def playback(self, actor_id, song_id, child_id, expected_version_id=None):
         async with self.repository.read():

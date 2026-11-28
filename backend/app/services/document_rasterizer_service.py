@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gc
 import hashlib
 import logging
@@ -10,10 +11,11 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
+import weakref
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePath
@@ -96,6 +98,42 @@ def _is_constrained_web_runtime() -> bool:
     }
     remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
     return render or disable_heavy or remote_ocr
+
+
+_RASTERIZER_SEMAPHORES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[int, asyncio.Semaphore]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def resolve_rasterizer_concurrency_limit() -> int:
+    """Return max concurrent multi-page document rasterizations (1 on Render/constrained, 2 locally)."""
+    raw = (os.getenv("VIREAD_RASTERIZER_MAX_CONCURRENCY") or "").strip()
+    if raw:
+        try:
+            return max(1, min(4, int(raw)))
+        except ValueError:
+            pass
+    return 1 if _is_constrained_web_runtime() else 2
+
+
+def get_rasterizer_semaphore() -> asyncio.Semaphore:
+    """Return the per-event-loop global semaphore bounding concurrent document rasterizations."""
+    loop = asyncio.get_running_loop()
+    limit = resolve_rasterizer_concurrency_limit()
+    cached = _RASTERIZER_SEMAPHORES.get(loop)
+    if cached is not None and cached[0] == limit:
+        return cached[1]
+    sem = asyncio.Semaphore(limit)
+    _RASTERIZER_SEMAPHORES[loop] = (limit, sem)
+    return sem
+
+
+@asynccontextmanager
+async def rasterizer_concurrency_gate() -> AsyncIterator[None]:
+    """Serialize/bound heavy PDF/DOCX/TIFF multi-page rasterization to protect 512 MiB RAM."""
+    sem = get_rasterizer_semaphore()
+    async with sem:
+        yield
 
 
 def _resolve_pdf_render_dpi() -> float:
@@ -1296,6 +1334,8 @@ def iter_rasterized_spooled_document(
         header_bytes=spooled.header_bytes,
     )
     temp_pdf_path: Path | None = None
+    page_iter: Iterator[RasterizedDocumentPage] | None = None
+    bounded_iter: Iterator[RasterizedDocumentPage] | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
@@ -1339,6 +1379,7 @@ def iter_rasterized_spooled_document(
                     close_fn()
                 except Exception:
                     pass
+        it = None
         bounded_iter = None
         page_iter = None
         if temp_pdf_path is not None:

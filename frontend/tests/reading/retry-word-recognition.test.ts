@@ -94,16 +94,16 @@ describe("Vietnamese retry recognition", () => {
   it("preserves the end of a short recording while speech is still settling", () => {
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 900,
+        elapsedMs: 550,
         speechObserved: true,
-        silenceElapsedMs: 800,
+        silenceElapsedMs: 450,
       }),
     ).toBe(false);
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 1000,
+        elapsedMs: 650,
         speechObserved: true,
-        silenceElapsedMs: 950,
+        silenceElapsedMs: 560,
       }),
     ).toBe(true);
   });

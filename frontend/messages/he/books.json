@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "הצגת בלוקי טקסט OCR לעמוד {page}",
     "closePageOcrBlocksAria": "סגירת בלוקי טקסט OCR לעמוד {page}",
     "openPageOcrBlocksAction": "בלוקי OCR",
-    "closePageOcrBlocksAction": "סגירת בלוקי OCR"
+    "closePageOcrBlocksAction": "סגירת בלוקי OCR",
+    "retryAllFailedAction": "נסה שוב את כל העמודים שנכשלו ({count})",
+    "retryingAllFailedButton": "מוסיף עמודים שנכשלו לתור הניסיון החוזר…",
+    "retryAllSuccessNotice": "{count} עמודים שנכשלו נוספו לתור הניסיון החוזר (שלבים שכבר הושלמו נשמרו).",
+    "retryAllQueuedOfflineNotice": "בקשות ניסיון חוזר עבור {count} עמודים נשמרו בתור ה-OCR. הן יעובדו אוטומטית כשהשירות יחזור לפעול.",
+    "retryAllPartialQueueFullNotice": "{retried} עמודים נוספו לתור הניסיון החוזר; {skipped} עמודים נותרים הושהו כי תור ה-OCR מלא. נסה שוב בעוד {seconds} שניות.",
+    "retryAllPartialFailedNotice": "{retried} עמודים נוספו לתור הניסיון החוזר; לא ניתן היה להוסיף {failed} עמודים כעת.",
+    "retryAllNoneNotice": "אין כרגע עמודים שנכשלו לניסיון חוזר.",
+    "queueFullNotice": "תור ה-OCR מלא כרגע. נסה שוב בעוד כ-{seconds} שניות."
   },
   "ocrContribution": {
     "cardAria": "תרומת דוגמאות לשיפור זיהוי הטקסט עבור {title}",
@@ -576,5 +584,35 @@
     "tooEasy": "קליל לחימום (כיתה {min}–{max})",
     "estimatedGrade": "רמה משוערת כיתה {min}–{max}",
     "phonicsScore": "מוכנות פונטית {score}%"
+  },
+  "offlinePack": {
+    "heading": "ערכת קריאה לא מקוונת וכרטיס QR להדפסה",
+    "description": "שמרו עמודים מאומתים במכשיר לקריאה ללא אינטרנט, או הדפיסו כרטיס QR לספר המודפס.",
+    "readyBadge": "נשמר ({count} עמודים)",
+    "downloadButton": "הורדת ערכה לא מקוונת",
+    "openOfflineReader": "קריאה לא מקוונת כעת",
+    "removeButton": "הסרת ערכה",
+    "syncPendingButton": "סנכרון ({count})",
+    "stageDownloadingPages": "מוריד עמודים מאומתים ושמע לדוגמה…",
+    "stageSavingDevice": "שומר באופן מאובטח באחסון המכשיר…",
+    "savedNotice": "ערכת קריאה לא מקוונת ({count} עמודים) נשמרה במכשיר.",
+    "removedNotice": "הערכה הלא מקוונת של ספר זה הוסרה.",
+    "downloadError": "לא ניתן להוריד את הערכה כעת. נסו שוב כשהחיבור יציב.",
+    "syncedNotice": "סונכרנו {count} מפגשי קריאה לא מקוונים.",
+    "syncDeferredNotice": "החיבור אינו יציב — המפגשים שמורים בבטחה לסנכרון אוטומטי בהמשך.",
+    "queuedOfflineNotice": "המפגש נשמר מקומית — ViRead יסנכרן אוטומטית עם חידוש החיבור.",
+    "readerHeaderBadge": "מצב לא מקוון · עמוד {page}/{total}",
+    "listenCachedAudio": "האזנה לדוגמה",
+    "tapWordsHint": "הקישו על מילים שהילד קרא נכון כדי לתעד התקדמות:",
+    "prevPage": "עמוד קודם",
+    "nextPage": "עמוד הבא",
+    "finishAndQueueSync": "סיום ושמירה לסנכרון"
+  },
+  "qrCard": {
+    "openButton": "כרטיס QR להדפסה",
+    "modalTitle": "כרטיס QR לקריאה ב-ViRead",
+    "eyebrow": "סימניית QR לספר מודפס",
+    "scanInstruction": "סרקו את קוד ה-QR במצלמת הטלפון כדי לפתוח ספר זה ישירות ב-ViRead.",
+    "printButton": "הדפסת כרטיס QR"
   }
 }

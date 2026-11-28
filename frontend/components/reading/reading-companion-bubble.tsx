@@ -154,7 +154,7 @@ export function ReadingCompanionBubble({
     <div
       aria-live="polite"
       className={cn(
-        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-card border px-2.5 py-1.5 transition-colors sm:min-h-16 sm:gap-3.5 sm:px-4 sm:py-3",
+        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-xl border px-2.5 py-1.5 transition-colors sm:gap-2.5 sm:px-3.5 sm:py-2",
         theme.card,
       )}
       data-companion-mood={state.mood}
@@ -165,9 +165,9 @@ export function ReadingCompanionBubble({
       <div
         aria-hidden="true"
         className={cn(
-          "flex size-7 shrink-0 items-center justify-center rounded-full shadow-xs sm:size-11",
+          "flex size-7 shrink-0 items-center justify-center rounded-full shadow-2xs sm:size-8",
           theme.badge,
-          isSpeaking && "ring-2 ring-offset-2 ring-primary/40",
+          isSpeaking && "ring-2 ring-offset-1 ring-primary/40",
         )}
       >
         <MoodIcon mood={state.mood} />
@@ -175,23 +175,23 @@ export function ReadingCompanionBubble({
       <div className="min-w-0 flex-1">
         <p
           className={cn(
-            "truncate text-[11px] font-extrabold sm:text-xs",
+            "truncate text-[11px] font-extrabold leading-tight sm:text-xs",
             theme.titleColor,
           )}
         >
           {displayTitle}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-base">
+        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:text-sm">
           {displayMessage}
         </p>
       </div>
       {onDismiss ? (
         <button
-          aria-label={t("phonics.closeAria")}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-border/70 bg-white/85 text-muted hover:bg-white hover:text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          data-testid="dismiss-companion-bubble"
-          onClick={onDismiss}
           type="button"
+          aria-label={t("companion.dismissAria")}
+          data-testid="dismiss-companion-bubble-btn"
+          onClick={onDismiss}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-white/80 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           <X aria-hidden="true" className="size-4" />
         </button>

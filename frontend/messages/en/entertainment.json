@@ -27,7 +27,7 @@
     "defaultGreeting": "Hello little reader! Would you like to tell a picture story, build sentences, sing along, or play a memory game today?",
     "defaultRecommendationReason": "Every activity gently connects with the books you are reading so you remember words longer without any pressure.",
     "focusDifficultWordsLabel": "Words you're gently reviewing:",
-    "playSuggestedCta": "Play suggested game",
+    "playSuggestedCta": "Play with Owl now",
     "onboardingRegionAria": "Getting started guide for Play & Learn",
     "onboardingCounter": "Quick guide ({current}/{total})",
     "onboardingStep1Title": "1. Pick a zone you like",
@@ -57,7 +57,15 @@
     "memoryCta": "Explore Memory Game",
     "breakReminderTitle": "Healthy eye break:",
     "defaultBreakReminder": "About 10–15 minutes per session keeps young eyes healthy and learning effortless.",
-    "recommendationLoadError": "Could not load learning recommendations right now."
+    "recommendationLoadError": "Could not load learning recommendations right now.",
+    "autoPlayFlowOn": "Auto-play",
+    "autoPlayFlowOff": "Auto-play (Off)",
+    "quickPlayCta": "Quick play",
+    "quickPlayCardAria": "Quick play: {title}",
+    "misreadWordsChipTitle": "Words to review:",
+    "magicQuestCta": "✨ 60s Magic Word Quest (Review now)",
+    "magicQuestNoBookHint": "No matching book yet? ViRead Owl weaves a 60-second magic story that clears right after play!",
+    "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
   },
   "karaoke": {
     "title": "Kids Karaoke",
@@ -92,7 +100,10 @@
       "coverAlt": "Cover art for {title}",
       "songInfo": "Song Info",
       "gradeRange": "Grade {min}–{max}",
-      "singSongAction": "Sing {title}"
+      "singSongAction": "Sing {title}",
+      "reviewDifficultWordsLabel": "Words to practice:",
+      "singNowAction": "Sing now",
+      "difficultWordsBoostHint": "Songs with words your child is practicing appear first."
     },
     "playerScreen": {
       "backToLibrary": "Back to song library",
@@ -250,8 +261,12 @@
         "weakestSegmentTitle": "Segment to practice · Line {number}",
         "retrySegmentSlow": "Practice this segment (0.85x)",
         "segmentReportSummary": "Segment report ({count} lines)",
-        "segmentLineHeader": "Line {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "Line {number} ({start}–{end})",
+        "practiceWeakestNow": "Practice weakest line now (0.85×)"
+      },
+      "autoplayPreparing": "Getting the song ready automatically…",
+      "autoplayTapToStart": "Tap once to start music",
+      "autoplayTapHint": "Your browser needs one quick tap to turn on music and the microphone."
     },
     "score": {
       "regionAria": "Lyrics accuracy",
@@ -332,6 +347,49 @@
       },
       "lyricsOnlyFallbackGuidance": "Web Audio analysis was not active on this device, so this session scored lyrics only.",
       "mildSpeakerBleedGuidance": "Mild speaker bleed entered the mic. Headphones will make pitch and rhythm scoring even more accurate!"
+    },
+    "magicChant": {
+      "libraryBadge": "✨ Instant · Auto-clears after chant",
+      "libraryCardTitle": "✨ 80 BPM Magic Rhythm Chant · Clap Beats & Review Words (Auto-clears)",
+      "libraryCardDesc": "No matching song yet? ViRead Owl weaves an 80 BPM rhythmic chant from your review words!",
+      "libraryOpenCta": "Open Magic Rhythm Chant",
+      "loadingTitle": "ViRead Owl is setting the beat and weaving your chant…",
+      "loadingStage1": "Picking focus words…",
+      "loadingStage2": "Composing 80 BPM rhyme lines…",
+      "errorTitle": "Magic chant needs a quick retry",
+      "errorBody": "Please tap Retry to weave a fresh rhythm chant.",
+      "expiredNotice": "The previous chant dissolved after 15 minutes — Owl wove a fresh one for you!",
+      "lineBadge": "Chant Line {current}/{total}",
+      "step1ClapPrompt": "Step 1: Tap the drum pad for {beats} steady beats!",
+      "step2SpeakPrompt": "Step 2: Speak «{word}» aloud in rhythm!",
+      "step2NoMicPrompt": "Step 2: Listen to the chant and complete this line!",
+      "listenLineBtn": "Hear chant line",
+      "clapBeatBtn": "Tap beat ({current}/{total})",
+      "speakWordBtn": "Speak «{word}»",
+      "stopListeningBtn": "Done speaking",
+      "listenWordSlowBtn": "Hear slow model",
+      "listeningStatus": "ViRead Owl is listening…",
+      "evaluatingStatus": "Checking your spoken word…",
+      "unclearVoiceRetry": "Couldn't hear clearly — bring the mic closer and say «{word}» again! (No strike used)",
+      "strike1Gentle": "Almost! Listen slowly to «{word}» (0.88×) and try again!",
+      "strike2Phonics": "Let's sound out «{word}» step by step!",
+      "strike3RescueReady": "Owl Assist ready! Tap Owl Boost to keep your rhythm star!",
+      "owlRescueBtn": "🦉 Owl Boost",
+      "finishNoMicBtn": "✨ Listen & Complete Line",
+      "toggleNoMicOn": "No-Mic Mode: Clap Beats & Listen",
+      "toggleNoMicOff": "Play without Mic",
+      "micDeniedFallbackNotice": "Microphone is unavailable — Owl enabled No-Mic Mode: Clap Beats & Listen!",
+      "spokenPraise": "Wonderful! You spoke «{word}» right in rhythm!",
+      "rescuePraise": "Hooray for great effort! Your rhythm star lit up!",
+      "noMicPraise": "Great job! You clapped the beat and heard «{word}»!",
+      "nextLineBtn": "Next chant line",
+      "openFinaleBtn": "Open Glowing Chant Scroll",
+      "finaleEyebrow": "Chant Scroll Illuminated",
+      "listenFullChantBtn": "Hear full rhythm chant",
+      "dissolveBtn": "✨ Release chant scroll to the starry sky",
+      "dissolvedBadge": "Temporary chant cleared · Word mastery saved",
+      "playAnotherBtn": "Weave another rhythm chant",
+      "backToLibraryBtn": "Back to song library"
     }
   },
   "pictureDescription": {
@@ -539,6 +597,21 @@
       "action": "What are they doing?",
       "where": "Where & what color?"
     },
+    "practicingWordsBadge": "Words you're practicing",
+    "cardDifficultWordsTag": "Words to practice: {words}",
+    "matchedDifficultWordBanner": "Words reviewed: {words}",
+    "autoPlayOn": "Auto-play",
+    "autoPlayOff": "Auto-play (Off)",
+    "quickPlayAutopilotBtn": "Play now (Auto-pick review picture)",
+    "openingAutopilotPrompt": "Look at this picture and tell me what you see!",
+    "autoMicBlockedFallback": "Tap Speak with Microphone to tell your story!",
+    "autoSubmitCountdown": "Sending in {seconds}s",
+    "submitNowAction": "Send now",
+    "pauseAutoAction": "Pause auto",
+    "autoPausedNotice": "Auto-send paused — tap Send when you finish your story.",
+    "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
+    "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
+    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",
     "studioIllustrationBadge": "Clean Illustration"
   },
   "karaokeRuntime": {

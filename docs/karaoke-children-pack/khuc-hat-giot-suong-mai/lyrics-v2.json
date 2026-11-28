@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "0aa14c4a-87eb-53db-ba24-321fc664f19a",
+      "text": "Long lanh giọt sương nằm trên lá",
+      "start_ms": 2667,
+      "end_ms": 7334,
+      "syllables": [
+        {
+          "id": "4c923da5-eb84-5c6b-aecf-cec5aa9c3136",
+          "text": "Long",
+          "start_ms": 2667,
+          "end_ms": 3267
+        },
+        {
+          "id": "0c4972b5-7d4f-5f81-b3e9-17c4bc4095d6",
+          "text": "lanh",
+          "start_ms": 3267,
+          "end_ms": 3867
+        },
+        {
+          "id": "f473e767-965b-522b-8b80-29339f0b57ed",
+          "text": "giọt",
+          "start_ms": 3867,
+          "end_ms": 4467
+        },
+        {
+          "id": "2aef95ad-03c1-5b5a-b432-23324574d5ad",
+          "text": "sương",
+          "start_ms": 4467,
+          "end_ms": 5067
+        },
+        {
+          "id": "f893c386-4d99-5eca-8016-ba5b104fa5bd",
+          "text": "nằm",
+          "start_ms": 5067,
+          "end_ms": 5667
+        },
+        {
+          "id": "a4990b1d-54c9-5923-8952-1f059a77d63d",
+          "text": "trên",
+          "start_ms": 5667,
+          "end_ms": 6267
+        },
+        {
+          "id": "0f09c9a4-b531-52e4-9046-2dc261e85e90",
+          "text": "lá",
+          "start_ms": 6267,
+          "end_ms": 7334
+        }
+      ]
+    },
+    {
+      "id": "9412fe1e-fcc6-5f58-b27a-e31dda114d7d",
+      "text": "Đón tia nắng ấm buổi ban mai",
+      "start_ms": 8001,
+      "end_ms": 12668,
+      "syllables": [
+        {
+          "id": "3308bfbd-46df-5604-abc8-82e8b4858e36",
+          "text": "Đón",
+          "start_ms": 8001,
+          "end_ms": 8601
+        },
+        {
+          "id": "3c51ff63-9346-564a-9007-88cd87c739d6",
+          "text": "tia",
+          "start_ms": 8601,
+          "end_ms": 9201
+        },
+        {
+          "id": "22f146f3-8cd6-55c7-8ac4-7df6746be1fc",
+          "text": "nắng",
+          "start_ms": 9201,
+          "end_ms": 9801
+        },
+        {
+          "id": "3088ced7-f645-5c21-ad0b-382a735cdd8b",
+          "text": "ấm",
+          "start_ms": 9801,
+          "end_ms": 10401
+        },
+        {
+          "id": "56107b5c-e9af-5421-a94a-622888dc272b",
+          "text": "buổi",
+          "start_ms": 10401,
+          "end_ms": 11001
+        },
+        {
+          "id": "8dfb3af3-84b8-5bc0-af25-11ca4b68c41e",
+          "text": "ban",
+          "start_ms": 11001,
+          "end_ms": 11601
+        },
+        {
+          "id": "acb31e55-150f-5a73-8479-febaac43387c",
+          "text": "mai",
+          "start_ms": 11601,
+          "end_ms": 12668
+        }
+      ]
+    },
+    {
+      "id": "9b0261a8-ddad-5f6e-83c5-1b35f058ec71",
+      "text": "Bay lên trời cao thành mây trắng",
+      "start_ms": 13335,
+      "end_ms": 18002,
+      "syllables": [
+        {
+          "id": "cd615ef0-050f-55bf-81f3-8a2d482fc03d",
+          "text": "Bay",
+          "start_ms": 13335,
+          "end_ms": 13935
+        },
+        {
+          "id": "a0689e9c-9ecd-57a4-b13a-dbf487fd4a4a",
+          "text": "lên",
+          "start_ms": 13935,
+          "end_ms": 14535
+        },
+        {
+          "id": "1473e2ca-6281-5153-af61-9d906e7f4667",
+          "text": "trời",
+          "start_ms": 14535,
+          "end_ms": 15135
+        },
+        {
+          "id": "8ea26425-5334-531c-9280-6c9128bcc464",
+          "text": "cao",
+          "start_ms": 15135,
+          "end_ms": 15735
+        },
+        {
+          "id": "3daed5c3-6f6d-5c6e-88f1-d66254c36880",
+          "text": "thành",
+          "start_ms": 15735,
+          "end_ms": 16335
+        },
+        {
+          "id": "c2e3d0d7-f93a-5b05-8fc7-84a824ab599e",
+          "text": "mây",
+          "start_ms": 16335,
+          "end_ms": 16935
+        },
+        {
+          "id": "6534edbc-f246-5f8f-940e-4ea16e846d04",
+          "text": "trắng",
+          "start_ms": 16935,
+          "end_ms": 18002
+        }
+      ]
+    },
+    {
+      "id": "969029cf-8c5b-5503-9826-86c0f128eca3",
+      "text": "Bồng bềnh theo gió dạo dặm dài",
+      "start_ms": 18669,
+      "end_ms": 23336,
+      "syllables": [
+        {
+          "id": "0cb8d405-ce27-5cff-82f2-09731d8a1477",
+          "text": "Bồng",
+          "start_ms": 18669,
+          "end_ms": 19269
+        },
+        {
+          "id": "6b6da953-7447-533c-97a6-8beb9ca9fb43",
+          "text": "bềnh",
+          "start_ms": 19269,
+          "end_ms": 19869
+        },
+        {
+          "id": "340022aa-e2c8-56ea-b721-6c9d4ece9237",
+          "text": "theo",
+          "start_ms": 19869,
+          "end_ms": 20469
+        },
+        {
+          "id": "94d9a80d-eef8-5e5b-921a-0504438de767",
+          "text": "gió",
+          "start_ms": 20469,
+          "end_ms": 21069
+        },
+        {
+          "id": "701144ff-d227-5fb6-871c-dfd2c29cf66d",
+          "text": "dạo",
+          "start_ms": 21069,
+          "end_ms": 21669
+        },
+        {
+          "id": "fa32687c-3edf-5060-bcbc-a8fe850b4501",
+          "text": "dặm",
+          "start_ms": 21669,
+          "end_ms": 22269
+        },
+        {
+          "id": "8ac337fa-6905-5e39-86b2-97915cdb4eb5",
+          "text": "dài",
+          "start_ms": 22269,
+          "end_ms": 23336
+        }
+      ]
+    },
+    {
+      "id": "cb550715-d7c0-597b-ad23-19db40b400f5",
+      "text": "Hóa cơn mưa rào về muôn lối",
+      "start_ms": 24003,
+      "end_ms": 28670,
+      "syllables": [
+        {
+          "id": "ad38b62e-81e3-5e6b-b35e-39296c64932d",
+          "text": "Hóa",
+          "start_ms": 24003,
+          "end_ms": 24603
+        },
+        {
+          "id": "f4571dbd-d43f-5b5a-8725-fd295a43603c",
+          "text": "cơn",
+          "start_ms": 24603,
+          "end_ms": 25203
+        },
+        {
+          "id": "baf95247-c9af-5ec7-882f-8c7d95d76a64",
+          "text": "mưa",
+          "start_ms": 25203,
+          "end_ms": 25803
+        },
+        {
+          "id": "4f466fc3-bfcc-5fd6-8893-6c4185c3848d",
+          "text": "rào",
+          "start_ms": 25803,
+          "end_ms": 26403
+        },
+        {
+          "id": "130b73a4-b0be-59a0-a584-abe63c77de09",
+          "text": "về",
+          "start_ms": 26403,
+          "end_ms": 27003
+        },
+        {
+          "id": "dda4fa9b-2297-540e-85e3-471a4bebd524",
+          "text": "muôn",
+          "start_ms": 27003,
+          "end_ms": 27603
+        },
+        {
+          "id": "0d851d2b-a130-5c6d-a8c7-aa107c784c7c",
+          "text": "lối",
+          "start_ms": 27603,
+          "end_ms": 28670
+        }
+      ]
+    },
+    {
+      "id": "ec45d486-c4a7-5029-9591-ff147e181dce",
+      "text": "Cho đồng lúa chín thắm tương lai",
+      "start_ms": 29337,
+      "end_ms": 34004,
+      "syllables": [
+        {
+          "id": "9f898fed-c91c-53e8-a600-3be5046fcaab",
+          "text": "Cho",
+          "start_ms": 29337,
+          "end_ms": 29937
+        },
+        {
+          "id": "7d651c5a-db8c-5214-81c5-5fe25004793b",
+          "text": "đồng",
+          "start_ms": 29937,
+          "end_ms": 30537
+        },
+        {
+          "id": "ca1105c8-7d10-5579-a0c5-8b99a65d743a",
+          "text": "lúa",
+          "start_ms": 30537,
+          "end_ms": 31137
+        },
+        {
+          "id": "a09cd665-5ae8-549a-be95-7d81eb3ee061",
+          "text": "chín",
+          "start_ms": 31137,
+          "end_ms": 31737
+        },
+        {
+          "id": "2adac184-f084-53b3-be1f-713f2c7d7b91",
+          "text": "thắm",
+          "start_ms": 31737,
+          "end_ms": 32337
+        },
+        {
+          "id": "1c5e3167-6228-56be-9993-bfac6e466fb7",
+          "text": "tương",
+          "start_ms": 32337,
+          "end_ms": 32937
+        },
+        {
+          "id": "96564601-0b9c-5bd0-aa78-d9293250582f",
+          "text": "lai",
+          "start_ms": 32937,
+          "end_ms": 34004
+        }
+      ]
+    }
+  ]
+}

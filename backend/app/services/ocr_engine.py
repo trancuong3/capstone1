@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -36,6 +37,7 @@ from app.services.ocr_evidence import (
 from app.services.viread_vietocr_v2_preprocessing import preprocess_line_array
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
 
 # The Windows setup script keeps the pinned Vietnamese model inside this
 # checkout instead of writing into Program Files. Tesseract expects the parent
@@ -767,44 +769,69 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     load_fallback_reason: str | None = None
     with _engine_lock:
         if not _ocr_dependencies_loaded:
-            _ocr_dependencies_loaded = True
-            try:
-                import torch as torch_runtime
-                torch = torch_runtime
-            except Exception as exc:
-                torch = None
-                _vietocr_import_status = "not_installed"
-                _vietocr_import_error = type(exc).__name__
-            try:
-                from paddleocr import PaddleOCR as paddle_runtime
-                PaddleOCR = paddle_runtime
+            if torch is None:
+                try:
+                    import torch as torch_runtime
+                    torch = torch_runtime
+                except Exception as exc:
+                    torch = None
+                    try:
+                        package_version("torch")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                    _vietocr_import_error = type(exc).__name__
+            if PaddleOCR is None:
+                os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
+                if "lmdb.cffi" in sys.modules or (
+                    "lmdb" in sys.modules and "lmdb.cpython" not in sys.modules
+                ):
+                    for _lmdb_mod in ("lmdb", "lmdb.cffi", "lmdb.cpython"):
+                        sys.modules.pop(_lmdb_mod, None)
+                try:
+                    from paddleocr import PaddleOCR as paddle_runtime
+                    PaddleOCR = paddle_runtime
+                    _paddle_import_status = "success"
+                    _paddle_import_error = None
+                except Exception as exc:
+                    PaddleOCR = None
+                    try:
+                        package_version("paddleocr")
+                    except PackageNotFoundError:
+                        _paddle_import_status = "not_installed"
+                        _paddle_import_error = None
+                    else:
+                        _paddle_import_status = "not_initialized"
+                        _paddle_import_error = type(exc).__name__
+            elif _paddle_import_status not in ("success", "not_installed"):
                 _paddle_import_status = "success"
                 _paddle_import_error = None
-            except Exception as exc:
-                PaddleOCR = None
+            if Cfg is None or Predictor is None:
                 try:
-                    package_version("paddleocr")
-                except PackageNotFoundError:
-                    _paddle_import_status = "not_installed"
-                else:
-                    _paddle_import_status = "not_initialized"
-                    _paddle_import_error = type(exc).__name__
-            try:
-                from vietocr.tool.config import Cfg as vietocr_config
-                from vietocr.tool.predictor import Predictor as vietocr_predictor
-                _install_safe_vietocr_downloaders()
-                Cfg, Predictor = vietocr_config, vietocr_predictor
+                    from vietocr.tool.config import Cfg as vietocr_config
+                    from vietocr.tool.predictor import Predictor as vietocr_predictor
+                    _install_safe_vietocr_downloaders()
+                    Cfg, Predictor = vietocr_config, vietocr_predictor
+                    _vietocr_import_status = "success"
+                    _vietocr_import_error = None
+                except Exception as exc:
+                    Cfg = Predictor = None
+                    try:
+                        package_version("vietocr")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                        _vietocr_import_error = None
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                        _vietocr_import_error = type(exc).__name__
+            elif _vietocr_import_status not in ("success", "not_installed"):
                 _vietocr_import_status = "success"
                 _vietocr_import_error = None
-            except Exception as exc:
-                Cfg = Predictor = None
-                try:
-                    package_version("vietocr")
-                except PackageNotFoundError:
-                    _vietocr_import_status = "not_installed"
-                else:
-                    _vietocr_import_status = "not_initialized"
-                    _vietocr_import_error = type(exc).__name__
+            _ocr_dependencies_loaded = (
+                _paddle_import_status in ("success", "not_installed")
+                and _vietocr_import_status in ("success", "not_installed")
+            )
 
         if _paddle_engine is None:
             if PaddleOCR is None:
@@ -1673,6 +1700,50 @@ def _resolve_tesseract_command() -> str | None:
     return configured_binary
 
 
+DEFAULT_OCR_MAX_INPUT_EDGE = 2600
+DEFAULT_OCR_PAGE_SOFT_BUDGET_SECONDS = 45.0
+DEFAULT_OCR_PAGE_HARD_BUDGET_SECONDS = 90.0
+
+
+def _resolve_max_input_edge() -> int:
+    raw = (os.getenv("VIREAD_OCR_MAX_INPUT_EDGE") or "").strip()
+    if not raw:
+        return DEFAULT_OCR_MAX_INPUT_EDGE
+    try:
+        return max(256, int(raw))
+    except ValueError:
+        return DEFAULT_OCR_MAX_INPUT_EDGE
+
+
+def _resolve_page_budget_seconds(env_key: str, default: float) -> float:
+    raw = (os.getenv(env_key) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return default
+
+
+def _decode_image_bytes(image_bytes: bytes) -> np.ndarray:
+    """Decode image bytes and downscale giant images to cap max edge while preserving aspect ratio."""
+    array = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if image is None or getattr(image, "size", 0) == 0 or getattr(image, "ndim", 0) < 2:
+        raise ValueError("Image decoding failed")
+    raw_h, raw_w = image.shape[:2]
+    if raw_w <= 0 or raw_h <= 0:
+        raise ValueError("Image dimensions are invalid")
+    max_edge = _resolve_max_input_edge()
+    max_dim = max(raw_w, raw_h)
+    if max_dim > max_edge:
+        scale = float(max_edge) / float(max_dim)
+        new_w = max(1, int(round(raw_w * scale)))
+        new_h = max(1, int(round(raw_h * scale)))
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return image
+
+
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
     _pt, _output = _ensure_pytesseract()
@@ -1684,13 +1755,8 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
         _ensure_tesseract_language_data()
 
-    array = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-    if image is None or getattr(image, "size", 0) == 0 or getattr(image, "ndim", 0) < 2:
-        raise ValueError("Image decoding failed")
+    image = _decode_image_bytes(image_bytes)
     orig_height, orig_width = image.shape[:2]
-    if orig_width <= 0 or orig_height <= 0:
-        raise ValueError("Image decoding failed")
 
     target_lang = os.getenv("TESSERACT_LANG", "vie")
     gray = _normalize_text_background(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
@@ -1703,6 +1769,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             lang=target_lang,
             config="--oem 1 --psm 6",
             output_type=dict_output,
+            timeout=30,
         )
     except Exception as exc:
         raise OcrEngineUnavailable("Tesseract execution failed") from exc
@@ -2114,7 +2181,20 @@ def _normalize_text_background(gray: np.ndarray) -> np.ndarray:
     # Excluding equality misses the background of clean two-tone screenshots.
     if float(np.mean(gray <= threshold)) > 0.5:
         gray = cv2.bitwise_not(gray)
-    background = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(8.0, max(gray.shape) / 40.0))
+    h, w = gray.shape[:2]
+    sigma = max(8.0, max(h, w) / 40.0)
+    if min(h, w) >= 400:
+        # Downscale by 4x before running the wide background blur to avoid
+        # multi-second 901x901 GaussianBlur GIL freezes on high-resolution pages.
+        small_w = max(1, w // 4)
+        small_h = max(1, h // 4)
+        small = cv2.resize(gray, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        small_sigma = max(2.0, sigma / 4.0)
+        ksize = max(3, int(round(small_sigma * 6.0)) | 1)
+        small_bg = cv2.GaussianBlur(small, (ksize, ksize), sigmaX=small_sigma)
+        background = cv2.resize(small_bg, (w, h), interpolation=cv2.INTER_LINEAR)
+    else:
+        background = cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma)
     return cv2.divide(gray, background, scale=255)
 
 
@@ -2201,7 +2281,7 @@ def _attach_tesseract_line_readings(
             lang=os.getenv("TESSERACT_LANG", "vie"),
             config="--oem 1 --psm 3",
             output_type=dict_output,
-            timeout=60,
+            timeout=25,
         )
     except Exception as exc:
         logger.warning("Tesseract page reading failed: %s", type(exc).__name__)
@@ -2574,14 +2654,21 @@ def _extract_text_and_boxes_dual_engine(
     paddle_engine: Any,
     vietocr_engine: Any | None,
 ) -> dict[str, object]:
-    array = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-    if image is None:
-        raise ValueError("Image decoding failed")
+    page_started = time.monotonic()
+    soft_budget_s = _resolve_page_budget_seconds(
+        "VIREAD_OCR_PAGE_SOFT_BUDGET_SECONDS", DEFAULT_OCR_PAGE_SOFT_BUDGET_SECONDS
+    )
+    hard_budget_s = max(
+        soft_budget_s,
+        _resolve_page_budget_seconds(
+            "VIREAD_OCR_PAGE_HARD_BUDGET_SECONDS", DEFAULT_OCR_PAGE_HARD_BUDGET_SECONDS
+        ),
+    )
+    hard_budget_aborted = False
+    soft_budget_skipped = False
 
+    image = _decode_image_bytes(image_bytes)
     orig_height, orig_width = image.shape[:2]
-    if orig_width <= 0 or orig_height <= 0:
-        raise ValueError("Image dimensions are invalid")
 
     scale_factor = 1.0
     max_dim = max(orig_width, orig_height)
@@ -2678,6 +2765,13 @@ def _extract_text_and_boxes_dual_engine(
         with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
             if use_batch:
                 for chunk_start in range(0, len(prepared_items), 16):
+                    if (time.monotonic() - page_started) >= hard_budget_s:
+                        hard_budget_aborted = True
+                        logger.warning(
+                            "Dual-engine OCR hit %.1fs hard page budget during VietOCR batch; returning best verified lines.",
+                            hard_budget_s,
+                        )
+                        break
                     chunk = prepared_items[chunk_start : chunk_start + 16]
                     batch_imgs = [entry["prediction_image"] for entry in chunk]
                     batch_ok = False
@@ -2695,12 +2789,24 @@ def _extract_text_and_boxes_dual_engine(
                         batch_ok = False
                     if not batch_ok:
                         for entry in chunk:
+                            if (time.monotonic() - page_started) >= hard_budget_s:
+                                hard_budget_aborted = True
+                                break
                             try:
                                 entry["viet_text"] = vietocr_engine.predict(entry["prediction_image"])
                             except Exception as exc:
                                 entry["viet_exc"] = exc
+                        if hard_budget_aborted:
+                            break
             else:
                 for entry in prepared_items:
+                    if (time.monotonic() - page_started) >= hard_budget_s:
+                        hard_budget_aborted = True
+                        logger.warning(
+                            "Dual-engine OCR hit %.1fs hard page budget during VietOCR line pass; returning best verified lines.",
+                            hard_budget_s,
+                        )
+                        break
                     try:
                         entry["viet_text"] = vietocr_engine.predict(entry["prediction_image"])
                     except Exception as exc:
@@ -2962,11 +3068,66 @@ def _extract_text_and_boxes_dual_engine(
     if not words_output:
         raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
 
-    tesseract_stats = _attach_tesseract_line_readings(image, words_output)
-    crop_stats = _recognize_uncertain_word_crops(
-        image, words_output, paddle_engine, vietocr_engine
-    )
-    adjudication_stats = _adjudicate_disputed_words(image, words_output)
+    elapsed_before_tess = time.monotonic() - page_started
+    tesseract_budget_cutoff = max(soft_budget_s, hard_budget_s - 25.0)
+    if hard_budget_aborted or elapsed_before_tess >= tesseract_budget_cutoff:
+        hard_budget_aborted = hard_budget_aborted or (elapsed_before_tess >= hard_budget_s)
+        soft_budget_skipped = True
+        tesseract_stats = {
+            "status": "skipped_time_budget",
+            "paired_words": 0,
+            "error": None,
+            "elapsed_ms": 0.0,
+        }
+    else:
+        tesseract_stats = _attach_tesseract_line_readings(image, words_output)
+
+    elapsed_before_crops = time.monotonic() - page_started
+    if hard_budget_aborted or elapsed_before_crops >= soft_budget_s:
+        soft_budget_skipped = True
+        hard_budget_aborted = hard_budget_aborted or (elapsed_before_crops >= hard_budget_s)
+        crop_stats = {
+            "bbox_validated": 0,
+            "requested": 0,
+            "recognized": 0,
+            "rejected_bbox": 0,
+            "rejected_crop_quality": 0,
+            "skipped_by_page_limit": 0,
+            "skipped_by_time_budget": True,
+            "inference_calls": 0,
+            "paddle_failures": 0,
+            "vietocr_failures": 0,
+            "elapsed_ms": 0.0,
+            "max_crops_per_page": MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+        }
+        adjudication_stats = {
+            "rule": OCR_ADJUDICATION_RULE,
+            "considered": 0,
+            "resolved": 0,
+            "text_changed": 0,
+            "tesseract_calls": 0,
+            "skipped_by_time_budget": True,
+            "elapsed_ms": 0.0,
+        }
+    else:
+        crop_stats = _recognize_uncertain_word_crops(
+            image, words_output, paddle_engine, vietocr_engine
+        )
+        elapsed_before_adj = time.monotonic() - page_started
+        if elapsed_before_adj >= soft_budget_s:
+            soft_budget_skipped = True
+            hard_budget_aborted = hard_budget_aborted or (elapsed_before_adj >= hard_budget_s)
+            adjudication_stats = {
+                "rule": OCR_ADJUDICATION_RULE,
+                "considered": 0,
+                "resolved": 0,
+                "text_changed": 0,
+                "tesseract_calls": 0,
+                "skipped_by_time_budget": True,
+                "elapsed_ms": 0.0,
+            }
+        else:
+            adjudication_stats = _adjudicate_disputed_words(image, words_output)
     punctuation_stats = _reconcile_punctuation(words_output)
     for word in words_output:
         bbox_source = word.pop("bbox_source", None)
@@ -3047,6 +3208,13 @@ def _extract_text_and_boxes_dual_engine(
             "selective_crop_stats": crop_stats,
             "adjudication_stats": adjudication_stats,
             "punctuation_stats": punctuation_stats,
+            "page_time_budget": {
+                "soft_seconds": soft_budget_s,
+                "hard_seconds": hard_budget_s,
+                "elapsed_seconds": round(time.monotonic() - page_started, 3),
+                "soft_skipped": soft_budget_skipped,
+                "hard_aborted": hard_budget_aborted,
+            },
         },
     }
 

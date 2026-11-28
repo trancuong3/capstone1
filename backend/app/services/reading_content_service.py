@@ -195,6 +195,36 @@ class ReadingContentService:
         words = []
         seen = set()
         legacy = False
+        is_real_repo = isinstance(self.repository, ReadingContentRepository)
+        v1_page_ids: list[UUID] = []
+        v1_rev_ids: list[UUID] = []
+        if is_real_repo:
+            seen_v1: set[tuple[UUID, UUID]] = set()
+            for report in reversed(reports):
+                metadata = report.Summary if isinstance(report.Summary, dict) else {}
+                if metadata.get("assessment_version") != 1:
+                    continue
+                key = (report.PageId, report.PageRevisionId)
+                if key in seen_v1:
+                    continue
+                seen_v1.add(key)
+                v1_page_ids.append(report.PageId)
+                v1_rev_ids.append(report.PageRevisionId)
+        batched_pages = (
+            await self.repository.pages_by_ids(v1_page_ids)
+            if is_real_repo and v1_page_ids
+            else None
+        )
+        batched_revisions = (
+            await self.repository.revisions_by_ids(v1_rev_ids)
+            if is_real_repo and v1_rev_ids
+            else None
+        )
+        batched_words = (
+            await self.repository.revision_words_by_revision_ids(v1_rev_ids)
+            if is_real_repo and v1_rev_ids
+            else None
+        )
         for report in reversed(reports):
             metadata = report.Summary if isinstance(report.Summary, dict) else {}
             if metadata.get("assessment_version") != 1:
@@ -203,15 +233,27 @@ class ReadingContentService:
             key = (report.PageId, report.PageRevisionId)
             if key in seen:
                 continue
-            page = await self.repository.page_by_id(report.PageId)
-            revision = await self.repository.revision_snapshot(*key)
+            page = (
+                batched_pages.get(report.PageId)
+                if batched_pages is not None
+                else await self.repository.page_by_id(report.PageId)
+            )
+            revision = (
+                batched_revisions.get(key)
+                if batched_revisions is not None
+                else await self.repository.revision_snapshot(*key)
+            )
             if (report.SessionId != session_id or page is None or page.BookId != session.BookId
                     or revision is None or (selected and key not in selected)):
                 raise HTTPException(status_code=501, detail="Saved practice identity is not available")
             try:
                 snapshot = [StoredInitialWordAssessment.model_validate(item)
                             for item in metadata.get("initial_assessment", [])]
-                valid_words = await self.repository.revision_words(report.PageRevisionId)
+                valid_words = (
+                    batched_words.get(report.PageRevisionId, [])
+                    if batched_words is not None
+                    else await self.repository.revision_words(report.PageRevisionId)
+                )
                 if (not snapshot or len({word.word_id for word in snapshot}) != len(snapshot)
                         or {word.word_id for word in snapshot} != {word.Id for word in valid_words}):
                     raise ValueError("Invalid saved word identity")
@@ -287,42 +329,83 @@ class ReadingContentService:
                 status_code=409,
                 detail="Cannot create reading events for a finished session",
             )
-        session_rows = await self.repository.session_page_rows(session.Id)
-        if session_rows:
-            snapshot = await self.repository.session_page(session.Id, payload.PageId)
-            if snapshot is None or snapshot.PageRevisionId != payload.PageRevisionId:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Reading events must reference a page and revision in this session's selected range.",
-                    },
+        if isinstance(self.repository, ReadingContentRepository):
+            content_rows = await self.repository.session_pages_with_content(session.Id)
+            if content_rows:
+                selected_tuple = next(
+                    (item for item in content_rows if item[0].PageId == payload.PageId),
+                    None,
                 )
-            page = await self.repository.page_by_id(snapshot.PageId)
-            revision = await self.repository.revision_snapshot(
-                snapshot.PageId, snapshot.PageRevisionId
-            )
-            if page is None or page.BookId != session.BookId or revision is None:
-                raise HTTPException(status_code=409, detail="Saved page revision is unavailable")
+                if selected_tuple is None or selected_tuple[0].PageRevisionId != payload.PageRevisionId:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference a page and revision in this session's selected range.",
+                        },
+                    )
+                _, page, revision = selected_tuple
+                if page is None or page.BookId != session.BookId or revision is None:
+                    raise HTTPException(status_code=409, detail="Saved page revision is unavailable")
+            else:
+                page = await self._repo_verified_page(payload.PageId, session.BookId, actor_id)
+                if page is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference an active verified page in this session's book.",
+                        },
+                    )
+                revision = await self.repository.verified_revision(page.Id, payload.PageRevisionId)
+                if revision is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference a verified revision of the selected page.",
+                        },
+                    )
         else:
-            page = await self._repo_verified_page(payload.PageId, session.BookId, actor_id)
-            if page is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Reading events must reference an active verified page in this session's book.",
-                    },
+            session_rows = await self.repository.session_page_rows(session.Id)
+            if session_rows:
+                snapshot = next(
+                    (row for row in session_rows if row.PageId == payload.PageId),
+                    None,
                 )
-            revision = await self.repository.verified_revision(page.Id, payload.PageRevisionId)
-            if revision is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Reading events must reference a verified revision of the selected page.",
-                    },
+                if snapshot is None or snapshot.PageRevisionId != payload.PageRevisionId:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference a page and revision in this session's selected range.",
+                        },
+                    )
+                page = await self.repository.page_by_id(snapshot.PageId)
+                revision = await self.repository.revision_snapshot(
+                    snapshot.PageId, snapshot.PageRevisionId
                 )
+                if page is None or page.BookId != session.BookId or revision is None:
+                    raise HTTPException(status_code=409, detail="Saved page revision is unavailable")
+            else:
+                page = await self._repo_verified_page(payload.PageId, session.BookId, actor_id)
+                if page is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference an active verified page in this session's book.",
+                        },
+                    )
+                revision = await self.repository.verified_revision(page.Id, payload.PageRevisionId)
+                if revision is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Reading events must reference a verified revision of the selected page.",
+                        },
+                    )
         if payload.WordId is not None and not await self.repository.revision_word_exists(
             revision.Id, payload.WordId
         ):
@@ -806,11 +889,32 @@ class ReadingContentService:
         await self.require_owned_child(session.ChildId, actor_id)
         return self._summary(session)
 
+    async def get_session_page_for_comparison(
+        self, session_id: UUID, actor_id: UUID
+    ) -> ReadingPageDTO:
+        """Lightweight session page fetch for transcript comparison (no media signing/savepoints)."""
+        return await self._get_session_page_internal(
+            session_id, actor_id, base_url=None, include_media=False
+        )
+
     async def get_session_page(
         self, session_id: UUID, actor_id: UUID, *, base_url: str | None = None
     ) -> ReadingPageDTO:
+        return await self._get_session_page_internal(
+            session_id, actor_id, base_url=base_url, include_media=True
+        )
+
+    async def _get_session_page_internal(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+        *,
+        base_url: str | None = None,
+        include_media: bool = True,
+    ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
         known_book_is_private: bool | None = None
+        known_owner_parent_id: UUID | None = None
         if isinstance(self.repository, ReadingContentRepository):
             ctx = await self.repository.session_with_ownership_and_book(
                 session_id, actor_id
@@ -821,6 +925,7 @@ class ReadingContentService:
             if not child_owned:
                 raise HTTPException(status_code=404, detail="Child profile not found")
             known_book_is_private = is_book_private(book_row)
+            known_owner_parent_id = getattr(book_row, "OwnerParentId", None)
 
             content_rows = await self.repository.session_pages_with_content(session.Id)
             if content_rows:
@@ -845,6 +950,8 @@ class ReadingContentService:
                     revision,
                     base_url=base_url,
                     book_is_private=known_book_is_private,
+                    owner_parent_id=known_owner_parent_id,
+                    include_media=include_media,
                 )
         else:
             session = await self._repo_session(session_id, actor_id)
@@ -867,7 +974,12 @@ class ReadingContentService:
                 )
                 if page is None or revision is None or page.BookId != session.BookId:
                     raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
-                return await self._build_page_dto(page, revision, base_url=base_url)
+                return await self._build_page_dto(
+                    page,
+                    revision,
+                    base_url=base_url,
+                    include_media=include_media,
+                )
 
         # Legacy sessions created before range persistence continue to use the
         # original one-page selection and current verified-revision contract.
@@ -911,6 +1023,25 @@ class ReadingContentService:
             revision,
             base_url=base_url,
             book_is_private=known_book_is_private,
+            owner_parent_id=known_owner_parent_id,
+            include_media=include_media,
+        )
+
+    async def get_page_for_comparison(
+        self,
+        page_id: UUID,
+        session_id: UUID,
+        actor_id: UUID,
+        revision_id: UUID | None = None,
+    ) -> ReadingPageDTO:
+        """Lightweight page fetch for transcript comparison (no media signing/savepoints)."""
+        return await self._get_page_internal(
+            page_id,
+            session_id,
+            actor_id,
+            revision_id=revision_id,
+            base_url=None,
+            include_media=False,
         )
 
     async def get_page(
@@ -922,8 +1053,28 @@ class ReadingContentService:
         *,
         base_url: str | None = None,
     ) -> ReadingPageDTO:
+        return await self._get_page_internal(
+            page_id,
+            session_id,
+            actor_id,
+            revision_id=revision_id,
+            base_url=base_url,
+            include_media=True,
+        )
+
+    async def _get_page_internal(
+        self,
+        page_id: UUID,
+        session_id: UUID,
+        actor_id: UUID,
+        revision_id: UUID | None = None,
+        *,
+        base_url: str | None = None,
+        include_media: bool = True,
+    ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
         known_book_is_private: bool | None = None
+        known_owner_parent_id: UUID | None = None
         if isinstance(self.repository, ReadingContentRepository):
             ctx = await self.repository.session_with_ownership_and_book(
                 session_id, actor_id
@@ -934,6 +1085,7 @@ class ReadingContentService:
             if not child_owned:
                 raise HTTPException(status_code=404, detail="Child profile not found")
             known_book_is_private = is_book_private(book_row)
+            known_owner_parent_id = getattr(book_row, "OwnerParentId", None)
 
             content_rows = await self.repository.session_pages_with_content(session.Id)
             if content_rows:
@@ -959,6 +1111,8 @@ class ReadingContentService:
                     revision,
                     base_url=base_url,
                     book_is_private=known_book_is_private,
+                    owner_parent_id=known_owner_parent_id,
+                    include_media=include_media,
                 )
         else:
             session = await self._repo_session(session_id, actor_id)
@@ -970,7 +1124,12 @@ class ReadingContentService:
             session_rows = await self.repository.session_page_rows(session.Id)
 
             if session_rows:
-                snapshot = await self.repository.session_page(session.Id, page_id)
+                snapshot = next(
+                    (row for row in session_rows if row.PageId == page_id),
+                    None,
+                )
+                if snapshot is None:
+                    snapshot = await self.repository.session_page(session.Id, page_id)
 
                 if snapshot is None:
                     raise HTTPException(
@@ -993,7 +1152,12 @@ class ReadingContentService:
                 if page is None or revision is None or page.BookId != session.BookId:
                     raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
 
-                return await self._build_page_dto(page, revision, base_url=base_url)
+                return await self._build_page_dto(
+                    page,
+                    revision,
+                    base_url=base_url,
+                    include_media=include_media,
+                )
 
         # Legacy session
         page = await self._repo_verified_page(page_id, session.BookId, actor_id)
@@ -1020,6 +1184,46 @@ class ReadingContentService:
             revision,
             base_url=base_url,
             book_is_private=known_book_is_private,
+            owner_parent_id=known_owner_parent_id,
+            include_media=include_media,
+        )
+
+    @staticmethod
+    def _build_session_progress_dto(
+        session: ReadingSession, rows: list[ReadingSessionPage]
+    ) -> ReadingSessionPageProgressDTO:
+        current_id = session.CurrentPageId or next(
+            (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
+            rows[0].PageId,
+        )
+        current_index = next(
+            (i for i, row in enumerate(rows) if row.PageId == current_id), 0
+        )
+        current_row = rows[current_index]
+        return ReadingSessionPageProgressDTO(
+            session_id=session.Id,
+            persisted=True,
+            start_page_id=rows[0].PageId,
+            end_page_id=rows[-1].PageId,
+            current_page_id=current_row.PageId,
+            start_page_number=rows[0].PageNumber,
+            end_page_number=rows[-1].PageNumber,
+            current_page_number=current_row.PageNumber,
+            current_index=current_index,
+            total_pages=len(rows),
+            completed_pages=sum(1 for row in rows if row.Status == "COMPLETED"),
+            pages=[
+                ReadingSessionPageProgressItem(
+                    page_id=row.PageId,
+                    page_revision_id=row.PageRevisionId,
+                    page_number=row.PageNumber,
+                    page_order=row.PageOrder,
+                    status=row.Status,
+                    started_at=row.StartedAt,
+                    completed_at=row.CompletedAt,
+                )
+                for row in rows
+            ],
         )
 
     async def get_session_progress(
@@ -1059,39 +1263,7 @@ class ReadingContentService:
                 )],
             )
 
-        current_id = session.CurrentPageId or next(
-            (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
-            rows[0].PageId,
-        )
-        current_index = next(
-            (i for i, row in enumerate(rows) if row.PageId == current_id), 0
-        )
-        current_row = rows[current_index]
-        return ReadingSessionPageProgressDTO(
-            session_id=session.Id,
-            persisted=True,
-            start_page_id=rows[0].PageId,
-            end_page_id=rows[-1].PageId,
-            current_page_id=current_row.PageId,
-            start_page_number=rows[0].PageNumber,
-            end_page_number=rows[-1].PageNumber,
-            current_page_number=current_row.PageNumber,
-            current_index=current_index,
-            total_pages=len(rows),
-            completed_pages=sum(1 for row in rows if row.Status == "COMPLETED"),
-            pages=[
-                ReadingSessionPageProgressItem(
-                    page_id=row.PageId,
-                    page_revision_id=row.PageRevisionId,
-                    page_number=row.PageNumber,
-                    page_order=row.PageOrder,
-                    status=row.Status,
-                    started_at=row.StartedAt,
-                    completed_at=row.CompletedAt,
-                )
-                for row in rows
-            ],
-        )
+        return self._build_session_progress_dto(session, rows)
 
     async def complete_session_page(
         self,
@@ -1130,7 +1302,7 @@ class ReadingContentService:
             current.Status = "COMPLETED"
             current.CompletedAt = current.CompletedAt or datetime.now(timezone.utc)
             await self.repository.save_session_progress(session, rows)
-        return await self.get_session_progress(session_id, actor_id)
+        return self._build_session_progress_dto(session, rows)
 
     async def navigate_session_page(
         self,
@@ -1164,7 +1336,7 @@ class ReadingContentService:
         if current is None:
             raise HTTPException(status_code=409, detail="Saved current page is not in this reading session")
         if current.PageId == target.PageId:
-            return await self.get_session_progress(session_id, actor_id)
+            return self._build_session_progress_dto(session, rows)
 
         now = datetime.now(timezone.utc)
         if target.PageOrder == current.PageOrder + 1:
@@ -1180,7 +1352,7 @@ class ReadingContentService:
             target.StartedAt = target.StartedAt or now
         session.CurrentPageId = target.PageId
         await self.repository.save_session_progress(session, rows)
-        return await self.get_session_progress(session_id, actor_id)
+        return self._build_session_progress_dto(session, rows)
 
     async def _build_page_dto(
         self,
@@ -1190,6 +1362,7 @@ class ReadingContentService:
         base_url: str | None = None,
         book_is_private: bool | None = None,
         owner_parent_id: UUID | None = None,
+        include_media: bool = True,
     ) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
         if not text_content:
@@ -1226,6 +1399,19 @@ class ReadingContentService:
                     "code": "CONTENT_NOT_READY",
                     "message": "The verified page has no valid word-position data. Ask an administrator to review the page.",
                 },
+            )
+
+        if not include_media:
+            return ReadingPageDTO(
+                page_id=page.Id,
+                page_revision_id=revision.Id,
+                page_number=page.PageNumber,
+                confidence=None,
+                width=int(getattr(page, "Width", 1000) or 1000),
+                height=int(getattr(page, "Height", 1000) or 1000),
+                image_url=None,
+                text=text_content,
+                words=words,
             )
 
         # Copy all ORM values needed for the response before ending the read

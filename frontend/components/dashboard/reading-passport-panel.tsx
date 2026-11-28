@@ -275,7 +275,7 @@ export function ReadingPassportPanel({
 
   return (
     <div
-      className="mt-3 space-y-3 rounded-control border border-primary/20 bg-white/95 p-4"
+      className="@container mt-3 space-y-3 rounded-control border border-primary/20 bg-white/95 p-4"
       data-testid="reading-passport-panel"
     >
       {passport ? (
@@ -304,7 +304,7 @@ export function ReadingPassportPanel({
             {passport.gentle_message_vi}
           </p>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 @[460px]:grid-cols-2">
             {passport.stamps.map((stamp) => (
               <div
                 className={`rounded-control border p-2.5 text-xs ${

@@ -18,7 +18,7 @@ export function AuthShell({ children }: AuthShellProps) {
   return (
     <div className="account-spread flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-3 py-4 sm:min-h-[640px] sm:px-12 sm:py-12">
+      <main className="flex w-full min-w-0 flex-1 items-start justify-center px-3 max-sm:py-3! sm:min-h-[640px] sm:items-center sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
           <div className="account-spread-inner grid w-full max-w-[560px] lg:max-w-[1088px] items-stretch overflow-hidden rounded-card border border-border bg-white lg:grid-cols-[1.1fr_1fr]">
             <div
@@ -34,7 +34,7 @@ export function AuthShell({ children }: AuthShellProps) {
                 className="object-cover object-[41%_center]"
               />
             </div>
-            <div className="mx-auto flex w-full max-w-[560px] flex-col justify-center [&>div]:rounded-none [&>div]:border-0 [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
+            <div className="mx-auto flex w-full max-w-[560px] flex-col justify-center [&>div]:rounded-none [&>div]:border-0 [&>div]:gap-3 [&>div]:p-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:gap-4 [&>div]:sm:px-8 [&>div]:sm:py-6">
               {children}
             </div>
           </div>

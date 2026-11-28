@@ -322,7 +322,8 @@
     "listenPhonics": "파닉스 듣기",
     "listeningRetry": "아이의 음성을 듣는 중…",
     "readAgain": "다시 읽기",
-    "stepsAria": "파닉스 단계"
+    "stepsAria": "파닉스 단계",
+    "autoHideHint": "철자 안내 완료 · 글자가 잘 보이도록 곧 닫혀요…"
   },
   "companion": {
     "teacherFemaleTitle": "AI 선생님",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "시범 음절 분해 · 어구 이어 읽기",
     "quickFixTitle": "칭찬 · 스스로 빠르게 고쳤어요!",
     "phonicsWinTitle": "칭찬 · 음절 분해를 아주 잘했어요!",
-    "overcameWordTitle": "환호 · 어려운 단어를 극복했어요!"
+    "overcameWordTitle": "환호 · 어려운 단어를 극복했어요!",
+    "dismissAria": "선생님 안내 숨기기"
   },
   "tutor": {
     "title": "이 단어는 어떻게 읽을까요?",
@@ -494,5 +496,12 @@
     "subtitle": "방금 읽은 책 페이지로 어휘와 문장 감각을 이어서 키워 보세요.",
     "pictureCta": "책 페이지 그림 묘사",
     "shooterCta": "책 페이지 문장 맞추기"
+  },
+  "lucBat": {
+    "toggleLabel": "륙밧(6-8조) 시 운율 가이드",
+    "toggleActive": "륙밧 운율 켜짐",
+    "coupletBadge": "6-8 연구 {count}쌍",
+    "beatGuide": "박자 끊어 읽기 2/2/2(6음절) · 2/2/2/2(8음절)",
+    "rhymePairLabel": "6번째 음절 운율 짝: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

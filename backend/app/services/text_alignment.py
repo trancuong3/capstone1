@@ -280,3 +280,19 @@ def summarize_alignment(alignment, words=None, threshold=2.0):
             if words else None
         ),
     }
+
+
+def align_text_with_regional_profile(
+    reference_text: str,
+    transcript: str,
+    phonetic_profile: str = "STRICT_SGK",
+) -> dict:
+    """Non-breaking dual-score alignment helper preserving strict SGK & regional scores."""
+    from app.services.regional_phonetics_service import evaluate_dual_score_alignment
+
+    evaluated = evaluate_dual_score_alignment(
+        reference_text,
+        transcript,
+        phonetic_profile,  # type: ignore[arg-type]
+    )
+    return evaluated.model_dump()

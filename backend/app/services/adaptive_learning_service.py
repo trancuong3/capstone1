@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import inspect
 from typing import Iterable
 from uuid import UUID
 
@@ -16,9 +17,17 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
+from app.services.child_difficult_word_feed import (
+    MIN_REINFORCEMENT_SCORE_NORMALIZED,
+    DifficultWordTarget,
+)
+from app.services.difficult_words_service import normalize_vietnamese_practice_word
 from app.schemas.adaptive_learning import (
     AdaptiveProfileRead,
     CrossGameRecommendationRead,
+    DailyFiveMinuteTrainCompleteRequest,
+    DailyFiveMinuteTrainCompleteResponse,
+    DailyFiveMinuteTrainRead,
     DifficultyDirection,
     EntertainmentRecommendationsRead,
     GameKey,
@@ -32,6 +41,12 @@ from app.schemas.adaptive_learning import (
     SkillStatus,
     SkillTaxonomyItem,
     SpacedDifficultWordRead,
+    TrainCar1WarmupRead,
+    TrainCar2GameKey,
+    TrainCar2GameRoundRead,
+    TrainCar3FinishMode,
+    TrainCar3FluencyFinishRead,
+    TrainWarmupWordItemRead,
 )
 
 NON_DIAGNOSTIC_DISCLAIMER_VI = (
@@ -239,6 +254,7 @@ def compute_adaptive_difficulty(
 def compute_spaced_difficult_words(
     word_attempts: list,
     *,
+    feed_targets: list[DifficultWordTarget] | None = None,
     now: datetime | None = None,
     limit: int = 8,
 ) -> list[SpacedDifficultWordRead]:
@@ -250,8 +266,12 @@ def compute_spaced_difficult_words(
 
     ref_now = now or datetime.now(timezone.utc)
     grouped: dict[str, dict] = {}
+    attempts_by_norm: dict[str, list[tuple[datetime, int, str]]] = defaultdict(list)
+
     for row in word_attempts:
-        norm = getattr(row, "NormalizedWord", None) or ""
+        norm = normalize_vietnamese_practice_word(
+            getattr(row, "NormalizedWord", None) or getattr(row, "DisplayText", None) or ""
+        )
         display = getattr(row, "DisplayText", None) or norm
         if not norm:
             continue
@@ -263,6 +283,10 @@ def compute_spaced_difficult_words(
                 "correct": 0,
                 "incorrect": 0,
                 "last_at": None,
+                "from_reading": False,
+                "heard_as": None,
+                "feed_priority": 0.0,
+                "reinforced_count": 0,
                 "rows": [],
             },
         )
@@ -274,8 +298,76 @@ def compute_spaced_difficult_words(
         elif status_val in ("INCORRECT", "UNCERTAIN"):
             bucket["incorrect"] += 1
         ts = getattr(row, "CompletedAt", None) or getattr(row, "CreatedAt", None)
-        if ts is not None and (bucket["last_at"] is None or ts > bucket["last_at"]):
-            bucket["last_at"] = ts
+        if ts is not None:
+            aware_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            if status_val in ("CORRECT", "INCORRECT", "UNCERTAIN"):
+                attempt_num = int(getattr(row, "AttemptNumber", 0) or 0)
+                attempts_by_norm[norm].append((aware_ts, attempt_num, str(status_val)))
+            if bucket["last_at"] is None or aware_ts > (
+                bucket["last_at"] if bucket["last_at"].tzinfo else bucket["last_at"].replace(tzinfo=timezone.utc)
+            ):
+                bucket["last_at"] = ts
+
+    # When live feed_targets is supplied, exclude mastered words (2 most recent valid == CORRECT)
+    # and merge real reading errors (ReadingComparisonReport + ReadingEvent) into spaced review.
+    feed_norms: set[str] = set()
+    if feed_targets is not None:
+        for norm, att_list in attempts_by_norm.items():
+            att_list.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            recent_two = [item[2] for item in att_list[:2]]
+            if len(recent_two) >= 2 and all(s == "CORRECT" for s in recent_two):
+                grouped.pop(norm, None)
+
+        for target in feed_targets:
+            norm = normalize_vietnamese_practice_word(target.normalized_word or target.word)
+            if not norm:
+                continue
+            feed_norms.add(norm)
+            reading_errors = (
+                int(target.reading_error_count)
+                if target.reading_error_count is not None
+                else int(target.error_count)
+            )
+            practice_errors = int(getattr(target, "practice_error_count", 0) or 0)
+            has_reading_evidence = reading_errors > 0
+            existing = grouped.get(norm)
+            if existing is None:
+                grouped[norm] = {
+                    "display_text": target.word,
+                    "attempts": 0,
+                    "correct": 0,
+                    "incorrect": int(target.error_count),
+                    "last_at": target.last_seen_at,
+                    "from_reading": has_reading_evidence,
+                    "heard_as": target.heard_as,
+                    "feed_priority": float(target.priority_score),
+                    "reinforced_count": int(target.reinforced_count),
+                    "rows": [],
+                }
+            else:
+                if has_reading_evidence:
+                    existing["from_reading"] = True
+                existing["heard_as"] = existing["heard_as"] or target.heard_as
+                existing["feed_priority"] = max(existing["feed_priority"], float(target.priority_score))
+                if target.reading_error_count is not None:
+                    existing["incorrect"] = max(existing["incorrect"], practice_errors) + reading_errors
+                else:
+                    existing["incorrect"] += reading_errors
+                existing["reinforced_count"] = max(
+                    existing["reinforced_count"], int(target.reinforced_count)
+                )
+                if target.last_seen_at is not None:
+                    cur_last = existing["last_at"]
+                    cur_aware = (
+                        cur_last if cur_last.tzinfo else cur_last.replace(tzinfo=timezone.utc)
+                    ) if cur_last is not None else None
+                    t_aware = (
+                        target.last_seen_at
+                        if target.last_seen_at.tzinfo
+                        else target.last_seen_at.replace(tzinfo=timezone.utc)
+                    )
+                    if cur_aware is None or t_aware > cur_aware:
+                        existing["last_at"] = target.last_seen_at
 
     ranked: list[SpacedDifficultWordRead] = []
     game_cycle: tuple[GameKey, ...] = (
@@ -298,17 +390,38 @@ def compute_spaced_difficult_words(
 
         # Target spaced interval grows with mastered repetitions: 1d -> 3d -> 7d.
         target_interval = 1 if correct == 0 else (3 if correct == 1 else 7)
+        is_new_reading_error = bool(info.get("from_reading")) and correct == 0
+        is_due = bool(
+            is_new_reading_error
+            or not mastered
+            or days_since is None
+            or days_since >= target_interval
+        )
         due_bonus = (
             1.5
-            if (not mastered or days_since is None or days_since >= target_interval)
+            if (is_new_reading_error or days_since is None or days_since >= target_interval)
             else 0.5
         )
-        error_weight = 1.0 + incorrect * 0.8 - correct * 0.35
+        error_weight = (
+            1.0
+            + incorrect * 0.8
+            - correct * 0.35
+            + float(info.get("feed_priority", 0.0)) * 0.3
+        )
         priority = round(max(0.1, error_weight * due_bonus), 2)
 
         phonics_cat, phonics_label = classify_vietnamese_phonics_category(info["display_text"])
         recommended_game = game_cycle[idx % len(game_cycle)]
-        if incorrect > correct:
+        heard_as = info.get("heard_as")
+        if heard_as:
+            reason_vi = (
+                f'Khi đọc sách bé từng đọc nhầm thành "{heard_as}"; ôn nhẹ qua trò chơi giúp bé nhớ ngay.'
+            )
+        elif info.get("from_reading") and incorrect > correct:
+            reason_vi = (
+                f"Bé vừa gặp khó ở từ này ({phonics_label}) khi đọc sách; nên ôn nhẹ trong câu ngắn."
+            )
+        elif incorrect > correct:
             reason_vi = f"Bé từng gặp khó ở từ này ({phonics_label}); nên ôn nhẹ qua trò chơi."
         elif not mastered and correct == 1:
             reason_vi = "Bé đã nói đúng 1 lần trong góc Giải trí; thử dùng thêm 1 lần nữa để làm chủ nhé!"
@@ -329,10 +442,13 @@ def compute_spaced_difficult_words(
                 reason_vi=reason_vi,
                 phonics_category=phonics_cat,
                 phonics_label_vi=phonics_label,
+                is_due=is_due,
             )
         )
 
-    ranked.sort(key=lambda item: (-item.priority_score, item.practice_count, item.normalized_word))
+    ranked.sort(
+        key=lambda item: (not item.is_due, -item.priority_score, item.practice_count, item.normalized_word)
+    )
     return ranked[:limit]
 
 
@@ -375,6 +491,7 @@ class AdaptiveLearningService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Child profile not found",
+                headers={"Cache-Control": "private, no-store"},
             )
         return child
 
@@ -618,7 +735,8 @@ class AdaptiveLearningService:
         teacher_gender: str | None = None,
     ) -> list[CrossGameRecommendationRead]:
         plan_map = {p.game_key: p for p in plans}
-        focus_words = [w.display_text for w in spaced_words[:3]]
+        due_words = [w for w in spaced_words if getattr(w, "is_due", True)]
+        focus_words = [w.display_text for w in due_words[:3]]
         teacher_label = "Thầy giáo AI" if teacher_gender == "male" else "Cô giáo AI"
         counts = {
             "PICTURE_DESCRIPTION": picture_count,
@@ -626,6 +744,18 @@ class AdaptiveLearningService:
             "KARAOKE": karaoke_count,
             "MEMORY_GAME": memory_count,
         }
+
+        def _difficulty_slug(level: int) -> str:
+            if level <= 2:
+                return "easy"
+            if level == 3:
+                return "medium"
+            return "challenge"
+
+        shooter_mode = "FILL_BLANK" if (child_grade >= 3 or focus_words) else "WORD_ORDER"
+        shooter_diff = plan_map["SENTENCE_SHOOTER"].recommended_difficulty
+        memory_mode = "FREE_RECALL" if child_grade >= 3 else "GUIDED_RECALL"
+        pic_mode = "VOCABULARY" if focus_words else ("STORY" if child_grade >= 3 else "OBSERVE")
 
         recs = [
             CrossGameRecommendationRead(
@@ -637,10 +767,14 @@ class AdaptiveLearningService:
                     if focus_words
                     else "Luyện xếp trật tự từ và điền từ vào chỗ trống siêu vui."
                 ),
-                suggested_mode="FILL_BLANK" if child_grade >= 3 else "WORD_ORDER",
-                suggested_difficulty=plan_map["SENTENCE_SHOOTER"].recommended_difficulty,
+                suggested_mode=shooter_mode,
+                suggested_difficulty=shooter_diff,
                 target_words=focus_words,
                 href="/entertainment/sentence-shooter",
+                quick_play_href=(
+                    f"/entertainment/sentence-shooter?autoplay=1&mode={shooter_mode}"
+                    f"&difficulty={_difficulty_slug(shooter_diff)}"
+                ),
                 priority=1 if focus_words else (2 + counts["SENTENCE_SHOOTER"]),
             ),
             CrossGameRecommendationRead(
@@ -648,10 +782,11 @@ class AdaptiveLearningService:
                 zone_title_vi="Khám phá trí nhớ",
                 game_title_vi="Bé nhớ được gì?",
                 reason_vi="Quan sát tranh tiếng Việt rực rỡ, rèn trí nhớ hình ảnh và kể tiếp câu chuyện sáng tạo.",
-                suggested_mode="FREE_RECALL" if child_grade >= 3 else "GUIDED_RECALL",
+                suggested_mode=memory_mode,
                 suggested_difficulty=plan_map["MEMORY_GAME"].recommended_difficulty,
                 target_words=focus_words[:2],
                 href="/entertainment/memory-game",
+                quick_play_href=f"/entertainment/memory-game?autoplay=1&recall_mode={memory_mode}",
                 priority=1 if counts["MEMORY_GAME"] == 0 else (2 + counts["MEMORY_GAME"]),
             ),
             CrossGameRecommendationRead(
@@ -659,10 +794,11 @@ class AdaptiveLearningService:
                 zone_title_vi="Thế giới kể chuyện",
                 game_title_vi=f"Kể chuyện qua tranh cùng {teacher_label}",
                 reason_vi=f"Luyện quan sát tranh và mở rộng câu văn cùng {teacher_label} dịu dàng.",
-                suggested_mode="STORY" if child_grade >= 3 else "OBSERVE",
+                suggested_mode=pic_mode,
                 suggested_difficulty=plan_map["PICTURE_DESCRIPTION"].recommended_difficulty,
                 target_words=focus_words[:2],
                 href="/entertainment/picture-description",
+                quick_play_href=f"/entertainment/picture-description?autoplay=1&mode={pic_mode}",
                 priority=2 + counts["PICTURE_DESCRIPTION"],
             ),
             CrossGameRecommendationRead(
@@ -678,6 +814,7 @@ class AdaptiveLearningService:
                 suggested_difficulty=plan_map["KARAOKE"].recommended_difficulty,
                 target_words=focus_words[:3],
                 href="/karaoke",
+                quick_play_href="/karaoke?autoplay=1",
                 priority=2 + counts["KARAOKE"],
             ),
         ]
@@ -687,6 +824,21 @@ class AdaptiveLearningService:
             r.model_copy(update={"priority": idx + 1})
             for idx, r in enumerate(recs)
         ]
+
+    async def _load_feed_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 12,
+    ) -> list[DifficultWordTarget] | None:
+        fn = getattr(self.repository, "list_difficult_word_targets", None)
+        if not callable(fn):
+            return None
+        res = fn(child_id, parent_id, limit=limit)
+        if inspect.isawaitable(res):
+            return await res
+        return None
 
     async def get_adaptive_profile(
         self,
@@ -700,6 +852,7 @@ class AdaptiveLearningService:
         resolved_gender = self._resolve_teacher_gender(child, teacher_gender)
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=90)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=90)
+        feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
         picture_sessions = await self.repository.list_picture_sessions(child_id, window_days=window_days)
         shooter_sessions = await self.repository.list_shooter_sessions(child_id, window_days=window_days)
         karaoke_sessions = await self.repository.list_karaoke_sessions(child_id, window_days=window_days)
@@ -715,7 +868,10 @@ class AdaptiveLearningService:
         )
         skills = self._build_skill_mastery(by_skill)
         plans = self._build_difficulty_plans(child.Grade, by_skill)
-        spaced_words = compute_spaced_difficult_words(word_attempts)
+        spaced_words = compute_spaced_difficult_words(
+            word_attempts,
+            feed_targets=feed_targets,
+        )
         recommendations = self._build_recommendations(
             child.Grade,
             plans,
@@ -798,6 +954,7 @@ class AdaptiveLearningService:
                 f"Chào {profile.child_alias}! Hôm nay mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
             )
 
+        due_words = [w for w in profile.spaced_difficult_words if getattr(w, "is_due", True)]
         return EntertainmentRecommendationsRead(
             child_id=profile.child_id,
             child_alias=profile.child_alias,
@@ -805,7 +962,7 @@ class AdaptiveLearningService:
             mascot_greeting_vi=greeting,
             natural_break_reminder_vi=break_msg,
             today_activities_count=today_count,
-            focus_difficult_words=[w.display_text for w in profile.spaced_difficult_words[:5]],
+            focus_difficult_words=[w.display_text for w in due_words[:5]],
             primary_recommendation=primary,
             recommendations=profile.recommendations,
         )
@@ -823,6 +980,7 @@ class AdaptiveLearningService:
         teacher_label = "Thầy giáo AI" if resolved_gender == "male" else "Cô giáo AI"
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=window_days)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=window_days)
+        feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
         picture_sessions = await self.repository.list_picture_sessions(child_id, window_days=window_days)
         shooter_sessions = await self.repository.list_shooter_sessions(child_id, window_days=window_days)
         karaoke_sessions = await self.repository.list_karaoke_sessions(child_id, window_days=window_days)
@@ -837,7 +995,34 @@ class AdaptiveLearningService:
             word_attempts,
         )
         skills = self._build_skill_mastery(by_skill)
-        spaced_words = compute_spaced_difficult_words(word_attempts, limit=10)
+        spaced_words = compute_spaced_difficult_words(
+            word_attempts,
+            feed_targets=feed_targets,
+            limit=10,
+        )
+
+        reinforced_norms: set[str] = set()
+        for row in explicit_rows:
+            if getattr(row, "SkillKey", None) == "difficult_word_mastery":
+                score_raw = float(getattr(row, "ScoreNormalized", 0.0) or 0.0)
+                if score_raw > 1.0:
+                    score_raw = score_raw / 100.0
+                if score_raw < MIN_REINFORCEMENT_SCORE_NORMALIZED:
+                    continue
+                for word in getattr(row, "PracticeWords", None) or []:
+                    norm = normalize_vietnamese_practice_word(word)
+                    if norm:
+                        reinforced_norms.add(norm)
+        for target in feed_targets or []:
+            if target.reinforced_count > 0:
+                reinforced_norms.add(target.normalized_word)
+        for att in word_attempts:
+            if getattr(att, "AssessmentStatus", None) == "CORRECT":
+                norm = normalize_vietnamese_practice_word(
+                    getattr(att, "NormalizedWord", None) or getattr(att, "DisplayText", None) or ""
+                )
+                if norm:
+                    reinforced_norms.add(norm)
 
         pic_scores = [s.BestScore * 10 for s in picture_sessions if s.AttemptsCount > 0]
         shoot_scores = [
@@ -968,6 +1153,7 @@ class AdaptiveLearningService:
             module_activities=module_activities,
             karaoke_weak_segments=weak_segments,
             home_support_tips_vi=tips[:4],
+            reading_misread_words_reinforced=len(reinforced_norms),
             generated_at=datetime.now(timezone.utc),
         )
 
@@ -1013,4 +1199,501 @@ class AdaptiveLearningService:
             confidence=row.Confidence,
             difficulty_level=row.DifficultyLevel,
             created_at=row.CreatedAt,
+        )
+
+    @staticmethod
+    def _build_syllable_hint_vi(display_text: str, phonics_category: str) -> str:
+        from app.services.active_weak_words import tokenize_focus_phrase
+        from app.services.vietnamese_phonics import build_vietnamese_phonics_steps
+
+        tokens = tokenize_focus_phrase(display_text)
+        syllable_join = " · ".join(tokens) if tokens else display_text
+        steps = build_vietnamese_phonics_steps(display_text)
+        blend_preview = ""
+        for step in steps:
+            if step.get("id") in ("onset_blend", "rhyme_build", "tone_blend"):
+                blend_preview = str(step.get("spoken_text") or "").rstrip(".")
+                if blend_preview:
+                    break
+
+        cue_by_cat = {
+            "l_n": "Đặt đầu lưỡi chạm nhẹ lợi trên cho âm l, hạ mềm cho âm n.",
+            "s_x": "Cong nhẹ đầu lưỡi ở âm s, thả nhẹ hơi phẳng ở âm x.",
+            "tr_ch": "Cong đầu lưỡi khi đọc tr, bật nhẹ mặt lưỡi khi đọc ch.",
+            "r_d_gi": "Rung nhẹ đầu lưỡi ở âm r, giữ hơi êm ở âm d/gi.",
+            "hoi_nga": "Thanh hỏi hạ nhẹ rồi nâng êm; thanh ngã nhấn nhịp giữa rõ ràng.",
+            "coda_n_ng_t_c": "Khép gọn âm cuối để tiếng tròn vành, rõ chữ.",
+            "compound_reduplicative": "Đọc liền mạch hai tiếng theo nhịp đều, không ngắt rời.",
+            "general": "Nghe mẫu chậm rồi đọc rõ từng tiếng thật bình tĩnh.",
+        }
+        cue = cue_by_cat.get(phonics_category, cue_by_cat["general"])
+        if blend_preview:
+            return f"Tách tiếng: {syllable_join} ({blend_preview}) — {cue}"
+        return f"Tách tiếng: {syllable_join} — {cue}"
+
+    @staticmethod
+    def _cold_start_words_for_grade(grade: int) -> tuple[tuple[str, str], ...]:
+        clamped = max(1, min(5, int(grade)))
+        by_grade: dict[int, tuple[tuple[str, str], ...]] = {
+            1: (
+                ("con trâu", "Con trâu thong thả gặm cỏ bên bờ đê."),
+                ("bông sen", "Bông sen hồng tỏa hương thơm dịu buổi sớm."),
+                ("cây tre", "Hàng cây tre xanh rì rào đón gió mát."),
+            ),
+            2: (
+                ("chim sẻ", "Chú chim sẻ nhỏ nhảy nhót trên cành cây."),
+                ("giọt sương", "Giọt sương sớm long lanh trên chiếc lá non."),
+                ("lung linh", "Ánh trăng rằm tỏa sáng lung linh trên sân nhà."),
+            ),
+            3: (
+                ("trong trẻo", "Tiếng suối chảy nghe thật trong trẻo và êm tai."),
+                ("rực rỡ", "Vườn hoa mùa xuân nở rộ sắc màu rực rỡ."),
+                ("cánh đồng", "Cánh đồng lúa chín vàng ươm dưới nắng mai."),
+            ),
+            4: (
+                ("khúc khuỷu", "Con đường nhỏ quanh đồi uốn lượn khúc khuỷu."),
+                ("xôn xao", "Tiếng lá thu xôn xao gọi mùa tựu trường về."),
+                ("truyền thống", "Làng nghề giữ gìn nét đẹp truyền thống lâu đời."),
+            ),
+            5: (
+                ("nghiêng nghiêng", "Bóng tre nghiêng nghiêng soi mát dòng sông quê."),
+                ("sáng suốt", "Đọc kỹ từng câu giúp em suy nghĩ sáng suốt hơn."),
+                ("trưởng thành", "Mỗi trang sách hay giúp chúng em thêm trưởng thành."),
+            ),
+        }
+        return by_grade[clamped]
+
+    @staticmethod
+    def _build_fluency_passage(
+        grade: int,
+        phonics_category: str,
+        target_words: list[str],
+    ) -> tuple[str, str, str]:
+        lead_words = ", ".join(target_words[:2]) if target_words else "từ vừa ôn"
+        w0 = target_words[0] if target_words else "cây tre"
+        w1 = target_words[1] if len(target_words) > 1 else w0
+
+        if grade <= 2:
+            by_cat: dict[str, tuple[str, str, str]] = {
+                "tr_ch": (
+                    "Buổi sớm bên hàng tre",
+                    f"Buổi sớm, nắng chiếu nhẹ qua hàng tre xanh. Bé thong thả đọc rõ tiếng {w0} và {w1} thật êm tai.",
+                    "Đọc chậm vừa phải, cong nhẹ đầu lưỡi ở các tiếng có âm tr và nghỉ hơi ở dấu chấm.",
+                ),
+                "s_x": (
+                    "Giọt sương mùa xuân",
+                    f"Sáng sớm, sương mai đậu trên lá xanh mát. Bé mỉm cười đọc vang từ {w0} cùng {w1} thật tròn vành.",
+                    "Giữ nhịp thở nhẹ, phân biệt êm âm s và âm x mà không cần vội vàng.",
+                ),
+                "l_n": (
+                    "Nắng lên lung linh",
+                    f"Nắng non lan nhẹ trên lối nhỏ quanh sân. Bé bình tĩnh đọc từng tiếng {w0} và {w1} thật rõ ràng.",
+                    "Chú ý vị trí đầu lưỡi ở âm l và âm n, ngắt nhịp nhẹ sau dấu phẩy.",
+                ),
+                "hoi_nga": (
+                    "Kể chuyện buổi chiều",
+                    f"Gió mát khẽ đưa hương hoa bưởi ngoài ngõ nhỏ. Bé đọc chậm rãi từ {w0} và {w1} đúng dấu thanh.",
+                    "Ngân nhẹ ở các tiếng có thanh hỏi và thanh ngã để câu đọc mềm mại hơn.",
+                ),
+            }
+            if phonics_category in by_cat:
+                return by_cat[phonics_category]
+            return (
+                "Góc đọc sách ấm áp",
+                f"Mỗi ngày năm phút, bé mở trang sách nhỏ bên cửa sổ. Bé đọc trôi chảy từ {w0} và {w1} với giọng thật vui.",
+                f"Nghe mẫu chậm 0.85x nếu cần, rồi đọc liền mạch câu có từ {lead_words}.",
+            )
+
+        return (
+            "Hành trình năm phút mỗi ngày",
+            (
+                f"Buổi chiều yên ả, ánh nắng dịu nhẹ trải trên bàn học nhỏ. "
+                f"Em đọc chậm rãi, rõ ràng từng câu văn có từ {w0} và {w1}, giữ nhịp ngắt nghỉ tự nhiên theo dấu câu."
+            ),
+            f"Giữ tốc độ vừa sức, nhấn nhẹ ở cụm từ {lead_words} và nghỉ hơi thoải mái cuối câu.",
+        )
+
+    async def get_daily_five_minute_train(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        teacher_gender: str | None = None,
+    ) -> DailyFiveMinuteTrainRead:
+        from app.services.active_weak_words import (
+            classify_vietnamese_phonics_category,
+            normalize_focus_phrase,
+            tokenize_focus_phrase,
+        )
+
+        child = await self._require_child(child_id, parent_id)
+        resolved_gender = self._resolve_teacher_gender(child, teacher_gender)
+        teacher_label = "Thầy giáo AI" if resolved_gender == "male" else "Cô giáo AI"
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+
+        explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=90)
+        word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=90)
+        picture_sessions = await self.repository.list_picture_sessions(child_id, window_days=30)
+        shooter_sessions = await self.repository.list_shooter_sessions(child_id, window_days=30)
+        karaoke_sessions = await self.repository.list_karaoke_sessions(child_id, window_days=30)
+        memory_sessions = await self.repository.list_memory_sessions(child_id, window_days=30)
+
+        by_skill = self._synthesize_evidence_rows(
+            explicit_rows,
+            picture_sessions,
+            shooter_sessions,
+            karaoke_sessions,
+            memory_sessions,
+            word_attempts,
+        )
+        plans = self._build_difficulty_plans(child.Grade, by_skill)
+        plan_map = {p.game_key: p for p in plans}
+        spaced_words = compute_spaced_difficult_words(word_attempts, now=now_utc, limit=6)
+
+        is_cold_start = len(spaced_words) == 0
+        warmup_items: list[TrainWarmupWordItemRead] = []
+        seen_norms: set[str] = set()
+
+        for sw in spaced_words[:3]:
+            norm = normalize_focus_phrase(sw.display_text) or sw.normalized_word
+            if not norm or norm in seen_norms:
+                continue
+            seen_norms.add(norm)
+            warmup_items.append(
+                TrainWarmupWordItemRead(
+                    normalized_word=norm,
+                    display_text=sw.display_text,
+                    phonics_category=sw.phonics_category,
+                    phonics_label_vi=sw.phonics_label_vi,
+                    syllable_hint_vi=self._build_syllable_hint_vi(
+                        sw.display_text, sw.phonics_category
+                    ),
+                    sample_sentence_vi=f"Bé đọc rõ từ {sw.display_text} trong câu ngắn thật bình tĩnh.",
+                    source="SPACED_DIFFICULT_WORD",
+                )
+            )
+
+        for cold_word, cold_sentence in self._cold_start_words_for_grade(child.Grade):
+            if len(warmup_items) >= 3:
+                break
+            norm = normalize_focus_phrase(cold_word)
+            if not norm or norm in seen_norms:
+                continue
+            seen_norms.add(norm)
+            p_cat, p_label = classify_vietnamese_phonics_category(cold_word)
+            warmup_items.append(
+                TrainWarmupWordItemRead(
+                    normalized_word=norm,
+                    display_text=cold_word,
+                    phonics_category=p_cat,
+                    phonics_label_vi=p_label,
+                    syllable_hint_vi=self._build_syllable_hint_vi(cold_word, p_cat),
+                    sample_sentence_vi=cold_sentence,
+                    source="COLD_START_GRADE",
+                )
+            )
+
+        cat_counts: dict[str, int] = defaultdict(int)
+        cat_labels: dict[str, str] = {}
+        for item in warmup_items:
+            cat_counts[item.phonics_category] += 1
+            cat_labels[item.phonics_category] = item.phonics_label_vi
+        dominant_cat = max(
+            cat_counts,
+            key=lambda key: (cat_counts[key], 1 if key != "general" else 0),
+        )
+        dominant_label = cat_labels[dominant_cat]
+        seeded_words = [w.display_text for w in warmup_items]
+
+        car_1 = TrainCar1WarmupRead(
+            title_vi="Toa 1: Khởi động từ khó",
+            subtitle_vi=(
+                f"Làm quen nhẹ 3 từ phù hợp lớp {child.Grade} cùng {teacher_label}."
+                if is_cold_start
+                else f"Ôn nhẹ {len(warmup_items)} từ thuộc nhóm \"{dominant_label}\" cùng {teacher_label}."
+            ),
+            estimated_seconds=90,
+            dominant_phonics_category=dominant_cat,
+            dominant_phonics_label_vi=dominant_label,
+            target_words=warmup_items,
+        )
+
+        prefer_picture = (
+            bool(spaced_words)
+            and spaced_words[0].recommended_game == "PICTURE_DESCRIPTION"
+        ) or (len(shooter_sessions) > len(picture_sessions) + 1)
+        car_2_game_key: TrainCar2GameKey = (
+            "PICTURE_DESCRIPTION" if prefer_picture else "SENTENCE_SHOOTER"
+        )
+        car_2_plan = plan_map[car_2_game_key]
+
+        w_first = seeded_words[0]
+        w_second = seeded_words[1] if len(seeded_words) > 1 else w_first
+        if car_2_game_key == "PICTURE_DESCRIPTION":
+            round_sentence = f"Trong tranh có {w_first} và {w_second} thật đẹp"
+            suggested_mode = "STORY" if child.Grade >= 3 else "OBSERVE"
+            prompt_vi = (
+                f"Quan sát chi tiết gợi ý và ghép câu miêu tả có từ \"{w_first}\", \"{w_second}\"."
+            )
+            deep_link_href = "/entertainment/picture-description"
+        else:
+            round_sentence = f"Bé đọc rõ từ {w_first} và {w_second} mỗi ngày"
+            suggested_mode = "FILL_BLANK" if child.Grade >= 3 else "WORD_ORDER"
+            prompt_vi = (
+                f"Chạm chọn đúng thứ tự các từ để hoàn thành câu có \"{w_first}\" và \"{w_second}\"."
+            )
+            deep_link_href = "/entertainment/sentence-shooter"
+
+        sentence_tokens = tokenize_focus_phrase(round_sentence)
+        if len(sentence_tokens) < 3:
+            sentence_tokens = ["bé", "đọc", w_first]
+        distractor_pool = ["lấp lánh", "nhanh nhảu", "bình minh", "êm đềm"]
+        distractors = [
+            d for d in distractor_pool if normalize_focus_phrase(d) not in seen_norms
+        ][:2]
+
+        car_2 = TrainCar2GameRoundRead(
+            title_vi="Toa 2: Vận dụng qua trò chơi",
+            subtitle_vi=(
+                "1 vòng Kể chuyện qua tranh gắn kết từ vừa khởi động."
+                if car_2_game_key == "PICTURE_DESCRIPTION"
+                else "1 vòng Xạ thủ ghép câu gắn kết đúng các từ vừa khởi động."
+            ),
+            estimated_seconds=120,
+            game_key=car_2_game_key,
+            suggested_mode=suggested_mode,
+            recommended_difficulty=car_2_plan.recommended_difficulty,
+            seeded_words=seeded_words,
+            prompt_vi=prompt_vi,
+            sentence_tokens=sentence_tokens,
+            distractor_tokens=distractors,
+            deep_link_href=deep_link_href,
+        )
+
+        weak_karaoke_line: str | None = None
+        weak_karaoke_tip: str | None = None
+        for sess in karaoke_sessions:
+            payload = getattr(sess, "ReportPayload", None)
+            if isinstance(payload, dict):
+                weakest = payload.get("weakest_segment") or payload.get("weakestSegment")
+                if isinstance(weakest, dict) and weakest.get("text"):
+                    weak_karaoke_line = str(weakest["text"]).strip()[:180]
+                    weak_karaoke_tip = str(
+                        weakest.get("tip_vi")
+                        or weakest.get("tipVi")
+                        or "Nghe mẫu tốc độ chậm 0.85x rồi ngân nga nhẹ nhàng theo từng nhịp chữ."
+                    )
+                    break
+
+        if weak_karaoke_line:
+            finish_mode: TrainCar3FinishMode = "SLOW_KARAOKE_085X"
+            passage_title = "Câu hát chậm 0.85x"
+            text_vi = f"{weak_karaoke_line} — cùng ôn nhẹ {', '.join(seeded_words[:2])}."
+            coaching_tip = weak_karaoke_tip or "Nghe chậm 0.85x và hát rõ từng tiếng thật thư giãn."
+        else:
+            finish_mode = "SHORT_PASSAGE"
+            passage_title, text_vi, coaching_tip = self._build_fluency_passage(
+                child.Grade,
+                dominant_cat,
+                seeded_words,
+            )
+
+        car_3 = TrainCar3FluencyFinishRead(
+            title_vi="Toa 3: Về đích trôi chảy",
+            subtitle_vi=(
+                "Nghe và hát chậm 0.85x thật êm để khép lại chuyến tàu."
+                if finish_mode == "SLOW_KARAOKE_085X"
+                else "Đọc đoạn ngắn có nhóm vần vừa ôn ở nhịp 0.85x thật thư thái."
+            ),
+            estimated_seconds=90,
+            finish_mode=finish_mode,
+            playback_speed=0.85,
+            phonics_category=dominant_cat,
+            phonics_label_vi=dominant_label,
+            passage_title_vi=passage_title,
+            text_vi=text_vi,
+            featured_words=seeded_words,
+            coaching_tip_vi=coaching_tip,
+        )
+
+        completed_keys_today: set[str] = set()
+        for row in explicit_rows:
+            created = getattr(row, "CreatedAt", None)
+            meta = getattr(row, "MetadataJson", None)
+            if (
+                created is not None
+                and created.date() == today_utc
+                and isinstance(meta, dict)
+                and meta.get("origin") == "DAILY_FIVE_MINUTE_TRAIN"
+            ):
+                key = str(
+                    meta.get("train_completion_key")
+                    or getattr(row, "SourceRecordId", None)
+                    or getattr(row, "Id", "")
+                )
+                completed_keys_today.add(key)
+
+        train_id = f"train-{child.Id}-{today_utc.isoformat()}"
+        if resolved_gender == "male":
+            greeting_vi = (
+                f"Chào {child.Alias}! Lên chuyến tàu 5 phút cùng thầy để khởi động 3 toa thật nhẹ nhàng nhé!"
+            )
+        elif resolved_gender == "female":
+            greeting_vi = (
+                f"Chào {child.Alias}! Lên chuyến tàu 5 phút cùng cô để khởi động 3 toa thật nhẹ nhàng nhé!"
+            )
+        else:
+            greeting_vi = (
+                f"Chào {child.Alias}! Mình cùng khởi hành chuyến tàu luyện đọc 5 phút qua 3 toa vui nhé!"
+            )
+
+        return DailyFiveMinuteTrainRead(
+            train_id=train_id,
+            visibility="PARENT_PRIVATE",
+            child_id=child.Id,
+            child_alias=child.Alias,
+            child_grade=child.Grade,
+            total_estimated_seconds=300,
+            is_cold_start=is_cold_start,
+            completed_today=len(completed_keys_today) > 0,
+            today_completed_count=len(completed_keys_today),
+            greeting_vi=greeting_vi,
+            no_mic_support_note_vi=(
+                "Nếu đang ở nơi ồn hoặc tạm không tiện bật mic, ba mẹ và bé có thể bật chế độ "
+                "\"Tạm không tiện bật mic\" để nghe mẫu và chạm chọn hoàn thành trọn vẹn cả 3 toa."
+            ),
+            natural_break_cue_vi=(
+                f"Hoàn thành ~5 phút hôm nay là vừa đẹp rồi! {child.Alias} nhớ chớp mắt nhẹ, "
+                "nhìn ra xa thư giãn mắt và uống một ngụm nước mát trước khi nghỉ ngơi nhé."
+            ),
+            disclaimer_vi=NON_DIAGNOSTIC_DISCLAIMER_VI,
+            car_1_warmup=car_1,
+            car_2_game=car_2,
+            car_3_fluency=car_3,
+            generated_at=now_utc,
+        )
+
+    async def complete_daily_five_minute_train(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        payload: DailyFiveMinuteTrainCompleteRequest,
+    ) -> DailyFiveMinuteTrainCompleteResponse:
+        child = await self._require_child(child_id, parent_id)
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+
+        if not (payload.car_1_completed or payload.car_2_completed or payload.car_3_completed):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="At least one train car must be completed",
+            )
+
+        clean_words = [
+            w.strip() for w in payload.practiced_words if isinstance(w, str) and w.strip()
+        ][:10]
+
+        if payload.interaction_mode == "NO_MIC_TOUCH":
+            evidence_type = "ESTIMATED"
+            base_conf = 0.58
+        elif payload.interaction_mode == "MIXED":
+            evidence_type = "OBSERVED"
+            base_conf = 0.72
+        else:
+            evidence_type = "OBSERVED"
+            base_conf = 0.80
+
+        completion_token = (payload.client_completion_id or payload.train_id).strip()[:48]
+        difficulty = max(1, min(5, int(child.Grade)))
+
+        def _car_score(car_key: str, default: float = 0.85) -> float:
+            raw = payload.car_scores.get(car_key, default)
+            try:
+                return max(0.0, min(1.0, float(raw)))
+            except (TypeError, ValueError):
+                return default
+
+        planned_specs: list[tuple[str, str, str, float]] = []
+        if payload.car_1_completed:
+            planned_specs.append(
+                ("c1", "difficult_word_mastery", "DIFFICULT_WORD", _car_score("car_1", 0.85))
+            )
+        if payload.car_2_completed:
+            if payload.car_2_game_key == "PICTURE_DESCRIPTION":
+                planned_specs.append(
+                    ("c2", "descriptive_speaking", "PICTURE_DESCRIPTION", _car_score("car_2", 0.86))
+                )
+            else:
+                planned_specs.append(
+                    ("c2", "sentence_ordering", "SENTENCE_SHOOTER", _car_score("car_2", 0.88))
+                )
+        if payload.car_3_completed:
+            if payload.car_3_finish_mode == "SLOW_KARAOKE_085X":
+                planned_specs.append(
+                    ("c3", "lyric_delivery", "KARAOKE", _car_score("car_3", 0.86))
+                )
+            else:
+                planned_specs.append(
+                    ("c3", "reading_fluency", "READING", _car_score("car_3", 0.88))
+                )
+
+        recorded_items: list[SkillEvidenceRead] = []
+        for suffix, skill_key, source_module, score_val in planned_specs:
+            source_record_id = f"train5m:{completion_token}:{suffix}"[:64]
+            ev_create = SkillEvidenceCreate(
+                skill_key=skill_key,
+                source_module=source_module,  # type: ignore[arg-type]
+                source_record_id=source_record_id,
+                evidence_type=evidence_type,  # type: ignore[arg-type]
+                score_normalized=score_val,
+                confidence=base_conf,
+                difficulty_level=difficulty,
+                practice_words=clean_words,
+                metadata_json={
+                    "origin": "DAILY_FIVE_MINUTE_TRAIN",
+                    "train_id": payload.train_id,
+                    "train_completion_key": completion_token,
+                    "interaction_mode": payload.interaction_mode,
+                    "duration_seconds": payload.duration_seconds,
+                    "car": suffix,
+                },
+            )
+            try:
+                created = await self.record_evidence(child_id, parent_id, ev_create)
+                recorded_items.append(created)
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_409_CONFLICT:
+                    raise
+
+        recent_evidence = await self.repository.list_skill_evidence(child_id, window_days=2)
+        completed_keys_today: set[str] = {completion_token}
+        for row in recent_evidence:
+            created_at = getattr(row, "CreatedAt", None)
+            meta = getattr(row, "MetadataJson", None)
+            if (
+                created_at is not None
+                and created_at.date() == today_utc
+                and isinstance(meta, dict)
+                and meta.get("origin") == "DAILY_FIVE_MINUTE_TRAIN"
+            ):
+                completed_keys_today.add(
+                    str(meta.get("train_completion_key") or getattr(row, "SourceRecordId", ""))
+                )
+
+        return DailyFiveMinuteTrainCompleteResponse(
+            visibility="PARENT_PRIVATE",
+            train_id=payload.train_id,
+            child_id=child.Id,
+            child_alias=child.Alias,
+            interaction_mode=payload.interaction_mode,
+            recorded_evidence_count=len(recorded_items),
+            evidence_items=recorded_items,
+            today_completed_trains_count=max(1, len(completed_keys_today)),
+            celebration_title_vi=f"Chuyến tàu 5 phút của {child.Alias} đã cập bến êm ái!",
+            natural_break_cue_vi=(
+                f"Tuyệt lắm {child.Alias}! Mình đã hoàn thành trọn vẹn 3 toa luyện đọc hôm nay. "
+                "Giờ bé hãy đóng màn hình, nhìn cây xanh hoặc khoảng xa 20 giây và nghỉ ngơi thoải mái nhé."
+            ),
+            completed_at=now_utc,
         )

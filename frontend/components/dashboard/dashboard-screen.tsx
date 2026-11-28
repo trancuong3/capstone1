@@ -15,6 +15,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button } from "@/components/common/button";
@@ -425,6 +426,16 @@ export function DashboardScreen() {
           )}
         </section>
       </div>
+
+      {!isLoading && selectedChild ? (
+        <div className="mt-5">
+          <FiveMinuteTrainCtaCard
+            childAlias={selectedChild.alias}
+            childId={selectedChild.id}
+            sourceSurface="dashboard"
+          />
+        </div>
+      ) : null}
 
       <AiTeacherVoiceSection
         selectedChild={selectedChild ?? null}

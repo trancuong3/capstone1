@@ -7,23 +7,12 @@ import {
   karaokePreviewSchema,
   lyricLineSchema,
   lyricsSchema,
+  songCardSchema,
+  type SongCard,
 } from "@/types/karaoke";
 
-const card = karaokePreviewSchema
-  .pick({
-    song_id: true,
-    version_id: true,
-    title: true,
-    author: true,
-    duration_ms: true,
-    cover_url: true,
-  })
-  .extend({
-    min_grade: z.number().int().min(1).max(5),
-    max_grade: z.number().int().min(1).max(5),
-  });
 const list = z.object({
-  items: z.array(card),
+  items: z.array(songCardSchema),
   total: z.number().int().nonnegative(),
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
@@ -93,7 +82,8 @@ export function createKaraokeService() {
 }
 export type KaraokeService = ReturnType<typeof createKaraokeService>;
 export type KaraokePlayback = z.infer<typeof playback>;
-export type KaraokeSongCard = z.infer<typeof card>;
+export type KaraokeSongCard = SongCard;
+export type { SongCard };
 export type KaraokeCatalog = z.infer<typeof list>;
 
 export function karaokeParentErrorMessage(error: unknown) {

@@ -536,5 +536,127 @@ class KaraokeRepositoryTests(unittest.IsolatedAsyncioTestCase):
         db.rollback.assert_awaited()
 
 
+class KaraokeDifficultWordCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_matches_authentic_lyrics_sorts_first_and_never_mutates_lyrics(self):
+        class CatalogMemoryRepository(MemoryRepository):
+            def __init__(self, target_words):
+                super().__init__()
+                self._target_words = list(target_words)
+
+            async def difficult_words(self, _child_id, _actor_id, *, limit=12):
+                return self._target_words[:limit]
+
+            async def list_states(self, *, search="", status=None, grade=None, limit=12, offset=0):
+                del search, status
+                published = []
+                for song in self.songs.values():
+                    if song.status != "PUBLISHED":
+                        continue
+                    version = self.versions.get(song.published_version_id)
+                    if version is None or version.state != "PUBLISHED":
+                        continue
+                    if grade is not None and not (version.min_grade <= grade <= version.max_grade):
+                        continue
+                    published.append(SongState(song, None, version))
+                return published[offset : offset + limit], len(published)
+
+        repository = CatalogMemoryRepository(["ánh trăng", "sao sáng"])
+        storage = MemoryStorage(repository)
+        service = KaraokeService(repository, storage)
+
+        # Song 1: no difficult word match
+        s1 = await service.create(ADMIN, SongCreate(title="Chú mèo nhỏ"))
+        s1 = await service.upload(
+            ADMIN,
+            s1.song_id,
+            DraftRequest(expected_revision=s1.revision, draft_version_id=s1.draft.id),
+            UploadFile(file=BytesIO(mp3_fixture()), filename="a.mp3"),
+        )
+        s1_lyrics = {
+            "format_version": 1,
+            "lines": [
+                {
+                    "id": str(uuid4()),
+                    "text": "Chú mèo nhỏ đi dạo",
+                    "start_ms": 0,
+                    "end_ms": 2000,
+                }
+            ],
+        }
+        s1 = await service.save(
+            ADMIN,
+            s1.song_id,
+            DraftWrite(
+                expected_revision=s1.revision,
+                draft_version_id=s1.draft.id,
+                title="Chú mèo nhỏ",
+                source_note="Public",
+                usage_note="Tests",
+                lyrics=s1_lyrics,
+            ),
+        )
+        await service.publish(
+            ADMIN,
+            s1.song_id,
+            DraftRequest(expected_revision=s1.revision, draft_version_id=s1.draft.id),
+        )
+
+        # Song 2: authentic lyrics match child's difficult words
+        s2 = await service.create(ADMIN, SongCreate(title="Đêm trăng"))
+        s2 = await service.upload(
+            ADMIN,
+            s2.song_id,
+            DraftRequest(expected_revision=s2.revision, draft_version_id=s2.draft.id),
+            UploadFile(file=BytesIO(mp3_fixture()), filename="b.mp3"),
+        )
+        s2_lyrics = {
+            "format_version": 1,
+            "lines": [
+                {
+                    "id": str(uuid4()),
+                    "text": "Ánh trăng vàng bên sao sáng đêm rằm",
+                    "start_ms": 0,
+                    "end_ms": 2500,
+                }
+            ],
+        }
+        s2 = await service.save(
+            ADMIN,
+            s2.song_id,
+            DraftWrite(
+                expected_revision=s2.revision,
+                draft_version_id=s2.draft.id,
+                title="Đêm trăng",
+                source_note="Public",
+                usage_note="Tests",
+                lyrics=s2_lyrics,
+            ),
+        )
+        await service.publish(
+            ADMIN,
+            s2.song_id,
+            DraftRequest(expected_revision=s2.revision, draft_version_id=s2.draft.id),
+        )
+
+        snapshot_1 = deepcopy(repository.versions[repository.songs[s1.song_id].published_version_id].lyrics)
+        snapshot_2 = deepcopy(repository.versions[repository.songs[s2.song_id].published_version_id].lyrics)
+
+        result = await service.list_songs(PARENT, CHILD)
+        self.assertEqual(result.total, 2)
+        self.assertEqual([item.song_id for item in result.items], [s2.song_id, s1.song_id])
+        self.assertEqual(result.items[0].matched_difficult_words, ["ánh trăng", "sao sáng"])
+        self.assertEqual(result.items[1].matched_difficult_words, [])
+
+        # Authentic lyrics MUST remain byte-for-byte identical.
+        self.assertEqual(
+            repository.versions[repository.songs[s1.song_id].published_version_id].lyrics,
+            snapshot_1,
+        )
+        self.assertEqual(
+            repository.versions[repository.songs[s2.song_id].published_version_id].lyrics,
+            snapshot_2,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

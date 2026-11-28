@@ -624,4 +624,104 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     expect(totalInterims).toBeLessThanOrEqual(4);
     expect(totalFinals).toBe(1);
   });
+
+  it("disables pause-boundary WASM interims and widens WASM interim cadence to 750ms to prevent worker collision with final flush", async () => {
+    const wasmCalls: Array<{ len: number; voicedDurationMs?: number }> = [];
+    class FakeReadyWasmWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: {
+        type: string;
+        id: string;
+        samples?: Float32Array;
+        voicedDurationMs?: number;
+      }) {
+        queueMicrotask(() => {
+          if (msg.type === "init") {
+            this.onmessage?.({
+              data: { type: "ready", id: msg.id },
+            } as MessageEvent);
+          } else if (msg.type === "transcribe") {
+            wasmCalls.push({
+              len: msg.samples?.length ?? 0,
+              voicedDurationMs: msg.voicedDurationMs,
+            });
+            this.onmessage?.({
+              data: {
+                type: "result",
+                id: msg.id,
+                text: "nhà em có",
+                decodeMs: 10,
+              },
+            } as MessageEvent);
+          }
+        });
+      }
+      terminate() {}
+    }
+
+    const { getBrowserWasmSttClient, resetBrowserWasmSttForTests } =
+      await import("@/lib/reading/browser-wasm-stt");
+    vi.stubGlobal("Worker", FakeReadyWasmWorker);
+    if (!globalThis.crypto?.subtle) {
+      vi.stubGlobal("crypto", { subtle: { digest: vi.fn() } });
+    }
+    resetBrowserWasmSttForTests();
+
+    try {
+      await getBrowserWasmSttClient().init();
+      setCachedVoiceEngineHealth({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: { available: false, stt_ready: false, tts_ready: false },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
+      const transcribe = vi.fn();
+      const rec = new LocalSegmentSpeechRecognition(
+        { transcribe } as unknown as SpeechService,
+        () => ({ sessionId: "sess-wasm-cadence", pageId: "p-1" }),
+      );
+      rec.start();
+
+      const internal = rec as unknown as {
+        active: boolean;
+        usingWasmStt: boolean;
+        consumeSamples16k: (chunk: Float32Array) => void;
+      };
+      expect(internal.usingWasmStt).toBe(true);
+      internal.active = true;
+
+      const voiced = new Float32Array(640).fill(0.05); // 40ms @ 16kHz
+      const silent = new Float32Array(640).fill(0);
+
+      // 400ms speech (below 750ms WASM interim step) + 200ms pause (would trigger pause-boundary on HTTP!)
+      for (let i = 0; i < 10; i += 1) {
+        internal.consumeSamples16k(voiced);
+        await Promise.resolve();
+      }
+      for (let i = 0; i < 5; i += 1) {
+        internal.consumeSamples16k(silent);
+        await Promise.resolve();
+      }
+      // Pause-boundary WASM interim MUST NOT fire during silence!
+      expect(wasmCalls).toHaveLength(0);
+
+      // Continue remaining silence up to SILENCE_FLUSH_MS -> exactly 1 final decode
+      for (let i = 0; i < 12; i += 1) {
+        internal.consumeSamples16k(silent);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(wasmCalls).toHaveLength(1);
+      expect(transcribe).not.toHaveBeenCalled();
+      rec.abort();
+    } finally {
+      resetBrowserWasmSttForTests();
+      vi.unstubAllGlobals();
+    }
+  });
 });

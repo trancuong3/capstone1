@@ -124,8 +124,12 @@ export function ParentProfileScreen() {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
-        <StatusMessage title={t("parent.profile.loadErrorTitle")} tone="error">
+      <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
+        <StatusMessage
+          className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
+          title={t("parent.profile.loadErrorTitle")}
+          tone="error"
+        >
           {t("auth.errors.generic")}
         </StatusMessage>
         <Button
@@ -164,13 +168,14 @@ export function ParentProfileScreen() {
 
   if (isEditing)
     return (
-      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
         <PageHeader
+          className="mb-0 gap-2 pb-3 sm:gap-4 sm:pb-5 [&_h1]:text-xl [&_h1]:sm:text-3xl [&_h1]:lg:text-[40px] max-sm:[&_p]:text-xs max-sm:[&_p]:leading-relaxed max-sm:[&_h1+p]:mt-1"
           eyebrow={t("parent.profile.editEyebrow")}
           title={t("parent.profile.editTitle")}
         />
-        <Card className="sm:px-8 sm:py-8">
-          <h2 className="text-2xl font-extrabold text-ink">
+        <Card className="gap-3 p-3.5 sm:gap-4 sm:px-8 sm:py-8">
+          <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
             {t("parent.profile.personalInfoHeading")}
           </h2>
           <ParentProfileForm
@@ -185,37 +190,44 @@ export function ParentProfileScreen() {
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-6 sm:pb-4">
       <PageHeader
+        className="mb-0 gap-2 pb-3 sm:gap-4 sm:pb-5 [&_h1]:text-xl [&_h1]:sm:text-3xl [&_h1]:lg:text-[40px] max-sm:[&_p]:text-xs max-sm:[&_p]:leading-relaxed max-sm:[&_h1+p]:mt-1"
         description={t("parent.profile.viewDescription")}
         eyebrow={t("parent.profile.accountEyebrow")}
         title={t("parent.profile.viewTitle")}
       />
       {saveNotice ? (
-        <StatusMessage tone="success" role="status">
+        <StatusMessage
+          className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
+          tone="success"
+          role="status"
+        >
           {saveNotice}
         </StatusMessage>
       ) : null}
-      <Card className="sm:px-8 sm:py-6">
-        <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-6">
-          <ProfileAvatar
-            ariaLabel={t("parent.profile.avatarAria", {
-              name: displayName ?? t("parent.profile.parentFallback"),
-            })}
-            displayName={displayName}
-            imageUrl={profile.avatar_url}
-            size="lg"
-          />
-          <div className="flex min-w-0 flex-col items-start gap-3">
-            <h2 className="max-w-full break-words text-2xl font-extrabold text-ink">
+      <Card className="gap-3 p-3.5 sm:gap-4 sm:px-8 sm:py-6">
+        <div className="flex flex-row items-center gap-3.5 sm:items-start sm:gap-6">
+          <div className="shrink-0">
+            <ProfileAvatar
+              ariaLabel={t("parent.profile.avatarAria", {
+                name: displayName ?? t("parent.profile.parentFallback"),
+              })}
+              displayName={displayName}
+              imageUrl={profile.avatar_url}
+              size="lg"
+            />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5 sm:gap-3">
+            <h2 className="max-w-full break-words text-lg font-extrabold text-ink sm:text-2xl">
               {displayName || t("parent.profile.noDisplayName")}
             </h2>
-            <p className="break-all text-body text-muted">
+            <p className="break-all text-xs leading-relaxed text-muted sm:text-sm">
               {contactValue(profile.email, profile.contact_info_status)} ·{" "}
               {getRoleLabel(profile.role)}
             </p>
             <p
-              className={`rounded-control px-3 py-2 text-sm font-bold ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
+              className={`rounded-control px-2.5 py-1 text-xs font-bold sm:px-3 sm:py-2 sm:text-sm ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
             >
               {emailVerificationLabel(
                 profile.email,
@@ -235,11 +247,11 @@ export function ParentProfileScreen() {
         >
           {t("parent.profile.editButton")}
         </Button>
-        <dl className="grid gap-4 sm:grid-cols-2">
+        <dl className="grid gap-2 sm:grid-cols-2 sm:gap-4 max-sm:[&>div]:min-h-0 max-sm:[&>div]:px-3 max-sm:[&>div]:py-2 max-sm:[&_dt]:text-xs max-sm:[&_dd]:text-sm">
           <InformationField label={t("parent.profile.emailLabel")}>
             {contactValue(profile.email, profile.contact_info_status)}
             {profile.pending_email ? (
-              <p className="mt-2 text-sm text-warning">
+              <p className="mt-1.5 text-xs text-warning sm:mt-2 sm:text-sm">
                 {t("parent.profile.pendingEmailPrefix")}{" "}
                 <strong>{profile.pending_email}</strong>
               </p>
@@ -263,24 +275,24 @@ export function ParentProfileScreen() {
       </Card>
       <section
         aria-labelledby="parent-children-heading"
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-3 sm:gap-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           <h2
-            className="text-2xl font-extrabold text-ink"
+            className="text-lg font-extrabold text-ink sm:text-2xl"
             id="parent-children-heading"
           >
             {t("parent.profile.linkedChildrenHeading")}
           </h2>
           <Link
-            className="text-label font-bold text-primary hover:underline"
+            className="inline-flex min-h-10 items-center text-sm font-bold text-primary hover:underline sm:text-label"
             href="/children"
           >
             {t("parent.profile.manageChildrenLink")}
           </Link>
         </div>
         {profile.children.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-6">
             {profile.children.map((child) => (
               <ChildProfileCard
                 key={child.id}
@@ -291,7 +303,10 @@ export function ParentProfileScreen() {
             ))}
           </div>
         ) : (
-          <StatusMessage tone="info">
+          <StatusMessage
+            className="gap-2 p-2.5 sm:gap-3 sm:p-4 max-sm:[&>svg]:size-4 [&>div]:text-xs [&>div]:leading-relaxed sm:[&>div]:text-sm"
+            tone="info"
+          >
             {t("parent.profile.noLinkedChildren")}
           </StatusMessage>
         )}

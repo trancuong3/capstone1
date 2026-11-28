@@ -41,6 +41,8 @@ _MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.IGNORECASE |
 _MODEL_COOLDOWN_BY_CODE_SECONDS: dict[str, float] = {
     "MODEL_UNAVAILABLE": 600.0,
     "PROVIDER_UNAVAILABLE": 30.0,
+    "PROVIDER_TIMEOUT": 45.0,
+    "PROVIDER_QUOTA": 60.0,
 }
 
 _TELEMETRY_LOCK = threading.Lock()

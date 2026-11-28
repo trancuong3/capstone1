@@ -313,7 +313,17 @@ class TestOcrPipelineHardening(unittest.TestCase):
         asyncio.run(_scenario())
 
     def test_age_based_priority_boost_prevents_parent_submission_starvation(self):
+        from app.repositories.ocr_inference_job_repository import (
+            PRIORITY_STARVATION_BOOST,
+            reset_ocr_queue_repo_state_for_tests,
+        )
+        from app.services.ocr_inference_job_service import (
+            JOB_KIND_ADMIN_UPLOAD,
+            PRIORITY_ADMIN_OCR,
+        )
+
         async def _scenario() -> None:
+            reset_ocr_queue_repo_state_for_tests()
             svc = self._svc()
             now = datetime.now(timezone.utc)
             old_parent = await svc.enqueue_job(
@@ -325,6 +335,23 @@ class TestOcrPipelineHardening(unittest.TestCase):
                 priority=PRIORITY_PARENT_SUBMISSION,
             )
             old_parent.CreatedAt = now - timedelta(minutes=6)
+            fresh_parent = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=uuid4(),
+                submission_id=uuid4(),
+                image_path="p/fresh.png",
+                image_sha256="c" * 64,
+                priority=PRIORITY_PARENT_SUBMISSION,
+            )
+            fresh_admin = await svc.enqueue_job(
+                job_kind=JOB_KIND_ADMIN_UPLOAD,
+                owner_user_id=uuid4(),
+                book_id=uuid4(),
+                page_id=uuid4(),
+                image_path="a/new.png",
+                image_sha256="d" * 64,
+                priority=PRIORITY_ADMIN_OCR,
+            )
             fresh_scan = await svc.enqueue_job(
                 job_kind=JOB_KIND_LOCAL_SCAN,
                 owner_user_id=self.parent_id,
@@ -334,10 +361,24 @@ class TestOcrPipelineHardening(unittest.TestCase):
             )
             await self.db.commit()
 
-            claimed = await svc.claim_next_job(worker_id="w1")
-            assert claimed is not None
-            self.assertEqual(claimed["job_id"], str(old_parent.Id))
-            self.assertLess(old_parent.Priority, fresh_scan.Priority)
+            # Interactive LOCAL_PAGE_SCAN (10) and ADMIN_OCR (20) are NEVER preempted by starvation boost (25).
+            c1 = await svc.claim_next_job(worker_id="w1")
+            assert c1 is not None
+            self.assertEqual(c1["job_id"], str(fresh_scan.Id))
+            self.assertEqual(PRIORITY_STARVATION_BOOST, 25)
+            self.assertEqual(old_parent.Priority, PRIORITY_STARVATION_BOOST)
+            self.assertGreater(old_parent.Priority, fresh_scan.Priority)
+            self.assertGreater(old_parent.Priority, fresh_admin.Priority)
+            self.assertLess(old_parent.Priority, fresh_parent.Priority)
+
+            c2 = await svc.claim_next_job(worker_id="w1")
+            assert c2 is not None
+            self.assertEqual(c2["job_id"], str(fresh_admin.Id))
+
+            # Aged parent (boosted to 25) beats fresh parent (50)
+            c3 = await svc.claim_next_job(worker_id="w1")
+            assert c3 is not None
+            self.assertEqual(c3["job_id"], str(old_parent.Id))
 
         asyncio.run(_scenario())
 

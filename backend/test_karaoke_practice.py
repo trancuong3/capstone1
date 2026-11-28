@@ -498,6 +498,166 @@ def test_derive_musical_profile_handles_v1_line_only_lyrics():
     assert len(phrases) == 2
 
 
+def test_karaoke_practice_closes_difficult_word_mastery_loop():
+    repo = FakePracticeRepository()
+    # Provide child difficult words that match line 1 ("Bé hát vui ca") and line 2 ("Nắng mai rực rỡ")
+    repo.difficult_words = lambda _child_id, _parent_id, limit=12: ["hát", "rực rỡ", "không có"]  # type: ignore[attr-defined]
+    client = _make_client(repo, PARENT_A)
+
+    # 1. Full song with high lyric score on line 1 ("hát") and low lyric score on line 2 ("rực rỡ")
+    res = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "FULL_SONG",
+            "scoring_mode": "FULL_MUSICAL",
+            "playback_rate": 1.0,
+            "headphone_mode": True,
+            "overall_score": 84,
+            "rhythm_score": 86,
+            "pitch_score": 82,
+            "lyrics_score": 85,
+            "fluency_score": 80,
+            "stars": 3,
+            "report_payload": {
+                "segments": [
+                    {
+                        "line_index": 0,
+                        "start_ms": 1000,
+                        "end_ms": 3000,
+                        "text": "Bé hát vui ca",
+                        "lyrics_score": 90,
+                        "status": "GREAT",
+                    },
+                    {
+                        "line_index": 1,
+                        "start_ms": 3500,
+                        "end_ms": 5500,
+                        "text": "Nắng mai rực rỡ",
+                        "lyrics_score": 20,
+                        "status": "PRACTICE",
+                    },
+                ],
+            },
+        },
+    )
+    assert res.status_code == 201, res.text
+    by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert "difficult_word_mastery" in by_skill
+    assert by_skill["difficult_word_mastery"].PracticeWords == ["hát"]
+    assert by_skill["difficult_word_mastery"].ScoreNormalized == _approx(0.85)
+    assert by_skill["lyric_delivery"].PracticeWords == ["hát"]
+    assert by_skill["rhythm_timing"].PracticeWords == []
+
+    # 2. RHYTHM_TAP must NOT emit difficult_word_mastery
+    repo.evidence.clear()
+    res_tap = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "RHYTHM_TAP",
+            "scoring_mode": "RHYTHM_AND_LYRICS",
+            "playback_rate": 1.0,
+            "overall_score": 90,
+            "rhythm_score": 90,
+            "lyrics_score": None,
+            "stars": 3,
+        },
+    )
+    assert res_tap.status_code == 201
+    assert all(e.SkillKey != "difficult_word_mastery" for e in repo.evidence)
+
+    # 3. Segment practice without segments payload matches only overlapping lines [3500..5500]
+    repo.evidence.clear()
+    res_seg = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "SEGMENT",
+            "scoring_mode": "LYRICS_ONLY",
+            "playback_rate": 0.85,
+            "overall_score": 82,
+            "lyrics_score": 82,
+            "stars": 2,
+            "segment_start_ms": 3500,
+            "segment_end_ms": 5500,
+        },
+    )
+    assert res_seg.status_code == 201
+    seg_by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert seg_by_skill["difficult_word_mastery"].PracticeWords == ["rực rỡ"]
+    assert seg_by_skill["difficult_word_mastery"].ScoreNormalized == _approx(0.82)
+
+    # 4. Segments without per-segment lyrics_score still exclude unsung PRACTICE lines via status
+    repo.evidence.clear()
+    res_status_only = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "FULL_SONG",
+            "scoring_mode": "FULL_MUSICAL",
+            "playback_rate": 1.0,
+            "overall_score": 82,
+            "rhythm_score": 85,
+            "pitch_score": 80,
+            "lyrics_score": 80,
+            "fluency_score": 80,
+            "stars": 2,
+            "report_payload": {
+                "segments": [
+                    {
+                        "line_index": 0,
+                        "start_ms": 1000,
+                        "end_ms": 3000,
+                        "text": "Bé hát vui ca",
+                        "lyrics_score": None,
+                        "status": "GREAT",
+                    },
+                    {
+                        "line_index": 1,
+                        "start_ms": 3500,
+                        "end_ms": 5500,
+                        "text": "Nắng mai rực rỡ",
+                        "lyrics_score": None,
+                        "status": "PRACTICE",
+                    },
+                ],
+            },
+        },
+    )
+    assert res_status_only.status_code == 201
+    status_by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert status_by_skill["difficult_word_mastery"].PracticeWords == ["hát"]
+
+    # 5. Text-less malformed segments fall back cleanly to published_lyrics scoped by segment window
+    repo.evidence.clear()
+    res_textless = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "SEGMENT",
+            "scoring_mode": "LYRICS_ONLY",
+            "playback_rate": 0.85,
+            "overall_score": 84,
+            "lyrics_score": 84,
+            "stars": 2,
+            "segment_start_ms": 3500,
+            "segment_end_ms": 5500,
+            "report_payload": {
+                "segments": [{"line_index": 1, "status": "GREAT"}],
+            },
+        },
+    )
+    assert res_textless.status_code == 201
+    textless_by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert textless_by_skill["difficult_word_mastery"].PracticeWords == ["rực rỡ"]
+
+
 import unittest
 
 
@@ -527,3 +687,6 @@ class KaraokePracticeUnittestBridge(unittest.TestCase):
 
     def test_08_v1_lyrics_profile_derivation(self):
         test_derive_musical_profile_handles_v1_line_only_lyrics()
+
+    def test_09_difficult_word_mastery_loop(self):
+        test_karaoke_practice_closes_difficult_word_mastery_loop()

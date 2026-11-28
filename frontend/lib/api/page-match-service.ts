@@ -15,6 +15,17 @@ export interface PageMatchService {
   ): Promise<ReadingPageDTO>;
 }
 
+export const cameraSpotlightPointSchema = z.tuple([z.number(), z.number()]);
+
+export const cameraSpotlightLineSchema = z.object({
+  line_index: z.number().int().nonnegative(),
+  text: z.string(),
+  word_count: z.number().int().positive(),
+  points: z.array(cameraSpotlightPointSchema).length(4),
+});
+
+export type CameraSpotlightLineDTO = z.infer<typeof cameraSpotlightLineSchema>;
+
 export const cameraPageMatchSchema = z.object({
   framing_valid: z.boolean(),
   matched: z.boolean(),
@@ -31,6 +42,13 @@ export const cameraPageMatchSchema = z.object({
   message: z.string(),
   confidence: z.number().min(0).max(1),
   matched_page: readingPageDtoSchema.nullable(),
+  homography_matrix: z.array(z.number()).length(9).nullable().optional(),
+  page_quad: z
+    .array(cameraSpotlightPointSchema)
+    .length(4)
+    .nullable()
+    .optional(),
+  spotlight_lines: z.array(cameraSpotlightLineSchema).optional(),
 });
 
 export type CameraPageMatchDTO = z.infer<typeof cameraPageMatchSchema>;
@@ -165,16 +183,35 @@ export async function fetchOcrWorkerHealth(
     const mode =
       typeof rec.mode === "string" && rec.mode.trim() ? rec.mode.trim() : null;
     const ready = rec.ready === true;
+    const hasExplicitReady = typeof rec.ready === "boolean";
     const probeDegraded = rec.probe_degraded === true;
     const workers = Array.isArray(rec.workers) ? rec.workers : [];
-    const anyWorkerOnline = workers.some(
-      (item) =>
-        item &&
-        typeof item === "object" &&
-        Boolean((item as Record<string, unknown>).online),
-    );
-    const workerOnline =
-      mode === "remote_worker" ? anyWorkerOnline || ready : ready;
+    const anyReadyWorkerOnline = workers.some((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return false;
+      }
+      const worker = item as Record<string, unknown>;
+      if (!worker.online || worker.ready === false) {
+        return false;
+      }
+      const workerStatus =
+        typeof worker.status === "string"
+          ? worker.status.trim().toUpperCase()
+          : "";
+      if (
+        workerStatus === "DEGRADED" ||
+        workerStatus === "STARTING" ||
+        workerStatus === "OFFLINE"
+      ) {
+        return false;
+      }
+      return true;
+    });
+    const workerOnline = hasExplicitReady
+      ? ready
+      : mode === "remote_worker"
+        ? anyReadyWorkerOnline
+        : false;
     const queueObj =
       rec.queue && typeof rec.queue === "object"
         ? (rec.queue as Record<string, unknown>)

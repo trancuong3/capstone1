@@ -187,9 +187,11 @@ function makeRecommendationPayload(
 }
 
 function PreferenceProbe() {
-  const { reducedMotion, calmSound } = useEntertainmentPreferences();
+  const { reducedMotion, calmSound, autoPlayFlow } =
+    useEntertainmentPreferences();
   return (
     <div
+      data-auto-play-flow={String(autoPlayFlow)}
       data-calm-sound={String(calmSound)}
       data-reduced-motion={String(reducedMotion)}
       data-testid="pref-probe"
@@ -271,6 +273,7 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
     expect(getEntertainmentPreferences()).toEqual({
       reducedMotion: true,
       calmSound: true,
+      autoPlayFlow: true,
       autopilotEnabled: true,
     });
 
@@ -283,9 +286,17 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
       "data-calm-sound",
       "true",
     );
+    expect(screen.getByTestId("pref-probe")).toHaveAttribute(
+      "data-auto-play-flow",
+      "true",
+    );
 
     act(() => {
-      setEntertainmentPreferences({ reducedMotion: false, calmSound: false });
+      setEntertainmentPreferences({
+        reducedMotion: false,
+        calmSound: false,
+        autoPlayFlow: false,
+      });
     });
 
     await waitFor(() => {
@@ -295,6 +306,10 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
       );
       expect(screen.getByTestId("pref-probe")).toHaveAttribute(
         "data-calm-sound",
+        "false",
+      );
+      expect(screen.getByTestId("pref-probe")).toHaveAttribute(
+        "data-auto-play-flow",
         "false",
       );
     });
@@ -307,13 +322,18 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
     ).toEqual({
       reducedMotion: false,
       calmSound: false,
-      autopilotEnabled: true,
+      autoPlayFlow: false,
+      autopilotEnabled: false,
     });
 
     act(() => {
       window.localStorage.setItem(
         ENTERTAINMENT_PREFERENCES_STORAGE_KEY,
-        JSON.stringify({ reducedMotion: true, calmSound: true }),
+        JSON.stringify({
+          reducedMotion: true,
+          calmSound: true,
+          autoPlayFlow: true,
+        }),
       );
       window.dispatchEvent(
         new StorageEvent("storage", {
@@ -329,6 +349,10 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
       );
       expect(screen.getByTestId("pref-probe")).toHaveAttribute(
         "data-calm-sound",
+        "true",
+      );
+      expect(screen.getByTestId("pref-probe")).toHaveAttribute(
+        "data-auto-play-flow",
         "true",
       );
     });

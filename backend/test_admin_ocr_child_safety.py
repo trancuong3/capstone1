@@ -136,11 +136,11 @@ class ChildSafetyOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             self.config(), transport=httpx.MockTransport(handler)
         ).analyze("Văn bản tiếng Việt.")
         self.assertEqual(result["suitability"], "SUITABLE")
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
         self.assertTrue(calls[-1].endswith("/api/chat"))
         self.assertEqual(
             [event["provider"] for event in result["provider_events"]],
-            ["gemini_primary", "groq_qwen", "ollama_local"],
+            ["gemini_primary", "gemini_fallback", "groq_qwen", "ollama_local"],
         )
 
     async def test_ollama_retries_once_in_json_mode_when_schema_format_is_rejected(self):
@@ -812,10 +812,10 @@ class ChildSafetyTimeoutAndCircuitTests(unittest.IsolatedAsyncioTestCase):
 
         orch._request = fake_request  # type: ignore[method-assign]
         # remaining (~10s) <= provider_timeout (60s), yet Google failed immediately (<10s elapsed).
-        # Must NOT prematurely raise DOCUMENT_TIMEOUT; must fall back to Groq and succeed!
+        # Must NOT prematurely raise DOCUMENT_TIMEOUT; must try Google sibling then Groq and succeed!
         res = await orch.analyze("Câu chuyện vui vẻ cho bé.")
         self.assertEqual(res["suitability"], "SUITABLE")
-        self.assertEqual(calls, ["gemini_primary", "groq_qwen"])
+        self.assertEqual(calls, ["gemini_primary", "gemini_fallback", "groq_qwen"])
 
     async def test_all_providers_skipped_by_circuit_breaker_raises_all_providers_skipped(self):
         from app.services.ai_capability_router import CircuitBreakerRegistry
@@ -847,6 +847,152 @@ class ChildSafetyTimeoutAndCircuitTests(unittest.IsolatedAsyncioTestCase):
             await orch.analyze("Bé đọc sách.")
         self.assertEqual(second_exc.exception.code, "ALL_PROVIDERS_SKIPPED")
         self.assertEqual(http_calls, 1)
+
+    async def test_sibling_503_does_not_disable_healthy_google_primary_on_later_chunks(self):
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            local_enabled=False,
+        )
+        orch = ChildSafetyOrchestrator(cfg)
+        calls: list[str] = []
+
+        async def fake_request(provider, _source: str):
+            calls.append(provider.name)
+            if provider.name == "gemini_primary":
+                if len(calls) == 1:
+                    return {"suitability": "SUITABLE", "findings": []}, 200, "json_schema", 0
+                if len(calls) == 2:
+                    raise ChildSafetyError("INVALID_OUTPUT_SCHEMA", [])
+                return {"suitability": "SUITABLE", "findings": []}, 200, "json_schema", 0
+            if provider.name == "gemini_fallback":
+                err = ChildSafetyError("PROVIDER_UNAVAILABLE", [])
+                err.status_code = 503
+                raise err
+            return {"suitability": "SUITABLE", "findings": []}, 200, "json_object", 0
+
+        orch._request = fake_request  # type: ignore[method-assign]
+        # Build 3 chunks (> 2 * CHUNK_CHARS=8000) to exercise chunk 0 -> chunk 1 -> chunk 2.
+        long_text = ("Bé đọc sách rất vui vẻ mỗi ngày. " * 700).strip()
+        res = await orch.analyze(long_text)
+        self.assertEqual(res["suitability"], "SUITABLE")
+        # Chunk 0: gemini_primary succeeds -> healthy_providers={'gemini_primary'}.
+        # Chunk 1: gemini_primary returns schema error -> gemini_fallback hits 503 (only disables gemini_fallback, NOT google family!) -> groq_qwen succeeds.
+        # Chunk 2: gemini_primary MUST still be called and succeed!
+        self.assertGreaterEqual(res["chunks_total"], 3)
+        self.assertIn("gemini_primary", calls[4:])
+        self.assertEqual(calls.count("gemini_fallback"), 1)
+
+    async def test_limit_zero_isolates_provider_and_lets_sibling_rescue_chunk_zero(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry, CircuitState
+
+        now = [1500.0]
+        cb = CircuitBreakerRegistry(clock=lambda: now[0], base_cooldown_seconds=30.0)
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            gemini_primary_model="gemini-primary-test",
+            gemini_fallback_model="gemini-fallback-test",
+            local_enabled=False,
+        )
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if "gemini-primary-test" in path:
+                calls.append("gemini_primary")
+                return httpx.Response(
+                    429,
+                    json={"error": {"message": "Quota exceeded free_tier_requests, limit: 0"}},
+                )
+            if "gemini-fallback-test" in path:
+                calls.append("gemini_fallback")
+                return _gemini(json.dumps(_valid(), ensure_ascii=False))
+            calls.append("unexpected")
+            return httpx.Response(500)
+
+        orch = ChildSafetyOrchestrator(
+            cfg, transport=httpx.MockTransport(handler), circuit_breaker=cb
+        )
+        res = await orch.analyze("Bé đọc sách rất vui.")
+        self.assertEqual(res["suitability"], "SUITABLE")
+        self.assertEqual(calls, ["gemini_primary", "gemini_fallback"])
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.OPEN)
+        self.assertEqual(cb.get_state("quota_group:gemini_free_shared"), CircuitState.CLOSED)
+
+    async def test_budget_exhausted_skips_cloud_without_tripping_circuit_breaker(self):
+        from app.services.ai_capability_router import CircuitBreakerRegistry, CircuitState
+
+        cb = CircuitBreakerRegistry(
+            base_cooldown_seconds=30.0,
+            transient_failure_threshold=1,
+        )
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key=None,
+            local_enabled=True,
+            cloud_timeout_seconds=5,
+            total_timeout_seconds=10,
+            local=LocalOcrConfig(timeout_seconds=10),
+        )
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "/api/chat" in request.url.path:
+                calls.append("ollama_local")
+                return _ollama(json.dumps(_valid(), ensure_ascii=False))
+            calls.append("cloud_should_not_run")
+            return httpx.Response(500)
+
+        orch = ChildSafetyOrchestrator(
+            cfg, transport=httpx.MockTransport(handler), circuit_breaker=cb
+        )
+
+        def fake_budget(*, provider, **_kwargs):
+            return 2.0 if provider.family == "ollama" else 0.0
+
+        with patch.object(orch, "_provider_timeout_budget", side_effect=fake_budget):
+            res = await orch.analyze("Bé đi học vui vẻ.")
+        self.assertEqual(res["suitability"], "SUITABLE")
+        self.assertEqual(calls, ["ollama_local"])
+        self.assertTrue(
+            any(
+                e["provider"] == "gemini_primary" and e["error_code"] == "BUDGET_EXHAUSTED"
+                for e in res["provider_events"]
+            )
+        )
+        self.assertEqual(cb.get_state("provider:gemini_primary"), CircuitState.CLOSED)
+        self.assertEqual(cb.get_state("provider:gemini_fallback"), CircuitState.CLOSED)
+
+    async def test_chunk0_primary_503_falls_back_to_google_sibling(self):
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            gemini_primary_model="gemini-primary-test",
+            gemini_fallback_model="gemini-fallback-test",
+            local_enabled=False,
+        )
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "gemini-primary-test" in request.url.path:
+                calls.append("gemini_primary")
+                return httpx.Response(503, json={"error": "temporary 503"})
+            if "gemini-fallback-test" in request.url.path:
+                calls.append("gemini_fallback")
+                return _gemini(json.dumps(_valid(), ensure_ascii=False))
+            calls.append("groq_qwen")
+            return _groq(json.dumps(_valid(), ensure_ascii=False))
+
+        res = await ChildSafetyOrchestrator(
+            cfg, transport=httpx.MockTransport(handler)
+        ).analyze("Câu chuyện hay cho học sinh tiểu học.")
+        self.assertEqual(res["suitability"], "SUITABLE")
+        self.assertEqual(calls, ["gemini_primary", "gemini_fallback"])
 
 
 if __name__ == "__main__":

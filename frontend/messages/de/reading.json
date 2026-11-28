@@ -322,7 +322,8 @@
     "listenPhonics": "Phonetik anhören",
     "listeningRetry": "Ich höre deinem Kind zu…",
     "readAgain": "Noch einmal lesen",
-    "stepsAria": "Phonetik-Schritte"
+    "stepsAria": "Phonetik-Schritte",
+    "autoHideHint": "Buchstabieren fertig · Wird ausgeblendet für freie Sicht…"
   },
   "companion": {
     "teacherFemaleTitle": "KI-Lehrkraft",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "Phonetik-Beispiel · Lies die Wortgruppe",
     "quickFixTitle": "Lob · Schnelle Selbstkorrektur!",
     "phonicsWinTitle": "Lob · Großartige Phonetik!",
-    "overcameWordTitle": "Hurra · Du hast ein schwieriges Wort gemeistert!"
+    "overcameWordTitle": "Hurra · Du hast ein schwieriges Wort gemeistert!",
+    "dismissAria": "Nachricht ausblenden"
   },
   "tutor": {
     "title": "Wie lesen wir dieses Wort?",
@@ -494,5 +496,12 @@
     "subtitle": "Vertiefen Sie Wortschatz und Satzbau direkt mit der eben gelesenen Buchseite.",
     "pictureCta": "Seitenbild beschreiben",
     "shooterCta": "Seitensätze bauen"
+  },
+  "lucBat": {
+    "toggleLabel": "Luc-Bat 6-8 Versrhythmus",
+    "toggleActive": "Luc-Bat-Rhythmus aktiv",
+    "coupletBadge": "{count} Verspaar(e) (6-8)",
+    "beatGuide": "Sprechtakt 2/2/2 (6 Silben) · 2/2/2/2 (8 Silben)",
+    "rhymePairLabel": "Binnenreim der 6. Silbe: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }

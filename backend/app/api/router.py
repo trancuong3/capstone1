@@ -27,7 +27,9 @@ from app.api.routes import (
 from app.api.routes import admin_viread_training
 from app.api.routes import assistant
 from app.api.routes import book_assets
+from app.api.routes import co_reading
 from app.api.routes import family_pedagogy
+from app.api.routes import fluency_prosody
 from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
@@ -36,6 +38,11 @@ from app.api.routes import karaoke_practice
 from app.api.routes import karaoke_processing
 from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
+from app.api.routes import offline_reading_pack
+from app.api.routes import personalized_micro_story
+from app.api.routes import phoneme_garden
+from app.api.routes import regional_phonetics
+from app.api.routes import vocabulary_notebook
 
 api_router = APIRouter()
 api_router.include_router(karaoke_simple_import.router, prefix="/karaoke", tags=["Karaoke Simple Import"])
@@ -98,3 +105,38 @@ api_router.include_router(ocr_extraction.router, prefix="/studio/ocr", tags=["Sm
 api_router.include_router(ocr_extraction.studio_router, prefix="/studio", tags=["Smart Book Studio OCR"])
 api_router.include_router(book_assets.router, prefix="/studio", tags=["Smart Book Studio Assets"])
 api_router.include_router(global_tasks.router, prefix="/studio", tags=["Smart Book Studio Tasks"])
+api_router.include_router(
+    vocabulary_notebook.router,
+    prefix="/vocabulary",
+    tags=["Vocabulary Notebook"],
+)
+api_router.include_router(
+    personalized_micro_story.router,
+    prefix="/micro-stories",
+    tags=["Personalized Micro Stories"],
+)
+api_router.include_router(
+    offline_reading_pack.router,
+    prefix="/offline",
+    tags=["Offline Reading Pack"],
+)
+api_router.include_router(
+    fluency_prosody.router,
+    prefix="/fluency",
+    tags=["Fluency Prosody Coach"],
+)
+api_router.include_router(
+    regional_phonetics.router,
+    prefix="/dialect",
+    tags=["Regional Phonetics"],
+)
+api_router.include_router(
+    co_reading.router,
+    prefix="/co-reading",
+    tags=["Co-Reading & Parent Narration"],
+)
+api_router.include_router(
+    phoneme_garden.router,
+    prefix="/phoneme-garden",
+    tags=["Phoneme Garden"],
+)

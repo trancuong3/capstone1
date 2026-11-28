@@ -841,7 +841,11 @@ class GlobalTasksService:
             if is_remote_worker_wakeup_configured():
                 valid_cache, cached_probe = peek_cached_remote_ocr_worker_health()
                 if valid_cache:
-                    worker_online = bool(cached_probe and cached_probe.get("online"))
+                    worker_online = bool(
+                        cached_probe
+                        and cached_probe.get("online")
+                        and cached_probe.get("ready", True)
+                    )
                 else:
                     if not was_in_tx and not (
                         getattr(self.db, "new", None)
@@ -853,7 +857,9 @@ class GlobalTasksService:
                         except Exception:
                             pass
                     probe = await probe_configured_remote_ocr_worker_health()
-                    worker_online = bool(probe and probe.get("online"))
+                    worker_online = bool(
+                        probe and probe.get("online") and probe.get("ready", True)
+                    )
         return worker_online
 
     async def get_task(
@@ -1898,9 +1904,7 @@ async def _execute_batch_book_import_job(
                 progress_unit="trang",
             )
         else:
-            worker_online = await svc.repo.is_remote_ocr_worker_online(
-                ttl_seconds=worker_heartbeat_ttl_seconds()
-            )
+            worker_online = await svc._resolve_worker_online(was_in_tx=True)
             await svc.commit_stage_result(
                 job_id=job.Id,
                 lease_token=lease_token,

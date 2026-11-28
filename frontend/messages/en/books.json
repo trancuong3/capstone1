@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "View OCR text blocks for page {page}",
     "closePageOcrBlocksAria": "Close OCR text blocks for page {page}",
     "openPageOcrBlocksAction": "OCR text blocks",
-    "closePageOcrBlocksAction": "Close OCR blocks"
+    "closePageOcrBlocksAction": "Close OCR blocks",
+    "retryAllFailedAction": "Retry all failed pages ({count})",
+    "retryingAllFailedButton": "Queuing failed pages for retry…",
+    "retryAllSuccessNotice": "Queued {count} failed page(s) for retry (earlier completed steps preserved).",
+    "retryAllQueuedOfflineNotice": "Saved retry requests for {count} failed page(s) to the OCR queue. They will process automatically once OCR is back online.",
+    "retryAllPartialQueueFullNotice": "Queued {retried} failed page(s) for retry; {skipped} remaining page(s) were paused because the OCR queue is full. Please try again in {seconds} seconds.",
+    "retryAllPartialFailedNotice": "Queued {retried} failed page(s) for retry; {failed} page(s) could not be queued right now.",
+    "retryAllNoneNotice": "There are no failed pages left to retry right now.",
+    "queueFullNotice": "The OCR queue is currently full. Please try again in about {seconds} seconds."
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead page reading for {title}",
@@ -576,5 +584,35 @@
     "tooEasy": "Light warm-up (Grade {min}–{max})",
     "estimatedGrade": "Est. Grade {min}–{max}",
     "phonicsScore": "Phonics {score}%"
+  },
+  "offlinePack": {
+    "heading": "Offline Reading Pack & Printable QR Card",
+    "description": "Save verified pages on this device for offline reading without internet, or print a QR card to slip inside the physical book.",
+    "readyBadge": "Saved ({count} pages)",
+    "downloadButton": "Download offline pack",
+    "openOfflineReader": "Read offline now",
+    "removeButton": "Remove offline pack",
+    "syncPendingButton": "Sync ({count})",
+    "stageDownloadingPages": "Downloading verified pages and sample audio…",
+    "stageSavingDevice": "Saving pack securely to device storage…",
+    "savedNotice": "Saved offline reading pack ({count} pages) on this device.",
+    "removedNotice": "Removed the offline reading pack for this book.",
+    "downloadError": "Could not download the offline reading pack right now. Please try again when connected.",
+    "syncedNotice": "Synchronized {count} offline reading session(s).",
+    "syncDeferredNotice": "Connection unstable — offline sessions remain safely queued for automatic sync.",
+    "queuedOfflineNotice": "Session saved locally — ViRead will sync automatically once online.",
+    "readerHeaderBadge": "Offline mode · Page {page}/{total}",
+    "listenCachedAudio": "Play sample",
+    "tapWordsHint": "Tap words your child practiced accurately to record offline progress:",
+    "prevPage": "Previous page",
+    "nextPage": "Next page",
+    "finishAndQueueSync": "Finish & Queue Sync"
+  },
+  "qrCard": {
+    "openButton": "Printable QR Card",
+    "modalTitle": "ViRead Printable QR Reading Card",
+    "eyebrow": "Physical Book QR Bookmark",
+    "scanInstruction": "Scan this QR code with a phone camera to jump straight to this book in ViRead.",
+    "printButton": "Print QR Card"
   }
 }

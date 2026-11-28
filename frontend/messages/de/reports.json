@@ -696,7 +696,8 @@
     "practiceTimes": "{count}×",
     "karaokeWeakSegmentsTitle": "Liedzeilen zum langsamen Üben mit 0,85x",
     "openSongAction": "Lied öffnen",
-    "homeTipsTitle": "Tipps für zu Hause für Eltern"
+    "homeTipsTitle": "Tipps für zu Hause für Eltern",
+    "misreadWordsReinforcedLabel": "Geübte Lesewörter aus Spielen"
   },
   "printCertificate": {
     "brandTagline": "Familien-Lesefortschrittsbericht",

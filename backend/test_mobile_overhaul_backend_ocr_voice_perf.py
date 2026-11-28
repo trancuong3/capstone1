@@ -1228,6 +1228,72 @@ class TestDashboardSummarySignedUrlCacheAndLightStartup(unittest.TestCase):
             )
             self.assertEqual(fallback["metadata"]["runtime_device"], "cpu")
 
+    def test_auth_role_ttl_defaults_history_role_cache_and_tts_miss_cache(self):
+        from fastapi import BackgroundTasks
+        from app.api import deps as deps_mod
+        from app.api.routes.reading import HistoryRepository
+        from app.database import role_cache as role_cache_mod
+        from app.services.tts_audio_cache_service import (
+            ResolvedCacheTarget,
+            TtsAudioCacheService,
+            clear_tts_cache_runtime_metrics,
+        )
+
+        # Auth token cache TTL defaults to 180s in non-test environments and clamps up to 300s
+        with (
+            patch.object(deps_mod, "APP_ENVIRONMENT", "production"),
+            patch.dict(os.environ, {"AUTH_TOKEN_CACHE_TTL_SECONDS": ""}, clear=False),
+        ):
+            self.assertEqual(deps_mod._auth_token_cache_ttl_seconds(), 180.0)
+        with patch.dict(os.environ, {"AUTH_TOKEN_CACHE_TTL_SECONDS": "240"}, clear=False):
+            self.assertEqual(deps_mod._auth_token_cache_ttl_seconds(), 240.0)
+        self.assertGreaterEqual(role_cache_mod._ROLE_TTL_SECONDS, 10.0)
+
+        # HistoryRepository.role delegates to get_cached_profile_role
+        actor_id = uuid4()
+        fake_db = MagicMock()
+        with patch(
+            "app.database.role_cache.get_cached_profile_role",
+            new=AsyncMock(return_value="parent"),
+        ) as cached_role_mock:
+            role_val = asyncio.run(HistoryRepository(fake_db).role(actor_id))
+        self.assertEqual(role_val, "parent")
+        cached_role_mock.assert_awaited_once_with(fake_db, actor_id)
+
+        # TtsAudioCacheService short-TTL miss cache skips repeat SQL RTTs on consecutive misses
+        clear_tts_cache_runtime_metrics()
+        self.addCleanup(clear_tts_cache_runtime_metrics)
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        mock_db = MagicMock(spec=AsyncSession)
+        mock_db.bind = object()
+        mock_db.rollback = AsyncMock()
+        svc = TtsAudioCacheService(mock_db)
+        svc.repo.get_daily_usage = AsyncMock(return_value={"bytes_served": 0, "hit_count": 0, "miss_count": 0})
+        svc.repo.get_best_active_entries = AsyncMock(return_value=[])
+        target = ResolvedCacheTarget("COACHING", None, None, None, None, True)
+        bg = BackgroundTasks()
+        with patch.dict(os.environ, {"VIREAD_TTS_CACHE_ENABLED": "true"}, clear=False):
+            m1 = asyncio.run(
+                svc.lookup_cached_audio(
+                    target=target,
+                    normalized_text="Từ chưa có cache",
+                    voice_id="local_north_truc_ly",
+                    background_tasks=bg,
+                )
+            )
+            m2 = asyncio.run(
+                svc.lookup_cached_audio(
+                    target=target,
+                    normalized_text="Từ chưa có cache",
+                    voice_id="local_north_truc_ly",
+                    background_tasks=bg,
+                )
+            )
+        self.assertIsNone(m1)
+        self.assertIsNone(m2)
+        self.assertEqual(svc.repo.get_best_active_entries.await_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

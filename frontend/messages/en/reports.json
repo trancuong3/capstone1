@@ -696,7 +696,8 @@
     "practiceTimes": "{count}x",
     "karaokeWeakSegmentsTitle": "Song lines to practice slowly at 0.85x",
     "openSongAction": "Open song",
-    "homeTipsTitle": "Home support tips for parents"
+    "homeTipsTitle": "Home support tips for parents",
+    "misreadWordsReinforcedLabel": "Misread reading words reinforced"
   },
   "printCertificate": {
     "brandTagline": "Family Reading Progress Snapshot",
