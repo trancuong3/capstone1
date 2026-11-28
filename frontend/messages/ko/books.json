@@ -28,7 +28,7 @@
     "clearFilter": "필터 지우기",
     "paginationAria": "도서관 페이지 나누기",
     "paginationItemLabel": "권",
-    "savedStatusError": "저장된 도서 상태를 불러오지 못했습니다. 백엔드 및 독서 관리 마이그레이션을 확인해 주세요.",
+    "savedStatusError": "저장된 도서 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "removedFromCollection": "목록에서 도서가 제거되었습니다.",
     "savedForChild": "아이 프로필에 도서가 저장되었습니다.",
     "saveCollectionFailed": "변경 사항을 저장하지 못했습니다. 다시 시도해 주세요. 상태가 업데이트되지 않았습니다.",

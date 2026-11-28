@@ -28,7 +28,7 @@
     "clearFilter": "נקה מסננים",
     "paginationAria": "חלוקה דפים בספריית הספרים",
     "paginationItemLabel": "ספרים",
-    "savedStatusError": "נכשל בטעינת מצב הספרים השמורים. בדוק את ה־backend ואת מיגרציית ניהול הקריאה",
+    "savedStatusError": "לא ניתן לטעון את מצב הספרים השמורים. נא לנסות שוב בעוד מספר רגעים.",
     "removedFromCollection": "הסרת הספר מרשימת הספרים",
     "savedForChild": "שמרת ספר לפרופיל הילד",
     "saveCollectionFailed": "נכשל בשמירת השינויים. נסה שוב; המצב לא עודכן",

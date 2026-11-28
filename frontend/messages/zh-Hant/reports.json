@@ -419,7 +419,7 @@
     "errorTitle": "發生錯誤",
     "savedTitle": "已儲存",
     "loadChildFailed": "無法載入兒童檔案，請再試一次。",
-    "loadManagementFailed": "無法載入閱讀管理資料。請檢查後端與閱讀管理遷移，然後再試。",
+    "loadManagementFailed": "無法載入閱讀管理資料。請稍後再試。",
     "mutationUnconfirmed": "操作失敗。資料尚未確認儲存，請再試一次。",
     "overviewAria": "閱讀習慣概覽",
     "summaryRunningGoals": "進行中的目標",

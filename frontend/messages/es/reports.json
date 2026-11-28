@@ -419,7 +419,7 @@
     "errorTitle": "Algo salió mal",
     "savedTitle": "Guardado",
     "loadChildFailed": "No se pudo cargar el perfil de la criatura. Inténtelo de nuevo.",
-    "loadManagementFailed": "No se pudieron cargar los datos de gestión de lectura. Compruebe el backend y las migraciones de gestión de lectura, y vuelva a intentarlo.",
+    "loadManagementFailed": "No se pudieron cargar los datos de gestión de lectura. Vuelve a intentarlo en unos minutos.",
     "mutationUnconfirmed": "No se pudo completar la acción. No se confirmó que los datos se hayan guardado; inténtelo de nuevo.",
     "overviewAria": "Resumen de hábitos de lectura",
     "summaryRunningGoals": "Objetivos activos",

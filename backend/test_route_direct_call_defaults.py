@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import ast
 import os
 from pathlib import Path
 import sys
@@ -19,21 +20,28 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi import Response  # noqa: E402
+from fastapi import HTTPException, Response  # noqa: E402
 from pydantic.fields import FieldInfo  # noqa: E402
 
 from app.api.routes import (  # noqa: E402
+    adaptive_learning,
+    admin_ocr,
+    admin_viread_training,
     book,
     book_assets,
     book_content_quality,
     child_progress,
+    karaoke,
     karaoke_practice,
     karaoke_processing,
+    karaoke_simple_import,
     memory_game,
     parent_notifications,
     parent_private_book,
+    picture_description,
     profile,
     reading,
+    sentence_shooter,
     system,
     voice_studio,
 )
@@ -608,6 +616,355 @@ class RouteDirectCallDefaultsTests(unittest.IsolatedAsyncioTestCase):
             crop_w=None,
             crop_h=None,
             rotation=0,
+        )
+
+    async def test_adaptive_learning_and_games_routes_direct_call_unwrap_defaults(self):
+        parent_id = uuid4()
+        child_id = uuid4()
+
+        al_svc = SimpleNamespace(
+            get_adaptive_profile=AsyncMock(return_value="profile_ok"),
+            get_parent_analytics=AsyncMock(return_value="analytics_ok"),
+        )
+        with patch.object(adaptive_learning, "_service", return_value=al_svc):
+            self.assertEqual(
+                await adaptive_learning.get_child_adaptive_profile(
+                    child_id, parent_id=parent_id, db=None
+                ),
+                "profile_ok",
+            )
+            self._assert_no_field_info_leaks(al_svc.get_adaptive_profile)
+            al_svc.get_adaptive_profile.assert_awaited_once_with(
+                child_id, parent_id, window_days=30
+            )
+            self.assertIs(
+                type(al_svc.get_adaptive_profile.await_args.kwargs["window_days"]),
+                int,
+            )
+
+            self.assertEqual(
+                await adaptive_learning.get_child_parent_entertainment_analytics(
+                    child_id, parent_id=parent_id, db=None
+                ),
+                "analytics_ok",
+            )
+            self._assert_no_field_info_leaks(al_svc.get_parent_analytics)
+            al_svc.get_parent_analytics.assert_awaited_once_with(
+                child_id, parent_id, window_days=30
+            )
+
+        ss_svc = SimpleNamespace(list_books=AsyncMock(return_value=["g1"]))
+        with patch.object(sentence_shooter, "build_service", return_value=ss_svc):
+            self.assertEqual(
+                await sentence_shooter.list_game_books(
+                    child_id=child_id, actor_id=parent_id, db=None
+                ),
+                ["g1"],
+            )
+            self._assert_no_field_info_leaks(ss_svc.list_books)
+            ss_svc.list_books.assert_awaited_once_with(
+                parent_id, child_id, "easy", 3
+            )
+
+        pd_svc = SimpleNamespace(create_session=AsyncMock(return_value="pic_ok"))
+        with patch.object(picture_description, "_service", return_value=pd_svc):
+            self.assertEqual(
+                await picture_description.create_picture_session(
+                    child_id=child_id,
+                    source_type="SAMPLE",
+                    sample_key="sunny-garden",
+                    actor_id=parent_id,
+                    db=None,
+                ),
+                "pic_ok",
+            )
+            self._assert_no_field_info_leaks(pd_svc.create_session)
+            pd_svc.create_session.assert_awaited_once_with(
+                parent_id,
+                child_id=child_id,
+                source_type="SAMPLE",
+                sample_key="sunny-garden",
+                book_page_id=None,
+                upload_bytes=None,
+                teaching_mode="OBSERVE",
+                target_words=[],
+                refresh_ai_guide=False,
+                teacher_gender=None,
+            )
+            self.assertIs(
+                pd_svc.create_session.await_args.kwargs["refresh_ai_guide"], False
+            )
+
+    async def test_karaoke_catalog_and_simple_import_direct_call_unwrap_defaults(self):
+        actor_id = uuid4()
+        child_id = uuid4()
+
+        k_svc = SimpleNamespace(
+            admin_list=AsyncMock(return_value="admin_list_ok"),
+            catalog=AsyncMock(return_value="catalog_ok"),
+        )
+        self.assertEqual(
+            await karaoke.admin_songs(actor_id=actor_id, service=k_svc),
+            "admin_list_ok",
+        )
+        self._assert_no_field_info_leaks(k_svc.admin_list)
+        k_svc.admin_list.assert_awaited_once_with(
+            actor_id, search="", status=None, limit=12, offset=0
+        )
+
+        self.assertEqual(
+            await karaoke.songs(child_id, actor_id=actor_id, service=k_svc),
+            "catalog_ok",
+        )
+        self._assert_no_field_info_leaks(k_svc.catalog)
+        k_svc.catalog.assert_awaited_once_with(
+            actor_id, child_id, search="", limit=12, offset=0
+        )
+
+        si_svc = SimpleNamespace(simple_import=AsyncMock(return_value="import_ok"))
+        fake_audio = SimpleNamespace(filename="song.mp3")
+        self.assertEqual(
+            await karaoke_simple_import.simple_import_song(
+                audio=fake_audio, actor_id=actor_id, service=si_svc
+            ),
+            "import_ok",
+        )
+        self._assert_no_field_info_leaks(si_svc.simple_import)
+        si_svc.simple_import.assert_awaited_once_with(
+            actor_id,
+            audio=fake_audio,
+            title=None,
+            author=None,
+            min_grade=1,
+            max_grade=5,
+            lyrics_text=None,
+            audio_type="UNKNOWN",
+            bpm=None,
+            auto_transcribe=True,
+            enable_background_processing=True,
+            source_note=None,
+            usage_note=None,
+            rights_confirmed=False,
+            child_safe_confirmed=False,
+        )
+        self.assertIs(
+            si_svc.simple_import.await_args.kwargs["rights_confirmed"], False
+        )
+        self.assertIs(
+            si_svc.simple_import.await_args.kwargs["child_safe_confirmed"], False
+        )
+
+    async def test_admin_ocr_and_training_routes_direct_call_unwrap_defaults(self):
+        actor_id = uuid4()
+        book_id = uuid4()
+        page_id = uuid4()
+        job_id = uuid4()
+        fake_img = SimpleNamespace(filename="page.png")
+
+        ocr_svc = SimpleNamespace(
+            upload_page=AsyncMock(
+                return_value=SimpleNamespace(
+                    verification_status="VERIFIED", draft_text=None, words=[]
+                )
+            ),
+            upload_document=AsyncMock(return_value="doc_ok"),
+            replace_page_image=AsyncMock(return_value="reup_ok"),
+            enqueue_upload_page_job=AsyncMock(return_value="job_page_ok"),
+            enqueue_upload_document_jobs=AsyncMock(return_value="job_doc_ok"),
+            enqueue_reupload_ocr_job=AsyncMock(return_value="job_reup_ok"),
+        )
+        with patch.object(admin_ocr, "AdminOcrService", return_value=ocr_svc):
+            await admin_ocr.upload_admin_page(
+                book_id, image=fake_img, actor_id=actor_id, db=None
+            )
+            self._assert_no_field_info_leaks(ocr_svc.upload_page)
+            ocr_svc.upload_page.assert_awaited_once_with(
+                actor_id, book_id, fake_img, upload_id=None, page_number=None
+            )
+
+            self.assertEqual(
+                await admin_ocr.upload_admin_document(
+                    book_id, document=fake_img, actor_id=actor_id, db=None
+                ),
+                "doc_ok",
+            )
+            self._assert_no_field_info_leaks(ocr_svc.upload_document)
+
+            self.assertEqual(
+                await admin_ocr.reupload_admin_page_image(
+                    page_id, image=fake_img, actor_id=actor_id, db=None
+                ),
+                "reup_ok",
+            )
+            self._assert_no_field_info_leaks(ocr_svc.replace_page_image)
+
+            self.assertEqual(
+                await admin_ocr.enqueue_admin_page_ocr_job(
+                    book_id, image=fake_img, actor_id=actor_id, db=None
+                ),
+                "job_page_ok",
+            )
+            self._assert_no_field_info_leaks(ocr_svc.enqueue_upload_page_job)
+
+            self.assertEqual(
+                await admin_ocr.enqueue_admin_document_ocr_jobs(
+                    book_id, document=fake_img, actor_id=actor_id, db=None
+                ),
+                "job_doc_ok",
+            )
+            self._assert_no_field_info_leaks(ocr_svc.enqueue_upload_document_jobs)
+
+            self.assertEqual(
+                await admin_ocr.enqueue_admin_reupload_ocr_job(
+                    page_id, image=fake_img, actor_id=actor_id, db=None
+                ),
+                "job_reup_ok",
+            )
+            self._assert_no_field_info_leaks(ocr_svc.enqueue_reupload_ocr_job)
+
+        with patch.dict(os.environ, {"VIREAD_TRAINING_WORKER_TOKEN": "t" * 40}):
+            with self.assertRaises(HTTPException) as ctx:
+                admin_viread_training._require_training_worker_token()
+            self.assertEqual(ctx.exception.status_code, 401)
+
+        train_svc = SimpleNamespace(
+            activate_flow1_model=AsyncMock(return_value="activated_ok")
+        )
+        drive_svc = SimpleNamespace(
+            put_job_resume_file=AsyncMock(return_value="resume_ok")
+        )
+        fake_comp = SimpleNamespace(
+            read=AsyncMock(return_value=b"{}"), close=AsyncMock()
+        )
+        fake_resume = SimpleNamespace(
+            read=AsyncMock(return_value=b"ckpt"), close=AsyncMock()
+        )
+        fake_db = SimpleNamespace(rollback=AsyncMock())
+        with (
+            patch.object(
+                admin_viread_training, "VireadOcrTrainingService", return_value=train_svc
+            ),
+            patch.object(
+                admin_viread_training, "_leased_colab_job", AsyncMock(return_value={})
+            ),
+            patch.object(
+                admin_viread_training,
+                "VireadDriveConnectionService",
+                return_value=drive_svc,
+            ),
+        ):
+            self.assertEqual(
+                await admin_viread_training.activate_viread_flow1_model(
+                    upload_id=job_id,
+                    weights_filename="weights.pth",
+                    chunks_json="[]",
+                    comparison_file=fake_comp,
+                    actor_id=actor_id,
+                    db=fake_db,
+                ),
+                "activated_ok",
+            )
+            self._assert_no_field_info_leaks(train_svc.activate_flow1_model)
+            train_svc.activate_flow1_model.assert_awaited_once_with(
+                actor_id=actor_id,
+                upload_id=job_id,
+                weights_filename="weights.pth",
+                chunks_json="[]",
+                comparison_bytes=b"{}",
+                config_bytes=None,
+                config_filename=None,
+                model_version=None,
+                reason=None,
+            )
+
+            self.assertEqual(
+                await admin_viread_training.upload_viread_colab_resume_object(
+                    job_id,
+                    "epoch-1.pt",
+                    worker_id="colab-worker-1",
+                    file=fake_resume,
+                    _worker=None,
+                    db=fake_db,
+                ),
+                "resume_ok",
+            )
+            self._assert_no_field_info_leaks(drive_svc.put_job_resume_file)
+            drive_svc.put_job_resume_file.assert_awaited_once_with(
+                job_id, "epoch-1.pt", b"ckpt", expected_sha256=None
+            )
+
+    def test_all_route_optional_fastapi_params_are_unwrapped(self):
+        routes_dir = BACKEND_DIR / "app" / "api" / "routes"
+        unwrapped_helpers = ("_unwrap_limit(", "_unwrap_bool(", "_unwrap_portal(")
+        missing: list[str] = []
+
+        for path in sorted(routes_dir.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                all_args = (
+                    node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+                )
+                defaults = (
+                    [None]
+                    * (
+                        len(node.args.posonlyargs)
+                        + len(node.args.args)
+                        - len(node.args.defaults)
+                    )
+                    + list(node.args.defaults)
+                    + list(node.args.kw_defaults)
+                )
+                body_src = ast.unparse(node.body)
+                for arg, default_node in zip(all_args, defaults):
+                    if not isinstance(default_node, ast.Call):
+                        continue
+                    fn_name = (
+                        default_node.func.id
+                        if isinstance(default_node.func, ast.Name)
+                        else (
+                            default_node.func.attr
+                            if isinstance(default_node.func, ast.Attribute)
+                            else ""
+                        )
+                    )
+                    if fn_name not in (
+                        "Query",
+                        "Header",
+                        "Form",
+                        "Body",
+                        "Cookie",
+                        "Path",
+                        "File",
+                    ):
+                        continue
+                    has_default = bool(
+                        default_node.args
+                        and not (
+                            isinstance(default_node.args[0], ast.Constant)
+                            and default_node.args[0].value is Ellipsis
+                        )
+                    ) or any(
+                        kw.arg in ("default", "default_factory")
+                        for kw in default_node.keywords
+                    )
+                    if not has_default:
+                        continue
+                    guarded = f"isinstance({arg.arg}" in body_src or any(
+                        f"{helper}{arg.arg}" in body_src for helper in unwrapped_helpers
+                    )
+                    if not guarded:
+                        rel = path.relative_to(BACKEND_DIR)
+                        missing.append(
+                            f"{rel}:{node.lineno} {node.name}({arg.arg}={ast.unparse(default_node)})"
+                        )
+
+        self.assertEqual(
+            missing,
+            [],
+            f"Optional FastAPI route parameters missing FieldInfo unwrapping:\n"
+            + "\n".join(missing),
         )
 
 

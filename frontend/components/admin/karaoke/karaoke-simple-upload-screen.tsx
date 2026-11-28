@@ -1638,10 +1638,14 @@ export function KaraokeSimpleUploadScreen({
                 </div>
               </div>
               {preview?.cover_url ? (
+                // Signed/dynamic remote media URLs are rendered directly without Next image host proxying.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={preview.cover_url}
                   alt={t("karaoke.simpleUpload.coverAlt", { title })}
                   className="size-20 rounded-control border border-border object-cover"
+                  decoding="async"
+                  loading="lazy"
                 />
               ) : null}
             </div>

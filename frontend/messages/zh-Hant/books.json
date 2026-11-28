@@ -28,7 +28,7 @@
     "clearFilter": "清除篩選條件",
     "paginationAria": "圖書庫分頁",
     "paginationItemLabel": "本書籍",
-    "savedStatusError": "無法載入已儲存的書籍狀態。請檢查後端與 Reading Management 遷移。",
+    "savedStatusError": "無法載入已儲存的書籍狀態。請稍後再試。",
     "removedFromCollection": "已從清單中移除書籍。",
     "savedForChild": "已將書籍儲存至孩子檔案。",
     "saveCollectionFailed": "無法儲存變更。請再試一次；狀態尚未更新。",

@@ -28,7 +28,7 @@
     "clearFilter": "フィルターを解除",
     "paginationAria": "ライブラリのページ送り",
     "paginationItemLabel": "冊",
-    "savedStatusError": "保存された本のステータスを読み込めませんでした。バックエンドと Reading Management のマイグレーションを確認してください。",
+    "savedStatusError": "保存された本のステータスを読み込めませんでした。しばらくしてからもう一度お試しください。",
     "removedFromCollection": "コレクションから本を削除しました。",
     "savedForChild": "お子様のプロフィールに本を保存しました。",
     "saveCollectionFailed": "変更を保存できませんでした。もう一度お試しください。ステータスは更新されていません。",
