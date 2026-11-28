@@ -62,7 +62,10 @@ const recorderStopMock = vi.fn<() => Promise<Blob | null>>(
   async () => new Blob(["audio"], { type: "audio/webm" }),
 );
 const recorderCancelMock = vi.fn();
-const mockRecorderState = { isSpeaking: false };
+const mockRecorderState = {
+  isSpeaking: false,
+  getIsSpeakingOverride: null as boolean | null,
+};
 
 const speechTranscribeMock = vi.fn<
   (...args: unknown[]) => Promise<{ text: string; provider: string }>
@@ -119,7 +122,8 @@ vi.mock("@/hooks/use-speech-recorder", () => ({
     stop: recorderStopMock,
     cancel: recorderCancelMock,
     getStream: () => null,
-    getIsSpeaking: () => mockRecorderState.isSpeaking,
+    getIsSpeaking: () =>
+      mockRecorderState.getIsSpeakingOverride ?? mockRecorderState.isSpeaking,
   }),
 }));
 
@@ -570,6 +574,7 @@ describe("Child Autopilot UX V4.1", () => {
     });
     vi.clearAllMocks();
     mockRecorderState.isSpeaking = false;
+    mockRecorderState.getIsSpeakingOverride = null;
     FakeSpeechRecognition.instances = [];
     adaptiveGetRecommendationsMock.mockResolvedValue(makeRecommendations());
     speechPlayMock.mockResolvedValue(undefined);
@@ -1408,6 +1413,191 @@ describe("Child Autopilot UX V4.1", () => {
     expect(
       screen.queryByTestId("reveal-practiced-words"),
     ).not.toBeInTheDocument();
+    // Stage E autopilot TTS must NOT celebrate unpracticed matched_focus_words either
+    const spokenTexts = speechPlayMock.mock.calls.map(([text]) => String(text));
+    expect(spokenTexts.some((text) => text.includes("Bé vừa ôn được từ"))).toBe(
+      false,
+    );
+  });
+
+  it("Review regressions: H1 VAD unclear draft safety + transient speech spike, H6 book_id+challenge 409 step-down when listBooks is empty, and M1 TTS union", async () => {
+    // 1) H6 + 409 step-down when ?autoplay=1&book_id=<small_book>&difficulty=challenge and listBooks(challenge) returns []
+    const shooterSession = makeShooterSession(1);
+    vi.mocked(shooterServiceMock.listBooks).mockResolvedValueOnce([]);
+    vi.mocked(shooterServiceMock.createSession)
+      .mockRejectedValueOnce({ status: 409, message: "INSUFFICIENT_CONTENT" })
+      .mockResolvedValueOnce(shooterSession);
+
+    const shooterView = render(
+      <SentenceShooterScreen
+        autoPlay={true}
+        initialBookId={BOOK_ID}
+        initialDifficulty="challenge"
+        initialLearningMode="FILL_BLANK"
+      />,
+    );
+    await waitFor(() => {
+      expect(shooterServiceMock.createSession).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          child_id: CHILD_ID,
+          book_id: BOOK_ID,
+          difficulty: "challenge",
+          learning_mode: "FILL_BLANK",
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(shooterServiceMock.createSession).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          child_id: CHILD_ID,
+          book_id: BOOK_ID,
+          difficulty: "medium",
+          learning_mode: "FILL_BLANK",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+    shooterView.unmount();
+
+    // 2) M1 TTS celebration: undefined practiced_difficult_words + empty used_focus_words must NOT read matched_focus_words;
+    //    empty practiced_difficult_words + non-empty used_focus_words MUST read used_focus_words.
+    speechPlayMock.mockClear();
+    const memSession = makeMemorySession(2);
+    const memoryMock = createMemoryServiceMock(memSession);
+    const partialUsedEval: MemoryEvaluationDTO = {
+      ...makeMemoryEvaluation(),
+      used_focus_words: ["con mèo"],
+      practiced_difficult_words: [],
+      focus_word_feedback_vi: null,
+    };
+    memoryMock.submitAttemptMock.mockResolvedValueOnce({
+      attempt: {
+        id: "att-m1-tts",
+        session_id: memSession.id,
+        attempt_number: 1,
+        stage: "RECALL" as const,
+        input_mode: "TEXT" as const,
+        response_text: "con mèo vàng",
+        factual_score: 80,
+        creative_score: 0,
+        stars: 3,
+        evaluation: partialUsedEval,
+        ai_provider: "deterministic-v4",
+        created_at: "2026-01-01T00:01:00Z",
+      },
+      session: {
+        ...memSession,
+        best_factual_score: 80,
+        stars: 3,
+        attempts_count: 1,
+      },
+    });
+    const memView = render(
+      <MemoryGameScreen autoPlay={true} service={memoryMock} />,
+    );
+    await screen.findByTestId("observe-stage");
+    fireEvent.click(screen.getByRole("button", { name: /Bé đã nhớ rồi/i }));
+    const recallInput = await screen.findByTestId("recall-textarea");
+    fireEvent.change(recallInput, { target: { value: "con mèo vàng" } });
+    fireEvent.click(screen.getByRole("button", { name: /Mở tranh/i }));
+    await screen.findByTestId("reveal-stage");
+    expect(
+      speechPlayMock.mock.calls.some(([text]) =>
+        String(text).includes("con mèo"),
+      ),
+    ).toBe(true);
+    memView.unmount();
+
+    // 3) H1 VAD edge cases: (a) recorder starts in child-passage mode, (b) unclear STT does NOT auto-submit old draft,
+    //    (c) transient getIsSpeaking() spike resets countdown instead of freezing it.
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    const picCatalog = makePictureCatalog();
+    const picSession = makePictureSession();
+    const evalResp = makePictureEvalResponse(picSession);
+    vi.mocked(pictureServiceMock.getCatalog).mockResolvedValue(picCatalog);
+    vi.mocked(pictureServiceMock.listSessions).mockResolvedValue([]);
+    vi.mocked(pictureServiceMock.createSession).mockResolvedValue(picSession);
+    vi.mocked(pictureServiceMock.evaluate).mockResolvedValue(evalResp);
+    speechTranscribeMock.mockResolvedValueOnce({
+      text: "",
+      provider: "elevenlabs",
+    });
+
+    vi.useFakeTimers();
+    const picView = render(<PictureDescriptionScreen autoPlay={true} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+    });
+    expect(recorderStartMock).toHaveBeenCalledWith({ mode: "child-passage" });
+
+    // Stop initial autopilot mic, pre-populate draft while idle, then re-arm mic
+    speechTranscribeMock.mockResolvedValue({
+      text: "",
+      provider: "elevenlabs",
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Dừng ghi âm/i }));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const micBtn = screen.getByRole("button", { name: /Nói bằng micro/i });
+    expect(micBtn).not.toBeDisabled();
+    speechTranscribeMock.mockClear();
+
+    const draftBox = screen.getByRole("textbox");
+    fireEvent.change(draftBox, { target: { value: "Bản nháp cũ của bé" } });
+    expect(draftBox).toHaveValue("Bản nháp cũ của bé");
+
+    await act(async () => {
+      fireEvent.click(micBtn);
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(recorderStartMock).toHaveBeenCalledTimes(2);
+
+    mockRecorderState.isSpeaking = true;
+    await act(async () => {
+      picView.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    mockRecorderState.isSpeaking = false;
+    await act(async () => {
+      picView.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    // Transient getIsSpeaking() spike while React recorder.isSpeaking remains false:
+    // timer must NOT permanently freeze; it resets deadline and completes after 2.2s quiet.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    mockRecorderState.getIsSpeakingOverride = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    mockRecorderState.getIsSpeakingOverride = null;
+    // Countdown must resume cleanly after spike and finish after another 2.2s,
+    // and because STT returned empty text, old draft MUST NOT be auto-submitted!
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2400);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(speechTranscribeMock).toHaveBeenCalledTimes(1);
+    expect(pictureServiceMock.evaluate).not.toHaveBeenCalled();
+    picView.unmount();
   });
 
   it("M4: respects autoPlayFlow=false on ?autoplay=1 across Sentence Shooter, Picture Description, and Memory Game", async () => {

@@ -1169,6 +1169,9 @@ export function PictureDescriptionScreen({
           child_id: childId,
           source_type: "CUSTOM_UPLOAD",
           image_file: uploadFile,
+          ...(resolvedInitialTeachingMode
+            ? { teaching_mode: resolvedInitialTeachingMode }
+            : {}),
           teacher_gender: teacherPersona.gender,
         },
         controller.signal,
@@ -1247,7 +1250,7 @@ export function PictureDescriptionScreen({
       usingExternalNativeSttRef.current = preferAndroidNativeStt;
       if (!preferAndroidNativeStt) {
         try {
-          await recorder.start();
+          await recorder.start({ mode: "child-passage" });
         } catch {
           if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
             return;
@@ -1632,9 +1635,7 @@ export function PictureDescriptionScreen({
       clearSilenceTimer();
       setSilenceCountdown(null);
       const transcribedDraft = await stopVoiceRecordingRef.current();
-      const textToEvaluate = (
-        transcribedDraft ?? descriptionTextRef.current
-      ).trim();
+      const textToEvaluate = (transcribedDraft ?? "").trim();
       if (
         !mountedRef.current ||
         !sessionIdRef.current ||
@@ -1757,7 +1758,13 @@ export function PictureDescriptionScreen({
       vadSpeechDetectedRef.current = true;
       return;
     }
-    if (!autoPlayFlow || autoSubmitPaused || isEvaluating || isTranscribing) {
+    if (
+      !autoPlayFlow ||
+      autoSubmitPaused ||
+      isEvaluating ||
+      isTranscribing ||
+      (typeof document !== "undefined" && document.hidden)
+    ) {
       return;
     }
 
@@ -1769,13 +1776,14 @@ export function PictureDescriptionScreen({
     }
 
     const silenceKey = hasLiveWords ? `stt:${liveTranscript}` : "vad-silence";
-    const deadline = Date.now() + SILENCE_AUTO_SUBMIT_MS;
+    let deadline = Date.now() + SILENCE_AUTO_SUBMIT_MS;
     const initialTick = hasVadSpeechFinished
       ? setTimeout(() => {
           if (
             mountedRef.current &&
             isRecordingVoiceRef.current &&
-            !unmountActionsRef.current.getIsSpeaking()
+            !unmountActionsRef.current.getIsSpeaking() &&
+            !(typeof document !== "undefined" && document.hidden)
           ) {
             setSilenceCountdown({
               key: silenceKey,
@@ -1789,10 +1797,16 @@ export function PictureDescriptionScreen({
       if (
         !mountedRef.current ||
         !isRecordingVoiceRef.current ||
-        unmountActionsRef.current.getIsSpeaking() ||
         (typeof document !== "undefined" && document.hidden)
       ) {
         clearSilenceTimer();
+        setSilenceCountdown(null);
+        return;
+      }
+      if (unmountActionsRef.current.getIsSpeaking()) {
+        vadSpeechDetectedRef.current = true;
+        deadline = Date.now() + SILENCE_AUTO_SUBMIT_MS;
+        setSilenceCountdown(null);
         return;
       }
       const remainingMs = Math.max(0, deadline - Date.now());

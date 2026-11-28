@@ -122,6 +122,10 @@ def _session_to_read(
     )
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _filter_lyrics_for_practice(
     published_lyrics: Any,
     report_payload: dict[str, Any] | None,
@@ -129,47 +133,61 @@ def _filter_lyrics_for_practice(
     segment_end_ms: int | None,
 ) -> dict[str, Any]:
     """Scope lyric lines to what the child actually sang in this practice session."""
+    has_segment_window = (
+        segment_start_ms is not None
+        and segment_end_ms is not None
+        and segment_end_ms > segment_start_ms
+    )
     if isinstance(report_payload, dict):
         raw_segments = report_payload.get("segments")
         if isinstance(raw_segments, list) and raw_segments:
-            dict_segments = [seg for seg in raw_segments if isinstance(seg, dict)]
-            has_per_segment_lyric_scores = any(
-                isinstance(seg.get("lyrics_score"), (int, float))
-                for seg in dict_segments
-            )
-            selected_lines: list[dict[str, Any]] = []
-            for seg in dict_segments:
-                text = seg.get("text")
-                if not isinstance(text, str) or not text.strip():
-                    continue
-                if has_per_segment_lyric_scores:
+            text_segments = [
+                seg
+                for seg in raw_segments
+                if isinstance(seg, dict)
+                and isinstance(seg.get("text"), str)
+                and seg["text"].strip()
+            ]
+            if text_segments:
+                has_per_segment_lyric_scores = any(
+                    _is_number(seg.get("lyrics_score")) for seg in text_segments
+                )
+                has_per_segment_status = any(
+                    isinstance(seg.get("status"), str) and seg["status"].strip()
+                    for seg in text_segments
+                )
+                selected_lines: list[dict[str, Any]] = []
+                for seg in text_segments:
+                    if has_segment_window:
+                        seg_start = seg.get("start_ms")
+                        seg_end = seg.get("end_ms")
+                        if _is_number(seg_start) and _is_number(seg_end):
+                            if seg_end <= segment_start_ms or seg_start >= segment_end_ms:  # type: ignore[operator]
+                                continue
                     seg_score = seg.get("lyrics_score")
-                    if isinstance(seg_score, (int, float)):
+                    if _is_number(seg_score):
                         if seg_score < 60:
                             continue
-                    elif seg.get("status") not in ("GREAT", "GOOD"):
-                        continue
-                selected_lines.append({"text": text})
-            return {"lines": selected_lines}
+                    elif has_per_segment_lyric_scores or has_per_segment_status:
+                        if seg.get("status") not in ("GREAT", "GOOD"):
+                            continue
+                    selected_lines.append({"text": seg["text"]})
+                return {"lines": selected_lines}
 
     if not isinstance(published_lyrics, dict):
         return {"lines": []}
     lines = published_lyrics.get("lines")
     if not isinstance(lines, list):
         return {"lines": []}
-    if (
-        segment_start_ms is not None
-        and segment_end_ms is not None
-        and segment_end_ms > segment_start_ms
-    ):
+    if has_segment_window:
         scoped: list[Any] = []
         for line in lines:
             if not isinstance(line, dict):
                 continue
             start_ms = line.get("start_ms")
             end_ms = line.get("end_ms")
-            if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
-                if end_ms <= segment_start_ms or start_ms >= segment_end_ms:
+            if _is_number(start_ms) and _is_number(end_ms):
+                if end_ms <= segment_start_ms or start_ms >= segment_end_ms:  # type: ignore[operator]
                     continue
             scoped.append(line)
         return {"lines": scoped}

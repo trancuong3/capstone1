@@ -1030,9 +1030,6 @@ export function SentenceShooterScreen({
     if (!autoSelectBook && !resolvedBookId) return;
     const targetDifficulty = options?.difficultyOverride ?? difficulty;
     const targetLearningMode = options?.learningModeOverride ?? learningMode;
-    if (options?.difficultyOverride) {
-      setDifficulty(options.difficultyOverride);
-    }
     if (options?.learningModeOverride) {
       setLearningMode(options.learningModeOverride);
     }
@@ -1084,7 +1081,7 @@ export function SentenceShooterScreen({
         }
       }
       if (!created || epoch !== sessionEpochRef.current) return;
-      if (resolvedDifficulty !== targetDifficulty) {
+      if (resolvedDifficulty !== difficulty) {
         setDifficulty(resolvedDifficulty);
       }
       clearProjectileTimers();
@@ -1355,21 +1352,32 @@ export function SentenceShooterScreen({
       autoStartedRef.current = true;
       return;
     }
+    const targetDifficulty =
+      resolvedInitialDifficulty ??
+      resolveAdaptiveDifficultyForGrade(child.grade);
+    const targetLearningMode = resolvedInitialLearningMode ?? learningMode;
+    let targetBookId: string | undefined;
     if (initialBookId) {
       if (bookState.status === "loading") {
         return;
       }
-      if (bookState.status !== "ready" || !selectedBook) {
+      if (bookState.status !== "ready") {
+        autoStartedRef.current = true;
+        return;
+      }
+      if (selectedBook) {
+        targetBookId = selectedBook.id;
+      } else if (targetDifficulty !== "easy") {
+        // When `?book_id=<uuid>&difficulty=challenge|medium` is requested, `listBooks` filters out
+        // books with < total_rounds sentences at that harder difficulty; allow `createSession`'s
+        // 409 step-down fallback (`challenge -> medium -> easy`) to open the requested book cleanly.
+        targetBookId = initialBookId;
+      } else {
         autoStartedRef.current = true;
         return;
       }
     }
     let active = true;
-    const targetDifficulty =
-      resolvedInitialDifficulty ??
-      resolveAdaptiveDifficultyForGrade(child.grade);
-    const targetLearningMode = resolvedInitialLearningMode ?? learningMode;
-    const targetBookId = initialBookId ? selectedBook?.id : undefined;
     void Promise.resolve().then(() => {
       if (!active || autoStartedRef.current) return;
       autoStartedRef.current = true;
@@ -2591,9 +2599,7 @@ export function SentenceShooterScreen({
                                   aria-hidden="true"
                                   className="size-3"
                                 />
-                                {t(
-                                  "sentenceShooter.difficultWordReviewPrefix",
-                                )}{" "}
+                                {t("sentenceShooter.difficultWordReviewPrefix")}{" "}
                                 <span
                                   className="viread-learning-content"
                                   dir="ltr"

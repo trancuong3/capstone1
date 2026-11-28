@@ -527,9 +527,8 @@ class MemoryGameService:
                 if attempt.Stage == "RECALL"
                 else evaluation.creative_score / 100.0
             )
-            word_multiplier = 0.85 + min(0.15, 0.08 * len(evaluation.used_focus_words))
             mastery_score = round(
-                max(0.0, min(1.0, stage_score_norm * word_multiplier)),
+                max(0.0, min(1.0, stage_score_norm)),
                 4,
             )
             evidence_items.append(

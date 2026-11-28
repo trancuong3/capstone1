@@ -919,7 +919,8 @@ class TestMemoryGameV41DifficultWordPersonalization(unittest.IsolatedAsyncioTest
         self.assertIn("Góc ôn từ khó", miss.attempt.evaluation.focus_word_feedback_vi or "")
 
     async def test_low_score_focus_word_spam_does_not_hit_reinforcement_threshold_and_random_rotates(self):
-        from app.schemas.memory_game import MemoryAttemptCreate, MemorySessionCreate
+        from unittest.mock import AsyncMock
+        from app.schemas.memory_game import MemoryAttemptCreate, MemoryEvaluationRead, MemorySessionCreate
 
         parent_id = uuid4()
         child_id = uuid4()
@@ -945,6 +946,43 @@ class TestMemoryGameV41DifficultWordPersonalization(unittest.IsolatedAsyncioTest
         mastery_entries = [e for e in repo.evidence_log if e["skill_key"] == "difficult_word_mastery"]
         self.assertTrue(mastery_entries)
         self.assertLess(mastery_entries[-1]["score_normalized"], 0.75)
+
+        # Solid recall (>= 75/100) using even 1 focus word MUST meet the 0.75 reinforcement threshold
+        strong_repo = InMemoryGameRepository(
+            children={child_id: ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)},
+            difficult_words={child_id: ["nghiêng"]},
+        )
+        strong_eval = MemoryEvaluationRead(
+            stage="RECALL",
+            factual_score=80,
+            creative_score=0,
+            stars=3,
+            matched_facts=[],
+            missed_facts=[],
+            creative_highlights=[],
+            story_anchors=[],
+            praise_message_vi="Bé nhớ rất giỏi!",
+            story_praise_vi="Bé kể hay lắm!",
+            next_tip_vi="Tiếp tục nhé!",
+            creative_followup_vi="Chuyện gì tiếp theo?",
+            used_focus_words=["nghiêng"],
+        )
+        strong_evaluator = MemoryGameEvaluator(config=MemoryAiConfig(enabled=False))
+        strong_evaluator.evaluate = AsyncMock(return_value=strong_eval)  # type: ignore[method-assign]
+        strong_service = MemoryGameService(strong_repo, evaluator=strong_evaluator)  # type: ignore[arg-type]
+        strong_session = await strong_service.create_session(
+            parent_id,
+            MemorySessionCreate(child_id=child_id, theme_key="happy_classroom", scene_seed=5),
+        )
+        await strong_service.submit_attempt(
+            parent_id,
+            strong_session.id,
+            MemoryAttemptCreate(stage="RECALL", input_mode="TEXT", response_text="Bức tranh có ánh nắng nghiêng rất đẹp."),
+        )
+        strong_mastery = [e for e in strong_repo.evidence_log if e["skill_key"] == "difficult_word_mastery"]
+        self.assertTrue(strong_mastery)
+        self.assertGreaterEqual(strong_mastery[-1]["score_normalized"], 0.75)
+        self.assertAlmostEqual(strong_mastery[-1]["score_normalized"], 0.80, places=4)
 
         # Explicit "random" theme must NOT stay trapped on "seaside_morning" across multiple seeds
         seen_themes: set[str] = set()

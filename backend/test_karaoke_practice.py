@@ -591,6 +591,72 @@ def test_karaoke_practice_closes_difficult_word_mastery_loop():
     assert seg_by_skill["difficult_word_mastery"].PracticeWords == ["rực rỡ"]
     assert seg_by_skill["difficult_word_mastery"].ScoreNormalized == _approx(0.82)
 
+    # 4. Segments without per-segment lyrics_score still exclude unsung PRACTICE lines via status
+    repo.evidence.clear()
+    res_status_only = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "FULL_SONG",
+            "scoring_mode": "FULL_MUSICAL",
+            "playback_rate": 1.0,
+            "overall_score": 82,
+            "rhythm_score": 85,
+            "pitch_score": 80,
+            "lyrics_score": 80,
+            "fluency_score": 80,
+            "stars": 2,
+            "report_payload": {
+                "segments": [
+                    {
+                        "line_index": 0,
+                        "start_ms": 1000,
+                        "end_ms": 3000,
+                        "text": "Bé hát vui ca",
+                        "lyrics_score": None,
+                        "status": "GREAT",
+                    },
+                    {
+                        "line_index": 1,
+                        "start_ms": 3500,
+                        "end_ms": 5500,
+                        "text": "Nắng mai rực rỡ",
+                        "lyrics_score": None,
+                        "status": "PRACTICE",
+                    },
+                ],
+            },
+        },
+    )
+    assert res_status_only.status_code == 201
+    status_by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert status_by_skill["difficult_word_mastery"].PracticeWords == ["hát"]
+
+    # 5. Text-less malformed segments fall back cleanly to published_lyrics scoped by segment window
+    repo.evidence.clear()
+    res_textless = client.post(
+        "/karaoke/practice-sessions",
+        json={
+            "child_id": str(CHILD_A),
+            "song_id": str(SONG_ID),
+            "practice_mode": "SEGMENT",
+            "scoring_mode": "LYRICS_ONLY",
+            "playback_rate": 0.85,
+            "overall_score": 84,
+            "lyrics_score": 84,
+            "stars": 2,
+            "segment_start_ms": 3500,
+            "segment_end_ms": 5500,
+            "report_payload": {
+                "segments": [{"line_index": 1, "status": "GREAT"}],
+            },
+        },
+    )
+    assert res_textless.status_code == 201
+    textless_by_skill = {e.SkillKey: e for e in repo.evidence}
+    assert textless_by_skill["difficult_word_mastery"].PracticeWords == ["rực rỡ"]
+
 
 import unittest
 

@@ -252,7 +252,7 @@ def compute_spaced_difficult_words(
     """Rank difficult words for spaced repetition across games (1d -> 3d -> 7d cadence)."""
     ref_now = now or datetime.now(timezone.utc)
     grouped: dict[str, dict] = {}
-    attempts_by_norm: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
+    attempts_by_norm: dict[str, list[tuple[datetime, int, str]]] = defaultdict(list)
 
     for row in word_attempts:
         norm = normalize_vietnamese_practice_word(
@@ -285,7 +285,8 @@ def compute_spaced_difficult_words(
         if ts is not None:
             aware_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
             if status_val in ("CORRECT", "INCORRECT", "UNCERTAIN"):
-                attempts_by_norm[norm].append((aware_ts, str(status_val)))
+                attempt_num = int(getattr(row, "AttemptNumber", 0) or 0)
+                attempts_by_norm[norm].append((aware_ts, attempt_num, str(status_val)))
             if bucket["last_at"] is None or aware_ts > (
                 bucket["last_at"] if bucket["last_at"].tzinfo else bucket["last_at"].replace(tzinfo=timezone.utc)
             ):
@@ -296,8 +297,8 @@ def compute_spaced_difficult_words(
     feed_norms: set[str] = set()
     if feed_targets is not None:
         for norm, att_list in attempts_by_norm.items():
-            att_list.sort(key=lambda item: item[0], reverse=True)
-            recent_two = [item[1] for item in att_list[:2]]
+            att_list.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            recent_two = [item[2] for item in att_list[:2]]
             if len(recent_two) >= 2 and all(s == "CORRECT" for s in recent_two):
                 grouped.pop(norm, None)
 

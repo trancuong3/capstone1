@@ -852,6 +852,7 @@ class PictureDescriptionService:
                 )
                 preloaded_candidate = ranked[0]
                 resolved_book_page_id_input = preloaded_candidate.PageId
+                auto_selected_book_page = True
 
         resolved_book_id: UUID | None = None
         resolved_book_page_id: UUID | None = None

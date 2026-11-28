@@ -2202,3 +2202,15 @@ class TestPictureDescriptionV41DifficultWordLoop(unittest.IsolatedAsyncioTestCas
         self.assertEqual(fallback_created.source_type, "SAMPLE")
         self.assertIsNotNone(fallback_created.sample_key)
         self.assertIsNone(fallback_created.book_page_id)
+
+        # Explicit source_type="BOOK_PAGE" + book_page_id=None + auto_select=True also falls back cleanly
+        fallback_book_auto = await fallback_service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type="BOOK_PAGE",
+            book_page_id=None,
+            auto_select=True,
+        )
+        self.assertEqual(fallback_book_auto.source_type, "SAMPLE")
+        self.assertIsNotNone(fallback_book_auto.sample_key)
+        self.assertIsNone(fallback_book_auto.book_page_id)

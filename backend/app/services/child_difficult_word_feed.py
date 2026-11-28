@@ -378,7 +378,8 @@ class ChildDifficultWordFeed:
             raw_reports.append(
                 ReportRow(
                     session_id=session_id,
-                    created_at=created_at,
+                    created_at=_ensure_utc(created_at)
+                    or datetime.min.replace(tzinfo=timezone.utc),
                     alignment=alignment,
                     summary=summary,
                     page_id=page_id,

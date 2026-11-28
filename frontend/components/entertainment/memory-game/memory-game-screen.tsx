@@ -1300,11 +1300,12 @@ export function MemoryGameScreen({
     }
     if (revealAutopilotSessionRef.current === session.id) return;
     revealAutopilotSessionRef.current = session.id;
-    const practicedWords =
-      recallEvaluation.practiced_difficult_words ??
-      recallEvaluation.used_focus_words ??
-      session.scene_spec.matched_focus_words ??
-      [];
+    const practicedWords = Array.from(
+      new Set([
+        ...(recallEvaluation.practiced_difficult_words ?? []),
+        ...(recallEvaluation.used_focus_words ?? []),
+      ]),
+    );
     const celebration = [
       recallEvaluation.praise_message_vi,
       practicedWords.length > 0
