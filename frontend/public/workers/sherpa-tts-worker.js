@@ -114,11 +114,6 @@ const VOICE_MODEL_CONFIGS = {
   },
 };
 
-const canRetainBothGenders =
-  typeof self.navigator === "undefined" ||
-  !self.navigator.deviceMemory ||
-  self.navigator.deviceMemory >= 4;
-
 let scriptsLoaded = false;
 let piperPromise = null;
 let piperModule = null;
@@ -502,8 +497,8 @@ async function ensureSharedEspeakAssets(epoch, genderForProgress) {
 async function ensureTtsReadyForGender(rawGender) {
   const gender = normalizeGender(rawGender);
   if (ttsInstancesByGender[gender] && piperModule) {
-    const readyGenders = ["female", "male"].filter(
-      (g) => Boolean(ttsInstancesByGender[g]),
+    const readyGenders = ["female", "male"].filter((g) =>
+      Boolean(ttsInstancesByGender[g]),
     );
     return {
       piper: piperModule,
@@ -606,8 +601,8 @@ async function ensureTtsReadyForGender(rawGender) {
         throw new Error("WASM TTS init disposed");
       }
       if (ttsInstancesByGender[gender]) {
-        const readyGenders = ["female", "male"].filter(
-          (g) => Boolean(ttsInstancesByGender[g]),
+        const readyGenders = ["female", "male"].filter((g) =>
+          Boolean(ttsInstancesByGender[g]),
         );
         return {
           piper,
@@ -727,8 +722,8 @@ async function ensureTtsReadyForGender(rawGender) {
       }
 
       ttsInstancesByGender[gender] = instance;
-      const readyGenders = ["female", "male"].filter(
-        (g) => Boolean(ttsInstancesByGender[g]),
+      const readyGenders = ["female", "male"].filter((g) =>
+        Boolean(ttsInstancesByGender[g]),
       );
       return { piper, tts: instance, gender, readyGenders };
     } finally {
