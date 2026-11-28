@@ -17,7 +17,6 @@ import type {
   MagicRhythmChantDTO,
   MagicWordQuestDTO,
   ParentEntertainmentAnalyticsDTO,
-  WarmupMicroStoryDTO,
 } from "@/types/adaptive-learning";
 
 const skillDomainSchema = z.enum([
@@ -241,19 +240,6 @@ function normalizeWindowDays(windowDays: number): number {
   }
   return Math.min(90, Math.max(7, Math.floor(windowDays)));
 }
-
-const warmupMicroStorySchema = z.object({
-  child_id: z.string().min(1),
-  local_date: z.string(),
-  has_due_words: z.boolean(),
-  target_words: z.array(z.string()).default([]),
-  title_vi: z.string(),
-  sentences: z.array(z.string()).default([]),
-  full_text: z.string(),
-  source: z.enum(["AI", "RULE_BASED"]),
-  cached: z.boolean().default(false),
-});
-
 export const magicQuestProviderTierSchema = z.enum([
   "GEMINI",
   "GROQ",
@@ -379,10 +365,6 @@ export interface AdaptiveLearningService {
     childId: string,
     payload: DailyFiveMinuteTrainCompleteRequestDTO,
   ): Promise<DailyFiveMinuteTrainCompleteResponseDTO>;
-  getWarmupStory(
-    childId: string,
-    options?: { readonly refresh?: boolean },
-  ): Promise<WarmupMicroStoryDTO>;
   createMagicWordQuest(
     childId: string,
     input?: CreateMagicWordQuestInput,
@@ -551,17 +533,6 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
           body: payload,
           bypassCache: true,
         },
-      );
-    },
-    async getWarmupStory(
-      childId: string,
-      options?: { readonly refresh?: boolean },
-    ) {
-      const normalizedChildId = assertNonEmptyChildId(childId);
-      const suffix = options?.refresh ? "?refresh=true" : "";
-      return requestApi(
-        `/learning/children/${encodeURIComponent(normalizedChildId)}/warmup-story${suffix}`,
-        warmupMicroStorySchema,
       );
     },
   };

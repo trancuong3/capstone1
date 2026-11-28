@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "Opened attempt #{attempt} for word \"{word}\".",
     "unknownBookSource": "Book source not specified."
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "60-second phonics warm-up",
-    "title": "Minimal-Pair Sandbox & Tone Mirror",
-    "subtitle": "Helps {alias} hear and practice commonly confused Vietnamese tones, onsets, and final consonants.",
-    "openButton": "Open 60s sandbox",
-    "collapseButton": "Collapse",
-    "unavailableHint": "Could not load minimal-pair exercises right now. Please try again shortly.",
-    "pairCounter": "Pair {current}/{total}",
-    "listenWord": "Listen",
-    "speakWord": "Try saying",
-    "listening": "Listening...",
-    "spokenMatch": "Wonderful! Clear pronunciation of the target word!",
-    "spokenContrast": "Sounded close to \"{heard}\" — listen to the sample and try slowly!",
-    "spokenRetry": "Could not hear clearly yet. Move closer to the mic and try slowly!",
-    "earChallengeButton": "Ear quiz",
-    "earCorrect": "Spot on! Great listening!",
-    "earRetry": "Almost! Listen once more and try again!",
-    "nextPairButton": "Next pair",
-    "nonClinicalDisclaimer": "Supportive reading practice insights based on speech recognition (not a medical or speech-therapy diagnosis)."
   }
 }

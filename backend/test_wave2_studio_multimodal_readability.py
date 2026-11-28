@@ -309,8 +309,8 @@ class Wave2StudioMultimodalReadabilityTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.services.warmup_micro_story_service.WarmupMicroStoryService._collect_due_words",
-                new=AsyncMock(return_value=[("nắng sớm", 1)]),
+                "app.services.family_storyweaver_service.FamilyStoryweaverService._collect_due_words",
+                new=AsyncMock(return_value=["nắng sớm"]),
             ),
             patch(
                 "app.services.family_storyweaver_service.FamilyStoryweaverService._try_generate_cloud_story",
