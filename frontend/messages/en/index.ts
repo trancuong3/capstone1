@@ -16,6 +16,7 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
+import { fiveMinTrainEn } from "../features/five_min_train";
 import { scanInstantEn } from "../features/scan_instant";
 import { wordGlossaryEn } from "../features/word_glossary";
 import type { MessagesDictionary } from "@/lib/i18n/types";
@@ -41,6 +42,7 @@ const messages: MessagesDictionary = {
   accessibility,
   scanInstant: scanInstantEn,
   wordGlossary: wordGlossaryEn,
+  fiveMinTrain: fiveMinTrainEn,
 };
 
 export default messages;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_parent_id
@@ -12,6 +12,9 @@ from app.database.session import get_db
 from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
 from app.schemas.adaptive_learning import (
     AdaptiveProfileRead,
+    DailyFiveMinuteTrainCompleteRequest,
+    DailyFiveMinuteTrainCompleteResponse,
+    DailyFiveMinuteTrainRead,
     EntertainmentRecommendationsRead,
     ParentEntertainmentAnalyticsRead,
     SkillEvidenceCreate,
@@ -20,6 +23,12 @@ from app.schemas.adaptive_learning import (
 from app.services.adaptive_learning_service import AdaptiveLearningService
 
 router = APIRouter()
+
+
+def _apply_private_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Vary"] = "Authorization"
 
 
 def _service(db: AsyncSession) -> AdaptiveLearningService:
@@ -99,3 +108,46 @@ async def record_child_skill_evidence(
     db: AsyncSession = Depends(get_db),
 ) -> SkillEvidenceRead:
     return await _service(db).record_evidence(child_id, parent_id, payload)
+
+
+@router.get(
+    "/children/{child_id}/daily-five-minute-train",
+    response_model=DailyFiveMinuteTrainRead,
+)
+async def get_child_daily_five_minute_train(
+    child_id: UUID,
+    response: Response,
+    teacher_gender: str | None = Query(default=None, pattern="^(female|male)$"),
+    parent_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> DailyFiveMinuteTrainRead:
+    _apply_private_no_store(response)
+    safe_gender = (
+        teacher_gender
+        if isinstance(teacher_gender, str) and teacher_gender in ("female", "male")
+        else None
+    )
+    return await _service(db).get_daily_five_minute_train(
+        child_id,
+        parent_id,
+        teacher_gender=safe_gender,
+    )
+
+
+@router.post(
+    "/children/{child_id}/daily-five-minute-train/complete",
+    response_model=DailyFiveMinuteTrainCompleteResponse,
+)
+async def complete_child_daily_five_minute_train(
+    child_id: UUID,
+    payload: DailyFiveMinuteTrainCompleteRequest,
+    response: Response,
+    parent_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> DailyFiveMinuteTrainCompleteResponse:
+    _apply_private_no_store(response)
+    return await _service(db).complete_daily_five_minute_train(
+        child_id,
+        parent_id,
+        payload,
+    )

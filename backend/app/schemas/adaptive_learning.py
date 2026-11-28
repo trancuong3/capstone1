@@ -170,3 +170,109 @@ class SkillEvidenceRead(BaseModel):
     confidence: float
     difficulty_level: int
     created_at: datetime
+
+
+TrainInteractionMode = Literal["VOICE", "NO_MIC_TOUCH", "MIXED"]
+TrainCar2GameKey = Literal["SENTENCE_SHOOTER", "PICTURE_DESCRIPTION"]
+TrainCar3FinishMode = Literal["SHORT_PASSAGE", "SLOW_KARAOKE_085X"]
+
+
+class TrainWarmupWordItemRead(BaseModel):
+    normalized_word: str
+    display_text: str
+    phonics_category: str = "general"
+    phonics_label_vi: str = "Từ cần ôn"
+    syllable_hint_vi: str
+    sample_sentence_vi: str
+    source: Literal["SPACED_DIFFICULT_WORD", "COLD_START_GRADE"]
+
+
+class TrainCar1WarmupRead(BaseModel):
+    car_number: Literal[1] = 1
+    car_key: Literal["WARMUP_WORDS"] = "WARMUP_WORDS"
+    title_vi: str
+    subtitle_vi: str
+    estimated_seconds: int = Field(default=90, ge=30, le=180)
+    dominant_phonics_category: str
+    dominant_phonics_label_vi: str
+    target_words: list[TrainWarmupWordItemRead] = Field(min_length=2, max_length=3)
+
+
+class TrainCar2GameRoundRead(BaseModel):
+    car_number: Literal[2] = 2
+    car_key: Literal["CONTEXT_GAME"] = "CONTEXT_GAME"
+    title_vi: str
+    subtitle_vi: str
+    estimated_seconds: int = Field(default=120, ge=45, le=240)
+    game_key: TrainCar2GameKey
+    suggested_mode: str
+    recommended_difficulty: int = Field(ge=1, le=5)
+    seeded_words: list[str] = Field(min_length=2, max_length=3)
+    prompt_vi: str
+    sentence_tokens: list[str] = Field(min_length=3, max_length=24)
+    distractor_tokens: list[str] = Field(default_factory=list, max_length=6)
+    deep_link_href: str
+
+
+class TrainCar3FluencyFinishRead(BaseModel):
+    car_number: Literal[3] = 3
+    car_key: Literal["FLUENCY_FINISH"] = "FLUENCY_FINISH"
+    title_vi: str
+    subtitle_vi: str
+    estimated_seconds: int = Field(default=90, ge=30, le=180)
+    finish_mode: TrainCar3FinishMode
+    playback_speed: float = Field(default=0.85, ge=0.5, le=1.2)
+    phonics_category: str
+    phonics_label_vi: str
+    passage_title_vi: str
+    text_vi: str
+    featured_words: list[str] = Field(default_factory=list)
+    coaching_tip_vi: str
+
+
+class DailyFiveMinuteTrainRead(BaseModel):
+    train_id: str
+    visibility: Literal["PARENT_PRIVATE"] = "PARENT_PRIVATE"
+    child_id: UUID
+    child_alias: str
+    child_grade: int = Field(ge=1, le=5)
+    total_estimated_seconds: int = Field(default=300, ge=120, le=600)
+    is_cold_start: bool = False
+    completed_today: bool = False
+    today_completed_count: int = Field(default=0, ge=0)
+    greeting_vi: str
+    no_mic_support_note_vi: str
+    natural_break_cue_vi: str
+    disclaimer_vi: str
+    car_1_warmup: TrainCar1WarmupRead
+    car_2_game: TrainCar2GameRoundRead
+    car_3_fluency: TrainCar3FluencyFinishRead
+    generated_at: datetime
+
+
+class DailyFiveMinuteTrainCompleteRequest(BaseModel):
+    train_id: str = Field(min_length=3, max_length=120)
+    client_completion_id: str | None = Field(default=None, max_length=64)
+    interaction_mode: TrainInteractionMode = "VOICE"
+    duration_seconds: int = Field(default=300, ge=10, le=1800)
+    practiced_words: list[str] = Field(default_factory=list, max_length=10)
+    car_2_game_key: TrainCar2GameKey = "SENTENCE_SHOOTER"
+    car_3_finish_mode: TrainCar3FinishMode = "SHORT_PASSAGE"
+    car_1_completed: bool = True
+    car_2_completed: bool = True
+    car_3_completed: bool = True
+    car_scores: dict[str, float] = Field(default_factory=dict)
+
+
+class DailyFiveMinuteTrainCompleteResponse(BaseModel):
+    visibility: Literal["PARENT_PRIVATE"] = "PARENT_PRIVATE"
+    train_id: str
+    child_id: UUID
+    child_alias: str
+    interaction_mode: TrainInteractionMode
+    recorded_evidence_count: int = Field(ge=0)
+    evidence_items: list[SkillEvidenceRead] = Field(default_factory=list)
+    today_completed_trains_count: int = Field(ge=1)
+    celebration_title_vi: str
+    natural_break_cue_vi: str
+    completed_at: datetime

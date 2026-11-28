@@ -2,6 +2,9 @@ import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
 import type {
+  DailyFiveMinuteTrainCompleteRequestDTO,
+  DailyFiveMinuteTrainCompleteResponseDTO,
+  DailyFiveMinuteTrainDTO,
   EntertainmentRecommendationsDTO,
   ParentEntertainmentAnalyticsDTO,
 } from "@/types/adaptive-learning";
@@ -106,6 +109,104 @@ const parentEntertainmentAnalyticsSchema = z.object({
   generated_at: z.string(),
 });
 
+const trainWarmupWordItemSchema = z.object({
+  normalized_word: z.string(),
+  display_text: z.string(),
+  phonics_category: z.string(),
+  phonics_label_vi: z.string(),
+  syllable_hint_vi: z.string(),
+  sample_sentence_vi: z.string(),
+  source: z.enum(["SPACED_DIFFICULT_WORD", "COLD_START_GRADE"]),
+});
+
+const trainCar1WarmupSchema = z.object({
+  car_number: z.literal(1),
+  car_key: z.literal("WARMUP_WORDS"),
+  title_vi: z.string(),
+  subtitle_vi: z.string(),
+  estimated_seconds: z.number().int(),
+  dominant_phonics_category: z.string(),
+  dominant_phonics_label_vi: z.string(),
+  target_words: z.array(trainWarmupWordItemSchema),
+});
+
+const trainCar2GameRoundSchema = z.object({
+  car_number: z.literal(2),
+  car_key: z.literal("CONTEXT_GAME"),
+  title_vi: z.string(),
+  subtitle_vi: z.string(),
+  estimated_seconds: z.number().int(),
+  game_key: z.enum(["SENTENCE_SHOOTER", "PICTURE_DESCRIPTION"]),
+  suggested_mode: z.string(),
+  recommended_difficulty: z.number().int(),
+  seeded_words: z.array(z.string()),
+  prompt_vi: z.string(),
+  sentence_tokens: z.array(z.string()),
+  distractor_tokens: z.array(z.string()).default([]),
+  deep_link_href: z.string(),
+});
+
+const trainCar3FluencyFinishSchema = z.object({
+  car_number: z.literal(3),
+  car_key: z.literal("FLUENCY_FINISH"),
+  title_vi: z.string(),
+  subtitle_vi: z.string(),
+  estimated_seconds: z.number().int(),
+  finish_mode: z.enum(["SHORT_PASSAGE", "SLOW_KARAOKE_085X"]),
+  playback_speed: z.number(),
+  phonics_category: z.string(),
+  phonics_label_vi: z.string(),
+  passage_title_vi: z.string(),
+  text_vi: z.string(),
+  featured_words: z.array(z.string()).default([]),
+  coaching_tip_vi: z.string(),
+});
+
+const dailyFiveMinuteTrainSchema = z.object({
+  train_id: z.string().min(1),
+  visibility: z.literal("PARENT_PRIVATE"),
+  child_id: z.string().min(1),
+  child_alias: z.string(),
+  child_grade: z.number().int(),
+  total_estimated_seconds: z.number().int(),
+  is_cold_start: z.boolean(),
+  completed_today: z.boolean(),
+  today_completed_count: z.number().int().default(0),
+  greeting_vi: z.string(),
+  no_mic_support_note_vi: z.string(),
+  natural_break_cue_vi: z.string(),
+  disclaimer_vi: z.string(),
+  car_1_warmup: trainCar1WarmupSchema,
+  car_2_game: trainCar2GameRoundSchema,
+  car_3_fluency: trainCar3FluencyFinishSchema,
+  generated_at: z.string(),
+});
+
+const skillEvidenceItemSchema = z.object({
+  id: z.string(),
+  child_id: z.string(),
+  skill_key: z.string(),
+  source_module: z.string(),
+  score_normalized: z.number(),
+  confidence: z.number(),
+  difficulty_level: z.number().int(),
+  created_at: z.string(),
+});
+
+const dailyFiveMinuteTrainCompleteResponseSchema = z.object({
+  visibility: z.literal("PARENT_PRIVATE"),
+  train_id: z.string(),
+  child_id: z.string(),
+  child_alias: z.string(),
+  interaction_mode: z.enum(["VOICE", "NO_MIC_TOUCH", "MIXED"]),
+  recorded_evidence_count: z.number().int(),
+  evidence_items: z.array(skillEvidenceItemSchema).default([]),
+  today_completed_trains_count: z.number().int(),
+  celebration_title_vi: z.string(),
+  natural_break_cue_vi: z.string(),
+  completed_at: z.string(),
+});
+
 export interface AdaptiveLearningService {
   getRecommendations(
     childId: string,
@@ -116,6 +217,14 @@ export interface AdaptiveLearningService {
     windowDays?: number,
     teacherGender?: "female" | "male",
   ): Promise<ParentEntertainmentAnalyticsDTO>;
+  getDailyFiveMinuteTrain(
+    childId: string,
+    teacherGender?: "female" | "male",
+  ): Promise<DailyFiveMinuteTrainDTO>;
+  completeDailyFiveMinuteTrain(
+    childId: string,
+    payload: DailyFiveMinuteTrainCompleteRequestDTO,
+  ): Promise<DailyFiveMinuteTrainCompleteResponseDTO>;
 }
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
@@ -140,6 +249,34 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
       return requestApi(
         `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
+      );
+    },
+    getDailyFiveMinuteTrain(
+      childId: string,
+      teacherGender?: "female" | "male",
+    ) {
+      const suffix = teacherGender
+        ? `?teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
+      return requestApi(
+        `/learning/children/${encodeURIComponent(childId)}/daily-five-minute-train${suffix}`,
+        dailyFiveMinuteTrainSchema,
+        undefined,
+        { bypassCache: true },
+      );
+    },
+    completeDailyFiveMinuteTrain(
+      childId: string,
+      payload: DailyFiveMinuteTrainCompleteRequestDTO,
+    ) {
+      return requestApi(
+        `/learning/children/${encodeURIComponent(childId)}/daily-five-minute-train/complete`,
+        dailyFiveMinuteTrainCompleteResponseSchema,
+        undefined,
+        {
+          method: "POST",
+          body: payload,
+        },
       );
     },
   };

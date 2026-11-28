@@ -26,6 +26,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
@@ -810,6 +811,13 @@ export function EntertainmentScreen({
           </div>
         ) : null}
       </div>
+
+      <FiveMinuteTrainCtaCard
+        childAlias={profileBadgeAlias}
+        childId={activeChildId}
+        focusWords={recommendations?.focus_difficult_words?.slice(0, 3)}
+        sourceSurface="entertainment"
+      />
 
       {/* Interactive First-Visit Onboarding (Calm, Zero Dark Patterns) */}
       {showOnboarding ? (

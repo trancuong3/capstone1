@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
@@ -167,6 +168,16 @@ export function FamilyReadingDesk({
           <Link className="desk-recent" href={recent.href}>
             {tParent("desk.latestReadPrefix", { title: recent.title })}
           </Link>
+        ) : null}
+        {hasProfiles && child ? (
+          <div className="mt-3">
+            <FiveMinuteTrainCtaCard
+              childAlias={child.alias}
+              childId={child.id}
+              compact
+              sourceSurface="dashboard"
+            />
+          </div>
         ) : null}
       </div>
       <div className="desk-illustration">
