@@ -64,6 +64,7 @@ import {
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
@@ -1021,6 +1022,10 @@ function ReadingSessionScreen({
           } else if (sttAllowsFallback) {
             const useGoogleStt =
               health.google.stt_configured && !health.google.stt_cooldown;
+            const useElevenLabsStt = Boolean(
+              health.elevenlabs?.stt_configured &&
+              !health.elevenlabs?.stt_cooldown,
+            );
             const hasNativeWebSpeech =
               typeof window !== "undefined" &&
               Boolean(
@@ -1034,9 +1039,13 @@ function ReadingSessionScreen({
                 ? "android_native"
                 : useGoogleStt
                   ? "google"
-                  : hasNativeWebSpeech
-                    ? "browser"
-                    : "browser",
+                  : useElevenLabsStt
+                    ? "elevenlabs"
+                    : hasNativeWebSpeech
+                      ? "browser"
+                      : wasmSupported
+                        ? "wasm"
+                        : "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
@@ -1063,6 +1072,10 @@ function ReadingSessionScreen({
         if (ttsAllowsFallback && localTtsDown) {
           const useGoogleTts =
             health.google.tts_configured && !health.google.tts_cooldown;
+          const useElevenLabsTts = Boolean(
+            health.elevenlabs?.tts_configured &&
+            !health.elevenlabs?.tts_cooldown,
+          );
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
@@ -1101,6 +1114,20 @@ function ReadingSessionScreen({
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
                 voiceId: googleVoiceId,
                 voiceGender: resolveVoiceGender(googleVoiceId),
+              });
+            }
+          } else if (useElevenLabsTts) {
+            if (!activeLock || activeLock.sessionId !== sessionId) {
+              lockSessionVoice(sessionId);
+            }
+            const resolvedLock = getActiveSessionVoiceLock();
+            if (!ttsUsingCachedAudio) {
+              recordTtsEngineUsage({
+                provider: "elevenlabs",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+                voiceId: resolvedLock?.voiceId ?? null,
+                voiceGender: resolveVoiceGender(resolvedLock?.voiceId),
               });
             }
           } else {
@@ -1265,21 +1292,20 @@ function ReadingSessionScreen({
     async function load() {
       try {
         const session = await services.readingService.get(sessionId);
-        const [
-          book,
-          child,
-          currentPage,
-          completion,
-          initialProgress,
-          practice,
-        ] = await Promise.all([
+        // Batch startup reads in two smaller waves (3 + 3) instead of blasting
+        // 6 concurrent DB queries on mobile cold start.
+        const [book, child, currentPage] = await Promise.all([
           services.bookService.get(session.book_id),
           services.childService.get(session.child_id),
           services.readingService.getCurrentPage(sessionId),
+        ]);
+        const [completion, initialProgress, practice] = await Promise.all([
           services.readingService.getCompletionSummary(sessionId),
           services.readingService.getPageProgress(sessionId),
-          services.readingService.getPracticeState?.(sessionId) ??
-            Promise.resolve(null),
+          (
+            services.readingService.getPracticeState?.(sessionId) ??
+            Promise.resolve(null)
+          ).catch(() => null),
         ]);
 
         // Server-side progress is authoritative on reload. A stale pageId query
@@ -2685,9 +2711,6 @@ function ReadingSessionScreen({
             }
             return;
           }
-          setLatestTranscript(
-            `Đánh vần tiếng “${plan.focusSyllable}”: ${plan.steps.map((s) => s.displayText).join(" · ")}`,
-          );
           await speakPhonicsLessonGuarded(plan, (stepIdx) => {
             if (isCurrent()) setActivePhonicsStepIndex(stepIdx);
           });
@@ -3984,10 +4007,15 @@ function ReadingSessionScreen({
     const handoff = options.preserveAlignment || options.forPassageHelp;
 
     const sttStatus = getVoiceEngineStatus().stt;
-    const freshSttHealth = getFreshVoiceEngineHealth();
+    const freshSttHealth = getVoiceEngineHealthForRouting();
+    const elevenLabsSttUsable = Boolean(
+      freshSttHealth?.elevenlabs?.stt_configured &&
+      !freshSttHealth?.elevenlabs?.stt_cooldown,
+    );
     const backendSttUnavailable =
       freshSttHealth !== null &&
       (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
+      !elevenLabsSttUsable &&
       (!freshSttHealth.google.stt_configured ||
         freshSttHealth.google.stt_cooldown);
     const alreadyUsingEmergencyBrowserStt =
@@ -4509,7 +4537,13 @@ function ReadingSessionScreen({
         true,
       );
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (error instanceof Error && error.name === "AbortError") {
+        if (mountedRef.current) {
+          setIsPlayingPageSample(false);
+          setIsBusy(false);
+        }
+        return;
+      }
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
@@ -4518,16 +4552,19 @@ function ReadingSessionScreen({
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
+        setIsPlayingPageSample(false);
         setIsBusy(false);
       }
     } finally {
+      if (mountedRef.current) {
+        setIsPlayingPageSample(false);
+        setIsBusy(false);
+      }
       if (isCurrentSample()) {
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
-        setIsPlayingPageSample(false);
-        setIsBusy(false);
       }
     }
   }
@@ -6935,7 +6972,7 @@ function ReadingSessionScreen({
         }
         return;
       } finally {
-        if (isCurrent()) setIsBusy(false);
+        if (mountedRef.current) setIsBusy(false);
       }
     }
 

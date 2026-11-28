@@ -34,23 +34,24 @@ export interface ViReadNativeSpeechPort {
 export interface AndroidSpeechCapabilities {
   readonly ttsAvailable: boolean;
   readonly viVoicesCount: number;
+  readonly hasMaleViVoice?: boolean;
+  readonly hasFemaleViVoice?: boolean;
   readonly sttAvailable: boolean;
   readonly onDeviceSttAvailable: boolean;
   readonly platform: string;
-  readonly hasMaleViVoice?: boolean;
-  readonly hasFemaleViVoice?: boolean;
 }
 
 export interface AndroidNativeTtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
-  readonly voiceGender?: "male" | "female";
+  readonly voiceGender?: "male" | "female" | null;
   readonly voiceId?: string | null;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly onStart?: (meta?: {
     readonly voiceGenderMismatch?: boolean;
     readonly resolvedVoiceName?: string | null;
+    readonly actualVoiceGender?: string | null;
   }) => void;
   readonly onRangeStart?: (start: number, end: number) => void;
   readonly onDone?: () => void;
@@ -61,11 +62,11 @@ export interface NativeSpeechIncomingEvent {
   readonly requestId?: string;
   readonly ttsAvailable?: boolean;
   readonly viVoicesCount?: number;
-  readonly sttAvailable?: boolean;
-  readonly onDeviceSttAvailable?: boolean;
   readonly hasMaleViVoice?: boolean;
   readonly hasFemaleViVoice?: boolean;
-  readonly actualVoiceGender?: "male" | "female" | "unknown";
+  readonly actualVoiceGender?: string;
+  readonly sttAvailable?: boolean;
+  readonly onDeviceSttAvailable?: boolean;
   readonly platform?: string;
   readonly voiceGenderMismatch?: boolean;
   readonly resolvedVoiceName?: string | null;
@@ -82,7 +83,8 @@ export interface NativeSpeechIncomingEvent {
 type BridgeEventListener = (event: NativeSpeechIncomingEvent) => void;
 
 const MAX_TTS_TEXT_CHARS = 2_500;
-const DEFAULT_CAPABILITIES_TIMEOUT_MS = 2_500;
+const DEFAULT_CAPABILITIES_TIMEOUT_MS = 8_500;
+const DEGRADED_CAPABILITIES_TTL_MS = 5_000;
 const DEFAULT_TTS_TIMEOUT_MS = 60_000;
 const DEFAULT_SETTINGS_TIMEOUT_MS = 2_500;
 
@@ -95,6 +97,7 @@ let previousOnMessage:
 const eventListeners = new Set<BridgeEventListener>();
 
 let cachedCapabilities: AndroidSpeechCapabilities | null = null;
+let cachedCapabilitiesAt = 0;
 let cachedCapabilitiesPort: ViReadNativeSpeechPort | null = null;
 let inflightCapabilitiesPromise: Promise<AndroidSpeechCapabilities | null> | null =
   null;
@@ -296,9 +299,21 @@ export function isAndroidNativeSpeechAvailable(): boolean {
   return getNativeSpeechPort() !== null;
 }
 
+function isCachedCapabilitiesFresh(): boolean {
+  if (!cachedCapabilities) return false;
+  if (cachedCapabilities.ttsAvailable && cachedCapabilities.sttAvailable) {
+    return true;
+  }
+  return (
+    cachedCapabilitiesAt > 0 &&
+    Date.now() - cachedCapabilitiesAt < DEGRADED_CAPABILITIES_TTL_MS
+  );
+}
+
 export function getCachedAndroidSpeechCapabilities(): AndroidSpeechCapabilities | null {
   const port = getNativeSpeechPort();
   if (!port || cachedCapabilitiesPort !== port) return null;
+  if (!isCachedCapabilitiesFresh()) return null;
   return cachedCapabilities;
 }
 
@@ -312,7 +327,8 @@ export async function getAndroidSpeechCapabilities(options?: {
   if (
     !options?.forceRefresh &&
     cachedCapabilities &&
-    cachedCapabilitiesPort === port
+    cachedCapabilitiesPort === port &&
+    isCachedCapabilitiesFresh()
   ) {
     return cachedCapabilities;
   }
@@ -341,6 +357,7 @@ export async function getAndroidSpeechCapabilities(options?: {
       }
       if (caps && getNativeSpeechPort() === port) {
         cachedCapabilities = caps;
+        cachedCapabilitiesAt = Date.now();
         cachedCapabilitiesPort = port;
       }
       resolve(caps);
@@ -356,6 +373,12 @@ export async function getAndroidSpeechCapabilities(options?: {
           Number.isFinite(event.viVoicesCount)
             ? Math.max(0, Math.floor(event.viVoicesCount))
             : 0,
+        ...(typeof event.hasMaleViVoice === "boolean"
+          ? { hasMaleViVoice: event.hasMaleViVoice }
+          : {}),
+        ...(typeof event.hasFemaleViVoice === "boolean"
+          ? { hasFemaleViVoice: event.hasFemaleViVoice }
+          : {}),
         sttAvailable: Boolean(event.sttAvailable),
         onDeviceSttAvailable: Boolean(event.onDeviceSttAvailable),
         platform:
@@ -469,6 +492,7 @@ export async function speakWithAndroidNativeTts(
     const emitStart = (meta?: {
       readonly voiceGenderMismatch?: boolean;
       readonly resolvedVoiceName?: string | null;
+      readonly actualVoiceGender?: string | null;
     }) => {
       if (startedEmitted) return;
       startedEmitted = true;
@@ -490,6 +514,10 @@ export async function speakWithAndroidNativeTts(
             resolvedVoiceName:
               typeof event.resolvedVoiceName === "string"
                 ? event.resolvedVoiceName
+                : null,
+            actualVoiceGender:
+              typeof event.actualVoiceGender === "string"
+                ? event.actualVoiceGender
                 : null,
           });
           break;
@@ -553,6 +581,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
   interimResults = true;
   lang = "vi-VN";
   maxAlternatives = 3;
+  preferOnDevice = true;
 
   onresult: ((event: SegmentSpeechEvent) => void) | null = null;
   onerror: ((event: SegmentSpeechErrorEvent) => void) | null = null;
@@ -740,6 +769,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
       lang: this.lang || "vi-VN",
       partialResults: Boolean(this.interimResults),
       maxResults: Math.max(1, Math.min(5, this.maxAlternatives || 3)),
+      preferOnDevice: Boolean(this.preferOnDevice),
     });
     if (!sent.ok) {
       this.teardownInternal();
@@ -787,6 +817,7 @@ export function resetAndroidNativeSpeechBridgeForTests(): void {
   detachDispatcher();
   eventListeners.clear();
   cachedCapabilities = null;
+  cachedCapabilitiesAt = 0;
   cachedCapabilitiesPort = null;
   inflightCapabilitiesPromise = null;
   requestSeq = 0;

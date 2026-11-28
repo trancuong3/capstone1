@@ -71,9 +71,11 @@ import {
 } from "@/lib/reading/tts-text";
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
+  isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
   recordTtsEngineUsage,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import {
   resolveVoiceGender,
@@ -293,20 +295,35 @@ function isLocalVoiceUnconfiguredError(error: unknown): boolean {
 }
 
 function isLocalVoiceUnconfiguredHealth(): boolean {
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return false;
   return (
-    health.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED" ||
-    health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+    isHostedLocalVoiceUnconfigured(health) ||
+    health.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED"
   );
+}
+
+function isElevenLabsLiveTtsUsable(
+  health: VoiceEngineHealthSnapshot | null,
+): boolean {
+  if (!health?.elevenlabs?.tts_configured || health.elevenlabs.tts_cooldown) {
+    return false;
+  }
+  // On Android APK under strict `local_only`, stay 100% on-device offline via
+  // Android Native TTS; on Web (or when cloud fallback is opted-in), allow
+  // configured ElevenLabs.
+  if (isAndroidNativeSpeechAvailable() && !canUseGoogleTtsFallback()) {
+    return false;
+  }
+  return true;
 }
 
 function isHostedNoLiveServerTts(error?: unknown): boolean {
   const unconfigured =
     isLocalVoiceUnconfiguredError(error) || isLocalVoiceUnconfiguredHealth();
   if (!unconfigured) return false;
-  const health = getFreshVoiceEngineHealth();
-  if (health?.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) {
+  const health = getVoiceEngineHealthForRouting();
+  if (isElevenLabsLiveTtsUsable(health)) {
     return false;
   }
   if (
@@ -333,6 +350,13 @@ function canUseAllowedDeviceFallbackTts(
   voiceOrOp?: Operation | ResolvedOperationVoice,
   error?: unknown,
 ): boolean {
+  // Enforce SessionVoiceLock ("Một buổi, một giọng"):
+  // never silently jump to OS/Android/browser voice mid-session unless:
+  // (a) parent opted into `local_with_google_fallback` + `allowGoogleTtsFallback`
+  //     and the local worker is unconfigured/outaged, OR
+  // (b) `/voice/status` confirmed hosted `LOCAL_VOICE_UNCONFIGURED` with no
+  //     active ElevenLabs/Google server TTS, allowing 100% on-device
+  //     Android Native / local Vietnamese Browser TTS fallback.
   const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
   const isSessionLocked = voice?.bypassSessionLock
     ? false
@@ -364,13 +388,6 @@ function canUseAllowedDeviceFallbackTts(
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
     (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
-
-  // Hosted deployment with NO live server TTS engine (`LOCAL_VOICE_UNCONFIGURED`,
-  // no ElevenLabs, no active Google Cloud TTS): on-device Android Native TTS or
-  // local Vietnamese Browser TTS is 100% on-device (offline, zero cloud data)
-  // and keeps guidance, reading, phonics, comprehension, and difficult words on
-  // ONE consistent pinned voice + exact user speed instead of failing with
-  // "Giọng đánh vần đã khóa đang tạm bận".
   const hostedOnDeviceFallback =
     isHostedNoLiveServerTts(error) &&
     (isAndroidNativeSpeechAvailable() || hasVietnameseBrowserVoice());
@@ -409,19 +426,16 @@ function shouldSkipBackendTtsForVoice(
   ) {
     return false;
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return false;
-  if (health.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) {
+  if (isElevenLabsLiveTtsUsable(health)) {
     return false;
   }
-  const googleActive =
+  const googleUsable =
     canUseGoogleTtsFallback() &&
     health.google.tts_configured &&
     !health.google.tts_cooldown;
-  const noLiveServerTts =
-    (!health.local.available || !health.local.tts_ready) && !googleActive;
-  if (!noLiveServerTts) return false;
-  return true;
+  return (!health.local.available || !health.local.tts_ready) && !googleUsable;
 }
 
 function shouldSkipBackendTtsForBrowserFallback(
@@ -537,7 +551,7 @@ function shouldRetryBackendWithGoogleTts(
   if (!canUseGoogleTtsFallback() || operation.voice.provider !== "local") {
     return false;
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return true;
   return health.google.tts_configured && !health.google.tts_cooldown;
 }
@@ -1324,14 +1338,13 @@ export class TtsPlayback {
         let approxIdx = startWordIdx;
 
         try {
-          const preferredGender = resolveVoiceGender(
-            operation.voice.requestedVoiceId,
-          );
+          const targetVoiceId =
+            operation.voice.requestedVoiceId ?? operation.voice.cacheVoiceId;
           const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
             rate: operation.voice.speed,
             pitch: 1.0,
-            voiceGender: preferredGender,
-            voiceId: operation.voice.requestedVoiceId,
+            voiceId: targetVoiceId,
+            voiceGender: resolveVoiceGender(targetVoiceId),
             signal: operation.controller.signal,
             onStart: (meta) => {
               if (
