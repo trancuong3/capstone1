@@ -569,6 +569,12 @@ async function shouldRetryColdStartResponse(
     return false;
   }
   const detail = await extractBackendDetail(response);
+  // Structured FastAPI JSON 503 responses (e.g. DB busy, voice offline) are
+  // application-level backpressure and must never be auto-retried; only
+  // unstructured/gateway 503 responses (detail === null) count as cold starts.
+  if (response.status === 503) {
+    return detail === null;
+  }
   // Only treat unstructured/gateway 502/504 responses as cold starts; never
   // retry structured application domain errors such as async OCR 504 responses.
   return detail === null || !isKnownBackendDetail(detail);
@@ -703,7 +709,7 @@ function invalidateReadCacheForMutationPath(path: string): void {
   invalidateApiReadCache();
 }
 
-const COLD_START_RETRY_STATUSES = new Set([502, 504]);
+const COLD_START_RETRY_STATUSES = new Set([502, 503, 504]);
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {

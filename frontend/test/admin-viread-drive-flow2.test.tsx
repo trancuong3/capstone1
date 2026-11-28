@@ -637,10 +637,10 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Google Drive/i }),
+        screen.getByRole("tab", { name: /Kho lưu trữ/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
+    await user.click(screen.getByRole("tab", { name: /Kho lưu trữ/i }));
 
     await waitFor(() => {
       expect(

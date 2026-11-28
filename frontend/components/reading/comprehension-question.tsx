@@ -493,6 +493,7 @@ export function ComprehensionQuestion({
         !voicePausedRef.current;
 
       if (nextResult.is_correct) {
+        setFeedbackPreserveVerbatim(false);
         if (source === "voice" || canUseVoice) {
           const praise = prompts.next("quizCorrect");
           setFeedbackNote(praise);
@@ -517,21 +518,27 @@ export function ComprehensionQuestion({
       const remainingChoices = activeValue.choices.filter(
         (c) => !nextEliminated.has(c.value),
       );
+      const activeTeacherGender = getEffectiveTeacherPersona().gender;
 
       if (nextWrongCount >= 3) {
         solvedQuestionIdRef.current = submittedQuestionId;
+        const framingLead = adaptTextToTeacherPersona(
+          "Không sao đâu con!",
+          activeTeacherGender,
+        );
         const explainText =
           remainingChoices.length === 1
-            ? `Không sao đâu con! Đáp án đúng là ${remainingChoices[0].id}: “${remainingChoices[0].label}”.${storyHint ? ` ${storyHint}` : ""} Mình sang câu tiếp theo nhé!`
+            ? `${framingLead} Đáp án đúng là ${remainingChoices[0].id}: “${remainingChoices[0].label}”.${storyHint ? ` ${storyHint}` : ""} Mình sang câu tiếp theo nhé!`
             : storyHint
-              ? `Không sao đâu con! Gợi ý từ bài đọc: ${storyHint} Mình sang câu tiếp theo nhé!`
-              : "Không sao đâu con! Mình cùng sang câu tiếp theo nhé!";
+              ? `${framingLead} Gợi ý từ bài đọc: ${storyHint} Mình sang câu tiếp theo nhé!`
+              : `${framingLead} Mình cùng sang câu tiếp theo nhé!`;
         setFeedbackNote(explainText);
+        setFeedbackPreserveVerbatim(true);
         setRevealedHint(explainText);
         if (source === "voice" || canUseVoice) {
           setVoicePhase("reading");
           const stillCurrent = await speakGuarded(explainText, gen, {
-            adaptPersona: !storyHint,
+            adaptPersona: false,
           });
           if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
             advanceToNextQuestion(submittedQuestionId);
@@ -543,19 +550,28 @@ export function ComprehensionQuestion({
       }
 
       if (nextWrongCount === 2) {
+        const adaptedNarrowLead = adaptTextToTeacherPersona(
+          remainingChoices.length === 1
+            ? "Mình loại bớt đáp án chưa đúng nhé. Chỉ còn đáp án __VIREAD_CHOICE_ID__: “__VIREAD_CHOICE_LABEL__” thôi!"
+            : `Mình loại bớt đáp án chưa đúng nhé. Con xem ${remainingChoices.length} lựa chọn còn lại nha!`,
+          activeTeacherGender,
+        );
         const narrowPrefix =
           remainingChoices.length === 1
-            ? `Mình loại bớt đáp án chưa đúng nhé. Chỉ còn đáp án ${remainingChoices[0].id}: “${remainingChoices[0].label}” thôi!`
-            : `Mình loại bớt đáp án chưa đúng nhé. Con xem ${remainingChoices.length} lựa chọn còn lại nha!`;
+            ? adaptedNarrowLead
+                .replace("__VIREAD_CHOICE_ID__", remainingChoices[0].id)
+                .replace("__VIREAD_CHOICE_LABEL__", remainingChoices[0].label)
+            : adaptedNarrowLead;
         const step2Text = storyHint
           ? `${narrowPrefix} ${storyHint}`
           : narrowPrefix;
         setFeedbackNote(step2Text);
+        setFeedbackPreserveVerbatim(true);
         setRevealedHint(step2Text);
         if (source === "voice" || canUseVoice) {
           setVoicePhase("reading");
           const stillCurrent = await speakGuarded(step2Text, gen, {
-            adaptPersona: !storyHint,
+            adaptPersona: false,
           });
           if (
             stillCurrent &&
