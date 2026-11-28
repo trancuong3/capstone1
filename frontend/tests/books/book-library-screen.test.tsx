@@ -256,4 +256,23 @@ describe("BookLibraryScreen with real API adapters", () => {
     ).not.toBeInTheDocument();
     expect(within(nav).getByText("Trang 2 / 2")).toBeInTheDocument();
   });
+
+  it("keeps >=44px (min-h-11) mobile touch targets on child header, My Books CTA, and grade pills", async () => {
+    apiFetchFixture.mockImplementation(async (input) => catalogResponse(input));
+    renderLibrary();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: bookFixture.title }),
+    ).toBeInTheDocument();
+
+    const childSwitchLink = screen.getByRole("link", {
+      name: new RegExp(childFixture.alias, "i"),
+    });
+    expect(childSwitchLink.className).toContain("min-h-11");
+
+    const myBooksLink = screen.getByRole("link", { name: /Sách của tôi/i });
+    expect(myBooksLink.className).toContain("min-h-11");
+
+    const gradeAllButton = screen.getByRole("button", { name: /Tất cả/i });
+    expect(gradeAllButton.className).toContain("min-h-11");
+  });
 });

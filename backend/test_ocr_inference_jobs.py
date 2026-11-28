@@ -1605,6 +1605,7 @@ class TestOcrInferenceJobsAndResilience(unittest.TestCase):
                 return {"reclaimed_count": 1, "failed_count": 0}
 
             with (
+                patch("app.services.ocr_inference_job_service.APP_ENVIRONMENT", "test"),
                 patch.dict(os.environ, {"VIREAD_POST_OCR_TEST_DEFER_SECONDS": "0.03"}, clear=False),
                 patch(
                     "app.services.ocr_inference_job_service.AsyncSessionLocal",
