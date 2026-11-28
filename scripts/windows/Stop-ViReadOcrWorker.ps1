@@ -1,10 +1,16 @@
 # Safely stop the ViRead Remote OCR Worker (both standalone ocr-worker-state.json and autostart supervisor/worker).
 param(
-    [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
+    [string]$OcrRuntimeDir = "",
     [int]$Port = 8020
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($OcrRuntimeDir)) {
+    $OcrRuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
 $stateFile = Join-Path $OcrRuntimeDir "ocr-worker-state.json"
 $autostartStateFile = Join-Path $OcrRuntimeDir "autostart-state.json"

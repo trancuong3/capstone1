@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+import copy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import hashlib
@@ -43,6 +44,8 @@ _DAILY_USAGE_CACHE_TTL_SECONDS = 15.0
 _SUMMARY_CACHE_TTL_SECONDS = 15.0
 _MISS_LOOKUP_CACHE_TTL_SECONDS = 15.0
 _MISS_LOOKUP_CACHE_MAX_ENTRIES = 512
+_HIT_LOOKUP_CACHE_TTL_SECONDS = 300.0
+_HIT_LOOKUP_CACHE_MAX_ENTRIES = 2048
 _AUDIO_RAM_LRU_MAX_BYTES = 32 * 1024 * 1024  # 32 MiB bounded server RAM LRU
 _AUDIO_RAM_LRU_MAX_ITEM_BYTES = 4 * 1024 * 1024  # Never pin >4 MiB single clip
 _CONSTRAINED_AUDIO_RAM_LRU_MAX_BYTES = 16 * 1024 * 1024  # 16 MiB on 512 MiB Render Free
@@ -53,6 +56,7 @@ _SCOPE_TARGET_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, Any]]" = Ordered
 _DAILY_USAGE_CACHE: dict[tuple[int, date], tuple[float, dict[str, int]]] = {}
 _SUMMARY_CACHE: dict[tuple[int, int, int, date], tuple[float, dict[str, Any]]] = {}
 _MISS_LOOKUP_CACHE: "OrderedDict[tuple[Any, ...], float]" = OrderedDict()
+_HIT_LOOKUP_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, dict[str, Any]]]" = OrderedDict()
 _AUDIO_RAM_LRU: "OrderedDict[tuple[str, str], tuple[bytes, str]]" = OrderedDict()
 _AUDIO_RAM_LRU_BYTES = 0
 
@@ -154,6 +158,7 @@ def invalidate_tts_cache_summary_cache() -> None:
     """Clear the 15s RAM TTL summary cache when cache entries change."""
     with _CACHE_STATE_LOCK:
         _SUMMARY_CACHE.clear()
+        _HIT_LOOKUP_CACHE.clear()
 
 
 def is_tts_cache_runtime_quota_exhausted() -> bool:
@@ -235,6 +240,7 @@ def clear_tts_cache_runtime_metrics() -> None:
         _DAILY_USAGE_CACHE.clear()
         _SUMMARY_CACHE.clear()
         _MISS_LOOKUP_CACHE.clear()
+        _HIT_LOOKUP_CACHE.clear()
         _AUDIO_RAM_LRU.clear()
         _AUDIO_RAM_LRU_BYTES = 0
 
@@ -273,6 +279,7 @@ def _audio_ram_lru_evict(objects: list[tuple[str, str]]) -> None:
     if not objects:
         return
     with _CACHE_STATE_LOCK:
+        _HIT_LOOKUP_CACHE.clear()
         for bucket, path in objects:
             existing = _AUDIO_RAM_LRU.pop((str(bucket), str(path)), None)
             if existing is not None:
@@ -288,6 +295,7 @@ def _scope_cache_invalidate(
     if book_id is None and page_id is None and page_revision_id is None:
         return
     with _CACHE_STATE_LOCK:
+        _HIT_LOOKUP_CACHE.clear()
         to_remove = [
             key
             for key, (_, target) in _SCOPE_TARGET_CACHE.items()
@@ -330,6 +338,9 @@ async def _bg_record_hit(entry_id: UUID, byte_size: int) -> None:
 
 async def _bg_record_miss(stale_entry_id: UUID | None = None) -> None:
     try:
+        if stale_entry_id is not None:
+            with _CACHE_STATE_LOCK:
+                _HIT_LOOKUP_CACHE.clear()
         async with AsyncSessionLocal() as session:
             repo = TtsAudioCacheRepository(session)
             if stale_entry_id is not None:
@@ -1339,6 +1350,7 @@ class TtsAudioCacheService:
         today = datetime.now(timezone.utc).date()
         usage_cache_key = (bind_key, today)
         miss_cache_key: tuple[Any, ...] | None = None
+        hit_cache_key: tuple[Any, ...] | None = None
         if is_real_repo and bind_key and use_bg_writes:
             miss_cache_key = (
                 bind_key,
@@ -1354,6 +1366,25 @@ class TtsAudioCacheService:
                 bool(allow_speed_fallback),
                 bool(require_word_timings),
             )
+            if (
+                target.scope in ("CATALOG", "COACHING")
+                and target.owner_parent_id is None
+                and download_object is _ORIGINAL_DOWNLOAD_OBJECT
+            ):
+                hit_cache_key = (
+                    bind_key,
+                    target.scope,
+                    "-",
+                    str(target.page_id or "-"),
+                    content_sha256,
+                    voice_id,
+                    model_version or "",
+                    preferred_model_version or "",
+                    round(float(speed), 2),
+                    tuple(formats),
+                    bool(allow_speed_fallback),
+                    bool(require_word_timings),
+                )
             now_miss_check = time.monotonic()
             with _CACHE_STATE_LOCK:
                 miss_exp = _MISS_LOOKUP_CACHE.get(miss_cache_key)
@@ -1367,6 +1398,7 @@ class TtsAudioCacheService:
         try:
             daily_limit = get_tts_cache_daily_egress_limit_bytes()
             daily_usage: dict[str, int]
+            queried_daily_usage_db = False
             if is_real_repo and daily_limit <= 0:
                 daily_usage = {"bytes_served": 0, "hit_count": 0, "miss_count": 0}
             elif is_real_repo:
@@ -1379,6 +1411,7 @@ class TtsAudioCacheService:
                 if cached_usage is not None:
                     daily_usage = cached_usage
                 else:
+                    queried_daily_usage_db = True
                     daily_usage = await self.repo.get_daily_usage()
                     now_put = time.monotonic()
                     with _CACHE_STATE_LOCK:
@@ -1392,6 +1425,7 @@ class TtsAudioCacheService:
                             dict(daily_usage),
                         )
             else:
+                queried_daily_usage_db = True
                 daily_usage = await self.repo.get_daily_usage()
 
             if daily_limit > 0 and daily_usage["bytes_served"] >= daily_limit:
@@ -1399,6 +1433,72 @@ class TtsAudioCacheService:
                 self._set_quota_exhausted(True)
                 return None
             self._set_quota_exhausted(False)
+
+            if hit_cache_key is not None:
+                now_hit_check = time.monotonic()
+                cached_hit_meta: dict[str, Any] | None = None
+                with _CACHE_STATE_LOCK:
+                    hit_cached_item = _HIT_LOOKUP_CACHE.get(hit_cache_key)
+                    if hit_cached_item is not None:
+                        if hit_cached_item[0] > now_hit_check:
+                            _HIT_LOOKUP_CACHE.move_to_end(hit_cache_key)
+                            cached_hit_meta = hit_cached_item[1]
+                        else:
+                            _HIT_LOOKUP_CACHE.pop(hit_cache_key, None)
+                if cached_hit_meta is not None:
+                    cached_ram_fast = _audio_ram_lru_get(
+                        cached_hit_meta["bucket"],
+                        cached_hit_meta["path"],
+                    )
+                    if cached_ram_fast is not None:
+                        audio_bytes, actual_type = cached_ram_fast
+                        if (
+                            daily_limit > 0
+                            and (daily_usage["bytes_served"] + len(audio_bytes)) > daily_limit
+                        ):
+                            await self._end_read_tx()
+                            self._set_quota_exhausted(True)
+                            return None
+                        if queried_daily_usage_db:
+                            await self._end_read_tx()
+                        with _CACHE_STATE_LOCK:
+                            existing_usage = _DAILY_USAGE_CACHE.get(usage_cache_key)
+                            if existing_usage is not None:
+                                updated_usage = dict(existing_usage[1])
+                                updated_usage["bytes_served"] = (
+                                    int(updated_usage.get("bytes_served", 0))
+                                    + len(audio_bytes)
+                                )
+                                updated_usage["hit_count"] = (
+                                    int(updated_usage.get("hit_count", 0)) + 1
+                                )
+                                _DAILY_USAGE_CACHE[usage_cache_key] = (
+                                    existing_usage[0],
+                                    updated_usage,
+                                )
+                        background_tasks.add_task(
+                            _bg_record_hit,
+                            cached_hit_meta["entry_id"],
+                            len(audio_bytes),
+                        )
+                        self._record_runtime_hit(len(audio_bytes))
+                        return CachedTtsHit(
+                            content=audio_bytes,
+                            content_type=actual_type,
+                            resolved_voice_id=cached_hit_meta["resolved_voice_id"],
+                            model_version=cached_hit_meta["model_version"],
+                            duration_seconds=cached_hit_meta["duration_seconds"],
+                            word_timings_json=copy.deepcopy(
+                                cached_hit_meta["word_timings_json"]
+                            ),
+                            scope=cached_hit_meta["scope"],
+                            storage_bucket=cached_hit_meta["bucket"],
+                            storage_path=cached_hit_meta["path"],
+                            cached_speed=cached_hit_meta["cached_speed"],
+                            normalized_text=cached_hit_meta["matched_normalized_text"],
+                        )
+                    with _CACHE_STATE_LOCK:
+                        _HIT_LOOKUP_CACHE.pop(hit_cache_key, None)
 
             entry = None
             folded: str | None = None
@@ -1588,6 +1688,7 @@ class TtsAudioCacheService:
             entry_duration = entry.DurationSeconds
             entry_timings = entry.WordTimingsJson
             entry_scope = entry.Scope
+            entry_owner_parent_id = getattr(entry, "OwnerParentId", None)
             raw_entry_speed = getattr(entry, "Speed", None)
             entry_speed = float(raw_entry_speed) if raw_entry_speed is not None else float(speed)
             entry_normalized_text = getattr(entry, "NormalizedText", None)
@@ -1629,6 +1730,8 @@ class TtsAudioCacheService:
                         )
                 except Exception as exc:
                     is_not_found = _is_storage_not_found_error(exc)
+                    with _CACHE_STATE_LOCK:
+                        _HIT_LOOKUP_CACHE.clear()
                     if not is_not_found:
                         log_diagnostic(
                             logger,
@@ -1653,6 +1756,46 @@ class TtsAudioCacheService:
                 if ram_cache_eligible:
                     _audio_ram_lru_put(entry_bucket, entry_path, audio_bytes, actual_type)
 
+            if (
+                hit_cache_key is not None
+                and ram_cache_eligible
+                and target.scope in ("CATALOG", "COACHING")
+                and target.owner_parent_id is None
+                and entry_scope in ("CATALOG", "COACHING")
+                and entry_owner_parent_id is None
+            ):
+                snapshotted_meta: dict[str, Any] = {
+                    "entry_id": (
+                        UUID(str(entry_id)) if isinstance(entry_id, UUID) else entry_id
+                    ),
+                    "bucket": str(entry_bucket),
+                    "path": str(entry_path),
+                    "resolved_voice_id": str(entry_voice),
+                    "model_version": str(entry_model) if entry_model is not None else "",
+                    "duration_seconds": (
+                        float(entry_duration) if entry_duration is not None else None
+                    ),
+                    "word_timings_json": copy.deepcopy(entry_timings),
+                    "scope": str(entry_scope),
+                    "cached_speed": (
+                        float(entry_speed) if entry_speed is not None else None
+                    ),
+                    "matched_normalized_text": (
+                        str(entry_normalized_text)
+                        if isinstance(entry_normalized_text, str)
+                        else None
+                    ),
+                }
+                now_hit_put = time.monotonic()
+                with _CACHE_STATE_LOCK:
+                    _HIT_LOOKUP_CACHE[hit_cache_key] = (
+                        now_hit_put + _HIT_LOOKUP_CACHE_TTL_SECONDS,
+                        snapshotted_meta,
+                    )
+                    _HIT_LOOKUP_CACHE.move_to_end(hit_cache_key)
+                    while len(_HIT_LOOKUP_CACHE) > _HIT_LOOKUP_CACHE_MAX_ENTRIES:
+                        _HIT_LOOKUP_CACHE.popitem(last=False)
+
             if is_real_repo:
                 with _CACHE_STATE_LOCK:
                     existing_usage = _DAILY_USAGE_CACHE.get(usage_cache_key)
@@ -1676,7 +1819,7 @@ class TtsAudioCacheService:
                 resolved_voice_id=entry_voice,
                 model_version=entry_model,
                 duration_seconds=entry_duration,
-                word_timings_json=entry_timings,
+                word_timings_json=copy.deepcopy(entry_timings),
                 scope=entry_scope,
                 storage_bucket=entry_bucket,
                 storage_path=entry_path,
@@ -1716,6 +1859,9 @@ class TtsAudioCacheService:
         ):
             return False
         if background_tasks is not None and isinstance(self.repo, TtsAudioCacheRepository):
+            with _CACHE_STATE_LOCK:
+                _MISS_LOOKUP_CACHE.clear()
+                _HIT_LOOKUP_CACHE.clear()
             background_tasks.add_task(
                 _bg_store_cached_audio,
                 target=target,
@@ -1905,6 +2051,7 @@ class TtsAudioCacheService:
             invalidate_tts_cache_summary_cache()
             with _CACHE_STATE_LOCK:
                 _MISS_LOOKUP_CACHE.clear()
+                _HIT_LOOKUP_CACHE.clear()
         except Exception as exc:
             await self._safe_rollback()
             still_owned = await _storage_path_owned_by_active_row(bucket, storage_path)
@@ -2034,6 +2181,8 @@ class TtsAudioCacheService:
                 break
         if evict_ids:
             await self.repo.mark_entries_status(evict_ids, status="DELETED")
+            with _CACHE_STATE_LOCK:
+                _HIT_LOOKUP_CACHE.clear()
         return evict_objects
 
     async def _enforce_lru_quota(
@@ -2157,6 +2306,9 @@ class TtsAudioCacheService:
                     exclude_ids=exclude_ids,
                 )
             )
+        if evicted_objects:
+            with _CACHE_STATE_LOCK:
+                _HIT_LOOKUP_CACHE.clear()
         return evicted_objects
 
     async def invalidate_target(
@@ -2203,6 +2355,9 @@ class TtsAudioCacheService:
             )
             return 0 if commit else []
 
+        with _CACHE_STATE_LOCK:
+            _MISS_LOOKUP_CACHE.clear()
+            _HIT_LOOKUP_CACHE.clear()
         if stale_objects:
             invalidate_tts_cache_summary_cache()
         _scope_cache_invalidate(
@@ -2290,6 +2445,8 @@ class TtsAudioCacheService:
 
 async def delete_stale_tts_objects(stale_objects: list[tuple[str, str]]) -> None:
     """Delete invalidated TTS cache objects from Storage AFTER the caller commits DB."""
+    with _CACHE_STATE_LOCK:
+        _HIT_LOOKUP_CACHE.clear()
     if not stale_objects:
         return
     invalidate_tts_cache_summary_cache()
@@ -2321,6 +2478,8 @@ async def invalidate_tts_cache_best_effort(
     commit: bool = False,
 ) -> int | list[tuple[str, str]]:
     """Safely mark affected TTS cache rows STALE without breaking legacy/minimal DB schemas."""
+    with _CACHE_STATE_LOCK:
+        _HIT_LOOKUP_CACHE.clear()
     if db is None or not isinstance(db, AsyncSession):
         return 0 if commit else []
     service = TtsAudioCacheService(db)

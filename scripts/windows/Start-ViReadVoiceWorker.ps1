@@ -1,6 +1,6 @@
 # Start the standalone ViRead Local Voice Worker on 127.0.0.1:8010 (idempotent, AboveNormal priority).
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [string]$VoiceRuntimeDir = "",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8010,
     [string]$TtsPrecision = "int8",
@@ -16,6 +16,16 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $workspaceParent "tools\voice-runtime"
+    }
+}
 $workerScript = Join-Path $scriptDir "voice_worker.py"
 $pyExe = Join-Path $VoiceRuntimeDir ".venv\Scripts\python.exe"
 $logsDir = Join-Path $VoiceRuntimeDir "logs"
@@ -60,9 +70,8 @@ function Resolve-VoiceWorkerToken([string]$explicitToken) {
     }
     $envFiles = @(
         (Join-Path $repoRoot "backend\.env"),
-        (Join-Path (Split-Path $repoRoot -Parent) "capstone1\backend\.env"),
-        "F:\c1\tools\viread-workers.env",
-        "F:\c1\capstone1\backend\.env"
+        (Join-Path $workspaceParent "capstone1\backend\.env"),
+        (Join-Path $workspaceParent "tools\viread-workers.env")
     ) | Select-Object -Unique
     foreach ($candidateKey in @("VIREAD_VOICE_WORKER_TOKEN", "VIREAD_LOCAL_VOICE_WORKER_TOKEN")) {
         foreach ($envFile in $envFiles) {

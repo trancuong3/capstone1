@@ -64,6 +64,7 @@ import {
   isPermanentlyHostedLocalUnconfigured,
   subscribeBrowserOnlineStatus,
   subscribeVoiceEngineHealth,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
@@ -72,6 +73,23 @@ import {
 } from "@/lib/reading/voice-persona";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { cn } from "@/lib/utils/cn";
+
+const OFFLINE_LOCAL_VOICE_HEALTH_SNAPSHOT: VoiceEngineHealthSnapshot = {
+  default_mode: "local_only",
+  default_voice_id: "local_north_truc_ly",
+  local: {
+    available: false,
+    stt_ready: false,
+    tts_ready: false,
+    tts_error_code: "LOCAL_TTS_UNAVAILABLE",
+  },
+  google: {
+    stt_configured: false,
+    tts_configured: false,
+    stt_cooldown: false,
+    tts_cooldown: false,
+  },
+};
 
 const PREVIEW_TEXT =
   "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.";
@@ -465,7 +483,7 @@ export function ReadingVoiceSettings({
       : value.voiceId === null
         ? preservedResetGender
         : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
-    void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
+    void warmWasmTtsIfNeeded(targetGender, resolveOfflineAwareHealth());
   }
 
   function selectTeacherGender(nextGender: VoiceGender) {
@@ -514,7 +532,7 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
-    void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
+    void warmWasmTtsIfNeeded(nextGender, resolveOfflineAwareHealth());
     triggerPreviewPlayback(nextGender);
   }
 
@@ -645,6 +663,25 @@ export function ReadingVoiceSettings({
     setIsOpen(false);
   }
 
+  const hasOnDeviceOfflineTts =
+    detectBrowserWasmTtsSupport().supported || isAndroidNativeSpeechAvailable();
+
+  const resolveOfflineAwareHealth = useCallback(():
+    VoiceEngineHealthSnapshot | undefined => {
+    const cachedHealth = voiceHealth ?? getCachedVoiceEngineHealth();
+    if (
+      loadState.status === "ready" &&
+      loadState.data.local_worker_ready === false
+    ) {
+      return cachedHealth &&
+        !cachedHealth.local.available &&
+        !cachedHealth.local.tts_ready
+        ? cachedHealth
+        : OFFLINE_LOCAL_VOICE_HEALTH_SNAPSHOT;
+    }
+    return cachedHealth ?? undefined;
+  }, [loadState, voiceHealth]);
+
   const optimisticStaticData = useMemo<VoiceList>(
     () => ({
       voices: [...STATIC_LOCAL_VOICES],
@@ -708,6 +745,28 @@ export function ReadingVoiceSettings({
   const selectedVoice = activeVoiceData
     ? activeVoiceData.voices.find((voice) => voice.voice_id === selectedVoiceId)
     : undefined;
+
+  useEffect(() => {
+    if (
+      loadState.status !== "ready" ||
+      loadState.data.local_worker_ready !== false
+    ) {
+      return;
+    }
+    const warmupGender = resolveVoiceGender(
+      selectedVoiceId,
+      selectedVoice?.gender ?? teacherPersona.gender,
+    );
+    void warmWasmTtsIfNeeded(warmupGender, resolveOfflineAwareHealth());
+  }, [
+    isOpen,
+    loadState,
+    resolveOfflineAwareHealth,
+    selectedVoice?.gender,
+    selectedVoiceId,
+    teacherPersona.gender,
+  ]);
+
   const filteredVoices = activeVoiceData
     ? activeVoiceData.voices.filter(matchesFilter)
     : [];
@@ -1142,7 +1201,7 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
-            !detectBrowserWasmTtsSupport().supported &&
+            !hasOnDeviceOfflineTts &&
             !(
               policy.providerMode === "local_with_google_fallback" &&
               ((policy.allowGoogleTtsFallback &&
@@ -1216,7 +1275,7 @@ export function ReadingVoiceSettings({
                 <span
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
-                    voiceHealth.local.available
+                    voiceHealth.local.available || hasOnDeviceOfflineTts
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
                       : voiceHealth.elevenlabs?.tts_configured ||
                           voiceHealth.elevenlabs?.stt_configured
@@ -1227,7 +1286,7 @@ export function ReadingVoiceSettings({
                   <span
                     className={cn(
                       "h-1.5 w-1.5 rounded-full",
-                      voiceHealth.local.available
+                      voiceHealth.local.available || hasOnDeviceOfflineTts
                         ? "bg-emerald-500"
                         : voiceHealth.elevenlabs?.tts_configured ||
                             voiceHealth.elevenlabs?.stt_configured
@@ -1237,7 +1296,7 @@ export function ReadingVoiceSettings({
                     aria-hidden="true"
                   />
                   {t("settings.localWorkerLabel")}{" "}
-                  {voiceHealth.local.available
+                  {voiceHealth.local.available || hasOnDeviceOfflineTts
                     ? t("settings.localAvailable")
                     : t("settings.localUnavailable")}
                 </span>

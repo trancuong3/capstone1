@@ -5,11 +5,17 @@ param(
     [string]$LanHost,
     [string]$ExtraDns = "",
     [string]$ExtraIp = "",
-    [string]$RuntimeDir = "F:\c1\viread-host-runtime",
+    [string]$RuntimeDir = "",
     [switch]$ForceRegenerateLeaf
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = Join-Path $WorkspaceParent "viread-host-runtime"
+}
 
 function Resolve-OpenSsl {
     $cmd = Get-Command openssl -ErrorAction SilentlyContinue

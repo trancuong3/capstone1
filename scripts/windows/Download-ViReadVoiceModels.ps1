@@ -1,12 +1,32 @@
 ﻿# Provision isolated ViRead Local Voice Runtime & verify pinned model SHA-256 checksums.
 # Keeps all voice dependencies strictly separate from the backend OCR environment.
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [string]$VoiceRuntimeDir = "",
     [string]$BasePython = "python",
     [string]$TtsPrecision = "fp32"
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $WorkspaceParent "tools\voice-runtime"
+    }
+}
+if (-not $PSBoundParameters.ContainsKey("BasePython") -and -not (Get-Command $BasePython -ErrorAction SilentlyContinue)) {
+    $pyCand = @(
+        (Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"),
+        (Join-Path $RepoRoot ".venv\Scripts\python.exe"),
+        (Join-Path $WorkspaceParent ".venv\Scripts\python.exe")
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ($pyCand) { $BasePython = $pyCand }
+}
 
 $venvDir = Join-Path $VoiceRuntimeDir ".venv"
 $hfCache = Join-Path $VoiceRuntimeDir "hf-cache"

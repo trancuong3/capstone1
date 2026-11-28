@@ -17,8 +17,8 @@ param(
     [string]$PgUser = "postgres",
     [string]$PgPassword = "viread_local_test",
     [string]$PgDatabase = "viread_qa_local",
-    [string]$RuntimeDir = "F:\c1\viread-host-runtime",
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [string]$RuntimeDir = "",
+    [string]$VoiceRuntimeDir = "",
     [switch]$SkipSeed,
     [switch]$SkipFrontendBuild,
     [switch]$FrontendDevMode,
@@ -30,7 +30,27 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
-$pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = Join-Path $workspaceParent "viread-host-runtime"
+}
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $workspaceParent "tools\voice-runtime"
+    }
+}
+$pythonExe = @(
+    (Join-Path $repoRoot "backend\.venv\Scripts\python.exe"),
+    (Join-Path $repoRoot ".venv\Scripts\python.exe"),
+    (Join-Path $workspaceParent ".venv\Scripts\python.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $pythonExe) {
+    $pythonExe = Join-Path $repoRoot "backend\.venv\Scripts\python.exe"
+}
 $backendEnvFile = Join-Path $repoRoot "backend\.env"
 $frontendEnvFile = Join-Path $repoRoot "frontend\.env.local"
 $localStorageDir = Join-Path $RuntimeDir "local-storage"

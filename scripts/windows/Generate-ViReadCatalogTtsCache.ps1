@@ -2,8 +2,8 @@
 # STRICT PRIVACY BOUNDARY: ONLY processes public catalog books (visibility_scope='CATALOG') with VERIFIED pages.
 # NEVER touches parent private books (visibility_scope='PARENT_PRIVATE' / viread-private-books).
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
-    [string]$OutputDir = "F:\c1\tools\catalog-tts-cache",
+    [string]$VoiceRuntimeDir = "",
+    [string]$OutputDir = "",
     [string]$VoiceId = "local_north_truc_ly",
     [double]$Speed = 1.0,
     [ValidateRange(48, 64)]
@@ -19,6 +19,19 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $workspaceParent "tools\voice-runtime"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+    $OutputDir = Join-Path $workspaceParent "tools\catalog-tts-cache"
+}
 $voicePyExe = Join-Path $VoiceRuntimeDir ".venv\Scripts\python.exe"
 $voiceWorkerScript = Join-Path $scriptDir "voice_worker.py"
 

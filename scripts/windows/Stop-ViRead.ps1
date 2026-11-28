@@ -7,13 +7,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
 if (-not $RuntimeDir) {
     if (-not $ConfigPath) { $ConfigPath = Join-Path $scriptDir "viread-host.config.json" }
     if (Test-Path $ConfigPath) {
         $cfg = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $RuntimeDir = [string]$cfg.runtimeDir
     } else {
-        $RuntimeDir = "F:\c1\viread-host-runtime"
+        $RuntimeDir = Join-Path $workspaceParent "viread-host-runtime"
     }
 }
 

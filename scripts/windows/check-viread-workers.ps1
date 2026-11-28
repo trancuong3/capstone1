@@ -1,8 +1,8 @@
 # Unified zero-secret status checker for ViRead Windows workers (Voice :8010 & OCR :8020 + Autostart Supervisor).
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
-    [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
-    [string]$OcrPythonExe = $(if (Test-Path -LiteralPath "F:\c1\capstone1\.venv\Scripts\python.exe") { "F:\c1\capstone1\.venv\Scripts\python.exe" } else { "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" }),
+    [string]$VoiceRuntimeDir = "",
+    [string]$OcrRuntimeDir = "",
+    [string]$OcrPythonExe = "",
     [string]$BindHost = "127.0.0.1",
     [int]$VoicePort = 8010,
     [int]$OcrPort = 8020,
@@ -11,9 +11,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
+$RepoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $WorkspaceParent "tools\voice-runtime"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($OcrRuntimeDir)) {
+    $OcrRuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
-if (-not $PSBoundParameters.ContainsKey("OcrPythonExe")) {
-    $workersEnv = "F:\c1\tools\viread-workers.env"
+if (-not $PSBoundParameters.ContainsKey("OcrPythonExe") -or [string]::IsNullOrWhiteSpace($OcrPythonExe)) {
+    $workersEnv = Join-Path $WorkspaceParent "tools\viread-workers.env"
     if (Test-Path -LiteralPath $workersEnv) {
         foreach ($rawLine in [System.IO.File]::ReadAllLines($workersEnv, [System.Text.Encoding]::UTF8)) {
             if ($null -eq $rawLine) { continue }
@@ -26,6 +40,16 @@ if (-not $PSBoundParameters.ContainsKey("OcrPythonExe")) {
                 }
             }
         }
+    }
+    if ([string]::IsNullOrWhiteSpace($OcrPythonExe)) {
+        $OcrPythonExe = @(
+            (Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"),
+            (Join-Path $RepoRoot ".venv\Scripts\python.exe"),
+            (Join-Path $WorkspaceParent ".venv\Scripts\python.exe")
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+    if ([string]::IsNullOrWhiteSpace($OcrPythonExe)) {
+        $OcrPythonExe = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
     }
 }
 
