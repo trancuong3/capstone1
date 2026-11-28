@@ -391,6 +391,47 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(provider._recovery_task)
 
+    async def test_is_worker_healthy_short_circuits_loopback_in_render_or_production(self) -> None:
+        with patch(
+            "app.services.local_voice_worker_bootstrap.httpx.AsyncClient",
+            side_effect=AssertionError("must not instantiate httpx.AsyncClient for loopback on Render/production"),
+        ):
+            for env_patch in (
+                {"RENDER": "true"},
+                {"APP_ENVIRONMENT": "production", "RENDER": ""},
+            ):
+                with patch.dict(os.environ, env_patch, clear=False):
+                    for url in (
+                        "http://127.0.0.1:8010",
+                        "http://localhost:8010",
+                        "http://[::1]:8010",
+                        "http://0.0.0.0:8010",
+                        "http://[::ffff:127.0.0.1]:8010",
+                    ):
+                        self.assertFalse(await bootstrap._is_worker_healthy(url))
+
+    def test_render_false_does_not_disable_windows_dev_autostart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "Start-ViReadVoiceWorker.ps1"
+            script.write_text("# mock", encoding="utf-8")
+            runtime = root / "voice-runtime"
+            py_exe = runtime / ".venv" / "Scripts" / "python.exe"
+            py_exe.parent.mkdir(parents=True, exist_ok=True)
+            py_exe.write_text("", encoding="utf-8")
+
+            ok, reason = bootstrap.should_autostart_local_voice_worker(
+                base_url="http://127.0.0.1:8010",
+                platform_name="win32",
+                app_environment="development",
+                render_env="false",
+                autostart_env="true",
+                runtime_dir=runtime,
+                start_script_path=script,
+            )
+            self.assertTrue(ok)
+            self.assertEqual(reason, "eligible")
+
 
 if __name__ == "__main__":
     unittest.main()

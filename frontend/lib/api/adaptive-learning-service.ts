@@ -1,44 +1,130 @@
-import { getBrowserAccessToken } from "@/lib/api/browser-auth";
+import { z } from "zod";
+
+import { requestApi } from "@/lib/api/api-client";
 import { ServiceError } from "@/lib/api/service-error";
 import { translateRuntime } from "@/lib/i18n/runtime";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   EntertainmentRecommendationsDTO,
   ParentEntertainmentAnalyticsDTO,
 } from "@/types/adaptive-learning";
 
-function unauthorizedError(): ServiceError {
-  return new ServiceError({
-    code: "AUTH_REQUIRED",
-    message: "Authentication required.",
-    status: 401,
-    request_id: "",
-    retryable: false,
-  });
-}
+const skillDomainSchema = z.enum([
+  "READING_WORDS",
+  "LANGUAGE_GRAMMAR",
+  "OBSERVATION_MEMORY_CREATIVITY",
+  "MUSIC_RHYTHM",
+]);
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const token = await getBrowserAccessToken({
-    onUnauthorized: unauthorizedError,
-  });
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
-  if (!response.ok) {
+const skillStatusSchema = z.enum(["OBSERVED", "ESTIMATED", "UNKNOWN"]);
+
+const gameKeySchema = z.enum([
+  "PICTURE_DESCRIPTION",
+  "SENTENCE_SHOOTER",
+  "KARAOKE",
+  "MEMORY_GAME",
+]);
+
+const crossGameRecommendationSchema = z.object({
+  game_key: gameKeySchema,
+  zone_title_vi: z.string(),
+  game_title_vi: z.string(),
+  reason_vi: z.string(),
+  suggested_mode: z.string(),
+  suggested_difficulty: z.number().int(),
+  target_words: z.array(z.string()).default([]),
+  href: z.string(),
+  priority: z.number().int(),
+});
+
+export const entertainmentRecommendationsSchema = z.object({
+  child_id: z.string().min(1),
+  child_alias: z.string(),
+  child_grade: z.number().int(),
+  mascot_greeting_vi: z.string(),
+  natural_break_reminder_vi: z.string(),
+  today_activities_count: z.number().int().default(0),
+  focus_difficult_words: z.array(z.string()).default([]),
+  primary_recommendation: crossGameRecommendationSchema,
+  recommendations: z.array(crossGameRecommendationSchema),
+});
+
+const skillMasterySchema = z.object({
+  skill_key: z.string().min(1),
+  label_vi: z.string(),
+  domain: skillDomainSchema,
+  status: skillStatusSchema,
+  mastery_pct: z.number().int().nullable(),
+  confidence: z.number(),
+  evidence_count: z.number().int(),
+  high_confidence_count: z.number().int(),
+  last_observed_at: z.string().nullable(),
+  source_modules: z.array(z.string()).default([]),
+});
+
+const spacedDifficultWordSchema = z.object({
+  normalized_word: z.string(),
+  display_text: z.string(),
+  priority_score: z.number(),
+  practice_count: z.number().int(),
+  last_practiced_at: z.string().nullable(),
+  days_since_practice: z.number().int().nullable(),
+  recommended_game: gameKeySchema,
+  reason_vi: z.string(),
+});
+
+const moduleActivitySummarySchema = z.object({
+  game_key: gameKeySchema,
+  title_vi: z.string(),
+  sessions_count: z.number().int(),
+  recent_average_pct: z.number().int().nullable(),
+  highlight_vi: z.string(),
+});
+
+const karaokeWeakSegmentSummarySchema = z.object({
+  song_id: z.string().min(1),
+  line_text: z.string(),
+  start_ms: z.number().int(),
+  end_ms: z.number().int(),
+  tip_vi: z.string(),
+});
+
+export const parentEntertainmentAnalyticsSchema = z.object({
+  child_id: z.string().min(1),
+  child_alias: z.string(),
+  child_grade: z.number().int(),
+  window_days: z.number().int(),
+  is_diagnostic: z.boolean(),
+  disclaimer_vi: z.string(),
+  observed_skills_count: z.number().int(),
+  estimated_skills_count: z.number().int(),
+  unknown_skills_count: z.number().int(),
+  skills: z.array(skillMasterySchema),
+  practiced_difficult_words: z.array(spacedDifficultWordSchema),
+  module_activities: z.array(moduleActivitySummarySchema),
+  karaoke_weak_segments: z.array(karaokeWeakSegmentSummarySchema),
+  home_support_tips_vi: z.array(z.string()),
+  generated_at: z.string(),
+});
+
+function assertNonEmptyChildId(childId: string): string {
+  const normalized = childId.trim();
+  if (!normalized) {
     throw new ServiceError({
-      code: response.status === 404 ? "RESOURCE_NOT_FOUND" : "NETWORK_ERROR",
+      code: "VALIDATION_ERROR",
       message: translateRuntime("entertainment.hub.recommendationLoadError"),
-      status: response.status,
-      request_id: response.headers.get("x-request-id") ?? "",
-      retryable: response.status >= 500,
+      status: 422,
+      request_id: "",
+      retryable: false,
     });
   }
-  return (await response.json()) as T;
+  return normalized;
+}
+
+function normalizeWindowDays(windowDays: number): number {
+  if (typeof windowDays !== "number" || !Number.isFinite(windowDays)) {
+    return 30;
+  }
+  return Math.min(90, Math.max(7, Math.floor(windowDays)));
 }
 
 export interface AdaptiveLearningService {
@@ -51,14 +137,19 @@ export interface AdaptiveLearningService {
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
   return {
-    getRecommendations(childId: string) {
-      return fetchJson<EntertainmentRecommendationsDTO>(
-        `/learning/children/${encodeURIComponent(childId)}/recommendations`,
+    async getRecommendations(childId: string) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
+      return requestApi(
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/recommendations`,
+        entertainmentRecommendationsSchema,
       );
     },
-    getParentAnalytics(childId: string, windowDays = 30) {
-      return fetchJson<ParentEntertainmentAnalyticsDTO>(
-        `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}`,
+    async getParentAnalytics(childId: string, windowDays = 30) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
+      const normalizedWindowDays = normalizeWindowDays(windowDays);
+      return requestApi(
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/parent-analytics?window_days=${normalizedWindowDays}`,
+        parentEntertainmentAnalyticsSchema,
       );
     },
   };

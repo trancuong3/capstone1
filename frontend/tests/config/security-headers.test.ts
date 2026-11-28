@@ -105,12 +105,16 @@ describe("Next.js HTTP security headers", () => {
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "1");
     vi.resetModules();
     const { default: prodConfig } = await import("@/next.config");
-    expect(prodConfig.experimental).toBeUndefined();
+    expect(prodConfig.experimental).toEqual({
+      optimizePackageImports: ["lucide-react"],
+    });
 
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "");
     vi.resetModules();
     const { default: normalDevConfig } = await import("@/next.config");
-    expect(normalDevConfig.experimental).toBeUndefined();
+    expect(normalDevConfig.experimental).toEqual({
+      optimizePackageImports: ["lucide-react"],
+    });
   });
 });

@@ -207,6 +207,91 @@ class LocalVoiceProviderInternetResilienceTests(unittest.IsolatedAsyncioTestCase
 
             mock_client_factory.assert_not_called()
 
+    async def test_render_and_production_reject_all_loopback_variants_and_render_false_allows_dev(
+        self,
+    ) -> None:
+        loopback_urls = (
+            None,
+            "http://127.0.0.1:8010",
+            "http://localhost:8010",
+            "http://localhost.:8010",
+            "http://worker.localhost:8010",
+            "http://[::1]:8010",
+            "http://0.0.0.0:8010",
+            "http://[::ffff:127.0.0.1]:8010",
+        )
+        for env_patch in (
+            {"RENDER": "true", "APP_ENVIRONMENT": "test"},
+            {"RENDER": "", "APP_ENVIRONMENT": "production"},
+        ):
+            with patch.dict(os.environ, env_patch, clear=False):
+                for raw_url in loopback_urls:
+                    provider = LocalVoiceProvider(base_url=raw_url)
+                    self.assertFalse(provider.is_configured(), f"{raw_url=} {env_patch=}")
+                    self.assertFalse(provider.can_autostart_loopback())
+                    with patch.object(provider, "_get_client") as mock_client:
+                        health = await provider.get_health()
+                        self.assertFalse(health["configured"])
+                        self.assertEqual(health["error_code"], "LOCAL_VOICE_UNCONFIGURED")
+                        voices, live = await provider.list_voices()
+                        self.assertFalse(live)
+                        self.assertTrue(len(voices) > 0)
+                        with self.assertRaises(LocalVoiceTechnicalError):
+                            await provider.synthesize(text="Xin chào")
+                        with self.assertRaises(LocalVoiceTechnicalError):
+                            await provider.transcribe(
+                                audio=_build_wav_bytes(),
+                                filename="seg.wav",
+                                content_type="audio/wav",
+                            )
+                        mock_client.assert_not_called()
+
+        with patch.dict(
+            os.environ,
+            {
+                "RENDER": "false",
+                "APP_ENVIRONMENT": "development",
+                "VIREAD_LOCAL_VOICE_WORKER_URL": "",
+            },
+            clear=False,
+        ):
+            dev_provider = LocalVoiceProvider()
+            self.assertTrue(dev_provider.is_configured())
+            self.assertTrue(dev_provider.is_loopback)
+            self.assertEqual(dev_provider.base_url, "http://127.0.0.1:8010")
+
+    def test_get_voice_orchestrator_cache_key_normalizes_render_and_app_env(self) -> None:
+        from app.api.routes.voice import (
+            clear_default_voice_orchestrators,
+            get_voice_orchestrator,
+        )
+
+        clear_default_voice_orchestrators()
+        self.addCleanup(clear_default_voice_orchestrators)
+        with patch.dict(
+            os.environ,
+            {"RENDER": "false", "APP_ENVIRONMENT": "development", "VIREAD_LOCAL_VOICE_WORKER_URL": ""},
+            clear=False,
+        ):
+            orch_false = get_voice_orchestrator()
+        with patch.dict(
+            os.environ,
+            {"RENDER": "", "APP_ENVIRONMENT": "development", "VIREAD_LOCAL_VOICE_WORKER_URL": ""},
+            clear=False,
+        ):
+            orch_empty = get_voice_orchestrator()
+        with patch.dict(
+            os.environ,
+            {"RENDER": "true", "APP_ENVIRONMENT": "test", "VIREAD_LOCAL_VOICE_WORKER_URL": ""},
+            clear=False,
+        ):
+            orch_render = get_voice_orchestrator()
+
+        self.assertIs(orch_false, orch_empty)
+        self.assertIsNot(orch_false, orch_render)
+        self.assertTrue(orch_false.local.is_configured())
+        self.assertFalse(orch_render.local.is_configured())
+
     async def test_https_forwards_token_request_id_and_uses_5s_connect_timeout(self) -> None:
         seen_requests: list[httpx.Request] = []
 

@@ -1,4 +1,14 @@
-import { getBrowserAccessToken } from "@/lib/api/browser-auth";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import {
+  COLD_START_RETRY_DELAY_MS,
+  COLD_START_RETRY_STATUSES,
+  cancelResponseBodyQuietly,
+  delayWithSignal,
+  raceWithSignal,
+} from "@/lib/api/cold-start-retry";
 import {
   inferRegionFromVoiceId,
   type VoiceRegion,
@@ -318,33 +328,92 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
   if (typeof window === "undefined" || typeof fetch !== "function") {
     return null;
   }
+  const HEALTH_TIMEOUT_MS = 8_000;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8_000);
+  const deadlineAt = Date.now() + HEALTH_TIMEOUT_MS;
+  const timeout = window.setTimeout(
+    () =>
+      controller.abort(new DOMException("Request timed out", "TimeoutError")),
+    HEALTH_TIMEOUT_MS,
+  );
 
   try {
     let token: string;
     try {
-      token = await getBrowserAccessToken({
-        onUnauthorized: () => new Error("AUTH_REQUIRED"),
-      });
+      token = await raceWithSignal(
+        getBrowserAccessToken({
+          signal: controller.signal,
+          onUnauthorized: () => new Error("AUTH_REQUIRED"),
+        }),
+        controller.signal,
+      );
     } catch {
       return null;
     }
     if (!token || controller.signal.aborted) return null;
 
-    const response = await fetch(`${getApiBaseUrl()}/voice/status`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (!response.ok) return null;
-    const raw: unknown = await response.json();
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (controller.signal.aborted || deadlineAt - Date.now() <= 0) {
+        return null;
+      }
+      try {
+        response = await raceWithSignal(
+          fetch(`${getApiBaseUrl()}/voice/status`, {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            signal: controller.signal,
+          }),
+          controller.signal,
+        );
+      } catch {
+        response = null;
+        if (
+          attempt === 0 &&
+          !controller.signal.aborted &&
+          deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+        ) {
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, controller.signal);
+          continue;
+        }
+        return null;
+      }
+
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
+        await cancelResponseBodyQuietly(response, controller.signal);
+        return null;
+      }
+
+      if (!response.ok) {
+        if (
+          attempt === 0 &&
+          COLD_START_RETRY_STATUSES.has(response.status) &&
+          !controller.signal.aborted &&
+          deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+        ) {
+          await cancelResponseBodyQuietly(response, controller.signal);
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, controller.signal);
+          continue;
+        }
+        await cancelResponseBodyQuietly(response, controller.signal);
+        return null;
+      }
+
+      break;
+    }
+
+    if (!response || !response.ok) return null;
+    const raw: unknown = await raceWithSignal(
+      response.json(),
+      controller.signal,
+    );
     if (!raw || typeof raw !== "object") return null;
     const rec = raw as Record<string, unknown>;
     const localRaw = rec.local as Record<string, unknown> | undefined;

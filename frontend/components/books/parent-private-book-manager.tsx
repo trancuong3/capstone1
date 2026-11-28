@@ -331,6 +331,30 @@ function describeStageErrorHint(
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
+interface AccountScopeState {
+  boundUserId: string;
+  epoch: number;
+}
+
+function resolveNextAccountScope(
+  prev: AccountScopeState,
+  currentUserId: string,
+): AccountScopeState | null {
+  if (!currentUserId) {
+    if (prev.boundUserId) {
+      return { boundUserId: "", epoch: prev.epoch + 1 };
+    }
+    return null;
+  }
+  if (!prev.boundUserId) {
+    return { boundUserId: currentUserId, epoch: prev.epoch };
+  }
+  if (prev.boundUserId !== currentUserId) {
+    return { boundUserId: currentUserId, epoch: prev.epoch + 1 };
+  }
+  return null;
+}
+
 interface ParentPrivateBookManagerProps {
   bookId: string;
   returnPage?: number;
@@ -342,9 +366,17 @@ export function ParentPrivateBookManager({
 }: ParentPrivateBookManagerProps) {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
+  const [accountScope, setAccountScope] = useState<AccountScopeState>(() => ({
+    boundUserId: currentUserId,
+    epoch: 0,
+  }));
+  const nextAccountScope = resolveNextAccountScope(accountScope, currentUserId);
+  if (nextAccountScope) {
+    setAccountScope(nextAccountScope);
+  }
   return (
     <ParentPrivateBookManagerContent
-      key={`${currentUserId}:${bookId}`}
+      key={`account-${accountScope.epoch}:${bookId}`}
       bookId={bookId}
       currentUserId={currentUserId}
       returnPage={returnPage}
@@ -467,7 +499,12 @@ function ParentPrivateBookManagerContent({
   );
 
   useEffect(() => {
-    clearPrivateMediaMemoryCache();
+    return () => {
+      clearPrivateMediaMemoryCache();
+    };
+  }, []);
+
+  useEffect(() => {
     const requestId = ++detailRequestIdRef.current;
     const controller = new AbortController();
     void service

@@ -626,7 +626,31 @@ describe("real Admin adapters", () => {
     ];
     expect(wakeUrl).toContain("/system/admin/health/ocr-worker/wakeup");
     expect(wakeInit.method).toBe("POST");
-    expect(wakeInit.signal).toBe(controller.signal);
+    expect(wakeInit.signal).toBeInstanceOf(AbortSignal);
+
+    const wakeController = new AbortController();
+    let capturedWakeSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          capturedWakeSignal = init?.signal ?? undefined;
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(
+                init.signal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              );
+            },
+            { once: true },
+          );
+        }),
+    );
+    const pendingWake = service.wakeOcrWorker(wakeController.signal);
+    await vi.waitFor(() => expect(capturedWakeSignal).toBeDefined());
+    wakeController.abort();
+    await expect(pendingWake).rejects.toMatchObject({ name: "AbortError" });
+    expect(capturedWakeSignal?.aborted).toBe(true);
 
     fetchMock.mockResolvedValueOnce(
       Response.json({ status: "ok", woken: "yes", detail: 123 }),

@@ -1450,13 +1450,13 @@ async def _execute_batch_book_import_job(
 
     # Mode A: Stored multi-page PDF/DOCX rasterization & page ingestion
     if isinstance(source_storage_path, str) and source_storage_path.strip() and job.ActorRole == "admin":
-        from tempfile import SpooledTemporaryFile
+        import gc
         from starlette.concurrency import run_in_threadpool
         from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
         from app.services.admin_ocr_service import AdminOcrService
         from app.services.document_rasterizer_service import (
-            SpooledUploadDocument,
             iter_rasterized_spooled_document,
+            spool_bytes_document,
         )
         from app.services.storage_service import download_object
 
@@ -1465,21 +1465,22 @@ async def _execute_batch_book_import_job(
             if is_book_private(book)
             else (SUPABASE_STORAGE_BUCKET or "books")
         )
-        doc_bytes = download_object(source_storage_path.strip(), bucket_name=bucket)
+        doc_bytes = await run_in_threadpool(
+            download_object, source_storage_path.strip(), bucket_name=bucket
+        )
         file_name = str(
             checkpoints.get("file_name")
             or req_opts.get("file_name")
             or source_storage_path.rsplit("/", 1)[-1]
         )
-        spool_file = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
-        spool_file.write(doc_bytes)
-        spool_file.seek(0)
-        spooled = SpooledUploadDocument(
+        spooled = await run_in_threadpool(
+            spool_bytes_document,
             file_name=file_name,
             content_type=str(checkpoints.get("content_type") or "application/pdf"),
-            size_bytes=len(doc_bytes),
-            file_obj=spool_file,
+            data=doc_bytes,
         )
+        del doc_bytes
+        gc.collect()
         completed_source_pages = {
             int(p)
             for p in (checkpoints.get("completed_source_pages") or [])
@@ -1503,52 +1504,61 @@ async def _execute_batch_book_import_job(
                     _sha,
                     page_iter,
                 ):
-                    rasterized = list(page_iter)
-                    total_source_pages = max(total_source_pages, len(rasterized))
-                    for item in rasterized:
-                        if item.source_page in completed_source_pages:
-                            continue
-                        handle.checkpoint(
-                            f"source_page_{item.source_page}", raise_on_preempt=True
-                        )
+                    def _next_page(it):
+                        return next(it, None)
+
+                    while True:
+                        item = await run_in_threadpool(_next_page, page_iter)
+                        if item is None:
+                            break
                         try:
-                            _page_num, rev = await admin_ocr._ingest_validated_page_image(
-                                job.ActorId,
-                                book.Id,
-                                data=item.image_bytes,
-                                content_type=item.content_type,
-                                extension=item.extension,
-                                width=item.width,
-                                height=item.height,
-                                upload_id=None,
-                                started_at=started_perf,
+                            total_source_pages = max(total_source_pages, item.source_page)
+                            if item.source_page in completed_source_pages:
+                                continue
+                            handle.checkpoint(
+                                f"source_page_{item.source_page}", raise_on_preempt=True
                             )
-                            completed_source_pages.add(item.source_page)
-                            created_page_ids.append(str(rev.page_id))
-                        except Exception as exc:
-                            logger.warning(
-                                "batch_import_document_page_failed job_id=%s source_page=%s err=%s",
-                                job.Id,
-                                item.source_page,
-                                type(exc).__name__,
+                            try:
+                                _page_num, rev = await admin_ocr._ingest_validated_page_image(
+                                    job.ActorId,
+                                    book.Id,
+                                    data=item.image_bytes,
+                                    content_type=item.content_type,
+                                    extension=item.extension,
+                                    width=item.width,
+                                    height=item.height,
+                                    upload_id=None,
+                                    started_at=started_perf,
+                                )
+                                completed_source_pages.add(item.source_page)
+                                created_page_ids.append(str(rev.page_id))
+                            except Exception as exc:
+                                logger.warning(
+                                    "batch_import_document_page_failed job_id=%s source_page=%s err=%s",
+                                    job.Id,
+                                    item.source_page,
+                                    type(exc).__name__,
+                                )
+                                failed_source_pages.append(item.source_page)
+                            done_count = len(completed_source_pages) + len(failed_source_pages)
+                            await svc.commit_stage_result(
+                                job_id=job.Id,
+                                lease_token=lease_token,
+                                stage="BATCH_BOOK_IMPORT",
+                                mark_stage_completed=False,
+                                checkpoint_data={
+                                    "completed_source_pages": sorted(completed_source_pages),
+                                    "created_page_ids": created_page_ids,
+                                    "failed_source_pages": failed_source_pages,
+                                    "total_source_pages": total_source_pages,
+                                },
+                                progress_completed=done_count,
+                                progress_total=max(1, total_source_pages),
+                                progress_unit="trang",
                             )
-                            failed_source_pages.append(item.source_page)
-                        done_count = len(completed_source_pages) + len(failed_source_pages)
-                        await svc.commit_stage_result(
-                            job_id=job.Id,
-                            lease_token=lease_token,
-                            stage="BATCH_BOOK_IMPORT",
-                            mark_stage_completed=False,
-                            checkpoint_data={
-                                "completed_source_pages": sorted(completed_source_pages),
-                                "created_page_ids": created_page_ids,
-                                "failed_source_pages": failed_source_pages,
-                                "total_source_pages": total_source_pages,
-                            },
-                            progress_completed=done_count,
-                            progress_total=max(1, total_source_pages),
-                            progress_unit="trang",
-                        )
+                        finally:
+                            del item
+                            gc.collect()
         finally:
             spooled.close()
 

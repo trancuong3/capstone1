@@ -14,6 +14,7 @@ import { LanguageSelector } from "@/components/i18n/language-selector";
 import { ParentEmailPreferencesCard } from "@/components/settings/parent-email-preferences-card";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
+import { useOptionalProfileService } from "@/hooks/use-profile-service";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import { createProfileService } from "@/lib/api/profile-service";
 import { getLocaleMetadata, type SupportedLocale } from "@/lib/i18n/locales";
@@ -95,7 +96,12 @@ function PasswordField({
 export function AccountSettingsScreen() {
   const { t } = useI18n();
   const authService = useAuthService();
-  const profileService = useMemo(() => createProfileService(), []);
+  const contextProfileService = useOptionalProfileService();
+  const fallbackProfileService = useMemo(
+    () => (contextProfileService ? null : createProfileService()),
+    [contextProfileService],
+  );
+  const profileService = contextProfileService ?? fallbackProfileService!;
   const [state, setState] = useState<SettingsState>({ status: "loading" });
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");

@@ -9,17 +9,24 @@ import {
   RefreshCw,
   Volume2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import {
+  Component,
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
-import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
-import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
@@ -129,9 +136,7 @@ import {
   type SegmentResultMeta,
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
-import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
-import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useRecordingPlayback } from "@/hooks/use-recording-playback";
@@ -193,6 +198,263 @@ import {
   compareTranscript,
   type ComparisonResult,
 } from "@/lib/api/comparison-service";
+
+function DynamicPanelSkeleton() {
+  return (
+    <section
+      aria-busy="true"
+      className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 p-4"
+    >
+      <Skeleton className="h-12 w-full rounded-control" />
+      <Skeleton className="min-h-[420px] w-full rounded-card" />
+      <Skeleton className="h-20 w-full rounded-card" />
+    </section>
+  );
+}
+
+const ComprehensionQuestion = dynamic(
+  () =>
+    import("@/components/reading/comprehension-question").then(
+      (mod) => mod.ComprehensionQuestion,
+    ),
+  {
+    ssr: false,
+    loading: () => <DynamicPanelSkeleton />,
+  },
+);
+
+const PhonicsLessonCard = dynamic(
+  () =>
+    import("@/components/reading/phonics-lesson-card").then(
+      (mod) => mod.PhonicsLessonCard,
+    ),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
+const ReadingVoiceSettings = dynamic(
+  () =>
+    import("@/components/reading/reading-voice-settings").then(
+      (mod) => mod.ReadingVoiceSettings,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <span
+        aria-hidden="true"
+        className="min-h-11 rounded-control bg-cream/80 lg:min-h-14"
+      />
+    ),
+  },
+);
+
+const SessionComplete = dynamic(
+  () =>
+    import("@/components/reading/session-complete").then(
+      (mod) => mod.SessionComplete,
+    ),
+  {
+    ssr: false,
+    loading: () => <DynamicPanelSkeleton />,
+  },
+);
+
+const TutorMessage = dynamic(
+  () =>
+    import("@/components/reading/tutor-message").then(
+      (mod) => mod.TutorMessage,
+    ),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
+interface DynamicPanelErrorBoundaryProps {
+  backHref?: string;
+  backLabel?: string;
+  children: ReactNode;
+  closeLabel: string;
+  description: string;
+  onClose?: () => void;
+  resetKey?: string | number | boolean | null;
+  retryLabel: string;
+  title: string;
+  variant: "compact" | "inline" | "floating" | "fullscreen";
+}
+
+interface DynamicPanelErrorBoundaryState {
+  hasError: boolean;
+  retryKey: number;
+}
+
+class DynamicPanelErrorBoundary extends Component<
+  DynamicPanelErrorBoundaryProps,
+  DynamicPanelErrorBoundaryState
+> {
+  state: DynamicPanelErrorBoundaryState = {
+    hasError: false,
+    retryKey: 0,
+  };
+
+  static getDerivedStateFromError(): Partial<DynamicPanelErrorBoundaryState> {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: DynamicPanelErrorBoundaryProps): void {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  private handleRetry = (): void => {
+    this.setState((prev) => ({
+      hasError: false,
+      retryKey: prev.retryKey + 1,
+    }));
+  };
+
+  render(): ReactNode {
+    if (!this.state.hasError) {
+      return (
+        <Fragment key={this.state.retryKey}>{this.props.children}</Fragment>
+      );
+    }
+
+    const {
+      backHref,
+      backLabel,
+      closeLabel,
+      description,
+      onClose,
+      retryLabel,
+      title,
+      variant,
+    } = this.props;
+
+    if (variant === "compact") {
+      return (
+        <div
+          className="inline-flex min-h-11 items-center gap-2 rounded-control border border-amber-300 bg-amber-50/90 px-3 py-1.5 text-xs font-semibold text-amber-950 lg:min-h-14"
+          data-testid="dynamic-panel-fallback-compact"
+          role="status"
+        >
+          <span className="truncate">{title}</span>
+          <button
+            className="inline-flex min-h-9 shrink-0 items-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-bold text-amber-950 hover:bg-amber-100"
+            onClick={this.handleRetry}
+            type="button"
+          >
+            {retryLabel}
+          </button>
+        </div>
+      );
+    }
+
+    if (variant === "floating") {
+      return (
+        <div
+          aria-live="polite"
+          className="pointer-events-none fixed inset-x-3 bottom-32 z-40 flex justify-center sm:inset-x-auto sm:right-6 sm:bottom-28 sm:max-w-md"
+          data-testid="dynamic-panel-fallback-floating"
+          role="status"
+        >
+          <div className="pointer-events-auto w-full rounded-card border border-amber-300 bg-paper/98 p-4 shadow-lg backdrop-blur-xs">
+            <StatusMessage title={title} tone="warning">
+              {description}
+            </StatusMessage>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                className="w-auto!"
+                onClick={this.handleRetry}
+                size="compact"
+                variant="secondary"
+              >
+                {retryLabel}
+              </Button>
+              {onClose ? (
+                <Button
+                  className="w-auto!"
+                  onClick={onClose}
+                  size="compact"
+                  variant="quiet"
+                >
+                  {closeLabel}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (variant === "fullscreen") {
+      return (
+        <section
+          className="mx-auto flex min-h-dvh w-full max-w-[960px] flex-col justify-center gap-4 p-6"
+          data-testid="dynamic-panel-fallback-fullscreen"
+        >
+          <StatusMessage title={title} tone="warning">
+            {description}
+          </StatusMessage>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              className="w-auto!"
+              onClick={this.handleRetry}
+              variant="primary"
+            >
+              {retryLabel}
+            </Button>
+            {onClose ? (
+              <Button className="w-auto!" onClick={onClose} variant="secondary">
+                {closeLabel}
+              </Button>
+            ) : null}
+            {backHref && backLabel ? (
+              <ButtonLink href={backHref} variant="secondary">
+                {backLabel}
+              </ButtonLink>
+            ) : null}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <div
+        className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3"
+        data-testid="dynamic-panel-fallback-inline"
+        role="status"
+      >
+        <StatusMessage title={title} tone="warning">
+          {description}
+        </StatusMessage>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button
+            className="w-auto!"
+            onClick={this.handleRetry}
+            size="compact"
+            variant="secondary"
+          >
+            {retryLabel}
+          </Button>
+          {onClose ? (
+            <Button
+              className="w-auto!"
+              onClick={onClose}
+              size="compact"
+              variant="quiet"
+            >
+              {closeLabel}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+}
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -323,6 +585,7 @@ function ReadingSessionScreen({
 }: ReadingScreenProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -7306,33 +7569,56 @@ function ReadingSessionScreen({
 
   if (uiState === "question") {
     return (
-      <ComprehensionQuestion
-        child={child}
-        onComplete={() => {
-          automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
-          setUiState("complete");
-        }}
-        sessionId={sessionId}
-      />
+      <DynamicPanelErrorBoundary
+        backHref={booksHref}
+        backLabel={t("session.backToLibrary")}
+        closeLabel={tCommon("actions.continue")}
+        description={t("session.openFailedDescription")}
+        onClose={() => setUiState("complete")}
+        resetKey={`${sessionId}:question`}
+        retryLabel={tCommon("actions.retry")}
+        title={tCommon("states.unavailable")}
+        variant="fullscreen"
+      >
+        <ComprehensionQuestion
+          child={child}
+          onComplete={() => {
+            automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
+            setUiState("complete");
+          }}
+          sessionId={sessionId}
+        />
+      </DynamicPanelErrorBoundary>
     );
   }
 
   if (uiState === "complete") {
     return (
-      <SessionComplete
-        booksHref={booksHref}
-        bookId={book.id}
-        startPageId={pageProgress?.start_page_id}
-        endPageId={pageProgress?.end_page_id}
-        child={child}
-        sessionId={sessionId}
-        summary={sessionSummary ?? completion}
-        reportError={comparisonError}
-        onRetryReports={
-          hasPageTranscripts ? () => void retrySavingPageReports() : undefined
-        }
-        isRetryingReports={isRetryingReports}
-      />
+      <DynamicPanelErrorBoundary
+        backHref={booksHref}
+        backLabel={t("session.backToLibrary")}
+        closeLabel={tCommon("actions.close")}
+        description={t("session.openFailedDescription")}
+        resetKey={`${sessionId}:complete`}
+        retryLabel={tCommon("actions.retry")}
+        title={tCommon("states.unavailable")}
+        variant="fullscreen"
+      >
+        <SessionComplete
+          booksHref={booksHref}
+          bookId={book.id}
+          startPageId={pageProgress?.start_page_id}
+          endPageId={pageProgress?.end_page_id}
+          child={child}
+          sessionId={sessionId}
+          summary={sessionSummary ?? completion}
+          reportError={comparisonError}
+          onRetryReports={
+            hasPageTranscripts ? () => void retrySavingPageReports() : undefined
+          }
+          isRetryingReports={isRetryingReports}
+        />
+      </DynamicPanelErrorBoundary>
     );
   }
 
@@ -7542,13 +7828,22 @@ function ReadingSessionScreen({
         exitHref={detailHref}
         onExit={() => setConfirmFinish(true)}
         voiceSettings={
-          <ReadingVoiceSettings
-            disabled={isMicRecording}
-            fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
-            onPreview={handleVoicePreview}
-            onStopPreview={stopAssistantAudio}
-          />
+          <DynamicPanelErrorBoundary
+            closeLabel={tCommon("actions.close")}
+            description={t("session.openFailedDescription")}
+            resetKey={sessionId}
+            retryLabel={tCommon("actions.retry")}
+            title={tCommon("states.unavailable")}
+            variant="compact"
+          >
+            <ReadingVoiceSettings
+              disabled={isMicRecording}
+              fallbackNotice={speechPlayer.fallbackNotice}
+              isPreviewing={speechPlayer.isPlaying}
+              onPreview={handleVoicePreview}
+              onStopPreview={stopAssistantAudio}
+            />
+          </DynamicPanelErrorBoundary>
         }
         isCurrentWordMispronounced={Boolean(
           currentWordId && mispronouncedWordIds.has(currentWordId),
@@ -7624,28 +7919,43 @@ function ReadingSessionScreen({
         onSpellWord={handleSpellCurrentWord}
         phonicsPanel={
           activePhonicsLesson ? (
-            <PhonicsLessonCard
-              activeStepIndex={activePhonicsStepIndex}
-              compact
-              isListeningRetry={isMicRecording}
-              isPlayingPhonics={isPlayingPhonicsLesson}
-              isPlayingWord={isReadingWord}
-              lesson={activePhonicsLesson.plan}
-              onPlayPhonics={handleSpellCurrentWord}
-              onPlayWord={
-                retryMode
-                  ? () => void handleReadSample()
-                  : handleReadCurrentWord
-              }
-              onStopAudio={stopAssistantAudio}
+            <DynamicPanelErrorBoundary
+              closeLabel={tCommon("actions.close")}
+              description={t("session.openFailedDescription")}
               onClose={() => {
                 stopAssistantAudio();
                 setActivePhonicsLesson(null);
                 setActivePhonicsStepIndex(null);
                 setPhonicsStatusHint(null);
               }}
-              statusHint={phonicsStatusHint}
-            />
+              resetKey={activePhonicsLesson.wordId}
+              retryLabel={tCommon("actions.retry")}
+              title={tCommon("states.unavailable")}
+              variant="inline"
+            >
+              <PhonicsLessonCard
+                activeStepIndex={activePhonicsStepIndex}
+                compact
+                isListeningRetry={isMicRecording}
+                isPlayingPhonics={isPlayingPhonicsLesson}
+                isPlayingWord={isReadingWord}
+                lesson={activePhonicsLesson.plan}
+                onPlayPhonics={handleSpellCurrentWord}
+                onPlayWord={
+                  retryMode
+                    ? () => void handleReadSample()
+                    : handleReadCurrentWord
+                }
+                onStopAudio={stopAssistantAudio}
+                onClose={() => {
+                  stopAssistantAudio();
+                  setActivePhonicsLesson(null);
+                  setActivePhonicsStepIndex(null);
+                  setPhonicsStatusHint(null);
+                }}
+                statusHint={phonicsStatusHint}
+              />
+            </DynamicPanelErrorBoundary>
           ) : null
         }
         onSkipRetryWord={skipRetryWord}
@@ -7929,16 +8239,26 @@ function ReadingSessionScreen({
           }
         />
       ) : uiState === "tts-error" || tutorOpen ? (
-        <TutorMessage
-          action={tutorAction}
-          isPlaying={speechPlayer.isPlaying}
-          isRetrying={isBusy}
-          nonBlocking={uiState === "tts-error" && !tutorOpen}
+        <DynamicPanelErrorBoundary
+          closeLabel={tCommon("actions.close")}
+          description={t("session.openFailedDescription")}
           onClose={closeTutor}
-          onRetry={() => void retryTutor()}
-          ttsFailed={uiState === "tts-error"}
-          word={currentWord}
-        />
+          resetKey={`${uiState}:${tutorOpen}:${tutorAction?.action_id ?? ""}`}
+          retryLabel={tCommon("actions.retry")}
+          title={tCommon("states.unavailable")}
+          variant="floating"
+        >
+          <TutorMessage
+            action={tutorAction}
+            isPlaying={speechPlayer.isPlaying}
+            isRetrying={isBusy}
+            nonBlocking={uiState === "tts-error" && !tutorOpen}
+            onClose={closeTutor}
+            onRetry={() => void retryTutor()}
+            ttsFailed={uiState === "tts-error"}
+            word={currentWord}
+          />
+        </DynamicPanelErrorBoundary>
       ) : null}
 
       <span className="sr-only" aria-live="polite">

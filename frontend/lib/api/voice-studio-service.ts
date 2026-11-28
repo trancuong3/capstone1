@@ -4,6 +4,18 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
+import {
+  COLD_START_RETRY_DELAY_MS,
+  COLD_START_RETRY_STATUSES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  cancelResponseBodyQuietly,
+  delayWithSignal,
+  getAbortReason,
+  isAbortOrTimeoutError,
+  raceWithSignal,
+  resolveTimeoutMs,
+} from "@/lib/api/cold-start-retry";
+import { invalidateApiReadCache } from "@/lib/api/read-cache";
 import { ServiceError } from "@/lib/api/service-error";
 import {
   buildSpeechServiceError,
@@ -143,12 +155,19 @@ function failure(
   });
 }
 
-async function accessToken(): Promise<string> {
+async function accessToken(signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
   try {
     return await getBrowserAccessToken({
+      signal,
       onUnauthorized: () => failure(401),
     });
   } catch (error) {
+    if (signal?.aborted || isAbortOrTimeoutError(error)) {
+      throw error;
+    }
     if (error instanceof ServiceError) throw error;
     throw failure(401);
   }
@@ -164,31 +183,90 @@ async function requestWithHeaders(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
-  timeoutMs = 30_000,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 ): Promise<{ readonly payload: unknown; readonly headers: Headers }> {
+  const effectiveTimeoutMs = resolveTimeoutMs(
+    timeoutMs,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+  );
+  const deadlineAt = Date.now() + effectiveTimeoutMs;
+  const method = (init.method ?? "GET").toUpperCase();
+  const canColdStartRetry = method === "GET";
+  const maxAttempts = canColdStartRetry ? 2 : 1;
+
   try {
     return await withRequestDeadline(
       async (requestSignal) => {
-        const token = await accessToken();
+        const token = await accessToken(requestSignal);
         requestSignal.throwIfAborted();
         const requestHeaders = new Headers(init.headers);
-        const response = await fetch(`${getApiBaseUrl()}${path}`, {
-          ...init,
-          headers: {
-            Accept: requestHeaders.get("Accept") ?? "application/json",
-            Authorization: `Bearer ${token}`,
-            ...(init.body ? { "Content-Type": "application/json" } : {}),
-          },
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          signal: requestSignal,
-        });
+        let response!: Response;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          requestSignal.throwIfAborted();
+          try {
+            response = await raceWithSignal(
+              fetch(`${getApiBaseUrl()}${path}`, {
+                ...init,
+                headers: {
+                  Accept: requestHeaders.get("Accept") ?? "application/json",
+                  Authorization: `Bearer ${token}`,
+                  ...(init.body ? { "Content-Type": "application/json" } : {}),
+                },
+                cache: "no-store",
+                credentials: "omit",
+                redirect: "error",
+                signal: requestSignal,
+              }),
+              requestSignal,
+            );
+          } catch (error) {
+            if (requestSignal.aborted || isAbortOrTimeoutError(error)) {
+              throw error;
+            }
+            if (
+              attempt === 0 &&
+              canColdStartRetry &&
+              deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+            ) {
+              await delayWithSignal(COLD_START_RETRY_DELAY_MS, requestSignal);
+              continue;
+            }
+            throw error;
+          }
+
+          if (
+            attempt === 0 &&
+            canColdStartRetry &&
+            COLD_START_RETRY_STATUSES.has(response.status) &&
+            !requestSignal.aborted
+          ) {
+            const providerCode = await extractSpeechProviderCode(
+              response,
+              requestSignal,
+            );
+            if (
+              !providerCode &&
+              deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+            ) {
+              await cancelResponseBodyQuietly(response, requestSignal);
+              await delayWithSignal(COLD_START_RETRY_DELAY_MS, requestSignal);
+              continue;
+            }
+          }
+          break;
+        }
+
         if (!response.ok) {
           if (response.status === 401) {
             invalidateBrowserTokenCache();
+            invalidateApiReadCache();
           }
-          const providerCode = await extractSpeechProviderCode(response);
+          const providerCode = await extractSpeechProviderCode(
+            response,
+            requestSignal,
+          );
+          await cancelResponseBodyQuietly(response, requestSignal);
           throw failure(
             response.status,
             response.status === 429 || response.status >= 500,
@@ -196,12 +274,15 @@ async function requestWithHeaders(
             providerCode,
           );
         }
-        const payload: unknown = await response.json();
+        const payload: unknown = await raceWithSignal(
+          response.json(),
+          requestSignal,
+        );
         requestSignal.throwIfAborted();
         return { payload, headers: response.headers };
       },
       signal,
-      timeoutMs,
+      effectiveTimeoutMs,
     );
   } catch (error) {
     if (error instanceof ServiceError || signal?.aborted) throw error;
@@ -234,6 +315,9 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 export function createVoiceStudioService(): VoiceStudioService {
   return {
     async listVoices(signal) {
+      if (signal?.aborted) {
+        throw getAbortReason(signal);
+      }
       const policy = getVoicePolicyPreferences();
       const query =
         policy.providerMode === "local_with_google_fallback" &&
@@ -285,6 +369,9 @@ export function createVoiceStudioService(): VoiceStudioService {
     },
 
     async synthesizeTimed(words, options = {}) {
+      if (options.signal?.aborted) {
+        throw getAbortReason(options.signal);
+      }
       const policy = getVoicePolicyPreferences();
       const activeLock = options.bypassSessionLock
         ? null

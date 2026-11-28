@@ -33,7 +33,12 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db, require_active_profile_id
-from app.database.config import CORS_ALLOWED_ORIGINS
+from app.database.config import (
+    APP_ENVIRONMENT,
+    CORS_ALLOWED_ORIGIN_REGEX,
+    CORS_ALLOWED_ORIGINS,
+    is_allowed_cors_origin,
+)
 from app.database.role_cache import get_cached_profile_role
 from app.database.session import AsyncSessionLocal
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -155,8 +160,9 @@ def get_voice_orchestrator() -> VoiceOrchestrator:
         or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
         or ""
     ).strip()
-    render_flag = (os.getenv("RENDER") or "").strip()
-    app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+    render_raw = (os.getenv("RENDER") or "").strip().lower()
+    render_flag = "true" if render_raw not in {"", "0", "false", "no", "off"} else ""
+    app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
     key = (worker_url, worker_token, render_flag, app_env)
     cached = _DEFAULT_ORCHESTRATORS.get(key)
     if cached is None:
@@ -595,7 +601,10 @@ async def _verify_ws_parent_id(
             detail="Authentication required",
         )
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-    actor_id = await asyncio.to_thread(get_current_parent_id, credentials)
+    auth_result = get_current_parent_id(credentials)
+    actor_id = (
+        await auth_result if inspect.isawaitable(auth_result) else auth_result
+    )
     return await _verify_ws_active_profile(actor_id)
 
 
@@ -639,11 +648,15 @@ def _ws_idle_timeout_seconds() -> float:
 
 
 def _is_ws_origin_allowed(websocket: WebSocket) -> bool:
-    """Validate browser Origin header against CORS_ALLOWED_ORIGINS when present."""
+    """Validate browser Origin header against allowed CORS origins/regex when present."""
     origin = (websocket.headers.get("origin") or "").strip()
     if not origin:
         return True
-    return origin in CORS_ALLOWED_ORIGINS
+    return is_allowed_cors_origin(
+        origin,
+        allowed_origins=CORS_ALLOWED_ORIGINS,
+        origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
+    )
 
 
 @router.websocket("/stt-stream")

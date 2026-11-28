@@ -200,11 +200,42 @@ describe("karaoke real HTTP adapter", () => {
     );
     const [, options] = fetchMock.mock.calls[0];
     expect(options.headers["Content-Type"]).toBeUndefined();
-    expect(options.signal).toBe(controller.signal);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(options.body).toBeInstanceOf(FormData);
     expect(options.body.get("expected_revision")).toBe("7");
     expect(options.body.get("draft_version_id")).toBe(versionId);
     expect(options.body.get("file")).toBe(file);
+
+    const abortController = new AbortController();
+    let capturedUploadSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          capturedUploadSignal = init?.signal ?? undefined;
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(
+                init.signal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              );
+            },
+            { once: true },
+          );
+        }),
+    );
+    const pendingUpload = service.upload(
+      songId,
+      "audio",
+      file,
+      8,
+      versionId,
+      abortController.signal,
+    );
+    await vi.waitFor(() => expect(capturedUploadSignal).toBeDefined());
+    abortController.abort();
+    await expect(pendingUpload).rejects.toMatchObject({ name: "AbortError" });
+    expect(capturedUploadSignal?.aborted).toBe(true);
   });
   it("uses explicit create/publish/visibility mutations", async () => {
     fetchMock.mockImplementation(() =>

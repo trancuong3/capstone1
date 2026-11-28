@@ -4,6 +4,15 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  cancelResponseBodyQuietly,
+  getAbortReason,
+  isAbortOrTimeoutError,
+  raceWithSignal,
+  resolveTimeoutMs,
+} from "@/lib/api/cold-start-retry";
+import { invalidateApiReadCache } from "@/lib/api/read-cache";
 import { ServiceError } from "@/lib/api/service-error";
 import {
   buildSpeechServiceError,
@@ -183,12 +192,20 @@ function failure(
 
 async function accessToken(
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
+  signal?: AbortSignal,
 ) {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
   try {
     return await getBrowserAccessToken({
+      signal,
       onUnauthorized: () => failure(capabilityCode, 401),
     });
   } catch (error) {
+    if (signal?.aborted || isAbortOrTimeoutError(error)) {
+      throw error;
+    }
     if (error instanceof ServiceError) throw error;
     throw failure(capabilityCode, 401);
   }
@@ -203,13 +220,13 @@ async function speechRequest(
   init: RequestInit,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const token = await accessToken(capabilityCode);
+  const token = await accessToken(capabilityCode, signal);
   signal?.throwIfAborted();
   const headers = new Headers(init.headers);
   headers.set("Accept", headers.get("Accept") ?? "*/*");
   headers.set("Authorization", `Bearer ${token}`);
   try {
-    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
       headers,
       cache: "no-store",
@@ -217,11 +234,16 @@ async function speechRequest(
       redirect: "error",
       signal,
     });
+    const response = signal
+      ? await raceWithSignal(fetchPromise, signal)
+      : await fetchPromise;
     if (!response.ok) {
       if (response.status === 401) {
         invalidateBrowserTokenCache();
+        invalidateApiReadCache();
       }
-      const providerCode = await extractSpeechProviderCode(response);
+      const providerCode = await extractSpeechProviderCode(response, signal);
+      await cancelResponseBodyQuietly(response, signal);
       throw failure(
         capabilityCode,
         response.status,
@@ -232,7 +254,13 @@ async function speechRequest(
     }
     return response;
   } catch (error) {
-    if (error instanceof ServiceError || signal?.aborted) throw error;
+    if (
+      error instanceof ServiceError ||
+      signal?.aborted ||
+      isAbortOrTimeoutError(error)
+    ) {
+      throw error;
+    }
     throw failure(capabilityCode, 0, "", true);
   }
 }
@@ -283,6 +311,9 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 export function createSpeechService(): SpeechService {
   return {
     async synthesize(text, options = {}) {
+      if (options.signal?.aborted) {
+        throw getAbortReason(options.signal);
+      }
       const normalizedText = text.normalize("NFC").trim();
       if (!normalizedText) throw failure("TTS_UNAVAILABLE", 422);
 
@@ -391,9 +422,21 @@ export function createSpeechService(): SpeechService {
           );
           const contentType = response.headers.get("content-type") ?? "";
           if (!contentType.toLowerCase().startsWith("audio/")) {
+            await cancelResponseBodyQuietly(response, signal);
             throw failure("TTS_UNAVAILABLE", response.status);
           }
-          const audio = await response.blob();
+          let audio: Blob;
+          try {
+            audio = await raceWithSignal(response.blob(), signal);
+          } catch (error) {
+            if (signal.aborted || isAbortOrTimeoutError(error)) throw error;
+            throw failure(
+              "TTS_UNAVAILABLE",
+              0,
+              response.headers.get("x-request-id") ?? "",
+              true,
+            );
+          }
           signal.throwIfAborted();
           if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
           const resolvedVoiceId =
@@ -466,11 +509,14 @@ export function createSpeechService(): SpeechService {
           return audio;
         },
         options.signal,
-        options.timeoutMs ?? 30_000,
+        resolveTimeoutMs(options.timeoutMs, DEFAULT_REQUEST_TIMEOUT_MS),
       );
     },
 
     async synthesizePhonics(steps, options = {}) {
+      if (options.signal?.aborted) {
+        throw getAbortReason(options.signal);
+      }
       if (!steps.length) throw failure("TTS_UNAVAILABLE", 422);
 
       const policy = getVoicePolicyPreferences();
@@ -590,7 +636,18 @@ export function createSpeechService(): SpeechService {
             },
             signal,
           );
-          const payload: unknown = await response.json();
+          let payload: unknown;
+          try {
+            payload = await raceWithSignal(response.json(), signal);
+          } catch (error) {
+            if (signal.aborted || isAbortOrTimeoutError(error)) throw error;
+            throw failure(
+              "TTS_UNAVAILABLE",
+              response.status,
+              response.headers.get("x-request-id") ?? "",
+              false,
+            );
+          }
           signal.throwIfAborted();
           const parsed = phonicsSpeechSchema.safeParse(payload);
           if (
@@ -682,11 +739,14 @@ export function createSpeechService(): SpeechService {
           };
         },
         options.signal,
-        options.timeoutMs ?? 30_000,
+        resolveTimeoutMs(options.timeoutMs, DEFAULT_REQUEST_TIMEOUT_MS),
       );
     },
 
     async transcribe(audio, options = {}) {
+      if (options.signal?.aborted) {
+        throw getAbortReason(options.signal);
+      }
       if (!audio.size || audio.size > 20 * 1024 * 1024)
         throw failure("STT_UNAVAILABLE", 422, "", false, "STT_INVALID_AUDIO");
 
@@ -749,16 +809,19 @@ export function createSpeechService(): SpeechService {
       appendKeyterms(form, options.keyterms);
 
       const controller = new AbortController();
-      const abort = () => controller.abort(options.signal?.reason);
+      const abort = () => controller.abort(getAbortReason(options.signal));
       if (options.signal?.aborted) abort();
       options.signal?.addEventListener("abort", abort, { once: true });
       let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort(
-          new DOMException("Transcription timed out", "TimeoutError"),
-        );
-      }, options.timeoutMs ?? 30_000);
+      const timer = setTimeout(
+        () => {
+          timedOut = true;
+          controller.abort(
+            new DOMException("Transcription timed out", "TimeoutError"),
+          );
+        },
+        resolveTimeoutMs(options.timeoutMs, DEFAULT_REQUEST_TIMEOUT_MS),
+      );
       const interrupted = new Promise<never>((_resolve, reject) => {
         controller.signal.addEventListener(
           "abort",
@@ -777,7 +840,10 @@ export function createSpeechService(): SpeechService {
               { method: "POST", body: form },
               controller.signal,
             );
-            const payload: unknown = await response.json();
+            const payload: unknown = await raceWithSignal(
+              response.json(),
+              controller.signal,
+            );
             controller.signal.throwIfAborted();
             const parsed = transcriptionSchema.safeParse(payload);
             if (!parsed.success)
@@ -809,7 +875,7 @@ export function createSpeechService(): SpeechService {
           })(),
         ]);
       } catch (error) {
-        if (options.signal?.aborted) throw options.signal.reason;
+        if (options.signal?.aborted) throw getAbortReason(options.signal);
         if (timedOut)
           throw failure("STT_UNAVAILABLE", 408, "", true, "STT_TIMEOUT");
         if (error instanceof ServiceError) throw error;

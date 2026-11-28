@@ -302,6 +302,16 @@ class ReadingContentRepository:
     async def page_by_id(self, page_id: UUID) -> BookPage | None:
         return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
 
+    async def pages_by_ids(self, page_ids: list[UUID]) -> dict[UUID, BookPage]:
+        """Batch-fetch BookPage rows keyed by Id for practice state restoration."""
+        if not page_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(page_ids))
+        result = await self.db.execute(
+            select(BookPage).where(BookPage.Id.in_(unique_ids))
+        )
+        return {row.Id: row for row in result.scalars().all()}
+
     async def revision_snapshot(self, page_id: UUID, revision_id: UUID) -> PageRevision | None:
         return await self.db.scalar(
             select(PageRevision).where(
@@ -309,6 +319,40 @@ class ReadingContentRepository:
                 PageRevision.PageId == page_id,
             )
         )
+
+    async def revision_snapshots(
+        self, keys: list[tuple[UUID, UUID]]
+    ) -> dict[tuple[UUID, UUID], PageRevision]:
+        """Batch-fetch PageRevision rows keyed by `(PageId, Id)`."""
+        if not keys:
+            return {}
+        unique_keys = set(keys)
+        rev_ids = list(dict.fromkeys(rev_id for _, rev_id in unique_keys))
+        result = await self.db.execute(
+            select(PageRevision).where(PageRevision.Id.in_(rev_ids))
+        )
+        return {
+            (row.PageId, row.Id): row
+            for row in result.scalars().all()
+            if (row.PageId, row.Id) in unique_keys
+        }
+
+    async def revision_word_ids_by_revisions(
+        self, revision_ids: list[UUID]
+    ) -> dict[UUID, set[UUID]]:
+        """Batch-fetch `{PageRevisionId: {WordId, ...}}` for practice state validation."""
+        if not revision_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(revision_ids))
+        result = await self.db.execute(
+            select(PageRevisionWord.PageRevisionId, PageRevisionWord.Id).where(
+                PageRevisionWord.PageRevisionId.in_(unique_ids)
+            )
+        )
+        by_rev: dict[UUID, set[UUID]] = {rev_id: set() for rev_id in unique_ids}
+        for rev_id, word_id in result.all():
+            by_rev.setdefault(rev_id, set()).add(word_id)
+        return by_rev
 
     async def save_session_progress(
         self, session: ReadingSession, page_rows: list[ReadingSessionPage]

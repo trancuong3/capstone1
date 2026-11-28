@@ -6,6 +6,12 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  cancelResponseBodyQuietly,
+  createLinkedAttemptController,
+  raceWithSignal,
+} from "@/lib/api/cold-start-retry";
 import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
@@ -51,60 +57,86 @@ export interface SupportService {
 export function createSupportService(): SupportService {
   return {
     async submitFeedback(request) {
+      const deadlineAt = Date.now() + DEFAULT_REQUEST_TIMEOUT_MS;
+      const authHandle = createLinkedAttemptController(
+        DEFAULT_REQUEST_TIMEOUT_MS,
+      );
       let accessToken: string;
       try {
         accessToken = await getBrowserAccessToken({
+          signal: authHandle.signal,
           onUnauthorized: () =>
             new SupportFeedbackError(safeMessageForStatus(401), 401),
         });
       } catch (error) {
+        if (authHandle.didTimeout()) {
+          throw new SupportFeedbackError(safeMessageForStatus(0), 0);
+        }
         if (error instanceof SupportFeedbackError) {
           throw error;
         }
         throw new SupportFeedbackError(safeMessageForStatus(401), 401);
+      } finally {
+        authHandle.cleanup();
       }
 
-      let response: Response;
-      try {
-        response = await fetch(getApiBaseUrl() + "/support/feedback", {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            Authorization: "Bearer " + accessToken,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(request),
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-        });
-      } catch {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
       }
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          invalidateBrowserTokenCache();
-        }
-        throw new SupportFeedbackError(
-          safeMessageForStatus(response.status),
-          response.status,
+      const attemptHandle = createLinkedAttemptController(remainingMs);
+      try {
+        const response = await raceWithSignal(
+          fetch(getApiBaseUrl() + "/support/feedback", {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              Authorization: "Bearer " + accessToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(request),
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            signal: attemptHandle.signal,
+          }),
+          attemptHandle.signal,
         );
-      }
 
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch {
+        if (!response.ok) {
+          if (response.status === 401) {
+            invalidateBrowserTokenCache();
+          }
+          await cancelResponseBodyQuietly(response, attemptHandle.signal);
+          if (attemptHandle.didTimeout()) {
+            throw new SupportFeedbackError(safeMessageForStatus(0), 0);
+          }
+          throw new SupportFeedbackError(
+            safeMessageForStatus(response.status),
+            response.status,
+          );
+        }
+
+        const payload: unknown = await raceWithSignal(
+          response.json(),
+          attemptHandle.signal,
+        );
+
+        const parsed = supportFeedbackResponseSchema.safeParse(payload);
+        if (!parsed.success) {
+          throw new SupportFeedbackError(safeMessageForStatus(0), 0);
+        }
+
+        return parsed.data;
+      } catch (error) {
+        if (error instanceof SupportFeedbackError) {
+          throw error;
+        }
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
+      } finally {
+        attemptHandle.cleanup();
       }
-
-      const parsed = supportFeedbackResponseSchema.safeParse(payload);
-      if (!parsed.success) {
-        throw new SupportFeedbackError(safeMessageForStatus(0), 0);
-      }
-
-      return parsed.data;
     },
   };
 }

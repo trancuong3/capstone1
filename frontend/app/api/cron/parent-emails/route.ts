@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -6,9 +6,13 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const ALLOWED_SCOPES = new Set(["all", "reminders", "presence", "engagement"]);
-const RETRYABLE_UPSTREAM_STATUSES = new Set([502, 504]);
-const FIRST_ATTEMPT_TIMEOUT_MS = 35_000;
-const RETRY_ATTEMPT_TIMEOUT_MS = 20_000;
+const RETRYABLE_UPSTREAM_STATUSES = new Set([
+  502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530,
+]);
+const FIRST_ATTEMPT_TIMEOUT_MS = 30_000;
+const RETRY_BACKOFF_MS = 1_500;
+const RETRY_ATTEMPT_TIMEOUT_MS = 22_000;
+const TOTAL_DISPATCH_BUDGET_MS = 55_000;
 
 function constantTimeMatch(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate, "utf8");
@@ -39,24 +43,69 @@ async function postDispatchOnce(
   dispatchUrl: string,
   backendSecret: string,
   timeoutMs: number,
+  requestId: string,
 ): Promise<Response> {
   return fetch(dispatchUrl, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "X-Cron-Secret": backendSecret,
+      "X-Request-ID": requestId,
     },
     cache: "no-store",
+    redirect: "error",
     signal: AbortSignal.timeout(timeoutMs),
   });
 }
 
+function sanitizeRequestId(
+  raw: string | null | undefined,
+  fallback: string,
+): string {
+  const trimmed = raw?.trim();
+  if (trimmed && trimmed.length <= 128 && /^[\w.-]+$/.test(trimmed)) {
+    return trimmed;
+  }
+  return fallback;
+}
+
+function resolveRequestId(request: NextRequest): string {
+  return sanitizeRequestId(request.headers.get("x-request-id"), randomUUID());
+}
+
+async function readJsonWithBudget(
+  response: Response,
+  budgetMs: number,
+): Promise<Record<string, unknown>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      response.json() as Promise<Record<string, unknown>>,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => {
+            reject(
+              new DOMException("Upstream body read timed out", "TimeoutError"),
+            );
+          },
+          Math.max(1_000, budgetMs),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 async function handleCronDispatch(request: NextRequest) {
+  const requestId = resolveRequestId(request);
   const cronSecret = (process.env.CRON_SECRET ?? "").trim();
   if (cronSecret.length < 16) {
     return NextResponse.json(
-      { ok: false, error: "CRON_SECRET_NOT_CONFIGURED" },
-      { status: 503 },
+      { ok: false, error: "CRON_SECRET_NOT_CONFIGURED", requestId },
+      { status: 503, headers: { "X-Request-ID": requestId } },
     );
   }
 
@@ -65,8 +114,8 @@ async function handleCronDispatch(request: NextRequest) {
   const token = bearerMatch?.[1]?.trim() ?? "";
   if (!token || !constantTimeMatch(token, cronSecret)) {
     return NextResponse.json(
-      { ok: false, error: "UNAUTHORIZED" },
-      { status: 401 },
+      { ok: false, error: "UNAUTHORIZED", requestId },
+      { status: 401, headers: { "X-Request-ID": requestId } },
     );
   }
 
@@ -75,20 +124,35 @@ async function handleCronDispatch(request: NextRequest) {
   const dispatchUrl = resolveDispatchUrl(scope);
   if (!dispatchUrl) {
     return NextResponse.json(
-      { ok: false, error: "BACKEND_API_URL_NOT_CONFIGURED" },
-      { status: 503 },
+      { ok: false, error: "BACKEND_API_URL_NOT_CONFIGURED", requestId },
+      { status: 503, headers: { "X-Request-ID": requestId } },
     );
   }
 
   const backendSecret =
     process.env.PARENT_EMAIL_CRON_SECRET?.trim() || cronSecret;
 
+  const startedAt = Date.now();
   let upstream: Response | null = null;
+  let lastErrorName: string | null = null;
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const timeoutMs =
+    const remainingBudgetMs =
+      TOTAL_DISPATCH_BUDGET_MS - (Date.now() - startedAt);
+    if (remainingBudgetMs <= 1_000) {
+      break;
+    }
+    const attemptCapMs =
       attempt === 0 ? FIRST_ATTEMPT_TIMEOUT_MS : RETRY_ATTEMPT_TIMEOUT_MS;
+    const timeoutMs = Math.min(attemptCapMs, remainingBudgetMs);
+
     try {
-      upstream = await postDispatchOnce(dispatchUrl, backendSecret, timeoutMs);
+      upstream = await postDispatchOnce(
+        dispatchUrl,
+        backendSecret,
+        timeoutMs,
+        requestId,
+      );
       if (
         upstream.ok ||
         !RETRYABLE_UPSTREAM_STATUSES.has(upstream.status) ||
@@ -96,43 +160,99 @@ async function handleCronDispatch(request: NextRequest) {
       ) {
         break;
       }
-      await upstream.body?.cancel().catch(() => undefined);
-    } catch {
+      const upstreamRequestId = sanitizeRequestId(
+        upstream.headers.get("x-request-id"),
+        requestId,
+      );
+      console.error(
+        "[cron/parent-emails] transient upstream status, retrying",
+        {
+          scope,
+          attempt: attempt + 1,
+          upstreamStatus: upstream.status,
+          requestId: upstreamRequestId,
+        },
+      );
+      void upstream.body?.cancel().catch(() => undefined);
+    } catch (error) {
       upstream = null;
+      lastErrorName = error instanceof Error ? error.name : "UnknownError";
+      console.error("[cron/parent-emails] upstream dispatch attempt failed", {
+        scope,
+        attempt: attempt + 1,
+        errorName: lastErrorName,
+        requestId,
+      });
       if (attempt === 1) {
-        return NextResponse.json(
-          { ok: false, error: "UPSTREAM_UNREACHABLE" },
-          { status: 504 },
-        );
+        break;
       }
     }
+
+    const remainingBeforeWait =
+      TOTAL_DISPATCH_BUDGET_MS - (Date.now() - startedAt);
+    if (remainingBeforeWait <= RETRY_BACKOFF_MS + 1_000) {
+      break;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
   }
 
   if (!upstream) {
+    console.error("[cron/parent-emails] upstream unreachable", {
+      scope,
+      errorName: lastErrorName,
+      requestId,
+    });
     return NextResponse.json(
-      { ok: false, error: "UPSTREAM_UNREACHABLE" },
-      { status: 504 },
+      { ok: false, error: "UPSTREAM_UNREACHABLE", requestId },
+      { status: 504, headers: { "X-Request-ID": requestId } },
     );
   }
 
+  const upstreamRequestId = sanitizeRequestId(
+    upstream.headers.get("x-request-id"),
+    requestId,
+  );
+
   if (!upstream.ok) {
+    void upstream.body?.cancel().catch(() => undefined);
+    console.error("[cron/parent-emails] upstream dispatch failed", {
+      scope,
+      upstreamStatus: upstream.status,
+      requestId: upstreamRequestId,
+    });
     return NextResponse.json(
       {
         ok: false,
         error: "UPSTREAM_DISPATCH_FAILED",
         upstreamStatus: upstream.status,
+        requestId: upstreamRequestId,
       },
-      { status: 502 },
+      { status: 502, headers: { "X-Request-ID": upstreamRequestId } },
     );
   }
 
   try {
-    const summary = (await upstream.json()) as Record<string, unknown>;
-    return NextResponse.json({ ok: true, summary }, { status: 200 });
-  } catch {
+    const remainingReadBudgetMs =
+      TOTAL_DISPATCH_BUDGET_MS - (Date.now() - startedAt);
+    const summary = await readJsonWithBudget(upstream, remainingReadBudgetMs);
     return NextResponse.json(
-      { ok: false, error: "UPSTREAM_INVALID_JSON" },
-      { status: 502 },
+      { ok: true, summary },
+      { status: 200, headers: { "X-Request-ID": upstreamRequestId } },
+    );
+  } catch {
+    console.error("[cron/parent-emails] upstream returned invalid JSON", {
+      scope,
+      upstreamStatus: upstream.status,
+      requestId: upstreamRequestId,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "UPSTREAM_INVALID_JSON",
+        upstreamStatus: upstream.status,
+        requestId: upstreamRequestId,
+      },
+      { status: 502, headers: { "X-Request-ID": upstreamRequestId } },
     );
   }
 }

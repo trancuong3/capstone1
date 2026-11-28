@@ -49,6 +49,7 @@ import type {
   DifficultWordPracticeStatus,
   ProgressPeriodsDTO,
   ProgressReportDTO,
+  ReportDateWindow,
 } from "@/types/reports";
 
 type TranslateFn = ReturnType<typeof useTranslations>;
@@ -208,13 +209,49 @@ function ProgressReportContent({
           requestedPeriodEnd,
         );
         if (window === "invalid") return;
+        async function fetchReportState(
+          targetWindow: ReportDateWindow | undefined,
+        ) {
+          try {
+            const data = await reportService.get(child.id, targetWindow);
+            return { report: data, reportStatus: "ready" as const };
+          } catch (failure) {
+            return {
+              report: null,
+              reportStatus:
+                isServiceError(failure) && failure.status === 404
+                  ? ("empty" as const)
+                  : isServiceError(failure) &&
+                      (failure.status === 501 || failure.status === 503)
+                    ? ("unavailable" as const)
+                    : ("error" as const),
+            };
+          }
+        }
+        if (window !== null) {
+          const [periods, reportResult] = await Promise.all([
+            reportService.listPeriods(child.id).catch(() => null),
+            fetchReportState(window),
+          ]);
+          if (!active) return;
+          setState({
+            status: "loaded",
+            children,
+            child,
+            report: reportResult.report,
+            reportStatus: reportResult.reportStatus,
+            periods: periods ?? { items: [], next_cursor: null },
+            periodsError: periods === null,
+          });
+          return;
+        }
         const periods = await reportService
           .listPeriods(child.id)
           .catch(() => null);
         if (!active) return;
         const periodsValue = periods ?? { items: [], next_cursor: null };
         const periodsError = periods === null;
-        if (!window && periods !== null && periods.items.length === 0) {
+        if (periods !== null && periods.items.length === 0) {
           setState({
             status: "loaded",
             children,
@@ -226,27 +263,14 @@ function ProgressReportContent({
           });
           return;
         }
-        let report: ProgressReportDTO | null = null;
-        let reportStatus: "ready" | "empty" | "unavailable" | "error" = "error";
-        try {
-          report = await reportService.get(child.id, window ?? undefined);
-          reportStatus = "ready";
-        } catch (failure) {
-          reportStatus =
-            isServiceError(failure) && failure.status === 404
-              ? "empty"
-              : isServiceError(failure) &&
-                  (failure.status === 501 || failure.status === 503)
-                ? "unavailable"
-                : "error";
-        }
+        const reportResult = await fetchReportState(undefined);
         if (!active) return;
         setState({
           status: "loaded",
           children,
           child,
-          report,
-          reportStatus,
+          report: reportResult.report,
+          reportStatus: reportResult.reportStatus,
           periods: periodsValue,
           periodsError,
         });

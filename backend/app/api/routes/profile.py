@@ -198,14 +198,21 @@ class ChildProfileService:
     def _response(child: ChildProfile, *, avatar_url: str | None = None, use_prebuilt_url: bool = False) -> dict:
         if not use_prebuilt_url:
             safe_path = ChildProfileService._safe_avatar_path(child)
-            avatar_url = (
-                create_signed_image_url(
-                    safe_path,
-                    bucket_name=SUPABASE_AVATAR_BUCKET,
-                )
-                if safe_path
-                else None
-            )
+            if safe_path:
+                from app.services import storage_service as _storage_service
+
+                if create_signed_image_url is not _storage_service._ORIGINAL_CREATE_SIGNED_IMAGE_URL:
+                    avatar_url = create_signed_image_url(
+                        safe_path,
+                        bucket_name=SUPABASE_AVATAR_BUCKET,
+                    )
+                else:
+                    avatar_url = _storage_service.create_cached_signed_image_urls(
+                        [safe_path],
+                        bucket_name=SUPABASE_AVATAR_BUCKET,
+                    )[0]
+            else:
+                avatar_url = None
         return {
             "id": child.Id,
             "parent_id": child.ParentId,

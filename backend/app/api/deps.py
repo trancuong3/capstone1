@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import inspect
@@ -6,14 +7,16 @@ import logging
 import os
 import threading
 import time
+import weakref
 from uuid import UUID
 
+import httpx
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.config import APP_ENVIRONMENT
+from app.database.config import APP_ENVIRONMENT, SUPABASE_KEY, SUPABASE_URL
 from app.database.role_cache import (
     _MISSING as _ROLE_CACHE_MISSING,
     get_cached_profile_active_role,
@@ -27,6 +30,83 @@ from app.diagnostic_logging import log_diagnostic
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
+
+_ORIG_GET_SUPABASE_CLIENT = get_supabase_client
+_REAL_HTTPX_ASYNC_CLIENT = httpx.AsyncClient
+_AUTH_HTTP_TIMEOUT = httpx.Timeout(8.0, connect=4.0, read=8.0, write=4.0, pool=4.0)
+_AUTH_HTTP_LIMITS = httpx.Limits(
+    max_connections=20,
+    max_keepalive_connections=10,
+    keepalive_expiry=30.0,
+)
+_AUTH_HTTP_CLIENTS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+class _AuthProviderStatusError(Exception):
+    """Internal marker preserving provider HTTP status without secret details."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"provider_status_{status_code}")
+        self.status_code = status_code
+
+
+def _is_retryable_auth_http_status(status_code: int) -> bool:
+    return status_code in {408, 429, 502, 503, 504} or 520 <= status_code <= 530
+
+
+def _build_auth_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        http2=True,
+        trust_env=False,
+        timeout=_AUTH_HTTP_TIMEOUT,
+        limits=_AUTH_HTTP_LIMITS,
+    )
+
+
+def _get_auth_http_client() -> httpx.AsyncClient | None:
+    if httpx.AsyncClient is not _REAL_HTTPX_ASYNC_CLIENT:
+        return None
+    loop = asyncio.get_running_loop()
+    client = _AUTH_HTTP_CLIENTS.get(loop)
+    if client is not None and not getattr(client, "is_closed", False):
+        return client
+    client = _build_auth_http_client()
+    _AUTH_HTTP_CLIENTS[loop] = client
+    return client
+
+
+async def _evict_auth_http_client(
+    expected_client: httpx.AsyncClient | None = None,
+) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if expected_client is not None and _AUTH_HTTP_CLIENTS.get(loop) is not expected_client:
+        return
+    client = _AUTH_HTTP_CLIENTS.pop(loop, None)
+    if client is not None and not getattr(client, "is_closed", False):
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                pass
+
+
+async def aclose_auth_http_clients() -> None:
+    """Close pooled async HTTP clients used for Supabase Auth verification on shutdown."""
+    clients = list(_AUTH_HTTP_CLIENTS.values())
+    _AUTH_HTTP_CLIENTS.clear()
+    for client in clients:
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose) and not getattr(client, "is_closed", False):
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 _AUTH_CACHE_LOCK = threading.Lock()
 _AUTH_CACHE_MAX_ENTRIES = 512
@@ -152,32 +232,7 @@ def _is_transient_network_error(error: BaseException) -> bool:
     )
 
 
-def get_current_parent_id(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> UUID:
-    """
-    Xác thực Supabase access token và lấy ID của authenticated user.
-
-    profiles.id trong project hiện tại liên kết với auth.users.id,
-    nên user.id là parent/profile ID hiện tại.
-    """
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
-
-    token = credentials.credentials
-    cache_ttl = _auth_token_cache_ttl_seconds()
-    token_digest = (
-        hashlib.sha256(token.encode("utf-8")).hexdigest() if cache_ttl > 0 else ""
-    )
-    if cache_ttl > 0:
-        cached = _get_cached_actor_id(token_digest)
-        if cached is not None:
-            return cached
-
+async def _verify_token_via_supabase_client(token: str) -> UUID:
     response = None
     last_error: Exception | None = None
 
@@ -185,7 +240,12 @@ def get_current_parent_id(
     for attempt in range(1, max_attempts + 1):
         try:
             supabase = get_supabase_client()
-            response = supabase.auth.get_user(token)
+            raw_response = supabase.auth.get_user(token)
+            response = (
+                await raw_response
+                if inspect.isawaitable(raw_response)
+                else raw_response
+            )
             last_error = None
             break
         except Exception as error:
@@ -200,7 +260,7 @@ def get_current_parent_id(
             # Nếu gặp lỗi ngắt kết nối giao thức mạng do socket cũ, reset pool và thử lại
             if _is_transient_network_error(error) and attempt < max_attempts:
                 reset_supabase_client()
-                time.sleep(0.04 * attempt)
+                await asyncio.sleep(0.04 * attempt)
                 continue
             break
 
@@ -226,12 +286,146 @@ def get_current_parent_id(
         )
 
     try:
-        actor_id = UUID(str(response.user.id))
+        return UUID(str(response.user.id))
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authenticated user ID",
+        ) from None
+
+
+async def _verify_token_via_http(token: str) -> UUID:
+    supabase_url = (SUPABASE_URL or "").rstrip("/")
+    supabase_key = SUPABASE_KEY or ""
+    auth_url = f"{supabase_url}/auth/v1/user"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {token}",
+    }
+
+    last_error: Exception | None = None
+    resp: httpx.Response | None = None
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        pooled_client: httpx.AsyncClient | None = None
+        try:
+            pooled_client = _get_auth_http_client()
+            if pooled_client is not None:
+                resp = await pooled_client.get(auth_url, headers=headers)
+            else:
+                async with httpx.AsyncClient(
+                    trust_env=False,
+                    timeout=_AUTH_HTTP_TIMEOUT,
+                ) as ephemeral_client:
+                    resp = await ephemeral_client.get(auth_url, headers=headers)
+
+            if resp.status_code == 200:
+                last_error = None
+                break
+            if resp.status_code in (400, 401):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                ) from None
+
+            last_error = _AuthProviderStatusError(resp.status_code)
+            if _is_retryable_auth_http_status(resp.status_code) and attempt < max_attempts:
+                await asyncio.sleep(0.04 * attempt)
+                continue
+            break
+        except HTTPException:
+            raise
+        except Exception as error:
+            provider_status = _auth_provider_status(error)
+            if provider_status in (400, 401):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                ) from None
+
+            last_error = error
+            if (
+                isinstance(error, httpx.TransportError)
+                or _is_transient_network_error(error)
+            ) and attempt < max_attempts:
+                if pooled_client is not None:
+                    await _evict_auth_http_client(pooled_client)
+                await asyncio.sleep(0.04 * attempt)
+                continue
+            break
+
+    if last_error is not None:
+        provider_status = _auth_provider_status(last_error)
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="supabase_auth_verification_unavailable",
+            stage="supabase_auth_provider",
+            exception=last_error,
+            provider_status=provider_status,
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
+        ) from None
+
+    try:
+        payload = resp.json() if resp is not None else None
+    except ValueError:
+        payload = None
+
+    raw_user_id = None
+    if isinstance(payload, dict):
+        raw_user_id = payload.get("id")
+        if raw_user_id is None and isinstance(payload.get("user"), dict):
+            raw_user_id = payload["user"].get("id")
+
+    if not raw_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    try:
+        return UUID(str(raw_user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authenticated user ID",
+        ) from None
+
+
+async def get_current_parent_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> UUID:
+    """
+    Xác thực Supabase access token và lấy ID của authenticated user.
+
+    profiles.id trong project hiện tại liên kết với auth.users.id,
+    nên user.id là parent/profile ID hiện tại.
+    """
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
+    token = credentials.credentials
+    cache_ttl = _auth_token_cache_ttl_seconds()
+    token_digest = (
+        hashlib.sha256(token.encode("utf-8")).hexdigest() if cache_ttl > 0 else ""
+    )
+    if cache_ttl > 0:
+        cached = _get_cached_actor_id(token_digest)
+        if cached is not None:
+            return cached
+
+    if get_supabase_client is not _ORIG_GET_SUPABASE_CLIENT:
+        actor_id = await _verify_token_via_supabase_client(token)
+    else:
+        actor_id = await _verify_token_via_http(token)
+
     if cache_ttl > 0:
         _put_cached_actor_id(token_digest, actor_id, cache_ttl, _jwt_exp_epoch(token))
     return actor_id

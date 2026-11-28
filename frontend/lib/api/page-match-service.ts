@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
 import {
+  createLinkedAttemptController,
+  raceWithSignal,
+} from "@/lib/api/cold-start-retry";
+import {
   readingPageDtoSchema,
   sessionPageProgressSchema,
 } from "@/lib/api/reading-service";
@@ -120,17 +124,25 @@ export interface OcrWorkerHealthSnapshot {
 export async function fetchOcrWorkerHealth(
   signal?: AbortSignal,
 ): Promise<OcrWorkerHealthSnapshot | null> {
-  if (typeof fetch !== "function") return null;
+  if (typeof fetch !== "function" || signal?.aborted) return null;
+  const attemptHandle = createLinkedAttemptController(8_000, signal);
   try {
-    const response = await fetch(`${getApiBaseUrl()}/health`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      credentials: "omit",
-      signal,
-    });
+    const response = await raceWithSignal(
+      fetch(`${getApiBaseUrl()}/health`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        signal: attemptHandle.signal,
+      }),
+      attemptHandle.signal,
+    );
     if (!response.ok) return null;
-    const raw: unknown = await response.json();
+    const raw: unknown = await raceWithSignal(
+      response.json(),
+      attemptHandle.signal,
+    );
     if (!raw || typeof raw !== "object") return null;
     const ocr = (raw as Record<string, unknown>).ocr;
     if (!ocr || typeof ocr !== "object") return null;
@@ -157,6 +169,8 @@ export async function fetchOcrWorkerHealth(
     return { mode, ready, workerOnline, queuedCount };
   } catch {
     return null;
+  } finally {
+    attemptHandle.cleanup();
   }
 }
 

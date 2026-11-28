@@ -12,13 +12,14 @@ Never runs in tests, on Render/production, on non-Windows hosts, or when
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import httpx
 
@@ -93,6 +94,48 @@ def _resolve_start_script_path() -> Path:
     return REPOSITORY_ROOT / "scripts" / "windows" / "Start-ViReadVoiceWorker.ps1"
 
 
+def _is_truthy_render_env(raw: str | None) -> bool:
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    cleaned = host.strip().lower().strip("[]").rstrip(".")
+    if not cleaned:
+        return False
+    if cleaned == "localhost" or cleaned.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(cleaned)
+    except ValueError:
+        return False
+    return bool(
+        ip.is_loopback
+        or ip.is_unspecified
+        or (ip.ipv4_mapped is not None and ip.ipv4_mapped.is_loopback)
+    )
+
+
+def _is_loopback_url(url: str | None) -> bool:
+    if not url or not url.strip():
+        return False
+    try:
+        parsed = urlsplit(url.strip())
+    except ValueError:
+        return False
+    return _is_loopback_host(parsed.hostname)
+
+
+def _is_production_or_render() -> bool:
+    if _is_truthy_render_env(os.getenv("RENDER")):
+        return True
+    app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+    return app_env == "production"
+
+
 def parse_loopback_worker_endpoint(base_url: str) -> tuple[str, int] | None:
     """Return `(bind_host, port)` if `base_url` is a local loopback HTTP endpoint."""
     parsed = urlparse(base_url)
@@ -131,7 +174,7 @@ def should_autostart_local_voice_worker(
         return False, f"app_environment_{eff_env}"
 
     eff_render = os.getenv("RENDER", "") if render_env is None else render_env
-    if eff_render.strip():
+    if _is_truthy_render_env(eff_render):
         return False, "render_environment"
 
     if autostart_env is None:
@@ -164,6 +207,8 @@ def should_autostart_local_voice_worker(
 
 
 async def _is_worker_healthy(base_url: str) -> bool:
+    if not base_url or (_is_production_or_render() and _is_loopback_url(base_url)):
+        return False
     worker_token = _resolve_worker_token()
     headers = (
         {

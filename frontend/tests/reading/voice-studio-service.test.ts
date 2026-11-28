@@ -286,4 +286,64 @@ describe("voice studio service", () => {
     );
     expect(fromHeader.cachedSpeed).toBe(1.0);
   });
+
+  it.each([Number.NaN, 0, -1, Number.POSITIVE_INFINITY])(
+    "sanitizes invalid timeoutMs=%s in synthesizeTimed instead of timing out in 1ms",
+    async (badTimeoutMs) => {
+      vi.useFakeTimers();
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            setTimeout(() => resolve(json(timedBody)), 10);
+          }),
+      );
+
+      const pending = createVoiceStudioService().synthesizeTimed(["Bé", "Na"], {
+        timeoutMs: badTimeoutMs,
+      });
+      await vi.advanceTimersByTimeAsync(15);
+      const speech = await pending;
+      expect(speech.durationSeconds).toBe(1.3);
+      expect(speech.words).toHaveLength(2);
+    },
+  );
+
+  it("surfaces original 524 error immediately in listVoices when remaining budget is below retry backoff", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          setTimeout(
+            () => resolve(new Response("Cloudflare 524", { status: 524 })),
+            14_600,
+          );
+        }),
+    );
+
+    const pending = createVoiceStudioService()
+      .listVoices()
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(14_600);
+    const err = await pending;
+    expect(err).toMatchObject({
+      code: "TTS_UNAVAILABLE",
+      status: 524,
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects pre-aborted synthesizeTimed immediately without auth or fetch calls", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      createVoiceStudioService().synthesizeTimed(["Bé"], {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(initialize).not.toHaveBeenCalled();
+    expect(getSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

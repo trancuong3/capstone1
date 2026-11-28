@@ -109,7 +109,12 @@ async def _verify_optional_active_actor(
         if require_active_profile_id in overrides:
             return actor_uuid
     else:
-        actor_uuid = await asyncio.to_thread(get_current_parent_id, credentials)
+        auth_result = get_current_parent_id(credentials)
+        actor_uuid = (
+            await auth_result
+            if inspect.isawaitable(auth_result)
+            else auth_result
+        )
 
     role = await get_cached_profile_role(db, actor_uuid)
     if role not in ("parent", "admin"):
@@ -155,7 +160,7 @@ async def get_book_pages(
     db: AsyncSession = Depends(get_db),
 ):
     """Return pages for an eligible catalog book; mint signed URLs only for verified active users."""
-    from app.services.storage_service import create_signed_image_urls
+    from app.services.storage_service import create_cached_signed_image_urls_async
 
     verified_actor_id = await _verify_optional_active_actor(request, db)
     pages = await BookService(db).list_pages(
@@ -191,8 +196,7 @@ async def get_book_pages(
                 raw_paths_to_sign.append(raw_image_path)
         if raw_paths_to_sign:
             try:
-                signed_urls = await asyncio.to_thread(
-                    create_signed_image_urls,
+                signed_urls = await create_cached_signed_image_urls_async(
                     raw_paths_to_sign,
                 )
                 signed_by_path = dict(zip(raw_paths_to_sign, signed_urls))

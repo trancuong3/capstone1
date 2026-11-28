@@ -71,6 +71,32 @@ function parseSourceDeclaration(raw: string | null): {
 
 const PAGE_SIZE = 9;
 
+interface AccountScopeState {
+  boundUserId: string;
+  epoch: number;
+}
+
+function resolveNextAccountScope(
+  prev: AccountScopeState,
+  currentUserId: string,
+): AccountScopeState | null {
+  if (!currentUserId) {
+    if (prev.boundUserId) {
+      return { boundUserId: "", epoch: prev.epoch + 1 };
+    }
+    return null;
+  }
+  if (!prev.boundUserId) {
+    // Initial async auth hydration ("" -> firstUserId): bind user without remounting form state.
+    return { boundUserId: currentUserId, epoch: prev.epoch };
+  }
+  if (prev.boundUserId !== currentUserId) {
+    // Switching between distinct signed-in accounts: bump epoch to remount immediately.
+    return { boundUserId: currentUserId, epoch: prev.epoch + 1 };
+  }
+  return null;
+}
+
 interface ParentMyBooksScreenProps {
   initialPage?: number;
 }
@@ -80,9 +106,17 @@ export function ParentMyBooksScreen({
 }: ParentMyBooksScreenProps) {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
+  const [accountScope, setAccountScope] = useState<AccountScopeState>(() => ({
+    boundUserId: currentUserId,
+    epoch: 0,
+  }));
+  const nextAccountScope = resolveNextAccountScope(accountScope, currentUserId);
+  if (nextAccountScope) {
+    setAccountScope(nextAccountScope);
+  }
   return (
     <ParentMyBooksContent
-      key={currentUserId}
+      key={`account-${accountScope.epoch}`}
       currentUserId={currentUserId}
       initialPage={initialPage}
     />
@@ -173,7 +207,12 @@ function ParentMyBooksContent({
   }, []);
 
   useEffect(() => {
-    clearPrivateMediaMemoryCache();
+    return () => {
+      clearPrivateMediaMemoryCache();
+    };
+  }, []);
+
+  useEffect(() => {
     const requestId = ++requestIdRef.current;
     const controller = new AbortController();
     const offset = (page - 1) * PAGE_SIZE;

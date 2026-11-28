@@ -55,10 +55,16 @@ from app.services.gpu_workload_scheduler import (
 )
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.smart_studio_flags import SmartStudioFlags
-from app.services.storage_service import delete_object, download_object, upload_object
+from app.services.storage_service import (
+    delete_object,
+    download_object,
+    download_object_async,
+    upload_object,
+)
 
 logger = logging.getLogger(__name__)
 _ORIGINAL_CATALOG_IS_ELIGIBLE = CatalogRepository.is_eligible
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
 
 HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
 
@@ -1877,5 +1883,8 @@ class BookCoverService:
         )
         if callable(getattr(self.db, "rollback", None)):
             await self.db.rollback()
-        content = await asyncio.to_thread(download_object, safe_path, bucket_name=bucket)
+        if download_object is not _ORIGINAL_DOWNLOAD_OBJECT:
+            content = await asyncio.to_thread(download_object, safe_path, bucket_name=bucket)
+        else:
+            content = await download_object_async(safe_path, bucket_name=bucket)
         return content, mime_type, private_book

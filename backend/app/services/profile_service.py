@@ -13,8 +13,12 @@ from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProv
 from app.repositories.profile_repository import ProfileRepository
 from app.services.storage_service import (
     create_cached_signed_image_urls,
+    create_cached_signed_image_urls_async,
     create_signed_image_url,
 )
+
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS = create_cached_signed_image_urls
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,12 @@ def _safe_avatar_url(path: object, expected_prefix: str) -> str | None:
     safe_path = _validate_safe_avatar_path(path, expected_prefix)
     if safe_path is None:
         return None
-    return create_signed_image_url(safe_path, bucket_name=SUPABASE_AVATAR_BUCKET)
+    if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
+        return create_signed_image_url(safe_path, bucket_name=SUPABASE_AVATAR_BUCKET)
+    return create_cached_signed_image_urls(
+        [safe_path],
+        bucket_name=SUPABASE_AVATAR_BUCKET,
+    )[0]
 
 
 async def batch_sign_avatar_paths(paths: list[str]) -> dict[str, str]:
@@ -58,11 +67,17 @@ async def batch_sign_avatar_paths(paths: list[str]) -> dict[str, str]:
     unique_paths = list(dict.fromkeys(p for p in paths if p))
     if not unique_paths:
         return {}
-    signed = await asyncio.to_thread(
-        create_cached_signed_image_urls,
-        unique_paths,
-        bucket_name=SUPABASE_AVATAR_BUCKET,
-    )
+    if create_cached_signed_image_urls is not _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS:
+        signed = await asyncio.to_thread(
+            create_cached_signed_image_urls,
+            unique_paths,
+            bucket_name=SUPABASE_AVATAR_BUCKET,
+        )
+    else:
+        signed = await create_cached_signed_image_urls_async(
+            unique_paths,
+            bucket_name=SUPABASE_AVATAR_BUCKET,
+        )
     return dict(zip(unique_paths, signed))
 
 

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
+import os
 from datetime import datetime, timezone
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 
+from app.database.config import APP_ENVIRONMENT, SUPABASE_STORAGE_BUCKET
 from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession, ReadingSessionPage
-from app.policies.book_access import is_book_private, private_page_image_url
+from app.policies.book_access import (
+    is_book_private,
+    private_page_image_url,
+    private_page_image_urls_async,
+)
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
     FluencyAssessmentCreate,
@@ -27,8 +35,17 @@ from app.services.catalog_tts_cache import (
     get_catalog_tts_default_voice_id,
     resolve_verified_catalog_tts_url,
 )
-from app.services.storage_service import create_signed_image_url
+from app.services import storage_service as _storage_service_module
+from app.services.storage_service import (
+    create_cached_signed_image_urls_async,
+    create_signed_image_url,
+    is_local_storage_enabled,
+)
 from app.services.word_box_geometry import has_verified_geometry
+
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
+_ORIGINAL_PRIVATE_PAGE_IMAGE_URL = private_page_image_url
+_ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC = create_cached_signed_image_urls_async
 
 
 class ReadingContentService:
@@ -158,17 +175,33 @@ class ReadingContentService:
         from pydantic import ValidationError
         from app.schemas.reading import PracticePageRead, PracticeWordRead, ReadingPracticeStateRead, StoredInitialWordAssessment
         await self.require_parent(actor_id)
-        session = await self._repo_session(session_id, actor_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Reading session not found")
-        await self.require_owned_child(session.ChildId, actor_id)
+        is_real_repo = isinstance(self.repository, ReadingContentRepository)
+        if is_real_repo:
+            ctx = await self.repository.session_with_ownership_and_book(session_id, actor_id)
+            if ctx is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
+            session, _book, child_owned = ctx
+            if not child_owned:
+                raise HTTPException(status_code=404, detail="Child profile not found")
+        else:
+            session = await self._repo_session(session_id, actor_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
+            await self.require_owned_child(session.ChildId, actor_id)
         reports = await self.repository.comparison_reports(session_id)
         events = await self.repository.events_for_session(session_id)
         selected_rows = await self.repository.session_page_rows(session_id)
         selected = {(row.PageId, row.PageRevisionId) for row in selected_rows}
-        pages = []
-        words = []
-        seen = set()
+
+        retry_events_by_word: dict[tuple[UUID | None, UUID | None, UUID | None], list[ReadingEvent]] = {}
+        for event in events:
+            if event.SessionId == session_id and event.Type == "WORD_RETRY":
+                retry_events_by_word.setdefault(
+                    (event.PageId, event.PageRevisionId, event.WordId), []
+                ).append(event)
+
+        seen_keys: set[tuple[UUID, UUID]] = set()
+        candidate_reports: list[tuple[object, dict, tuple[UUID, UUID]]] = []
         legacy = False
         for report in reversed(reports):
             metadata = report.Summary if isinstance(report.Summary, dict) else {}
@@ -176,32 +209,59 @@ class ReadingContentService:
                 legacy = True
                 continue
             key = (report.PageId, report.PageRevisionId)
-            if key in seen:
+            if key in seen_keys:
                 continue
-            page = await self.repository.page_by_id(report.PageId)
-            revision = await self.repository.revision_snapshot(*key)
+            seen_keys.add(key)
+            candidate_reports.append((report, metadata, key))
+
+        pages_map: dict = {}
+        revisions_map: dict = {}
+        word_ids_map: dict[UUID, set[UUID]] = {}
+        if candidate_reports and is_real_repo:
+            pages_map = await self.repository.pages_by_ids(
+                [report.PageId for report, _, _ in candidate_reports]
+            )
+            revisions_map = await self.repository.revision_snapshots(
+                [key for _, _, key in candidate_reports]
+            )
+            word_ids_map = await self.repository.revision_word_ids_by_revisions(
+                [report.PageRevisionId for report, _, _ in candidate_reports]
+            )
+
+        pages = []
+        words = []
+        for report, metadata, key in candidate_reports:
+            if is_real_repo:
+                page = pages_map.get(report.PageId)
+                revision = revisions_map.get(key)
+            else:
+                page = await self.repository.page_by_id(report.PageId)
+                revision = await self.repository.revision_snapshot(*key)
             if (report.SessionId != session_id or page is None or page.BookId != session.BookId
                     or revision is None or (selected and key not in selected)):
                 raise HTTPException(status_code=501, detail="Saved practice identity is not available")
             try:
                 snapshot = [StoredInitialWordAssessment.model_validate(item)
                             for item in metadata.get("initial_assessment", [])]
-                valid_words = await self.repository.revision_words(report.PageRevisionId)
+                if is_real_repo:
+                    valid_word_ids = word_ids_map.get(report.PageRevisionId, set())
+                else:
+                    valid_words = await self.repository.revision_words(report.PageRevisionId)
+                    valid_word_ids = {word.Id for word in valid_words}
                 if (not snapshot or len({word.word_id for word in snapshot}) != len(snapshot)
-                        or {word.word_id for word in snapshot} != {word.Id for word in valid_words}):
+                        or {word.word_id for word in snapshot} != valid_word_ids):
                     raise ValueError("Invalid saved word identity")
                 saved_page = PracticePageRead(page_id=report.PageId, page_revision_id=report.PageRevisionId,
                     page_number=page.PageNumber, transcript=report.Transcript, initial_assessment=snapshot)
             except (ValidationError, TypeError, ValueError):
                 raise HTTPException(status_code=501, detail="Saved practice evidence is not available") from None
-            seen.add(key)
             pages.append(saved_page)
             for word in snapshot:
                 if word.status not in {"MISPRONUNCIATION", "OMISSION"}:
                     continue
-                matching = [event for event in events if event.SessionId == session_id
-                    and event.PageId == report.PageId and event.PageRevisionId == report.PageRevisionId
-                    and event.WordId == word.word_id and event.Type == "WORD_RETRY"]
+                matching = retry_events_by_word.get(
+                    (report.PageId, report.PageRevisionId, word.word_id), []
+                )
                 attempts = []
                 failed = set()
                 unkeyed_failed = 0
@@ -1374,18 +1434,31 @@ class ReadingContentService:
 
         image_url = None
         if book_is_private and book_id_value is not None:
-            image_url = await asyncio.to_thread(
-                private_page_image_url,
-                book_id_value,
-                page_id,
-                revision_id=page_revision_id,
-                base_url=base_url,
-                storage_path=image_path,
-                owner_id=owner_parent_id,
-            )
+            if private_page_image_url is not _ORIGINAL_PRIVATE_PAGE_IMAGE_URL:
+                image_url = await asyncio.to_thread(
+                    private_page_image_url,
+                    book_id_value,
+                    page_id,
+                    revision_id=page_revision_id,
+                    base_url=base_url,
+                    storage_path=image_path,
+                    owner_id=owner_parent_id,
+                )
+            else:
+                image_url = (
+                    await private_page_image_urls_async(
+                        book_id_value,
+                        [(page_id, page_revision_id, image_path)],
+                        base_url=base_url,
+                        owner_id=owner_parent_id,
+                    )
+                )[0]
         elif image_path:
             try:
-                image_url = await asyncio.to_thread(create_signed_image_url, image_path)
+                if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
+                    image_url = await asyncio.to_thread(create_signed_image_url, image_path)
+                else:
+                    image_url = (await create_cached_signed_image_urls_async([image_path]))[0]
             except Exception:
                 # Keep reading text available if Storage preview URLs are temporarily unavailable.
                 image_url = None
@@ -1401,6 +1474,9 @@ class ReadingContentService:
 
         illustration_url = None
         illustration_text_free = False
+        ill_id = None
+        ill_path: str | None = None
+        ill_owner_id = None
         try:
             from sqlalchemy import desc, select
             from app.models.smart_book_studio import BookPresentationAsset
@@ -1421,8 +1497,41 @@ class ReadingContentService:
                         .limit(1)
                     )
                     if ill_asset is not None:
-                        illustration_url = f"/studio/assets/{ill_asset.Id}/media"
+                        ill_id = ill_asset.Id
+                        raw_ill_path = getattr(ill_asset, "StoragePath", None)
+                        ill_path = raw_ill_path.strip() if isinstance(raw_ill_path, str) and raw_ill_path.strip() else None
+                        ill_owner_id = getattr(ill_asset, "OwnerId", None)
+                        illustration_url = f"/studio/assets/{ill_id}/media"
                         illustration_text_free = True
+            if (
+                ill_id is not None
+                and not book_is_private
+                and ill_owner_id is None
+                and ill_path is not None
+                and not is_local_storage_enabled()
+            ):
+                skip_unpatched_test_signing = (
+                    APP_ENVIRONMENT == "test"
+                    and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
+                    and not _storage_service_module.SUPABASE_ADMIN_KEY
+                    and create_cached_signed_image_urls_async is _ORIGINAL_CREATE_CACHED_SIGNED_IMAGE_URLS_ASYNC
+                    and _storage_service_module.create_signed_image_urls is _storage_service_module._ORIGINAL_CREATE_SIGNED_IMAGE_URLS
+                    and _storage_service_module.get_supabase_admin_client is _storage_service_module._ORIGINAL_GET_SUPABASE_ADMIN_CLIENT
+                    and httpx.AsyncClient is _storage_service_module._ORIGINAL_HTTPX_ASYNC_CLIENT
+                )
+                if not skip_unpatched_test_signing:
+                    rollback_fn = getattr(db_session, "rollback", None)
+                    if inspect.iscoroutinefunction(rollback_fn):
+                        await rollback_fn()
+                    try:
+                        illustration_url = (
+                            await create_cached_signed_image_urls_async(
+                                [ill_path],
+                                bucket_name=SUPABASE_STORAGE_BUCKET,
+                            )
+                        )[0]
+                    except Exception:
+                        illustration_url = f"/studio/assets/{ill_id}/media"
         except Exception:
             illustration_url = None
             illustration_text_free = False

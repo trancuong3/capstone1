@@ -345,4 +345,164 @@ describe("Saved reading progress UI", () => {
       ),
     ).toBe(false);
   });
+
+  it("dispatches periods and progress requests concurrently when an explicit period is selected", async () => {
+    let resolvePeriods!: (response: Response) => void;
+    let resolveReport!: (response: Response) => void;
+    const periodsPending = new Promise<Response>((done) => {
+      resolvePeriods = done;
+    });
+    const reportPending = new Promise<Response>((done) => {
+      resolveReport = done;
+    });
+
+    fetchMock.mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/periods")) return periodsPending;
+      if (parsed.pathname === `/system/progress/${TEST_CHILD_ID}`) {
+        return reportPending;
+      }
+      return respond(url);
+    });
+
+    renderReport({
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes("/periods")),
+      ).toBe(true);
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(
+            `/system/progress/${TEST_CHILD_ID}?period_start=${report.period_start}&period_end=${report.period_end}`,
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      resolvePeriods(Response.json({}, { status: 503 }));
+      resolveReport(Response.json(report));
+    });
+
+    await screen.findByText("4 buổi");
+    expect(screen.getByText("Chưa tải được danh sách kỳ")).toBeInTheDocument();
+  });
+
+  it("ignores stale parallel explicit-period responses after switching filters", async () => {
+    let resolveStalePeriods!: (response: Response) => void;
+    let resolveStaleReport!: (response: Response) => void;
+    const stalePeriodsPending = new Promise<Response>((done) => {
+      resolveStalePeriods = done;
+    });
+    const staleReportPending = new Promise<Response>((done) => {
+      resolveStaleReport = done;
+    });
+
+    fetchMock.mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === `/system/progress/${TEST_CHILD_ID}/periods`) {
+        return stalePeriodsPending;
+      }
+      if (parsed.pathname === `/system/progress/${TEST_CHILD_ID}`) {
+        return staleReportPending;
+      }
+      return respond(url);
+    });
+
+    const view = renderReport({
+      requestedChildId: TEST_CHILD_ID,
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(`/system/progress/${TEST_CHILD_ID}/periods`),
+        ),
+      ).toBe(true);
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(
+            `/system/progress/${TEST_CHILD_ID}?period_start=${report.period_start}&period_end=${report.period_end}`,
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    view.rerender(
+      <AppServicesProvider>
+        <ProgressReportScreen
+          requestedChildId={TEST_FOREIGN_CHILD_ID}
+          requestedPeriodStart={older.period_start}
+          requestedPeriodEnd={older.period_end}
+        />
+      </AppServicesProvider>,
+    );
+
+    await screen.findByRole("heading", {
+      name: `Tiến bộ của ${second.alias}`,
+    });
+
+    await act(async () => {
+      resolveStalePeriods(
+        Response.json({ items: [option], next_cursor: null }),
+      );
+      resolveStaleReport(Response.json({ ...report, completed_sessions: 777 }));
+    });
+
+    expect(screen.queryByText("777 buổi")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: `Tiến bộ của ${second.alias}`,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("handles listPeriods 503 paired with reportService.get 404 (empty + periodsError) and 503 (unavailable + periodsError) when an explicit period is selected", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/periods")) {
+        return Response.json({}, { status: 503 });
+      }
+      if (parsed.pathname === `/system/progress/${TEST_CHILD_ID}`) {
+        return Response.json({}, { status: 404 });
+      }
+      return respond(url);
+    });
+
+    const firstView = renderReport({
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await screen.findByText("Chưa tải được danh sách kỳ");
+    expect(
+      screen.getByText("Chưa có báo cáo cho kỳ đã chọn"),
+    ).toBeInTheDocument();
+    firstView.unmount();
+
+    fetchMock.mockImplementation(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/periods")) {
+        return Response.json({}, { status: 503 });
+      }
+      if (parsed.pathname === `/system/progress/${TEST_CHILD_ID}`) {
+        return Response.json({}, { status: 503 });
+      }
+      return respond(url);
+    });
+
+    renderReport({
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await screen.findByText("Chưa tải được danh sách kỳ");
+    expect(screen.getByText("Dữ liệu đang chờ bổ sung")).toBeInTheDocument();
+  });
 });

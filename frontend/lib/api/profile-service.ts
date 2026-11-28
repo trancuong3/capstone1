@@ -16,6 +16,19 @@ import {
   invalidateApiReadCache,
   runCoalescedApiGet,
 } from "@/lib/api/read-cache";
+import {
+  COLD_START_RETRY_DELAY_MS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  cancelResponseBodyQuietly,
+  createLinkedAttemptController,
+  delayWithSignal,
+  getAbortReason,
+  isAbortOrTimeoutError,
+  raceWithSignal,
+  shouldRetryColdStartResponse,
+  type LinkedAttemptHandle,
+} from "@/lib/api/cold-start-retry";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { translateRuntime } from "@/lib/i18n/runtime";
@@ -24,8 +37,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ProfileService {
-  get(): Promise<ParentProfileDTO>;
-  getDashboardSummary(): Promise<DashboardSummaryDTO>;
+  get(signal?: AbortSignal): Promise<ParentProfileDTO>;
+  getDashboardSummary(signal?: AbortSignal): Promise<DashboardSummaryDTO>;
   update(request: ParentProfileUpdateInput): Promise<ParentProfileDTO>;
   requestEmailChange(email: string): Promise<void>;
   resendEmailChange(email: string): Promise<void>;
@@ -188,9 +201,18 @@ function safeStatusMessage(status: number): string {
   }
 }
 
-async function resolveSafeErrorMessage(response: Response): Promise<string> {
+async function resolveSafeErrorMessage(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
   try {
-    const payload: unknown = await response.clone().json();
+    const jsonPromise = response.clone().json();
+    const payload: unknown = signal
+      ? await raceWithSignal(jsonPromise, signal)
+      : await jsonPromise;
     if (typeof payload === "object" && payload !== null) {
       if ("detail" in payload) {
         if (typeof payload.detail === "string") {
@@ -211,15 +233,21 @@ async function resolveSafeErrorMessage(response: Response): Promise<string> {
         if (translated) return translated;
       }
     }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     // Non-JSON error bodies must never be reflected to the UI.
   }
 
   return safeStatusMessage(response.status);
 }
 
-async function createHttpError(response: Response): Promise<ServiceError> {
-  const message = await resolveSafeErrorMessage(response);
+async function createHttpError(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<ServiceError> {
+  const message = await resolveSafeErrorMessage(response, signal);
   return new ServiceError({
     code: mapErrorCode(response.status),
     message,
@@ -239,8 +267,11 @@ function unauthorizedError(): ServiceError {
   });
 }
 
-async function resolveProfileAccessToken(): Promise<string> {
+async function resolveProfileAccessToken(
+  signal?: AbortSignal,
+): Promise<string> {
   return getBrowserAccessToken({
+    signal,
     onUnauthorized: unauthorizedError,
   });
 }
@@ -259,20 +290,52 @@ async function request<T>(
       retryable: false,
     });
   }
+  if (init?.signal?.aborted) {
+    throw getAbortReason(init.signal);
+  }
+
+  const method = (init?.method ?? "GET").toUpperCase();
+  const isFormDataBody =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const effectiveTimeoutMs = isFormDataBody
+    ? DEFAULT_UPLOAD_TIMEOUT_MS
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+  const deadlineAt = Date.now() + effectiveTimeoutMs;
+  const canColdStartRetry = method === "GET";
+  const maxAttempts = canColdStartRetry ? 2 : 1;
 
   let token: string;
-
+  const authHandle = createLinkedAttemptController(
+    effectiveTimeoutMs,
+    init?.signal ?? undefined,
+  );
   try {
-    token = await resolveProfileAccessToken();
+    token = await resolveProfileAccessToken(authHandle.signal);
   } catch (error) {
+    if (init?.signal?.aborted && !authHandle.didTimeout()) {
+      throw getAbortReason(init.signal);
+    }
+    if (authHandle.didTimeout()) {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
+        status: 0,
+        request_id: "",
+        retryable: true,
+      });
+    }
     if (error instanceof ServiceError) {
+      throw error;
+    }
+    if (isAbortOrTimeoutError(error)) {
       throw error;
     }
 
     throw unauthorizedError();
+  } finally {
+    authHandle.cleanup();
   }
 
-  const method = (init?.method ?? "GET").toUpperCase();
   const execute = async (signal?: AbortSignal): Promise<T> => {
     const headers = new Headers({
       Accept: "application/json",
@@ -282,65 +345,220 @@ async function request<T>(
       headers.set("Content-Type", "application/json");
     }
 
-    let response: Response;
+    const parentSignal = signal ?? init?.signal ?? undefined;
+    let response!: Response;
+    let activeAttemptHandle: LinkedAttemptHandle | null = null;
 
     try {
-      response = await fetch(`${getApiBaseUrl()}${path}`, {
-        ...init,
-        headers: {
-          ...Object.fromEntries(headers.entries()),
-          ...(init?.headers ?? {}),
-        },
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: signal ?? init?.signal,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: 0,
-        request_id: "",
-        retryable: true,
-      });
-    }
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (parentSignal?.aborted) {
+          throw getAbortReason(parentSignal);
+        }
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs <= 0) {
+          if (parentSignal?.aborted) {
+            throw getAbortReason(parentSignal);
+          }
+          throw new ServiceError({
+            code: "NETWORK_ERROR",
+            message: translateRuntime(
+              "errors.clientRuntime.genericParentRetry",
+            ),
+            status: 0,
+            request_id: "",
+            retryable: true,
+          });
+        }
 
-    const requestId = response.headers.get("x-request-id") ?? "";
-    if (!response.ok) {
-      if (response.status === 401) {
-        invalidateBrowserTokenCache();
-        invalidateApiReadCache();
+        const attemptHandle = createLinkedAttemptController(
+          remainingMs,
+          parentSignal,
+        );
+
+        try {
+          response = await raceWithSignal(
+            fetch(`${getApiBaseUrl()}${path}`, {
+              ...init,
+              headers: {
+                ...Object.fromEntries(headers.entries()),
+                ...(init?.headers ?? {}),
+              },
+              cache: "no-store",
+              credentials: "omit",
+              redirect: "error",
+              signal: attemptHandle.signal,
+            }),
+            attemptHandle.signal,
+          );
+        } catch (error) {
+          const timedOut = attemptHandle.didTimeout();
+          attemptHandle.cleanup();
+          if (parentSignal?.aborted && !timedOut) throw error;
+          if (
+            attempt === 0 &&
+            canColdStartRetry &&
+            !timedOut &&
+            !parentSignal?.aborted &&
+            deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS
+          ) {
+            await delayWithSignal(COLD_START_RETRY_DELAY_MS, parentSignal);
+            continue;
+          }
+          throw new ServiceError({
+            code: "NETWORK_ERROR",
+            message: translateRuntime(
+              "errors.clientRuntime.genericParentRetry",
+            ),
+            status: 0,
+            request_id: "",
+            retryable: true,
+          });
+        }
+
+        let shouldRetry = false;
+        if (attempt === 0 && canColdStartRetry && !parentSignal?.aborted) {
+          try {
+            shouldRetry =
+              (await shouldRetryColdStartResponse(
+                response,
+                (detail) => Boolean(SAFE_PROFILE_BACKEND_MESSAGES[detail]),
+                attemptHandle.signal,
+              )) && deadlineAt - Date.now() > COLD_START_RETRY_DELAY_MS;
+          } catch (error) {
+            const timedOut = attemptHandle.didTimeout();
+            attemptHandle.cleanup();
+            if (parentSignal?.aborted && !timedOut) {
+              throw getAbortReason(parentSignal);
+            }
+            if (timedOut) {
+              throw new ServiceError({
+                code: "NETWORK_ERROR",
+                message: translateRuntime(
+                  "errors.clientRuntime.genericParentRetry",
+                ),
+                status: 0,
+                request_id: "",
+                retryable: true,
+              });
+            }
+            throw error;
+          }
+        }
+
+        if (shouldRetry) {
+          await cancelResponseBodyQuietly(response, attemptHandle.signal);
+          const timedOut = attemptHandle.didTimeout();
+          attemptHandle.cleanup();
+          if (parentSignal?.aborted && !timedOut) {
+            throw getAbortReason(parentSignal);
+          }
+          if (timedOut) {
+            throw new ServiceError({
+              code: "NETWORK_ERROR",
+              message: translateRuntime(
+                "errors.clientRuntime.genericParentRetry",
+              ),
+              status: 0,
+              request_id: "",
+              retryable: true,
+            });
+          }
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, parentSignal);
+          continue;
+        }
+
+        activeAttemptHandle = attemptHandle;
+        break;
       }
-      throw await createHttpError(response);
-    }
 
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
+      const requestId = response.headers.get("x-request-id") ?? "";
+      if (!response.ok) {
+        if (response.status === 401) {
+          invalidateBrowserTokenCache();
+          invalidateApiReadCache();
+        }
+        let httpError: ServiceError;
+        try {
+          httpError = await createHttpError(
+            response,
+            activeAttemptHandle?.signal,
+          );
+          await cancelResponseBodyQuietly(
+            response,
+            activeAttemptHandle?.signal,
+          );
+        } catch (error) {
+          const timedOut = activeAttemptHandle?.didTimeout() ?? false;
+          if (parentSignal?.aborted && !timedOut) {
+            throw getAbortReason(parentSignal);
+          }
+          if (timedOut) {
+            throw new ServiceError({
+              code: "NETWORK_ERROR",
+              message: translateRuntime(
+                "errors.clientRuntime.genericParentRetry",
+              ),
+              status: 0,
+              request_id: requestId,
+              retryable: true,
+            });
+          }
+          throw error;
+        }
+        if (
+          parentSignal?.aborted &&
+          !(activeAttemptHandle?.didTimeout() ?? false)
+        ) {
+          throw getAbortReason(parentSignal);
+        }
+        if (activeAttemptHandle?.didTimeout()) {
+          throw new ServiceError({
+            code: "NETWORK_ERROR",
+            message: translateRuntime(
+              "errors.clientRuntime.genericParentRetry",
+            ),
+            status: 0,
+            request_id: requestId,
+            retryable: true,
+          });
+        }
+        throw httpError;
+      }
 
-    const parsed = schema.safeParse(payload);
-    if (!parsed.success) {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: DEFAULT_PROFILE_ERROR_MESSAGE,
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
+      let payload: unknown;
+      try {
+        payload = activeAttemptHandle
+          ? await raceWithSignal(response.json(), activeAttemptHandle.signal)
+          : await response.json();
+      } catch (error) {
+        const timedOut = activeAttemptHandle?.didTimeout() ?? false;
+        if (parentSignal?.aborted && !timedOut) {
+          throw error;
+        }
+        throw new ServiceError({
+          code: "NETWORK_ERROR",
+          message: translateRuntime("errors.clientRuntime.genericParentRetry"),
+          status: timedOut ? 0 : response.status,
+          request_id: requestId,
+          retryable: timedOut,
+        });
+      }
 
-    return parsed.data;
+      const parsed = schema.safeParse(payload);
+      if (!parsed.success) {
+        throw new ServiceError({
+          code: "NETWORK_ERROR",
+          message: DEFAULT_PROFILE_ERROR_MESSAGE,
+          status: response.status,
+          request_id: requestId,
+          retryable: false,
+        });
+      }
+
+      return parsed.data;
+    } finally {
+      activeAttemptHandle?.cleanup();
+    }
   };
 
   if (method !== "GET") {
@@ -354,8 +572,11 @@ async function request<T>(
     }
   }
 
-  return runCoalescedApiGet(path, token, undefined, (sharedSignal) =>
-    execute(sharedSignal),
+  return runCoalescedApiGet(
+    path,
+    token,
+    init?.signal ?? undefined,
+    (sharedSignal) => execute(sharedSignal),
   );
 }
 
@@ -525,16 +746,21 @@ function getProfileEmailRedirectUrl(): string {
 
 export function createProfileService(): ProfileService {
   return {
-    async get(): Promise<ParentProfileDTO> {
-      const response = await request("/profiles/me", parentProfileApiSchema);
+    async get(signal?: AbortSignal): Promise<ParentProfileDTO> {
+      const response = await request("/profiles/me", parentProfileApiSchema, {
+        signal,
+      });
       return normalizeParentProfile(response);
     },
 
-    async getDashboardSummary(): Promise<DashboardSummaryDTO> {
+    async getDashboardSummary(
+      signal?: AbortSignal,
+    ): Promise<DashboardSummaryDTO> {
       try {
         const response = await request(
           "/profiles/dashboard-summary",
           dashboardSummaryApiSchema,
+          { signal },
         );
         const normalizedProfile = response.profile
           ? normalizeParentProfile(response.profile)
@@ -560,7 +786,7 @@ export function createProfileService(): ProfileService {
           (error.status === 404 || error.code === "RESOURCE_NOT_FOUND")
         ) {
           const [profileResult, children] = await Promise.all([
-            request("/profiles/me", parentProfileApiSchema)
+            request("/profiles/me", parentProfileApiSchema, { signal })
               .then((res) => normalizeParentProfile(res))
               .catch((profileError: unknown) => {
                 if (
