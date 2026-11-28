@@ -52,7 +52,6 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
   type setSpeechPreferences,
-  getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
 import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
 import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
@@ -285,9 +284,10 @@ export function ReadingVoiceSettings({
           storedVoice &&
           !data.voices.some((voice) => voice.voice_id === storedVoice)
         ) {
+          setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
           const preservedGender = resolveVoiceGender(
             storedVoice,
-            getSpeechPreferencesMeta().gender,
+            getEffectiveTeacherPersona().gender,
           );
           const preservedRegion = inferRegionFromVoiceId(
             storedVoice,
@@ -308,7 +308,6 @@ export function ReadingVoiceSettings({
             fallbackVoice && fallbackVoice.voice_id !== data.default_voice_id
               ? fallbackVoice.voice_id
               : null;
-          setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
           const persistRemovedFallback =
             selectedChildId &&
             typeof childService.updateVoicePreferences === "function"

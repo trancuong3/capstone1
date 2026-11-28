@@ -290,6 +290,7 @@ function AssistantCircularAvatar({
 }
 
 export interface ViReadAssistantPanelProps {
+  readonly activeUserId?: string | null;
   readonly pathname: string;
   readonly isReadingRoute: boolean;
   readonly isAdminRoute: boolean;
@@ -301,6 +302,7 @@ export interface ViReadAssistantPanelProps {
 }
 
 export function ViReadAssistantPanel({
+  activeUserId,
   pathname,
   isReadingRoute,
   isAdminRoute,
@@ -358,12 +360,38 @@ export function ViReadAssistantPanel({
   );
   const effectiveChildContext =
     effectiveRoleScope === "parent" ? childContext : null;
+  const latestRoleScopeRef = useRef<AssistantRoleScope>(effectiveRoleScope);
+  const latestUserIdRef = useRef<string | null | undefined>(activeUserId);
+  const prevRoleScopeRef = useRef<AssistantRoleScope>(effectiveRoleScope);
+  const prevUserIdRef = useRef<string | null | undefined>(activeUserId);
+
+  const roleScopeBadgeLabel = useMemo(() => {
+    if (effectiveRoleScope === "admin") {
+      return t("common.assistant.scopeAdmin");
+    }
+    if (effectiveRoleScope === "parent") {
+      return t("common.assistant.scopeParent");
+    }
+    return t("common.assistant.scopePublic");
+  }, [effectiveRoleScope, t]);
 
   const refreshChildContext = useCallback(
     async (forceRefresh = false): Promise<AssistantChildContextSnapshot> => {
+      if (effectiveRoleScope !== "parent") {
+        const emptySnapshot: AssistantChildContextSnapshot = {
+          userId: null,
+          selectedChildId: null,
+          children: [],
+          selectedChild: null,
+        };
+        if (mountedRef.current) {
+          setChildContext(null);
+        }
+        return emptySnapshot;
+      }
       try {
         const snapshot = await readAssistantChildContext({ forceRefresh });
-        if (mountedRef.current) {
+        if (mountedRef.current && latestRoleScopeRef.current === "parent") {
           setChildContext(snapshot);
         }
         return snapshot;
@@ -375,13 +403,13 @@ export function ViReadAssistantPanel({
           selectedChild: null,
           loadFailed: true,
         };
-        if (mountedRef.current) {
+        if (mountedRef.current && latestRoleScopeRef.current === "parent") {
           setChildContext(fallbackSnapshot);
         }
         return fallbackSnapshot;
       }
     },
-    [],
+    [effectiveRoleScope],
   );
 
   useEffect(() => {
@@ -392,6 +420,38 @@ export function ViReadAssistantPanel({
   }, []);
 
   useEffect(() => {
+    latestRoleScopeRef.current = effectiveRoleScope;
+    if (activeUserId !== undefined) {
+      latestUserIdRef.current = activeUserId;
+    }
+
+    const roleChanged = prevRoleScopeRef.current !== effectiveRoleScope;
+    const userChanged =
+      activeUserId !== undefined &&
+      prevUserIdRef.current !== undefined &&
+      prevUserIdRef.current !== activeUserId;
+
+    prevRoleScopeRef.current = effectiveRoleScope;
+    if (activeUserId !== undefined) {
+      prevUserIdRef.current = activeUserId;
+    }
+
+    if (!roleChanged && !userChanged) {
+      return;
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    pendingPromptRef.current = null;
+    setIsSending(false);
+    setSendingElapsedSeconds(0);
+    setSendingForceLlm(false);
+    setRateLimitState(null);
+    setCheckingChildMessageId(null);
+    setChildContext(null);
+  }, [effectiveRoleScope, activeUserId]);
+
+  useEffect(() => {
     if (effectiveRoleScope !== "parent") {
       return;
     }
@@ -400,12 +460,20 @@ export function ViReadAssistantPanel({
     const syncChildContext = () => {
       void readAssistantChildContext({ forceRefresh: false })
         .then((snapshot) => {
-          if (!cancelled && mountedRef.current) {
+          if (
+            !cancelled &&
+            mountedRef.current &&
+            latestRoleScopeRef.current === "parent"
+          ) {
             setChildContext(snapshot);
           }
         })
         .catch(() => {
-          if (!cancelled && mountedRef.current) {
+          if (
+            !cancelled &&
+            mountedRef.current &&
+            latestRoleScopeRef.current === "parent"
+          ) {
             setChildContext({
               userId: null,
               selectedChildId: null,
@@ -442,7 +510,7 @@ export function ViReadAssistantPanel({
       );
       window.removeEventListener("storage", handleStorage);
     };
-  }, [effectiveRoleScope]);
+  }, [effectiveRoleScope, activeUserId]);
 
   useEffect(() => {
     if (!isSending) {
@@ -593,6 +661,8 @@ export function ViReadAssistantPanel({
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      const requestScope = effectiveRoleScope;
+      const requestUserId = activeUserId;
       pendingPromptRef.current = { prompt: trimmed, forceLlm };
       setSendingElapsedSeconds(0);
       setSendingForceLlm(forceLlm);
@@ -614,6 +684,17 @@ export function ViReadAssistantPanel({
           },
         );
 
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          latestRoleScopeRef.current !== requestScope ||
+          (requestUserId !== undefined &&
+            latestUserIdRef.current !== undefined &&
+            latestUserIdRef.current !== requestUserId)
+        ) {
+          return;
+        }
+
         const isKbOrigin =
           result.source_tier === "tier_0_kb" ||
           (result.source_tier === "cache" &&
@@ -622,13 +703,14 @@ export function ViReadAssistantPanel({
           !forceLlm &&
           networkInfo.online &&
           result.provider_id !== "viread_scope_guard" &&
+          result.provider_id !== "viread_domain_guard" &&
           (result.source_tier === "offline" ||
             result.source_tier === "tier_3_fallback");
 
         const safeNavigationOffer = isSafeAssistantNavigationHref(
           result.navigation_offer?.href,
           pathname,
-          result.role_scope,
+          requestScope,
         )
           ? result.navigation_offer
           : null;
@@ -643,8 +725,10 @@ export function ViReadAssistantPanel({
           modelId: result.model_id,
           latencyMs: result.latency_ms,
           cached: result.cached,
-          roleScope: result.role_scope,
-          quickActions: result.quick_actions,
+          roleScope: requestScope,
+          quickActions: result.quick_actions.filter((action) =>
+            isSafeAssistantQuickActionHref(action.href, pathname, requestScope),
+          ),
           suggestedPrompts: result.suggested_prompts,
           navigationOffer: safeNavigationOffer,
           navigationDecision: safeNavigationOffer ? "pending" : undefined,
@@ -652,12 +736,23 @@ export function ViReadAssistantPanel({
             !forceLlm &&
             networkInfo.online &&
             isKbOrigin &&
-            result.provider_id !== "viread_scope_guard",
+            result.provider_id !== "viread_scope_guard" &&
+            result.provider_id !== "viread_domain_guard",
           canRetryOnline,
           sourcePrompt: trimmed,
         };
         onMessagesChange((prev) => [...prev.slice(-20), botMessage]);
       } catch (error) {
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          latestRoleScopeRef.current !== requestScope ||
+          (requestUserId !== undefined &&
+            latestUserIdRef.current !== undefined &&
+            latestUserIdRef.current !== requestUserId)
+        ) {
+          return;
+        }
         if (error instanceof AssistantRateLimitError) {
           const message =
             typeof error.retryAfterSeconds === "number" &&
@@ -671,7 +766,7 @@ export function ViReadAssistantPanel({
             retryPrompt: trimmed,
             retryForceLlm: forceLlm,
           });
-        } else if (!controller.signal.aborted) {
+        } else {
           const fallback = resolveOfflineAssistantReply(
             trimmed,
             pathname,
@@ -681,7 +776,7 @@ export function ViReadAssistantPanel({
           const safeFallbackOffer = isSafeAssistantNavigationHref(
             fallback.navigation_offer?.href,
             pathname,
-            fallback.role_scope,
+            requestScope,
           )
             ? fallback.navigation_offer
             : null;
@@ -695,15 +790,22 @@ export function ViReadAssistantPanel({
               sourceTier: fallback.source_tier,
               providerId: fallback.provider_id,
               latencyMs: fallback.latency_ms,
-              roleScope: fallback.role_scope,
-              quickActions: fallback.quick_actions,
+              roleScope: requestScope,
+              quickActions: fallback.quick_actions.filter((action) =>
+                isSafeAssistantQuickActionHref(
+                  action.href,
+                  pathname,
+                  requestScope,
+                ),
+              ),
               suggestedPrompts: fallback.suggested_prompts,
               navigationOffer: safeFallbackOffer,
               navigationDecision: safeFallbackOffer ? "pending" : undefined,
               canRetryOnline:
                 !forceLlm &&
                 networkInfo.online &&
-                fallback.provider_id !== "viread_scope_guard",
+                fallback.provider_id !== "viread_scope_guard" &&
+                fallback.provider_id !== "viread_domain_guard",
               sourcePrompt: trimmed,
             },
           ]);
@@ -719,7 +821,9 @@ export function ViReadAssistantPanel({
       }
     },
     [
+      activeUserId,
       effectiveBandwidth,
+      effectiveRoleScope,
       isSending,
       locale,
       messages,
@@ -757,7 +861,7 @@ export function ViReadAssistantPanel({
       const safeOffer = isSafeAssistantNavigationHref(
         offlineGuide.navigation_offer?.href,
         pathname,
-        offlineGuide.role_scope,
+        effectiveRoleScope,
       )
         ? offlineGuide.navigation_offer
         : null;
@@ -772,17 +876,31 @@ export function ViReadAssistantPanel({
           sourceTier: offlineGuide.source_tier,
           providerId: offlineGuide.provider_id,
           latencyMs: offlineGuide.latency_ms,
-          roleScope: offlineGuide.role_scope,
-          quickActions: offlineGuide.quick_actions,
+          roleScope: effectiveRoleScope,
+          quickActions: offlineGuide.quick_actions.filter((action) =>
+            isSafeAssistantQuickActionHref(
+              action.href,
+              pathname,
+              effectiveRoleScope,
+            ),
+          ),
           suggestedPrompts: offlineGuide.suggested_prompts,
           navigationOffer: safeOffer,
           navigationDecision: safeOffer ? "pending" : undefined,
-          canRetryOnline: offlineGuide.provider_id !== "viread_scope_guard",
+          canRetryOnline:
+            offlineGuide.provider_id !== "viread_scope_guard" &&
+            offlineGuide.provider_id !== "viread_domain_guard",
           sourcePrompt: prompt,
         },
       ]);
     },
-    [effectiveBandwidth, locale, onMessagesChange, pathname],
+    [
+      effectiveBandwidth,
+      effectiveRoleScope,
+      locale,
+      onMessagesChange,
+      pathname,
+    ],
   );
 
   const updateMessageNavigation = useCallback(
@@ -832,7 +950,10 @@ export function ViReadAssistantPanel({
         readonly overrideScope?: AssistantRoleScope;
       },
     ) => {
-      const scopeForGate = msgRoleScope ?? effectiveRoleScope;
+      const scopeForGate = effectiveRoleScope;
+      if (msgRoleScope && msgRoleScope !== effectiveRoleScope) {
+        return;
+      }
       const isHrefAllowed = options?.allowSamePath
         ? isSafeAssistantQuickActionHref(offer.href, pathname, scopeForGate)
         : isSafeAssistantNavigationHref(offer.href, pathname, scopeForGate);
@@ -853,6 +974,7 @@ export function ViReadAssistantPanel({
 
       // 2. Child-selection gate for child-scoped parent destinations.
       const needsChildGate =
+        effectiveRoleScope === "parent" &&
         scopeForGate === "parent" &&
         (Boolean(offer.requires_child_selection) ||
           requiresSelectedChildForHref(offer.href));
@@ -941,11 +1063,16 @@ export function ViReadAssistantPanel({
       msgRoleScope: AssistantRoleScope | undefined,
       child: ChildProfileDTO,
     ) => {
-      const scopeForGate = msgRoleScope ?? effectiveRoleScope;
       if (
-        !isSafeAssistantQuickActionHref(offer.href, pathname, scopeForGate) ||
-        (scopeForGate !== "admin" &&
-          (offer.href === "/admin" || offer.href.startsWith("/admin/")))
+        effectiveRoleScope !== "parent" ||
+        (msgRoleScope && msgRoleScope !== "parent")
+      ) {
+        return;
+      }
+      if (
+        !isSafeAssistantQuickActionHref(offer.href, pathname, "parent") ||
+        offer.href === "/admin" ||
+        offer.href.startsWith("/admin/")
       ) {
         return;
       }
@@ -989,7 +1116,11 @@ export function ViReadAssistantPanel({
       action: AssistantQuickAction,
       msg?: AssistantMessage,
     ) => {
-      const actionScope = msg?.roleScope ?? effectiveRoleScope;
+      if (msg?.roleScope && msg.roleScope !== effectiveRoleScope) {
+        event.preventDefault();
+        return;
+      }
+      const actionScope = effectiveRoleScope;
       if (!isSafeAssistantQuickActionHref(action.href, pathname, actionScope)) {
         event.preventDefault();
         return;
@@ -1080,6 +1211,7 @@ export function ViReadAssistantPanel({
   const activeSuggestions =
     lastMessage &&
     lastMessage.role === "assistant" &&
+    (!lastMessage.roleScope || lastMessage.roleScope === effectiveRoleScope) &&
     lastMessage.messagePath === pathname &&
     (lastMessage.suggestedPrompts?.length ?? 0) > 0
       ? lastMessage.suggestedPrompts!
@@ -1101,79 +1233,100 @@ export function ViReadAssistantPanel({
       role="complementary"
     >
       {/* Compact Header */}
-      <div className="flex shrink-0 items-center justify-between gap-2 bg-primary px-3 py-2 text-white">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white/15"
-          >
-            <Bot className="size-4" />
-          </span>
-          <div className="min-w-0">
+      <div className="shrink-0 bg-primary px-3 py-2 text-white">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white/15"
+            >
+              <Bot className="size-4" />
+            </span>
             <p className="truncate text-xs font-extrabold leading-tight">
               {t("common.assistant.title")}
             </p>
-            <p className="truncate text-[10px] leading-tight text-white/80">
-              {pageGuide.title}
-            </p>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              aria-label={t("common.assistant.bandwidthToggleAria", {
+                mode: bandwidthChipLabel,
+              })}
+              className="inline-flex h-6 items-center gap-1 rounded-full bg-white/15 px-2 text-[10px] font-bold text-white transition-colors hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
+              data-testid="viread-assistant-bandwidth-btn"
+              onClick={cycleBandwidthMode}
+              title={t("common.assistant.bandwidthTooltip")}
+              type="button"
+            >
+              {!networkInfo.online ? (
+                <WifiOff aria-hidden="true" className="size-3" />
+              ) : effectiveBandwidth === "low" ? (
+                <Zap aria-hidden="true" className="size-3" />
+              ) : (
+                <Wifi aria-hidden="true" className="size-3" />
+              )}
+              <span className="max-w-[78px] truncate">
+                {bandwidthChipLabel}
+              </span>
+            </button>
+
+            {messages.length > 0 ? (
+              <button
+                aria-label={t("common.assistant.clearAria")}
+                className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+                data-testid="viread-assistant-clear"
+                onClick={clearConversation}
+                title={t("common.assistant.clearTitle")}
+                type="button"
+              >
+                <RotateCcw aria-hidden="true" className="size-3.5" />
+              </button>
+            ) : null}
+
+            <button
+              aria-label={t("common.assistant.hideButtonAria")}
+              className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+              data-testid="viread-assistant-hide"
+              onClick={() => onUpdateVisibility("hidden")}
+              title={t("common.assistant.hideTooltip")}
+              type="button"
+            >
+              <EyeOff aria-hidden="true" className="size-3.5" />
+            </button>
+
+            <button
+              aria-label={t("common.assistant.minimizeAria")}
+              className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+              data-testid="viread-assistant-minimize"
+              onClick={() => onUpdateVisibility("minimized")}
+              title={t("common.assistant.minimizeTitle")}
+              type="button"
+            >
+              <Minus aria-hidden="true" className="size-3.5" />
+            </button>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            aria-label={t("common.assistant.bandwidthToggleAria", {
-              mode: bandwidthChipLabel,
-            })}
-            className="inline-flex h-6 items-center gap-1 rounded-full bg-white/15 px-2 text-[10px] font-bold text-white transition-colors hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
-            data-testid="viread-assistant-bandwidth-btn"
-            onClick={cycleBandwidthMode}
-            title={t("common.assistant.bandwidthTooltip")}
-            type="button"
-          >
-            {!networkInfo.online ? (
-              <WifiOff aria-hidden="true" className="size-3" />
-            ) : effectiveBandwidth === "low" ? (
-              <Zap aria-hidden="true" className="size-3" />
-            ) : (
-              <Wifi aria-hidden="true" className="size-3" />
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-bold leading-none",
+              effectiveRoleScope === "admin"
+                ? "bg-amber-300/25 text-amber-50 ring-1 ring-amber-200/45"
+                : effectiveRoleScope === "parent"
+                  ? "bg-white/20 text-white"
+                  : "bg-sky-200/25 text-white",
             )}
-            <span className="max-w-[78px] truncate">{bandwidthChipLabel}</span>
-          </button>
-
-          {messages.length > 0 ? (
-            <button
-              aria-label={t("common.assistant.clearAria")}
-              className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
-              data-testid="viread-assistant-clear"
-              onClick={clearConversation}
-              title={t("common.assistant.clearTitle")}
-              type="button"
-            >
-              <RotateCcw aria-hidden="true" className="size-3.5" />
-            </button>
-          ) : null}
-
-          <button
-            aria-label={t("common.assistant.hideButtonAria")}
-            className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
-            data-testid="viread-assistant-hide"
-            onClick={() => onUpdateVisibility("hidden")}
-            title={t("common.assistant.hideTooltip")}
-            type="button"
+            data-testid="viread-assistant-role-badge"
           >
-            <EyeOff aria-hidden="true" className="size-3.5" />
-          </button>
-
-          <button
-            aria-label={t("common.assistant.minimizeAria")}
-            className="flex size-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
-            data-testid="viread-assistant-minimize"
-            onClick={() => onUpdateVisibility("minimized")}
-            title={t("common.assistant.minimizeTitle")}
-            type="button"
-          >
-            <Minus aria-hidden="true" className="size-3.5" />
-          </button>
+            {roleScopeBadgeLabel}
+          </span>
+          <span aria-hidden="true" className="text-[10px] text-white/55">
+            ·
+          </span>
+          <p className="min-w-0 truncate text-[10.5px] font-medium leading-tight text-white/85">
+            {pageGuide.title}
+          </p>
         </div>
       </div>
 
@@ -1217,31 +1370,39 @@ export function ViReadAssistantPanel({
         {/* Conversation Messages */}
         {messages.map((msg, index) => {
           const isUser = msg.role === "user";
+          if (
+            !isUser &&
+            msg.roleScope &&
+            msg.roleScope !== effectiveRoleScope
+          ) {
+            return null;
+          }
           const safeNavigationOffer =
             !isUser &&
             (isSafeAssistantNavigationHref(
               msg.navigationOffer?.href,
               pathname,
-              msg.roleScope,
+              effectiveRoleScope,
             ) ||
               ((msg.navigationDecision === "needs_child" ||
                 msg.navigationDecision === "needs_reading_exit_confirm") &&
                 isSafeAssistantQuickActionHref(
                   msg.navigationOffer?.href,
                   pathname,
-                  msg.roleScope,
+                  effectiveRoleScope,
                 )))
               ? msg.navigationOffer!
               : null;
-          const offerScope = msg.roleScope ?? effectiveRoleScope;
           const offerRequiresChild =
             Boolean(safeNavigationOffer) &&
-            offerScope === "parent" &&
+            effectiveRoleScope === "parent" &&
             (Boolean(safeNavigationOffer?.requires_child_selection) ||
               requiresSelectedChildForHref(safeNavigationOffer?.href));
-          const activeChild = hasValidSelectedChild(effectiveChildContext)
-            ? effectiveChildContext.selectedChild
-            : null;
+          const activeChild =
+            effectiveRoleScope === "parent" &&
+            hasValidSelectedChild(effectiveChildContext)
+              ? effectiveChildContext.selectedChild
+              : null;
           const isCheckingChild = checkingChildMessageId === msg.id;
 
           return (
@@ -1645,7 +1806,7 @@ export function ViReadAssistantPanel({
                           isSafeAssistantQuickActionHref(
                             action.href,
                             pathname,
-                            msg.roleScope,
+                            effectiveRoleScope,
                           ),
                         )
                       : [];

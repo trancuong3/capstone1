@@ -576,5 +576,35 @@
     "tooEasy": "輕鬆熱身（約{min}–{max}年級）",
     "estimatedGrade": "預估 {min}–{max}年級",
     "phonicsScore": "拼讀適讀度 {score}%"
+  },
+  "offlinePack": {
+    "heading": "離線閱讀包與可列印 QR 卡",
+    "description": "將已核驗頁面儲存至本裝置以便無網路共讀，或列印 QR 書籤夾入紙本書籍中。",
+    "readyBadge": "已儲存（{count}頁）",
+    "downloadButton": "下載離線閱讀包",
+    "openOfflineReader": "立即離線閱讀",
+    "removeButton": "移除離線包",
+    "syncPendingButton": "同步（{count}）",
+    "stageDownloadingPages": "正在下載已核驗頁面與示範語音…",
+    "stageSavingDevice": "正在安全儲存至裝置記憶體…",
+    "savedNotice": "已將離線閱讀包（{count}頁）儲存至本裝置。",
+    "removedNotice": "已移除本書的離線閱讀包。",
+    "downloadError": "暫時無法下載離線閱讀包，請於網路穩定時重試。",
+    "syncedNotice": "已成功同步 {count} 次離線閱讀紀錄。",
+    "syncDeferredNotice": "網路不穩定，離線紀錄已安全保留並將自動重試同步。",
+    "queuedOfflineNotice": "閱讀紀錄已儲存在本機，恢復連線後將自動同步。",
+    "readerHeaderBadge": "離線模式 · 第 {page}/{total} 頁",
+    "listenCachedAudio": "聽示範",
+    "tapWordsHint": "點選孩子已讀準的詞語以記錄離線學習進度：",
+    "prevPage": "上一頁",
+    "nextPage": "下一頁",
+    "finishAndQueueSync": "完成並排程同步"
+  },
+  "qrCard": {
+    "openButton": "列印 QR 卡",
+    "modalTitle": "ViRead 可列印 QR 閱讀卡",
+    "eyebrow": "紙本書 QR 書籤",
+    "scanInstruction": "使用手機相機掃描此 QR 碼，即可在 ViRead 中直接開啟本書。",
+    "printButton": "列印 QR 卡"
   }
 }

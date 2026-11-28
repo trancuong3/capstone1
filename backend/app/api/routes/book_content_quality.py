@@ -5,12 +5,13 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.schemas.book_content_quality import (
+    AdminOcrHardSampleRadarResponse,
     BookQualityBookDecisionRead,
     BookQualityBookDecisionRequest,
     BookContentReportCreate,
@@ -271,3 +272,34 @@ async def update_admin_book_finding(
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).update_finding(actor_id, finding_id, payload)
+
+
+@router.get(
+    "/admin/quality/ocr-hard-samples",
+    response_model=AdminOcrHardSampleRadarResponse,
+)
+async def get_admin_ocr_hard_sample_radar(
+    response: Response,
+    limit: int = Query(default=30, ge=1, le=100),
+    max_ocr_confidence: float = Query(default=0.88, ge=0.1, le=1.0),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return privacy-safe OCR hard-sample candidates correlated with reading friction."""
+    from app.services.ocr_hard_sample_radar_service import OcrHardSampleRadarService
+
+    resolved_limit = (
+        limit if isinstance(limit, int) and not isinstance(limit, bool) else 30
+    )
+    resolved_max_conf = (
+        float(max_ocr_confidence)
+        if isinstance(max_ocr_confidence, (int, float))
+        and not isinstance(max_ocr_confidence, bool)
+        else 0.88
+    )
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    return await OcrHardSampleRadarService(db).get_hard_sample_radar(
+        actor_id,
+        limit=resolved_limit,
+        max_ocr_confidence=resolved_max_conf,
+    )

@@ -85,7 +85,6 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getCachedVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
-  isHostedLocalVoiceUnconfigured,
   isLocalVoiceConfirmedUnavailable,
   isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
@@ -1527,13 +1526,6 @@ export class TtsPlayback {
       this.sessionServerAudioServed.clear();
     }
     this.pageSampleSegments = [];
-    this.cache.clear();
-    this.cacheBytes = 0;
-    this.shortCache.clear();
-    this.shortCacheBytes = 0;
-    this.phonicsCache.clear();
-    this.phonicsCacheBytes = 0;
-    this.inFlightShortPrefetch.clear();
     clearPinnedBrowserVoices();
     this.setFallbackNotice(null);
     this.stop();

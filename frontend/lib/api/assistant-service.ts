@@ -7,7 +7,11 @@ import {
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
 import { resolveOfflineAssistantReply } from "@/lib/assistant/page-guides";
-import { isSafeAssistantNavigationHref } from "@/lib/assistant/route-helpers";
+import {
+  inferAssistantRoleScope,
+  isSafeAssistantNavigationHref,
+  isSafeAssistantQuickActionHref,
+} from "@/lib/assistant/route-helpers";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   AssistantChatRequest,
@@ -225,16 +229,26 @@ export async function sendAssistantMessage(
     }
 
     const data = parsed.data;
+    const normalizedRoleScope = inferAssistantRoleScope(request.current_path);
+    const safeQuickActions = data.quick_actions.filter((action) =>
+      isSafeAssistantQuickActionHref(
+        action.href,
+        request.current_path,
+        normalizedRoleScope,
+      ),
+    );
     const safeOffer = isSafeAssistantNavigationHref(
       data.navigation_offer?.href,
       request.current_path,
-      data.role_scope,
+      normalizedRoleScope,
     )
       ? data.navigation_offer
       : null;
 
     return {
       ...data,
+      role_scope: normalizedRoleScope,
+      quick_actions: safeQuickActions,
       navigation_offer: safeOffer,
     };
   } catch (error) {

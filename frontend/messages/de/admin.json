@@ -1293,7 +1293,24 @@
       "rejected": "Diese Seitenversion wurde abgelehnt.",
       "suspendedWithTitle": "Privates Buch „{title}“ gesperrt. Die besitzende Familie kann es nicht sofort lesen."
     },
-    "kpiAria": "Übersicht zur Moderation von Benutzerbüchern"
+    "kpiAria": "Übersicht zur Moderation von Benutzerbüchern",
+    "subtabHardRadar": "OCR-Schwierigkeitsradar",
+    "hardRadar": {
+      "heading": "OCR-Schwierigkeitsradar (Lesehuerden -> Flow 2)",
+      "privacyNotice": "Beruecksichtigt ausschliesslich Katalogbuecher und aktiv fuer Flow 2 freigegebene Privatbuecher (PII-gefiltert und vollstaendig anonymisiert).",
+      "loading": "OCR-Konfidenz und Lesesignale werden abgeglichen…",
+      "loadError": "OCR-Schwierigkeitsradar konnte nicht geladen werden.",
+      "totalCandidates": "Priorisierte OCR-Woerter",
+      "catalogCount": "Aus Katalogbuechern",
+      "consentedPrivateCount": "Aus Flow-2-Freigaben",
+      "empty": "Keine unsicheren OCR-Woerter mit Lesewiederholungen gefunden.",
+      "scopeCatalog": "Katalogbuch",
+      "scopeConsentedPrivate": "Flow 2 freigegeben",
+      "scoreLabel": "Prioritaet {score}/100",
+      "pageLineMeta": "Seite {page} · Zeile {line}",
+      "signalSummary": "OCR-Konfidenz: {conf}% · Fehlversuche: {retries} · Abweichungen: {mismatches} · Anonyme Sitzungen: {sessions}",
+      "inspectOcrAction": "OCR-Seite pruefen"
+    }
   },
   "flow2": {
     "filters": {

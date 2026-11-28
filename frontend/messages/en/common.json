@@ -164,7 +164,10 @@
     "childEmptyDesc": "You do not have a child profile yet. Create one to keep separate books, voice settings, and progress!",
     "childCreateBtn": "Create child profile",
     "childPickerPrompt": "Which child would you like to open this page for?",
-    "quickActionGateIntro": "Before opening **{label}**, let's check your selected child profile."
+    "quickActionGateIntro": "Before opening **{label}**, let's check your selected child profile.",
+    "scopePublic": "Guest Help",
+    "scopeParent": "Parent Help",
+    "scopeAdmin": "Admin Help"
   },
   "taskCenter": {
     "backgroundProcessing": "Processing in background…",

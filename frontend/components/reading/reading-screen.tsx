@@ -30,6 +30,7 @@ import {
   buildDuetTurnsForPage,
   resolveActiveDuetTurn,
 } from "@/lib/reading/duet-reading";
+import { analyzeLucBatPage } from "@/lib/reading/luc-bat-cadence";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay-modal";
 import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
@@ -845,6 +846,7 @@ function ReadingSessionScreen({
     percent: number | null;
     file?: string;
   } | null>(null);
+  const [lucBatModeEnabled, setLucBatModeEnabled] = useState(false);
 
   useEffect(() => {
     const wasmClient = getBrowserWasmSttClient();
@@ -4984,27 +4986,27 @@ function ReadingSessionScreen({
     const sttStatus = getVoiceEngineStatus().stt;
     const freshSttHealth = getVoiceEngineHealthForRouting();
     const sttPolicy = getVoicePolicyPreferences();
-    const sttCloudAllowed =
+    const cloudSttAllowedByPolicy =
       sttPolicy.providerMode === "local_with_google_fallback" &&
       sttPolicy.allowGoogleSttFallback;
     const elevenLabsSttUsable = Boolean(
-      sttCloudAllowed &&
+      cloudSttAllowedByPolicy &&
       freshSttHealth?.elevenlabs?.stt_configured &&
       !freshSttHealth?.elevenlabs?.stt_cooldown,
     );
     const googleSttUsable = Boolean(
-      sttCloudAllowed &&
+      cloudSttAllowedByPolicy &&
       freshSttHealth?.google.stt_configured &&
       !freshSttHealth.google.stt_cooldown,
     );
+    const cloudSttUsable =
+      (cloudSttAllowedByPolicy && elevenLabsSttUsable) || googleSttUsable;
     const backendSttUnavailable =
       (isPermanentlyHostedLocalUnconfigured(freshSttHealth) &&
-        !elevenLabsSttUsable &&
-        !googleSttUsable) ||
+        !cloudSttUsable) ||
       (freshSttHealth !== null &&
         (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
-        !elevenLabsSttUsable &&
-        !googleSttUsable);
+        !cloudSttUsable);
     const alreadyUsingEmergencyBrowserStt =
       sttStatus.tier === "android_native" ||
       sttStatus.tier === "browser_wasm" ||
@@ -7580,8 +7582,8 @@ function ReadingSessionScreen({
         "provider" in transcription && transcription.provider === "wasm";
       if (
         !localSttConfirmedDown &&
-        !usedWasmProvider &&
         !isPermanentlyHostedLocalUnconfigured() &&
+        !usedWasmProvider &&
         (!nonViLanguage || browserStatus === "CORRECT") &&
         shouldAttemptShortWordKeytermPass2({
           status,
@@ -9262,6 +9264,8 @@ function ReadingSessionScreen({
   const showCoReadingTrigger =
     !isOfflinePackMode && prosodyCueSourceText.length > 0 && !retryMode;
   const canUseDuetMode = !retryMode && duetTurns.length >= 2;
+  const lucBatGuide = analyzeLucBatPage(page);
+  const canUseLucBatGuide = !retryMode && lucBatGuide.isLucBat;
   const hasUtilityTools = Boolean(
     showProsodyCuesBar || showCoReadingTrigger || canUseDuetMode,
   );
@@ -9269,6 +9273,7 @@ function ReadingSessionScreen({
     hasUtilityTools ||
     isOfflinePackMode ||
     pageProgress ||
+    canUseLucBatGuide ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
     isWasmDownloading ||
@@ -9539,6 +9544,52 @@ function ReadingSessionScreen({
           ) : null}
         </div>
       ) : null}
+      {canUseLucBatGuide ? (
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              aria-pressed={lucBatModeEnabled}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+                lucBatModeEnabled
+                  ? "border-amber-600 bg-amber-500 text-white shadow-2xs"
+                  : "border-border bg-white text-ink hover:bg-sky"
+              }`}
+              data-testid="luc-bat-mode-toggle"
+              onClick={() => setLucBatModeEnabled((prev) => !prev)}
+              type="button"
+            >
+              {lucBatModeEnabled
+                ? t("lucBat.toggleActive")
+                : t("lucBat.toggleLabel")}
+            </button>
+            <span className="text-xs font-semibold text-muted">
+              {t("lucBat.coupletBadge", {
+                count: formatNumber(lucBatGuide.couplets.length),
+              })}
+            </span>
+          </div>
+          {lucBatModeEnabled && lucBatGuide.couplets[0] ? (
+            <div
+              className="rounded-card border border-amber-300 bg-amber-50/85 px-3.5 py-2 text-xs text-ink"
+              data-testid="luc-bat-cadence-banner"
+            >
+              <p className="font-extrabold text-amber-950">
+                {t("lucBat.beatGuide")}
+              </p>
+              <p
+                className="viread-learning-content mt-0.5 font-semibold text-amber-900"
+                dir="ltr"
+                lang="vi"
+              >
+                {t("lucBat.rhymePairLabel", {
+                  sixthLuc: lucBatGuide.couplets[0].lucSixthWord,
+                  sixthBat: lucBatGuide.couplets[0].batSixthWord,
+                })}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {canUseDuetMode && duetModeEnabled && activeDuetTurn ? (
         <div
@@ -9612,7 +9663,6 @@ function ReadingSessionScreen({
           ) : null}
         </div>
       ) : null}
-
       {pageNavigationError && pickerIndex === null ? (
         <div
           data-topbar-notice-overlay="true"
@@ -9758,6 +9808,11 @@ function ReadingSessionScreen({
           isSamplePaused={speechPlayer.isPaused}
           readingMode={readingMode}
           onReadingModeChange={setReadingMode}
+          lucBatAnnotations={
+            lucBatModeEnabled && canUseLucBatGuide
+              ? lucBatGuide.wordAnnotations
+              : null
+          }
           onToggleSamplePause={() => {
             if (speechPlayer.isPaused)
               void speechPlayer.resume().catch(() => setUiState("tts-error"));

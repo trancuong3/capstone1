@@ -576,5 +576,35 @@
     "tooEasy": "سهل للإحماء (الصف {min}–{max})",
     "estimatedGrade": "المستوى المقدر {min}–{max}",
     "phonicsScore": "جاهزية التهجئة {score}%"
+  },
+  "offlinePack": {
+    "heading": "حزمة القراءة دون اتصال وبطاقة QR للطباعة",
+    "description": "احفظ الصفحات الموثقة على هذا الجهاز للقراءة دون إنترنت، أو اطبع بطاقة QR لوضعها داخل الكتاب الورقي.",
+    "readyBadge": "محفوظ ({count} صفحات)",
+    "downloadButton": "تنزيل حزمة دون اتصال",
+    "openOfflineReader": "القراءة دون اتصال الآن",
+    "removeButton": "حذف الحزمة",
+    "syncPendingButton": "مزامنة ({count})",
+    "stageDownloadingPages": "جار تنزيل الصفحات الموثقة والصوت النموذجي…",
+    "stageSavingDevice": "جار الحفظ الآمن في ذاكرة الجهاز…",
+    "savedNotice": "تم حفظ حزمة القراءة دون اتصال ({count} صفحات) على الجهاز.",
+    "removedNotice": "تمت إزالة حزمة القراءة دون اتصال لهذا الكتاب.",
+    "downloadError": "تعذر تنزيل الحزمة حاليا. يرجى المحاولة مجددا عند استقرار الاتصال.",
+    "syncedNotice": "تمت مزامنة {count} جلسة قراءة دون اتصال.",
+    "syncDeferredNotice": "الاتصال غير مستقر — الجلسات محفوظة بأمان للمزامنة التلقائية لاحقا.",
+    "queuedOfflineNotice": "تم حفظ الجلسة محليا — ستتم المزامنة تلقائيا عند توفر الإنترنت.",
+    "readerHeaderBadge": "وضع دون اتصال · صفحة {page}/{total}",
+    "listenCachedAudio": "استماع للنموذج",
+    "tapWordsHint": "اضغط على الكلمات التي قرأها الطفل بدقة لتسجيل التقدم:",
+    "prevPage": "الصفحة السابقة",
+    "nextPage": "الصفحة التالية",
+    "finishAndQueueSync": "إنهاء وجدولة المزامنة"
+  },
+  "qrCard": {
+    "openButton": "بطاقة QR للطباعة",
+    "modalTitle": "بطاقة QR للقراءة من ViRead",
+    "eyebrow": "فاصل كتاب ورقي برمز QR",
+    "scanInstruction": "امسح رمز QR بكاميرا الهاتف لفتح هذا الكتاب مباشرة في ViRead.",
+    "printButton": "طباعة بطاقة QR"
   }
 }

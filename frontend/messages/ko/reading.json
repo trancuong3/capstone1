@@ -496,5 +496,12 @@
     "subtitle": "방금 읽은 책 페이지로 어휘와 문장 감각을 이어서 키워 보세요.",
     "pictureCta": "책 페이지 그림 묘사",
     "shooterCta": "책 페이지 문장 맞추기"
+  },
+  "lucBat": {
+    "toggleLabel": "륙밧(6-8조) 시 운율 가이드",
+    "toggleActive": "륙밧 운율 켜짐",
+    "coupletBadge": "6-8 연구 {count}쌍",
+    "beatGuide": "박자 끊어 읽기 2/2/2(6음절) · 2/2/2/2(8음절)",
+    "rhymePairLabel": "6번째 음절 운율 짝: \"{sixthLuc}\" <-> \"{sixthBat}\""
   }
 }
