@@ -5002,7 +5002,11 @@ function ReadingSessionScreen({
       assistantAudioPlayingRef.current = true;
       await play();
     } catch (error) {
-      const aborted = error instanceof Error && error.name === "AbortError";
+      const aborted =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       playAborted = aborted;
       playbackFailed = !aborted;
       throw error;
@@ -5087,9 +5091,11 @@ function ReadingSessionScreen({
     retryResumeAfterAssistantAudioRef.current = null;
     assistantAudioPendingRef.current = false;
     assistantAudioPlayingRef.current = false;
+    isVoicePreviewPlayingRef.current = false;
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
+    isVoicePreviewPlayingRef.current = true;
     return playAssistantAudio(
       async () => {
         const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
@@ -5097,19 +5103,33 @@ function ReadingSessionScreen({
         let audioPlayed = false;
         let playbackFailed = false;
         try {
-          await speechPlayer.playWithWordTimings(sample.split(" "), {
-            text: sample,
-            bookId: null,
-            pageId: null,
-            pageRevisionId: null,
-            isPrivateBook: false,
-            cacheScope: "COACHING",
-            bypassSessionLock: true,
-            utteranceKind: "voice_preview",
-            onPlay: () => {
-              audioPlayed = true;
+          await speechPlayer.playWithWordTimings(
+            sample.split(" "),
+            {
+              text: sample,
+              bookId: null,
+              pageId: null,
+              pageRevisionId: null,
+              isPrivateBook: false,
+              cacheScope: "COACHING",
+              bypassSessionLock: true,
+              utteranceKind: "voice_preview",
+              onPlay: () => {
+                audioPlayed = true;
+              },
             },
-          });
+            () =>
+              speechPlayer.play(sample, {
+                coaching: true,
+                cacheScope: "COACHING",
+                isPrivateBook: false,
+                bypassSessionLock: true,
+                utteranceKind: "voice_preview",
+                onPlay: () => {
+                  audioPlayed = true;
+                },
+              }),
+          );
         } catch (error) {
           playbackFailed = true;
           throw error;
@@ -5123,7 +5143,9 @@ function ReadingSessionScreen({
       },
       false,
       false,
-    );
+    ).finally(() => {
+      isVoicePreviewPlayingRef.current = false;
+    });
   }
 
   function clearRetryCaptureTimeout(): void {
@@ -5173,7 +5195,11 @@ function ReadingSessionScreen({
   }
 
   function stopAssistantAudio(): void {
-    if (retryModeRef.current && assistantAudioPlayingRef.current) {
+    if (
+      retryModeRef.current &&
+      assistantAudioPlayingRef.current &&
+      !isVoicePreviewPlayingRef.current
+    ) {
       retryResumeAfterAssistantAudioRef.current =
         retryCandidatesRef.current[retryPositionRef.current] ?? null;
     }
@@ -6105,10 +6131,15 @@ function ReadingSessionScreen({
         false,
       );
     } catch (error) {
+      const isAbortErr =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       if (
         mountedRef.current &&
         playbackGeneration === tutorPlaybackGenerationRef.current &&
-        !(error instanceof Error && error.name === "AbortError")
+        !isAbortErr
       ) {
         setUiState("tts-error");
       }
@@ -6130,6 +6161,7 @@ function ReadingSessionScreen({
       speechRecorder.isRecording ||
       countdown !== null;
     setIsBusy(true);
+    void speechPlayer.prefetch?.(word, { wordSample: true });
     const playbackGeneration = ++tutorPlaybackGenerationRef.current;
     try {
       let nextAction = tutorAction;
@@ -6186,10 +6218,15 @@ function ReadingSessionScreen({
         setUiState("reading");
       }
     } catch (error) {
+      const isAbortErr =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError";
       if (
         mountedRef.current &&
         playbackGeneration === tutorPlaybackGenerationRef.current &&
-        !(error instanceof Error && error.name === "AbortError")
+        !isAbortErr
       ) {
         setUiState("tts-error");
       }
@@ -7875,7 +7912,12 @@ function ReadingSessionScreen({
         ]);
         return !timedOut;
       } catch (error) {
-        if (timedOut && error instanceof Error && error.name === "AbortError") {
+        const isAbortErr =
+          typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          (error as { name?: unknown }).name === "AbortError";
+        if (timedOut && isAbortErr) {
           return false;
         }
         throw error;

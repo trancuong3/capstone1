@@ -3728,4 +3728,105 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     }
   });
+
+  it("stopping voice preview inside ReadingVoiceSettings during wrong-word retry falls back cleanly and never auto-opens the retry microphone", async () => {
+    const getPracticeState = vi.fn().mockResolvedValue({
+      session_id: TEST_SESSION_ID,
+      legacy_evidence_present: false,
+      pages: [
+        {
+          page_id: pageFour.page_id,
+          page_revision_id: pageFour.page_revision_id,
+          page_number: 4,
+          transcript: "Bé chó nhỏ đang",
+          initial_assessment: pageFour.words.map((word, index) => ({
+            word_id: word.word_id,
+            word_index: word.word_index,
+            text: word.text,
+            status: index === 1 ? "MISPRONUNCIATION" : "CORRECT",
+          })),
+        },
+      ],
+      words: [
+        {
+          page_id: pageFour.page_id,
+          page_revision_id: pageFour.page_revision_id,
+          word_id: pageFour.words[1].word_id,
+          retry_attempt_count: 1,
+          incorrect_retry_count: 1,
+          resolution_status: "RETRYING",
+        },
+      ],
+    });
+    Object.assign(services.readingService, { getPracticeState });
+    speechServiceMock.transcribe.mockResolvedValue({
+      text: "",
+      language_code: "vi",
+      language_probability: 0.2,
+      words: [],
+    });
+
+    const user = userEvent.setup();
+    renderReading("ready");
+    await user.click(
+      await screen.findByRole("button", { name: "Đồng ý, đọc lại" }),
+    );
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Giọng đọc" })).toBeEnabled(),
+    );
+
+    speechRecorderMock.start.mockClear();
+    let rejectPreviewWithAbort!: () => void;
+    speechPlayerMock.playWithWordTimings.mockImplementationOnce(
+      async (
+        _words: readonly string[],
+        _opts: unknown,
+        fallback?: () => Promise<void>,
+      ) => {
+        if (!fallback) {
+          throw new Error("Missing fallback callback on handleVoicePreview");
+        }
+        await fallback();
+      },
+    );
+    speechPlayerMock.play.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectPreviewWithAbort = () => {
+            reject(new DOMException("Stopped preview", "AbortError"));
+          };
+        }),
+    );
+    speechPlayerMock.stop.mockImplementationOnce(() => {
+      rejectPreviewWithAbort?.();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    await user.click(await screen.findByRole("button", { name: "Nghe thử" }));
+    await waitFor(() =>
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        }),
+      ),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nghe thử" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Nghe thử" })).toBeInTheDocument(),
+    );
+    expect(speechRecorderMock.start).not.toHaveBeenCalled();
+  });
 });
