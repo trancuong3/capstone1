@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  SlidersHorizontal,
   Users,
   Volume2,
 } from "lucide-react";
@@ -59,10 +60,10 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   buildPhonicsLesson,
-  READING_MASTERY_LABELS,
   type PhonicsLessonPlan,
   type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
+import { cn } from "@/lib/utils/cn";
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
@@ -776,6 +777,7 @@ function ReadingSessionScreen({
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
+  const pageOptionsRef = useRef<HTMLDivElement>(null);
   const [coReadingOpen, setCoReadingOpen] = useState(false);
   const [duetModeEnabled, setDuetModeEnabled] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
@@ -800,9 +802,7 @@ function ReadingSessionScreen({
       },
       onClosePhonics: () => {
         stopAssistantAudio();
-        setActivePhonicsLesson(null);
-        setActivePhonicsStepIndex(null);
-        setPhonicsStatusHint(null);
+        dismissPhonicsCard();
       },
       onClosePicker: closePagePicker,
     };
@@ -1172,6 +1172,7 @@ function ReadingSessionScreen({
   const pageWordsByRevisionRef = useRef(
     new Map<string, readonly ReadingPageWordDTO[]>(),
   );
+  const PHONICS_AUTO_HIDE_DELAY_MS = 1800;
   const [activePhonicsLesson, setActivePhonicsLesson] = useState<{
     readonly wordId: string | null;
     readonly plan: PhonicsLessonPlan;
@@ -1184,8 +1185,57 @@ function ReadingSessionScreen({
   const [phonicsStatusHint, setPhonicsStatusHint] = useState<string | null>(
     null,
   );
+  const [isPhonicsAutoHiding, setIsPhonicsAutoHiding] = useState(false);
+  const phonicsAutoHideTimerRef = useRef<number | null>(null);
   const phonicsSpelledWordIdsRef = useRef(new Set<string>());
   const passageContainsSpellRef = useRef(false);
+
+  const clearPhonicsAutoHideTimer = useCallback(() => {
+    if (phonicsAutoHideTimerRef.current !== null) {
+      window.clearTimeout(phonicsAutoHideTimerRef.current);
+      phonicsAutoHideTimerRef.current = null;
+    }
+    setIsPhonicsAutoHiding(false);
+  }, []);
+
+  const dismissPhonicsCard = useCallback(() => {
+    clearPhonicsAutoHideTimer();
+    setActivePhonicsLesson(null);
+    setActivePhonicsStepIndex(null);
+    setPhonicsStatusHint(null);
+  }, [clearPhonicsAutoHideTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (phonicsAutoHideTimerRef.current !== null) {
+        window.clearTimeout(phonicsAutoHideTimerRef.current);
+        phonicsAutoHideTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pageOptionsOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !pageOptionsRef.current?.contains(event.target)
+      ) {
+        setPageOptionsOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPageOptionsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [pageOptionsOpen]);
 
   const finishStartedRef = useRef(false);
   const retryReportSaveStartedRef = useRef(false);
@@ -1332,6 +1382,10 @@ function ReadingSessionScreen({
     if (uiStateRef.current === "tts-error") {
       setUiState("reading");
     }
+    if (activePhonicsLessonRef.current) {
+      dismissPhonicsCard();
+    }
+    setCompanionBubble(null);
     setPreviewSnapshot(null);
     setCurrentWordId(word.word_id);
 
@@ -2402,9 +2456,8 @@ function ReadingSessionScreen({
     setCompanionBubble(null);
     sentenceReinforcementRef.current.reset();
     setActiveSentenceReinforcement(null);
-    setActivePhonicsLesson(null);
-    setActivePhonicsStepIndex(null);
-    setPhonicsStatusHint(null);
+    dismissPhonicsCard();
+    setPageOptionsOpen(false);
     lastPreviewTranscriptRef.current = null;
     setPreviewSnapshot(null);
     lastPreviewWordIndexRef.current = -1;
@@ -3481,6 +3534,8 @@ function ReadingSessionScreen({
     }
 
     let plan = buildPhonicsLesson(target.text);
+    clearPhonicsAutoHideTimer();
+    setCompanionBubble(null);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
@@ -3557,6 +3612,18 @@ function ReadingSessionScreen({
         wasListening,
       );
       if (!isCurrent()) return;
+      clearPhonicsAutoHideTimer();
+      setIsPhonicsAutoHiding(true);
+      const expectedWordId = target.word_id;
+      phonicsAutoHideTimerRef.current = window.setTimeout(() => {
+        phonicsAutoHideTimerRef.current = null;
+        if (!mountedRef.current) return;
+        if (activePhonicsLessonRef.current?.wordId === expectedWordId) {
+          dismissPhonicsCard();
+        } else {
+          setIsPhonicsAutoHiding(false);
+        }
+      }, PHONICS_AUTO_HIDE_DELAY_MS);
       if (wasListening && !retryModeRef.current) {
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
@@ -4220,9 +4287,7 @@ function ReadingSessionScreen({
                   scored.statusByWordId.get(currentPhonicsLesson.wordId)
                     ?.status === "MATCH"
                 ) {
-                  setPhonicsStatusHint(
-                    READING_MASTERY_LABELS.CORRECT_AFTER_SPELLING,
-                  );
+                  dismissPhonicsCard();
                 } else if (
                   currentPhonicsLesson?.plan.supported &&
                   scored.spellingInProgress &&
@@ -9197,12 +9262,13 @@ function ReadingSessionScreen({
   const showCoReadingTrigger =
     !isOfflinePackMode && prosodyCueSourceText.length > 0 && !retryMode;
   const canUseDuetMode = !retryMode && duetTurns.length >= 2;
+  const hasUtilityTools = Boolean(
+    showProsodyCuesBar || showCoReadingTrigger || canUseDuetMode,
+  );
   const hasTopBarContent = Boolean(
-    showProsodyCuesBar ||
-    showCoReadingTrigger ||
+    hasUtilityTools ||
     isOfflinePackMode ||
     pageProgress ||
-    canUseDuetMode ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
     isWasmDownloading ||
@@ -9210,41 +9276,11 @@ function ReadingSessionScreen({
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
-      {showProsodyCuesBar || showCoReadingTrigger ? (
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          {showProsodyCuesBar ? (
-            <div className="min-w-0 flex-1">
-              <ProsodyBreathingCuesBar
-                compact
-                fetchRemoteOnExpand={!isOfflinePackMode}
-                text={prosodyCueSourceText}
-              />
-            </div>
-          ) : null}
-          {showCoReadingTrigger ? (
-            <button
-              type="button"
-              data-testid="reading-open-co-reading-btn"
-              onClick={() => {
-                stopAssistantAudio();
-                setCoReadingOpen(true);
-              }}
-              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50/85 px-3 py-1.5 text-xs font-bold text-sky-900 transition-colors hover:bg-sky-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            >
-              <Users
-                aria-hidden="true"
-                className="size-3.5 shrink-0 text-sky-700"
-              />
-              <span>{coReadingCopy.panelTitle}</span>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+    <div className="relative flex flex-col gap-1 border-b border-border/70 pb-1">
       {isOfflinePackMode ? (
         <div
           data-testid="reading-offline-pack-banner"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-amber-200 bg-amber-50/90 px-3 py-1.5 text-xs text-amber-950"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-amber-200 bg-amber-50/90 px-3 py-1 text-xs text-amber-950"
         >
           <span className="font-bold">
             Gói đọc ngoại tuyến ({child.alias}) — lượt đọc sẽ tự đồng bộ khi có
@@ -9262,206 +9298,321 @@ function ReadingSessionScreen({
           />
         </div>
       ) : null}
-      {pageProgress ? (
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
-          <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
-            <Button
-              aria-label={t("session.previousPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
-              disabled={
-                (isBusy && !speechPlayer.isPlaying) ||
-                (uiState !== "reading" && uiState !== "tts-error") ||
-                pageProgress.current_index <= 0
-              }
-              onClick={() =>
-                void navigateWithinRange(pageProgress.current_index - 1)
-              }
-              variant="secondary"
-            >
-              <ChevronLeft
-                aria-hidden="true"
-                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
-              />
-              <span className="hidden sm:inline">
-                {t("session.previousPage")}
-              </span>
-              <span className="sm:hidden">{t("session.prevPageShort")}</span>
-            </Button>
-            <Button
-              aria-label={t("session.nextPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
-              disabled={
-                (isBusy && !speechPlayer.isPlaying) ||
-                (uiState !== "reading" && uiState !== "tts-error") ||
-                pageProgress.current_index >= pageProgress.total_pages - 1
-              }
-              onClick={() =>
-                void navigateWithinRange(pageProgress.current_index + 1)
-              }
-              variant="secondary"
-            >
-              <span className="hidden sm:inline">{t("session.nextPage")}</span>
-              <span className="sm:hidden">{t("session.nextPageShort")}</span>
-              <ChevronRight
-                aria-hidden="true"
-                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
-              />
-            </Button>
-            {pageProgress.persisted &&
-            pageProgress.pages[pageProgress.current_index]?.status !==
-              "COMPLETED" ? (
+
+      {pageProgress || hasUtilityTools ? (
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {pageProgress ? (
+            <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
               <Button
-                aria-label={t("session.markPageDoneAria")}
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
-                disabled={isBusy || uiState !== "reading"}
-                onClick={() => void confirmCurrentPageCompleted()}
-                variant="quiet"
+                aria-label={t("session.previousPage")}
+                className="h-9! min-h-9! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:h-10! sm:gap-1.5! sm:px-2.5! sm:text-sm!"
+                disabled={
+                  (isBusy && !speechPlayer.isPlaying) ||
+                  (uiState !== "reading" && uiState !== "tts-error") ||
+                  pageProgress.current_index <= 0
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index - 1)
+                }
+                variant="secondary"
+              >
+                <ChevronLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4 shrink-0"
+                />
+                <span className="hidden sm:inline">
+                  {t("session.previousPage")}
+                </span>
+                <span className="sm:hidden">{t("session.prevPageShort")}</span>
+              </Button>
+              <Button
+                aria-label={t("session.nextPage")}
+                className="h-9! min-h-9! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:h-10! sm:gap-1.5! sm:px-2.5! sm:text-sm!"
+                disabled={
+                  (isBusy && !speechPlayer.isPlaying) ||
+                  (uiState !== "reading" && uiState !== "tts-error") ||
+                  pageProgress.current_index >= pageProgress.total_pages - 1
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index + 1)
+                }
+                variant="secondary"
               >
                 <span className="hidden sm:inline">
-                  {t("session.markPageDone")}
+                  {t("session.nextPage")}
                 </span>
-                <span className="sm:hidden">
-                  {t("session.markPageDoneShort")}
-                </span>
+                <span className="sm:hidden">{t("session.nextPageShort")}</span>
+                <ChevronRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4 shrink-0"
+                />
               </Button>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            aria-label={t("session.pageOptionsAria")}
-            aria-expanded={pageOptionsOpen}
-            aria-controls="reading-page-options"
-            onClick={() => setPageOptionsOpen((open) => !open)}
-            className="ms-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
-          >
-            <span>{t("session.pageOptions")}</span>
-            <ChevronDown
-              aria-hidden="true"
-              className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          <div
-            id="reading-page-options"
-            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ms-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
-          >
-            <p
-              data-reading-range-label="true"
-              className="font-semibold text-ink"
-            >
-              {t("preparation.rangeSummary", {
-                start: formatNumber(pageProgress.start_page_number),
-                end: formatNumber(pageProgress.end_page_number),
-              })}
-            </p>
-            <p
-              data-reading-page-summary="true"
-              className="text-muted"
-              aria-live="polite"
-            >
-              {t("session.pageProgressDetail", {
-                page: formatNumber(pageProgress.current_page_number),
-                index: formatNumber(pageProgress.current_index + 1),
-                total: formatNumber(pageProgress.total_pages),
-                completed: formatNumber(pageProgress.completed_pages),
-              })}
-            </p>
-          </div>
-        </div>
-      ) : null}
-      {canUseDuetMode ? (
-        <div className="flex flex-col gap-1.5 pt-0.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              aria-pressed={duetModeEnabled}
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
-                duetModeEnabled
-                  ? "border-primary bg-primary text-white shadow-2xs"
-                  : "border-border bg-white text-ink hover:bg-sky"
-              }`}
-              data-testid="duet-mode-toggle"
-              onClick={() => setDuetModeEnabled((prev) => !prev)}
-              type="button"
-            >
-              <Users aria-hidden="true" className="size-3.5 shrink-0" />
-              {duetModeEnabled ? t("duet.toggleActive") : t("duet.toggleLabel")}
-            </button>
-          </div>
-          {duetModeEnabled && activeDuetTurn ? (
-            <div
-              className={`flex flex-wrap items-center justify-between gap-2.5 rounded-card border px-3.5 py-2.5 ${
-                activeDuetTurn.role === "PARENT"
-                  ? "border-amber-300 bg-amber-50/90"
-                  : "border-emerald-300 bg-emerald-50/90"
-              }`}
-              data-duet-role={activeDuetTurn.role}
-              data-testid="duet-turn-banner"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
-                      activeDuetTurn.role === "PARENT"
-                        ? "bg-amber-200/80 text-amber-950"
-                        : "bg-emerald-200/80 text-emerald-950"
-                    }`}
-                  >
-                    {activeDuetTurn.role === "PARENT"
-                      ? t("duet.parentTurnBadge")
-                      : t("duet.childTurnBadge")}
-                  </span>
-                  <span className="text-xs font-semibold text-muted">
-                    {t("duet.turnCounter", {
-                      current: formatNumber(activeDuetTurn.turnIndex + 1),
-                      total: formatNumber(duetTurns.length),
-                    })}
-                  </span>
-                </div>
-                <p
-                  className="viread-learning-content mt-1 line-clamp-2 text-sm font-bold text-ink"
-                  dir="ltr"
-                  lang="vi"
+              {pageProgress.persisted &&
+              pageProgress.pages[pageProgress.current_index]?.status !==
+                "COMPLETED" ? (
+                <Button
+                  aria-label={t("session.markPageDoneAria")}
+                  className="h-9! min-h-9! w-auto! min-w-0 px-2! py-1! text-xs! sm:h-10! sm:px-2.5! sm:text-sm!"
+                  disabled={isBusy || uiState !== "reading"}
+                  onClick={() => void confirmCurrentPageCompleted()}
+                  variant="quiet"
                 >
-                  {activeDuetTurn.text}
-                </p>
-              </div>
-              {activeDuetTurn.role === "PARENT" ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    className="w-auto"
-                    fullWidth={false}
-                    onClick={() => {
-                      speechPlayer.stop();
-                      void speechPlayer
-                        .play(activeDuetTurn.text, {
-                          utteranceKind: "page_sample",
-                        })
-                        .catch(() => undefined);
-                    }}
-                    size="compact"
-                    type="button"
-                    variant="secondary"
-                  >
-                    <Volume2 aria-hidden="true" className="size-3.5" />
-                    {t("duet.listenParentSample")}
-                  </Button>
-                  <Button
-                    className="w-auto"
-                    data-testid="duet-complete-parent-turn"
-                    fullWidth={false}
-                    onClick={handleCompleteParentDuetTurn}
-                    size="compact"
-                    type="button"
-                  >
-                    {t("duet.completeParentTurn")}
-                  </Button>
+                  <span className="hidden md:inline">
+                    {t("session.markPageDone")}
+                  </span>
+                  <span className="md:hidden">
+                    {t("session.markPageDoneShort")}
+                  </span>
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {pageProgress ? (
+            <div className="hidden min-w-0 flex-1 items-center justify-end gap-x-2.5 text-xs md:flex">
+              <p
+                data-reading-range-label="true"
+                className="truncate font-semibold text-ink"
+              >
+                {t("preparation.rangeSummary", {
+                  start: formatNumber(pageProgress.start_page_number),
+                  end: formatNumber(pageProgress.end_page_number),
+                })}
+              </p>
+              <p
+                data-reading-page-summary="true"
+                className="truncate tabular-nums text-muted"
+                aria-live="polite"
+              >
+                {t("session.pageProgressDetail", {
+                  page: formatNumber(pageProgress.current_page_number),
+                  index: formatNumber(pageProgress.current_index + 1),
+                  total: formatNumber(pageProgress.total_pages),
+                  completed: formatNumber(pageProgress.completed_pages),
+                })}
+              </p>
+              {pageProgress.current_index === pageProgress.total_pages - 1 ? (
+                <span
+                  data-reading-end-hint="true"
+                  className="hidden shrink-0 rounded-full bg-sky px-2 py-0.5 text-[11px] font-bold text-primary xl:inline-flex"
+                  role="status"
+                >
+                  {t("session.lastPageHint")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {hasUtilityTools || pageProgress ? (
+            <div
+              ref={pageOptionsRef}
+              data-reading-utility-chips="true"
+              className={cn(
+                "relative shrink-0",
+                pageProgress ? "ms-auto md:ms-0" : "ms-auto",
+                !hasUtilityTools && "md:hidden",
+              )}
+            >
+              <button
+                type="button"
+                aria-label={t("session.pageOptionsAria")}
+                aria-expanded={pageOptionsOpen}
+                aria-controls="reading-page-options"
+                data-testid="reading-tools-toggle"
+                onClick={() => setPageOptionsOpen((open) => !open)}
+                className={cn(
+                  "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-control border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-10 sm:px-3",
+                  pageOptionsOpen || duetModeEnabled
+                    ? "border-primary/40 bg-sky/70 text-primary"
+                    : "border-border bg-white text-ink hover:bg-sky/50",
+                )}
+              >
+                <SlidersHorizontal
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0"
+                />
+                <span>{t("session.pageOptions")}</span>
+                {duetModeEnabled ? (
+                  <span
+                    aria-hidden="true"
+                    className="size-2 rounded-full bg-primary"
+                  />
+                ) : null}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    pageOptionsOpen && "rotate-180",
+                  )}
+                />
+              </button>
+
+              {pageOptionsOpen ? (
+                <div
+                  id="reading-page-options"
+                  data-testid="reading-tools-popover"
+                  className="absolute end-0 top-full z-30 mt-1.5 w-[min(92vw,360px)] space-y-2.5 rounded-2xl border border-border bg-white/98 p-3 shadow-lg"
+                >
+                  {pageProgress ? (
+                    <div className="space-y-0.5 border-b border-border/70 pb-2 text-xs md:hidden">
+                      <p
+                        data-reading-range-label="true"
+                        className="font-semibold text-ink"
+                      >
+                        {t("preparation.rangeSummary", {
+                          start: formatNumber(pageProgress.start_page_number),
+                          end: formatNumber(pageProgress.end_page_number),
+                        })}
+                      </p>
+                      <p
+                        data-reading-page-summary="true"
+                        className="text-muted"
+                        aria-live="polite"
+                      >
+                        {t("session.pageProgressDetail", {
+                          page: formatNumber(pageProgress.current_page_number),
+                          index: formatNumber(pageProgress.current_index + 1),
+                          total: formatNumber(pageProgress.total_pages),
+                          completed: formatNumber(pageProgress.completed_pages),
+                        })}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {showProsodyCuesBar ? (
+                    <ProsodyBreathingCuesBar
+                      fetchRemoteOnExpand={!isOfflinePackMode}
+                      text={prosodyCueSourceText}
+                    />
+                  ) : null}
+
+                  {showCoReadingTrigger || canUseDuetMode ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {showCoReadingTrigger ? (
+                        <button
+                          type="button"
+                          data-testid="reading-open-co-reading-btn"
+                          onClick={() => {
+                            setPageOptionsOpen(false);
+                            stopAssistantAudio();
+                            setCoReadingOpen(true);
+                          }}
+                          className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50/85 px-3 py-1.5 text-xs font-bold text-sky-900 transition-colors hover:bg-sky-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        >
+                          <Users
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0 text-sky-700"
+                          />
+                          <span>{coReadingCopy.panelTitle}</span>
+                        </button>
+                      ) : null}
+                      {canUseDuetMode ? (
+                        <button
+                          aria-pressed={duetModeEnabled}
+                          className={cn(
+                            "inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                            duetModeEnabled
+                              ? "border-primary bg-primary text-white shadow-2xs"
+                              : "border-border bg-white text-ink hover:bg-sky",
+                          )}
+                          data-testid="duet-mode-toggle"
+                          onClick={() => {
+                            setDuetModeEnabled((prev) => !prev);
+                            setPageOptionsOpen(false);
+                          }}
+                          type="button"
+                        >
+                          <Users
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                          {duetModeEnabled
+                            ? t("duet.toggleActive")
+                            : t("duet.toggleLabel")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : null}
         </div>
       ) : null}
+
+      {canUseDuetMode && duetModeEnabled && activeDuetTurn ? (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-1.5 ${
+            activeDuetTurn.role === "PARENT"
+              ? "border-amber-300 bg-amber-50/90"
+              : "border-emerald-300 bg-emerald-50/90"
+          }`}
+          data-duet-role={activeDuetTurn.role}
+          data-testid="duet-turn-banner"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-extrabold ${
+                  activeDuetTurn.role === "PARENT"
+                    ? "bg-amber-200/80 text-amber-950"
+                    : "bg-emerald-200/80 text-emerald-950"
+                }`}
+              >
+                {activeDuetTurn.role === "PARENT"
+                  ? t("duet.parentTurnBadge")
+                  : t("duet.childTurnBadge")}
+              </span>
+              <span className="text-xs font-semibold text-muted">
+                {t("duet.turnCounter", {
+                  current: formatNumber(activeDuetTurn.turnIndex + 1),
+                  total: formatNumber(duetTurns.length),
+                })}
+              </span>
+              <p
+                className="viread-learning-content min-w-0 flex-1 truncate text-xs font-bold text-ink sm:text-sm"
+                dir="ltr"
+                lang="vi"
+              >
+                {activeDuetTurn.text}
+              </p>
+            </div>
+          </div>
+          {activeDuetTurn.role === "PARENT" ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                className="w-auto"
+                fullWidth={false}
+                onClick={() => {
+                  speechPlayer.stop();
+                  void speechPlayer
+                    .play(activeDuetTurn.text, {
+                      utteranceKind: "page_sample",
+                    })
+                    .catch(() => undefined);
+                }}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                <Volume2 aria-hidden="true" className="size-3.5" />
+                {t("duet.listenParentSample")}
+              </Button>
+              <Button
+                className="w-auto"
+                data-testid="duet-complete-parent-turn"
+                fullWidth={false}
+                onClick={handleCompleteParentDuetTurn}
+                size="compact"
+                type="button"
+              >
+                {t("duet.completeParentTurn")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {pageNavigationError && pickerIndex === null ? (
         <div
           data-topbar-notice-overlay="true"
@@ -9470,7 +9621,7 @@ function ReadingSessionScreen({
           <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
           {retryMode ? (
             <Button
-              className="h-11! w-auto! px-3! py-1! text-sm!"
+              className="h-10! w-auto! px-3! py-1! text-sm!"
               disabled={isBusy}
               onClick={() => void beginRetryWord(retryPositionRef.current)}
               variant="secondary"
@@ -9506,16 +9657,6 @@ function ReadingSessionScreen({
           size="compact"
           testId="reading-ai-busy-progress"
         />
-      ) : null}
-      {pageProgress &&
-      pageProgress.current_index === pageProgress.total_pages - 1 ? (
-        <p
-          data-reading-end-hint="true"
-          className="hidden text-xs font-semibold text-primary sm:block sm:text-sm"
-          role="status"
-        >
-          {t("session.lastPageHint")}
-        </p>
       ) : null}
     </div>
   ) : null;
@@ -9678,8 +9819,13 @@ function ReadingSessionScreen({
               >
                 <PhonicsLessonCard
                   activeStepIndex={activePhonicsStepIndex}
+                  autoHideDurationMs={PHONICS_AUTO_HIDE_DELAY_MS}
+                  bookId={book.id}
+                  childGrade={child.grade}
+                  childId={child.id}
                   compact
                   isAnalyzingAi={isAnalyzingPhonicsAi}
+                  isAutoHiding={isPhonicsAutoHiding}
                   isListeningRetry={isMicRecording}
                   isPlayingPhonics={isPlayingPhonicsLesson}
                   isPlayingWord={isReadingWord}
@@ -9691,12 +9837,12 @@ function ReadingSessionScreen({
                       : handleReadCurrentWord
                   }
                   onStopAudio={stopAssistantAudio}
+                  onUserInteract={clearPhonicsAutoHideTimer}
                   onClose={() => {
                     stopAssistantAudio();
-                    setActivePhonicsLesson(null);
-                    setActivePhonicsStepIndex(null);
-                    setPhonicsStatusHint(null);
+                    dismissPhonicsCard();
                   }}
+                  pageId={page.page_id}
                   statusHint={phonicsStatusHint}
                 />
               </ReadingSubpanelErrorBoundary>
@@ -9720,6 +9866,7 @@ function ReadingSessionScreen({
           hesitationWordIds={hesitationWordIds}
           assistedWordIds={assistedWordIds}
           companionBubble={companionBubble}
+          onDismissCompanion={() => setCompanionBubble(null)}
           isCompanionSpeaking={
             speechPlayer.isPlaying &&
             !isPlayingPageSample &&

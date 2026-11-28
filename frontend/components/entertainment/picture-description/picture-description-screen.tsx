@@ -1563,31 +1563,10 @@ export function PictureDescriptionScreen({
         const localUnconfigured = isPermanentlyHostedLocalUnconfigured(
           getFreshVoiceEngineHealth(),
         );
-        if (!localUnconfigured && !isServerSttConfirmedUnavailable()) {
-          try {
-            const sttResult = await speechService.transcribe(audioBlob, {
-              languageCode: "vi",
-              keyterms,
-              signal: sttController.signal,
-            });
-            if (isStaleCapture()) return;
-            sttTranscript = sttResult.text?.trim() || null;
-          } catch (sttError: unknown) {
-            if (isStaleCapture()) return;
-            const errText =
-              typeof sttError === "object" && sttError !== null
-                ? `${String((sttError as { code?: unknown }).code ?? "")} ${String((sttError as { providerCode?: unknown }).providerCode ?? "")} ${sttError instanceof Error ? sttError.message : ""}`
-                : "";
-            if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
-              markHostedLocalUnconfigured();
-            }
-            if (isServiceError(sttError) && sttError.status === 503) {
-              refreshVoiceHealthQuietlyAfterSttFailure();
-            }
-            sttTranscript = null;
-          }
-        }
-        if (!sttTranscript && detectBrowserWasmSttSupport().supported) {
+        const serverSttUnavailable =
+          localUnconfigured || isServerSttConfirmedUnavailable();
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
+        if (serverSttUnavailable && wasmSupported) {
           try {
             const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
               audioBlob,
@@ -1598,6 +1577,41 @@ export function PictureDescriptionScreen({
           } catch {
             if (isStaleCapture()) return;
             sttTranscript = null;
+          }
+        } else if (!serverSttUnavailable) {
+          try {
+            const sttResult = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: sttController.signal,
+            });
+            if (isStaleCapture()) return;
+            sttTranscript = sttResult.text?.trim() || null;
+          } catch (err: unknown) {
+            if (isStaleCapture()) return;
+            const errText =
+              typeof err === "object" && err !== null
+                ? `${String((err as { code?: unknown }).code ?? "")} ${String((err as { providerCode?: unknown }).providerCode ?? "")} ${err instanceof Error ? err.message : ""}`
+                : "";
+            if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+              markHostedLocalUnconfigured();
+            }
+            if (isServiceError(err) && err.status === 503) {
+              refreshVoiceHealthQuietlyAfterSttFailure();
+            }
+            sttTranscript = null;
+          }
+          if (!sttTranscript && wasmSupported) {
+            try {
+              const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
+                audioBlob,
+                { timeoutMs: 12_000 },
+              );
+              if (isStaleCapture()) return;
+              sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
+            } catch {
+              if (isStaleCapture()) return;
+            }
           }
         }
       }

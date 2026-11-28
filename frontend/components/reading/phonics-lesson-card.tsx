@@ -207,13 +207,14 @@ export function PhonicsLessonCard({
       <section
         aria-label={t("phonics.regionAria")}
         className={cn(
-          "rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4",
-          compact && "p-3",
+          "relative overflow-hidden rounded-2xl border-2 border-amber-200 bg-amber-50/90 p-4",
+          compact && "border p-2.5 shadow-sm",
         )}
+        data-phonics-auto-hiding={isAutoHiding ? "true" : undefined}
         data-testid="phonics-lesson-unsupported"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-amber-950">
               {isAnalyzingAi
                 ? "AI đang phân tích cách đánh vần..."
@@ -222,17 +223,22 @@ export function PhonicsLessonCard({
             <p className="text-xs text-amber-900/80">
               {isAnalyzingAi
                 ? `Đang tách vần và dấu cho từ “${lesson.cleanPhrase || lesson.rawText}”...`
-                : t("phonics.unsupportedNotice", {
-                    word: lesson.cleanPhrase || lesson.rawText,
-                  })}
+                : isAutoHiding
+                  ? t("phonics.autoHideHint")
+                  : t("phonics.unsupportedNotice", {
+                      word: lesson.cleanPhrase || lesson.rawText,
+                    })}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {lesson.canPlayWholeWord && onPlayWord ? (
               <Button
                 className="w-auto!"
                 disabled={isPlayingWord || isListeningRetry}
-                onClick={onPlayWord}
+                onClick={() => {
+                  onUserInteract?.();
+                  onPlayWord();
+                }}
                 size="compact"
                 variant="secondary"
               >
@@ -245,7 +251,10 @@ export function PhonicsLessonCard({
                 type="button"
                 aria-label={t("phonics.closeAria")}
                 onClick={onClose}
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className={cn(
+                  "inline-flex shrink-0 items-center justify-center rounded-control border border-amber-300 bg-white px-2 text-xs font-semibold text-amber-950 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                  compact ? "min-h-9 min-w-9" : "min-h-11 min-w-11 px-2.5",
+                )}
               >
                 <X aria-hidden="true" className="size-4" />
                 <span className="sr-only">{t("phonics.closeSr")}</span>
@@ -253,6 +262,18 @@ export function PhonicsLessonCard({
             ) : null}
           </div>
         </div>
+        {isAutoHiding ? (
+          <div
+            aria-hidden="true"
+            className="mt-2 h-1 w-full overflow-hidden rounded-full bg-amber-200/70"
+            data-testid="phonics-auto-hide-bar"
+          >
+            <div
+              className="phonics-auto-hide-progress h-full origin-left bg-amber-500"
+              style={{ animationDuration: `${autoHideDurationMs}ms` }}
+            />
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -369,20 +390,22 @@ export function PhonicsLessonCard({
     <section
       aria-label={t("phonics.titleAria", { syllable: lesson.focusSyllable })}
       className={cn(
-        "rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-sky/70 via-white to-emerald-50/50 p-4 shadow-sm",
-        compact && "p-3",
+        "relative overflow-hidden rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-sky/70 via-white to-emerald-50/50 p-4 shadow-sm transition-opacity duration-200",
+        compact &&
+          "border border-primary/30 bg-white/98 p-2.5 shadow-md sm:p-3",
       )}
+      data-phonics-auto-hiding={isAutoHiding ? "true" : undefined}
       data-testid="phonics-lesson-card"
     >
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-bold text-primary">
+      <div className={cn(compact ? "space-y-1.5" : "space-y-2")}>
+        <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">
               <Sparkles aria-hidden="true" className="size-3.5" />
               {t("phonics.title")}
             </span>
             <span
-              className="viread-learning-content rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950"
+              className="viread-learning-content rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-950"
               dir="ltr"
               lang="vi"
             >
@@ -390,7 +413,7 @@ export function PhonicsLessonCard({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div
               aria-label={tGlossary("tabsAria")}
               className="inline-flex rounded-xl border border-border bg-white/95 p-0.5"
@@ -399,7 +422,8 @@ export function PhonicsLessonCard({
               <button
                 aria-selected={activeTab === "PHONICS"}
                 className={cn(
-                  "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                  compact ? "min-h-8" : "min-h-9 gap-1.5 px-3",
                   activeTab === "PHONICS"
                     ? "bg-primary text-white shadow-2xs"
                     : "text-ink hover:bg-sky/50",
@@ -418,13 +442,15 @@ export function PhonicsLessonCard({
               <button
                 aria-selected={activeTab === "MEANING"}
                 className={cn(
-                  "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                  compact ? "min-h-8" : "min-h-9 gap-1.5 px-3",
                   activeTab === "MEANING"
                     ? "bg-primary text-white shadow-2xs"
                     : "text-ink hover:bg-sky/50",
                 )}
                 data-testid="phonics-tab-meaning"
                 onClick={() => {
+                  onUserInteract?.();
                   onStopAudio?.();
                   setActiveTab("MEANING");
                 }}
@@ -436,6 +462,82 @@ export function PhonicsLessonCard({
               </button>
             </div>
 
+            {compact && activeTab === "PHONICS" ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {onPlayWord ? (
+                  <Button
+                    className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                    disabled={isPlayingPhonics || isListeningRetry}
+                    onClick={() => {
+                      onUserInteract?.();
+                      if (isPlayingWord && onStopAudio) onStopAudio();
+                      else onPlayWord();
+                    }}
+                    size="compact"
+                    variant="secondary"
+                  >
+                    <Volume2 aria-hidden="true" className="size-3.5" />
+                    {t("phonics.listenWord")}
+                  </Button>
+                ) : null}
+
+                {onPlayPhonics ? (
+                  <Button
+                    className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                    disabled={isPlayingWord || isListeningRetry}
+                    onClick={() => {
+                      if (isPlayingPhonics && onStopAudio) onStopAudio();
+                      else onPlayPhonics();
+                    }}
+                    size="compact"
+                    variant="primary"
+                  >
+                    {isPlayingPhonics ? (
+                      <>
+                        <Square aria-hidden="true" className="size-3.5" />
+                        {t("phonics.stopPhonics")}
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 aria-hidden="true" className="size-3.5" />
+                        {t("phonics.listenPhonics")}
+                      </>
+                    )}
+                  </Button>
+                ) : null}
+
+                {onStartRetry ? (
+                  <Button
+                    className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                    disabled={
+                      isPlayingPhonics || isPlayingWord || isListeningRetry
+                    }
+                    onClick={() => {
+                      onUserInteract?.();
+                      onStartRetry();
+                    }}
+                    size="compact"
+                    variant="secondary"
+                  >
+                    {isListeningRetry ? (
+                      <>
+                        <Mic
+                          aria-hidden="true"
+                          className="size-3.5 animate-pulse"
+                        />
+                        {t("phonics.listeningRetry")}
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw aria-hidden="true" className="size-3.5" />
+                        {t("phonics.readAgain")}
+                      </>
+                    )}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
             {onClose ? (
               <button
                 type="button"
@@ -444,7 +546,10 @@ export function PhonicsLessonCard({
                   stopMeaningAudio();
                   onClose();
                 }}
-                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className={cn(
+                  "inline-flex shrink-0 items-center justify-center rounded-control border border-border bg-white text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                  compact ? "min-h-9 min-w-9 px-2" : "min-h-11 min-w-11 px-2.5",
+                )}
               >
                 <X aria-hidden="true" className="size-4" />
                 <span className="sr-only">{t("phonics.closeSr")}</span>
@@ -453,15 +558,17 @@ export function PhonicsLessonCard({
           </div>
         </div>
 
-        {activeTab === "PHONICS" ? (
+        {!compact && activeTab === "PHONICS" ? (
           <div className="flex flex-wrap items-center gap-2">
             {onPlayWord ? (
               <Button
                 className="w-auto!"
                 disabled={isPlayingPhonics || isListeningRetry}
-                onClick={
-                  isPlayingWord && onStopAudio ? onStopAudio : onPlayWord
-                }
+                onClick={() => {
+                  onUserInteract?.();
+                  if (isPlayingWord && onStopAudio) onStopAudio();
+                  else onPlayWord();
+                }}
                 size="compact"
                 variant="secondary"
               >
@@ -498,7 +605,10 @@ export function PhonicsLessonCard({
               <Button
                 className="w-auto!"
                 disabled={isPlayingPhonics || isPlayingWord || isListeningRetry}
-                onClick={onStartRetry}
+                onClick={() => {
+                  onUserInteract?.();
+                  onStartRetry();
+                }}
                 size="compact"
                 variant="secondary"
               >
@@ -522,7 +632,10 @@ export function PhonicsLessonCard({
       {/* Synchronized character-slice highlight of the focus syllable / phrase */}
       <div
         aria-live="polite"
-        className="viread-learning-content mt-3 flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white px-4 py-3 text-center"
+        className={cn(
+          "viread-learning-content flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white text-center",
+          compact ? "mt-2 px-3 py-1.5" : "mt-3 px-4 py-3",
+        )}
         data-testid="phonics-focus-display"
         dir="ltr"
         lang="vi"
@@ -530,7 +643,8 @@ export function PhonicsLessonCard({
         {prefixText ? (
           <span
             className={cn(
-              "text-2xl font-bold transition-colors sm:text-3xl",
+              "font-bold transition-colors",
+              compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl",
               highlightKind === "context"
                 ? "rounded bg-emerald-100 px-1 text-emerald-950"
                 : "text-muted/60",
@@ -542,7 +656,8 @@ export function PhonicsLessonCard({
 
         <span
           className={cn(
-            "inline-flex items-baseline rounded-lg px-1.5 py-0.5 text-3xl font-extrabold tracking-wide transition-all sm:text-4xl",
+            "inline-flex items-baseline rounded-lg px-1.5 py-0.5 font-extrabold tracking-wide transition-all",
+            compact ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl",
             (highlightKind === "whole_syllable" ||
               highlightKind === "tone_and_syllable" ||
               highlightKind === "context") &&
@@ -581,7 +696,8 @@ export function PhonicsLessonCard({
         {suffixText ? (
           <span
             className={cn(
-              "text-2xl font-bold transition-colors sm:text-3xl",
+              "font-bold transition-colors",
+              compact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl",
               highlightKind === "context"
                 ? "rounded bg-emerald-100 px-1 text-emerald-950"
                 : "text-muted/60",
@@ -597,7 +713,12 @@ export function PhonicsLessonCard({
           {/* Ordered phonics steps */}
           <ol
             aria-label={t("phonics.stepsAria")}
-            className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4"
+            className={cn(
+              "grid",
+              compact
+                ? "mt-2 grid-cols-2 gap-1.5 sm:grid-cols-4"
+                : "mt-3 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4",
+            )}
           >
             {lesson.steps.map((step, idx) => {
               const isCurrent = activeStepIndex === idx;
@@ -606,7 +727,10 @@ export function PhonicsLessonCard({
                 <li
                   aria-current={isCurrent ? "step" : undefined}
                   className={cn(
-                    "flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm font-bold transition-all",
+                    "flex items-center rounded-xl border-2 font-bold transition-all",
+                    compact
+                      ? "gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm"
+                      : "gap-2 px-3 py-2 text-sm",
                     isCurrent
                       ? "scale-[1.02] border-primary bg-primary text-white shadow-sm"
                       : isDone
@@ -618,7 +742,8 @@ export function PhonicsLessonCard({
                 >
                   <span
                     className={cn(
-                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-extrabold",
+                      "inline-flex shrink-0 items-center justify-center rounded-full text-xs font-extrabold",
+                      compact ? "size-5" : "size-6",
                       isCurrent
                         ? "bg-white text-primary"
                         : isDone
@@ -640,10 +765,32 @@ export function PhonicsLessonCard({
             })}
           </ol>
 
-          {statusHint ? (
+          {isAutoHiding ? (
+            <div className="mt-2 space-y-1">
+              <p
+                aria-live="polite"
+                className="text-center text-xs font-semibold text-primary"
+              >
+                {t("phonics.autoHideHint")}
+              </p>
+              <div
+                aria-hidden="true"
+                className="h-1 w-full overflow-hidden rounded-full bg-primary/15"
+                data-testid="phonics-auto-hide-bar"
+              >
+                <div
+                  className="phonics-auto-hide-progress h-full origin-left bg-primary"
+                  style={{ animationDuration: `${autoHideDurationMs}ms` }}
+                />
+              </div>
+            </div>
+          ) : statusHint ? (
             <p
               aria-live="polite"
-              className="mt-2.5 text-center text-sm font-semibold text-primary"
+              className={cn(
+                "text-center font-semibold text-primary",
+                compact ? "mt-1.5 text-xs sm:text-sm" : "mt-2.5 text-sm",
+              )}
             >
               {statusHint}
             </p>
@@ -651,7 +798,10 @@ export function PhonicsLessonCard({
         </>
       ) : (
         <div
-          className="mt-3 space-y-3 rounded-xl border border-border bg-white p-4"
+          className={cn(
+            "rounded-xl border border-border bg-white",
+            compact ? "mt-2 space-y-2 p-3" : "mt-3 space-y-3 p-4",
+          )}
           data-testid="phonics-meaning-panel"
           role="tabpanel"
         >
@@ -809,7 +959,10 @@ export function PhonicsLessonCard({
                     <Button
                       className="min-h-11 w-auto!"
                       data-testid="glossary-open-notebook-btn"
-                      onClick={() => setNotebookDrawerOpen(true)}
+                      onClick={() => {
+                        onUserInteract?.();
+                        setNotebookDrawerOpen(true);
+                      }}
                       size="compact"
                       type="button"
                       variant="quiet"

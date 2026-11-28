@@ -97,6 +97,7 @@ interface ReadingLayoutProps {
   assistedWordIds?: ReadonlySet<string>;
   companionBubble?: CompanionBubbleState | null;
   isCompanionSpeaking?: boolean;
+  onDismissCompanion?: () => void;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
@@ -163,6 +164,7 @@ export function ReadingLayout({
   assistedWordIds,
   companionBubble = null,
   isCompanionSpeaking = false,
+  onDismissCompanion,
   readingMode,
   onReadingModeChange,
   previewSnapshot,
@@ -181,27 +183,38 @@ export function ReadingLayout({
   const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
     activeReadingMode ??
     (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
+  const suppressSecondaryBanners = Boolean(phonicsPanel) && !retryMode;
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
     isPlayingSample ||
     isReadingWord ||
-    (isMicRecording &&
-      (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
-    Boolean(latestTranscript);
+    (!suppressSecondaryBanners &&
+      isMicRecording &&
+      isCurrentWordMispronounced);
+  const showCompanionBubble =
+    !retryMode && !suppressSecondaryBanners && Boolean(companionBubble);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
     Boolean(phonicsPanel) ||
-    Boolean(!retryMode && companionBubble);
+    showCompanionBubble;
+  const isReadingFocusActive =
+    isMicRecording &&
+    !phonicsPanel &&
+    !retryMode &&
+    !sentenceReinforcementPanel;
 
   return (
-    <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1.5 px-3 pt-1.5 sm:gap-3 sm:px-6 sm:pt-3">
-      <header className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-3">
+    <section
+      data-reading-focus={isReadingFocusActive ? "active" : "idle"}
+      className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-2.5 pt-1 sm:gap-2 sm:px-5 sm:pt-2"
+    >
+      <header className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2.5">
         <div className="flex shrink-0 items-center">
           <Link
             aria-label={t("layout.exitAria")}
-            className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-label"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-10 sm:min-h-10 sm:gap-1.5 sm:px-2.5 sm:text-label"
             href={exitHref}
             onClick={
               onExit
@@ -238,7 +251,7 @@ export function ReadingLayout({
             aria-label={t("layout.phonicsAria")}
             onClick={onSpellWord}
             disabled={controlsDisabled}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
+            className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-1.5 sm:px-3 sm:text-sm"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
             <span className="inline-block max-sm:first-letter:uppercase">
@@ -254,7 +267,7 @@ export function ReadingLayout({
           aria-label={t("layout.tutorAria")}
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
-          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
+          className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-1.5 sm:px-2.5 sm:text-sm"
         >
           <CircleHelp
             aria-hidden="true"
@@ -317,16 +330,16 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock relative -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
+        className="reading-dock relative -mx-2.5 px-2.5 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] sm:-mx-5 sm:px-5 sm:pt-2 sm:pb-1.5"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
             className={cn(
-              "mx-auto mb-1 w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:space-y-2",
+              "mx-auto mb-1 w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-1.5 sm:space-y-1.5",
               phonicsPanel || retryMode || sentenceReinforcementPanel
-                ? "max-h-[44dvh] sm:max-h-[38dvh]"
-                : "max-h-[15dvh] sm:max-h-[24dvh]",
+                ? "max-h-[38dvh] sm:max-h-[34dvh]"
+                : "max-h-[14dvh] sm:max-h-[18dvh]",
             )}
           >
             {retryMode ? (
@@ -505,72 +518,52 @@ export function ReadingLayout({
                 </div>
               </div>
             ) : isReadingWord ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple px-4 py-2.5">
-                <span className="shrink-0 text-sm font-semibold text-purple-ink">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-2.5 rounded-xl border border-purple/50 bg-purple px-3 py-1.5">
+                <span className="shrink-0 text-xs font-semibold text-purple-ink sm:text-sm">
                   {t("layout.sampleWordButton")}
                 </span>
                 <p
-                  className="viread-learning-content min-w-0 flex-1 truncate text-lg font-semibold text-purple-900"
+                  className="viread-learning-content min-w-0 flex-1 truncate text-base font-semibold text-purple-900 sm:text-lg"
                   dir="ltr"
                   lang="vi"
                 >
                   &ldquo;{currentWordText || latestTranscript}&rdquo;
                 </p>
               </div>
-            ) : isMicRecording ? (
+            ) : !suppressSecondaryBanners &&
+              isMicRecording &&
               isCurrentWordMispronounced ? (
-                <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border border-danger/30 bg-danger-surface px-4 py-2.5">
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <span className="size-2.5 shrink-0 rounded-full bg-danger" />
-                    <span className="shrink-0 text-sm font-semibold text-danger">
-                      {t("layout.incorrectWordBannerLabel")}
-                    </span>
-                    <p className="min-w-0 flex-1 truncate text-base font-semibold text-rose-950">
-                      {t("layout.retryWordPromptPrefix")}
-                      <span
-                        className="viread-learning-content underline decoration-2 underline-offset-2"
-                        dir="ltr"
-                        lang="vi"
-                      >
-                        {currentWordText}
-                      </span>
-                      {t("layout.retryWordPromptSuffix")}
-                    </p>
-                  </div>
-                  {currentWordText && onReadWord ? (
-                    <button
-                      type="button"
-                      onClick={onReadWord}
-                      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 py-1.5 text-sm font-semibold text-danger hover:bg-danger-surface"
-                      title={t("layout.listenTargetWordTitle")}
-                    >
-                      <>
-                        <Volume2 aria-hidden="true" className="size-4" />{" "}
-                        {t("controls.samplePage")}
-                      </>
-                    </button>
-                  ) : null}
-                </div>
-              ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-3 py-1 text-xs text-muted sm:text-sm">
-                  {t("layout.childJustReadPrefix")}{" "}
-                  <span className="viread-learning-content" dir="ltr" lang="vi">
-                    “{latestTranscript}”
+              <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger-surface px-3.5 py-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <span className="size-2.5 shrink-0 rounded-full bg-danger" />
+                  <span className="shrink-0 text-xs font-semibold text-danger sm:text-sm">
+                    {t("layout.incorrectWordBannerLabel")}
                   </span>
-                </p>
-              ) : null
-            ) : !phonicsPanel && latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
-                <span className="shrink-0 text-sm font-semibold text-purple-ink">
-                  {t("layout.latestRecording")}
-                </span>
-                <p
-                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
-                  dir="ltr"
-                  lang="vi"
-                >
-                  &ldquo;{latestTranscript}&rdquo;
-                </p>
+                  <p className="min-w-0 flex-1 truncate text-sm font-semibold text-rose-950 sm:text-base">
+                    {t("layout.retryWordPromptPrefix")}
+                    <span
+                      className="viread-learning-content underline decoration-2 underline-offset-2"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {currentWordText}
+                    </span>
+                    {t("layout.retryWordPromptSuffix")}
+                  </p>
+                </div>
+                {currentWordText && onReadWord ? (
+                  <button
+                    type="button"
+                    onClick={onReadWord}
+                    className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 py-1 text-xs font-semibold text-danger hover:bg-danger-surface sm:text-sm"
+                    title={t("layout.listenTargetWordTitle")}
+                  >
+                    <>
+                      <Volume2 aria-hidden="true" className="size-4" />{" "}
+                      {t("controls.samplePage")}
+                    </>
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -581,14 +574,18 @@ export function ReadingLayout({
             ) : null}
 
             {phonicsPanel ? (
-              <div className="mx-auto w-full max-w-[1008px]">
+              <div
+                data-reading-phonics-stage="true"
+                className="mx-auto w-full max-w-[1008px]"
+              >
                 {phonicsPanel}
               </div>
             ) : null}
 
-            {!retryMode && companionBubble ? (
+            {showCompanionBubble && companionBubble ? (
               <ReadingCompanionBubble
                 isSpeaking={isCompanionSpeaking}
+                onDismiss={onDismissCompanion}
                 state={companionBubble}
               />
             ) : null}

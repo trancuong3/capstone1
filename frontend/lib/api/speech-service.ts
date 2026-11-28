@@ -425,11 +425,17 @@ export function createSpeechService(): SpeechService {
         activeLock?.speed ??
         (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
       const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ? effectiveVoiceId : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
         resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
@@ -672,11 +678,17 @@ export function createSpeechService(): SpeechService {
         activeLock?.speed ??
         (hasExplicitGlobalSpeed ? speechPrefs.speed : undefined);
       const effectiveVoiceId = getEffectiveVoiceId();
+      const defaultVoiceOverride =
+        effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ||
+        policy.region !== "north" ||
+        speechMeta.gender === "male"
+          ? effectiveVoiceId
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         speechPrefs.voiceId ??
-        (effectiveVoiceId !== DEFAULT_LOCAL_VOICE_ID ? effectiveVoiceId : null);
+        defaultVoiceOverride;
       const cacheVoiceId =
         resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =

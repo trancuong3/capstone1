@@ -2782,7 +2782,11 @@ export class TtsPlayback {
           this.auditUtterance(operation, kind, spokenText, served);
         };
 
+        const isEphemeral = Boolean(
+          options.ephemeral || this.defaultCacheContext?.ephemeral,
+        );
         if (
+          !isEphemeral &&
           options.wordSample &&
           (await this.tryPlayTier0WordSlice(operation, spokenText, options))
         ) {
@@ -2793,9 +2797,6 @@ export class TtsPlayback {
           return;
         }
 
-        const isEphemeral = Boolean(
-          options.ephemeral || this.defaultCacheContext?.ephemeral,
-        );
         const dynamicUncached = isDynamicUncachedPrompt(spokenText, options);
         const hasCacheTarget =
           !isEphemeral &&

@@ -66,6 +66,7 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   fetchVoiceEngineHealth,
+  getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   recordSttEngineUsage,
@@ -1676,9 +1677,11 @@ export function DifficultWordPracticePanel({
         let effectiveConfidence = browserBestConfRef.current;
         let effectiveQualityStatus: string | undefined = quality?.status;
         let uploadAudioBlob: Blob | undefined = recording;
+        const freshHealth = getFreshVoiceEngineHealth();
         const routingHealth = getVoiceEngineHealthForRouting();
-        const permanentlyUnconfigured =
-          isPermanentlyHostedLocalUnconfigured(routingHealth);
+        const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(
+          freshHealth ?? routingHealth,
+        );
         const localSttDown =
           permanentlyUnconfigured ||
           (routingHealth !== null &&

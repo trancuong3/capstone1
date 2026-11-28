@@ -290,12 +290,25 @@ export function ReadingVoiceSettings({
             storedVoice,
             getEffectiveTeacherPersona().gender,
           );
-          const sameGenderReplacement =
-            preservedGender === "male"
-              ? data.voices.find(
-                  (v) => resolveVoiceGender(v.voice_id, v.gender) === "male",
-                )
-              : undefined;
+          const preservedRegion = inferRegionFromVoiceId(
+            storedVoice,
+            getVoicePolicyPreferences().region,
+          );
+          const fallbackVoice =
+            data.voices.find(
+              (v) =>
+                resolveVoiceRegion(v) === preservedRegion &&
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            data.voices.find(
+              (v) =>
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            null;
+          const fallbackVoiceId =
+            fallbackVoice && fallbackVoice.voice_id !== data.default_voice_id
+              ? fallbackVoice.voice_id
+              : null;
           const persistRemovedFallback =
             selectedChildId &&
             typeof childService.updateVoicePreferences === "function"
@@ -313,17 +326,12 @@ export function ReadingVoiceSettings({
                   readonly voiceId: string;
                 }) => voiceStudio.updateSessionVoiceLock!(lockInput)
               : undefined;
-          if (sameGenderReplacement) {
+          if (fallbackVoice) {
             applyGlobalTeacherVoiceSelection({
-              voiceId: sameGenderReplacement.voice_id,
-              storedVoiceId:
-                sameGenderReplacement.voice_id === data.default_voice_id
-                  ? null
-                  : sameGenderReplacement.voice_id,
-              gender: "male",
-              region:
-                resolveVoiceRegion(sameGenderReplacement) ??
-                getVoicePolicyPreferences().region,
+              voiceId: fallbackVoice.voice_id,
+              storedVoiceId: fallbackVoiceId,
+              gender: preservedGender,
+              region: resolveVoiceRegion(fallbackVoice) ?? preservedRegion,
               childId: selectedChildId,
               persistToBackend: persistRemovedFallback,
               syncActiveServerSessionLock: syncRemovedSessionLock,
@@ -647,7 +655,7 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button"
+        className="min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-11 lg:flex-row lg:gap-1.5 lg:px-2.5 lg:py-1.5 lg:text-sm"
         disabled={disabled}
         onClick={open}
         size="compact"

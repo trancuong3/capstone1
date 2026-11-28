@@ -664,7 +664,11 @@ export async function awaitSttReadyBeforeListening(
   const startedAt = Date.now();
   let health = getVoiceEngineHealthForRouting();
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
-  if (health?.local.available && health.local.stt_ready) {
+  if (
+    !permanentlyUnconfigured &&
+    health?.local.available &&
+    health.local.stt_ready
+  ) {
     return true;
   }
   if (!health && !permanentlyUnconfigured && maxWaitMs > 0) {
