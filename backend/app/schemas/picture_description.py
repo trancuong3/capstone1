@@ -71,6 +71,9 @@ class PictureBookPageItem(BaseModel):
     page_id: UUID
     page_number: int = Field(..., ge=1)
     image_url: str
+    has_verified_illustration: bool = False
+    page_kind: str | None = None
+    ocr_excerpt: str | None = None
 
 
 class PictureCatalogRead(BaseModel):

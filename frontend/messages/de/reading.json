@@ -468,5 +468,31 @@
     "keepTrying": "Versuche, langsam und deutlich zu lesen.",
     "wordsRead": "{count, plural, =0 {Keine Wörter gelesen} one {1 Wort gelesen} other {# Wörter gelesen}}"
   },
-  "learningContentNotice": "Der Leseinhalt wird von links nach rechts angezeigt, um die korrekte Rechtschreibung beizubehalten."
+  "learningContentNotice": "Der Leseinhalt wird von links nach rechts angezeigt, um die korrekte Rechtschreibung beizubehalten.",
+  "pageKinds": {
+    "TEXT_ONLY": "Lesetext",
+    "TEXT_AND_IMAGE": "Illustrierte Geschichte",
+    "IMAGE_PRIMARY": "Bildseite",
+    "COMIC": "Comic / Dialog",
+    "POEM": "Kindergedicht",
+    "EXERCISE": "Übungsseite",
+    "MULTI_COLUMN": "Mehrspaltig",
+    "TEXT_OVER_IMAGE": "Text auf Illustration",
+    "LOW_QUALITY": "Prüfung empfohlen"
+  },
+  "duet": {
+    "toggleLabel": "Eltern-Kind-Wechsellesen",
+    "toggleActive": "Wechsellesen aktiv",
+    "parentTurnBadge": "Eltern lesen vor",
+    "childTurnBadge": "Jetzt liest das Kind!",
+    "listenParentSample": "Beispiel anhören",
+    "completeParentTurn": "Gelesen — Kind ist dran",
+    "turnCounter": "Runde {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Seitenbild & Sätze entdecken",
+    "subtitle": "Vertiefen Sie Wortschatz und Satzbau direkt mit der eben gelesenen Buchseite.",
+    "pictureCta": "Seitenbild beschreiben",
+    "shooterCta": "Seitensätze bauen"
+  }
 }

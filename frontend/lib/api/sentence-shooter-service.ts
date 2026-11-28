@@ -119,6 +119,7 @@ const abandonSchema = z.object({
 export interface CreateSentenceShooterSessionInput {
   readonly child_id: string;
   readonly book_id: string;
+  readonly book_page_id?: string | null;
   readonly difficulty: SentenceShooterDifficulty;
   readonly total_rounds: number;
   readonly learning_mode?: SentenceShooterLearningMode;

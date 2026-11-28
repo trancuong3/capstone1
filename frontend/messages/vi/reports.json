@@ -697,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Đoạn hát bé nên luyện chậm 0.85x thêm",
     "openSongAction": "Mở bài hát",
     "homeTipsTitle": "Gợi ý đồng hành tại nhà cho ba mẹ"
+  },
+  "printCertificate": {
+    "brandTagline": "Báo cáo tiến bộ đọc sách gia đình",
+    "printA4Action": "In báo cáo A4",
+    "downloadCertificateAction": "Tải chứng nhận (.png)",
+    "certificateHeading": "CHỨNG NHẬN CỘT MỐC ĐỌC SÁCH",
+    "certificateSubtitle": "Ghi nhận hành trình rèn đọc tiếng Việt bền bỉ cùng gia đình",
+    "awardedTo": "Trao tặng bạn nhỏ chăm ngoan",
+    "progressAchievement": "{alias} đã kiên trì luyện đọc và mở rộng vốn từ tiếng Việt mỗi tuần!",
+    "progressStatsLine": "Phiên hoàn thành: {sessions} · Số từ đã đọc: {words} · Độ chính xác TB: {accuracy}",
+    "sessionReaderFallback": "Bạn nhỏ chăm đọc",
+    "sessionAchievement": "Đã hoàn thành phiên luyện đọc rõ ràng và tự tin!",
+    "sessionStatsLine": "Số trang đã đọc: {pages} · Tổng số từ: {words} · Độ chính xác cao nhất: {accuracy}",
+    "issuedOn": "Ngày cấp: {date}",
+    "encouragementFooter": "Mỗi trang sách con đọc hôm nay là một hạt mầm tri thức ấm áp bên gia đình."
   }
 }

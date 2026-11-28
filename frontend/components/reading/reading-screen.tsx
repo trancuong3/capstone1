@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Users,
   Volume2,
 } from "lucide-react";
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
@@ -24,6 +25,10 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import {
+  buildDuetTurnsForPage,
+  resolveActiveDuetTurn,
+} from "@/lib/reading/duet-reading";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
@@ -739,6 +744,7 @@ function ReadingSessionScreen({
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
+  const [duetModeEnabled, setDuetModeEnabled] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const retryOnRemountRef = useRef({
@@ -1030,6 +1036,46 @@ function ReadingSessionScreen({
   const [companionBubble, setCompanionBubble] =
     useState<CompanionBubbleState | null>(null);
   const [presencePaused, setPresencePaused] = useState(false);
+  const duetTurns = useMemo(
+    () => (page ? buildDuetTurnsForPage(page) : []),
+    [page],
+  );
+  const activeDuetTurn = useMemo(
+    () =>
+      duetModeEnabled && duetTurns.length >= 2
+        ? resolveActiveDuetTurn(
+            duetTurns,
+            previewSnapshot?.currentWordId ?? currentWordId,
+            correctWordIds,
+          )
+        : null,
+    [
+      correctWordIds,
+      currentWordId,
+      duetModeEnabled,
+      duetTurns,
+      previewSnapshot?.currentWordId,
+    ],
+  );
+  const handleCompleteParentDuetTurn = useCallback(() => {
+    if (!activeDuetTurn || activeDuetTurn.role !== "PARENT") return;
+    for (const wId of activeDuetTurn.wordIds) {
+      helpedWordIdsRef.current.add(wId);
+      correctWordIdsRef.current.add(wId);
+    }
+    setAssistedWordIds(new Set(helpedWordIdsRef.current));
+    setCorrectWordIds(new Set(correctWordIdsRef.current));
+    const snap = alignmentEngineRef.current?.advanceParentTurnWords(
+      activeDuetTurn.wordIds,
+    );
+    if (snap) {
+      setCurrentWordId(snap.currentWordId);
+      setPreviewSnapshot(snap);
+      if (snap.currentWordId === null) {
+        void autoCompletePageAfterFinalWordRef.current(snap);
+      }
+    }
+  }, [activeDuetTurn]);
   useEffect(() => {
     automationRef.current = automationPreferences;
     coachingStyleRef.current = coachingStyle;
@@ -8556,6 +8602,7 @@ function ReadingSessionScreen({
             bookId={book.id}
             startPageId={pageProgress?.start_page_id}
             endPageId={pageProgress?.end_page_id}
+            lastPageId={page.page_id}
             child={child}
             sessionId={sessionId}
             summary={sessionSummary ?? completion}
@@ -8572,8 +8619,10 @@ function ReadingSessionScreen({
     );
   }
 
+  const canUseDuetMode = !retryMode && duetTurns.length >= 2;
   const hasTopBarContent = Boolean(
     pageProgress ||
+    canUseDuetMode ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
     isWasmDownloading ||
@@ -8688,6 +8737,98 @@ function ReadingSessionScreen({
               })}
             </p>
           </div>
+        </div>
+      ) : null}
+      {canUseDuetMode ? (
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              aria-pressed={duetModeEnabled}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+                duetModeEnabled
+                  ? "border-primary bg-primary text-white shadow-2xs"
+                  : "border-border bg-white text-ink hover:bg-sky"
+              }`}
+              data-testid="duet-mode-toggle"
+              onClick={() => setDuetModeEnabled((prev) => !prev)}
+              type="button"
+            >
+              <Users aria-hidden="true" className="size-3.5 shrink-0" />
+              {duetModeEnabled ? t("duet.toggleActive") : t("duet.toggleLabel")}
+            </button>
+          </div>
+          {duetModeEnabled && activeDuetTurn ? (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-2.5 rounded-card border px-3.5 py-2.5 ${
+                activeDuetTurn.role === "PARENT"
+                  ? "border-amber-300 bg-amber-50/90"
+                  : "border-emerald-300 bg-emerald-50/90"
+              }`}
+              data-duet-role={activeDuetTurn.role}
+              data-testid="duet-turn-banner"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                      activeDuetTurn.role === "PARENT"
+                        ? "bg-amber-200/80 text-amber-950"
+                        : "bg-emerald-200/80 text-emerald-950"
+                    }`}
+                  >
+                    {activeDuetTurn.role === "PARENT"
+                      ? t("duet.parentTurnBadge")
+                      : t("duet.childTurnBadge")}
+                  </span>
+                  <span className="text-xs font-semibold text-muted">
+                    {t("duet.turnCounter", {
+                      current: formatNumber(activeDuetTurn.turnIndex + 1),
+                      total: formatNumber(duetTurns.length),
+                    })}
+                  </span>
+                </div>
+                <p
+                  className="viread-learning-content mt-1 line-clamp-2 text-sm font-bold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
+                  {activeDuetTurn.text}
+                </p>
+              </div>
+              {activeDuetTurn.role === "PARENT" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    className="w-auto"
+                    fullWidth={false}
+                    onClick={() => {
+                      speechPlayer.stop();
+                      void speechPlayer
+                        .play(activeDuetTurn.text, {
+                          utteranceKind: "page_sample",
+                        })
+                        .catch(() => undefined);
+                    }}
+                    size="compact"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Volume2 aria-hidden="true" className="size-3.5" />
+                    {t("duet.listenParentSample")}
+                  </Button>
+                  <Button
+                    className="w-auto"
+                    data-testid="duet-complete-parent-turn"
+                    fullWidth={false}
+                    onClick={handleCompleteParentDuetTurn}
+                    size="compact"
+                    type="button"
+                  >
+                    {t("duet.completeParentTurn")}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {pageNavigationError && pickerIndex === null ? (

@@ -291,7 +291,37 @@
     "addPagesPrimary": "Seiten hinzufügen",
     "managePagesSecondary": "Seiten verwalten",
     "editModalTitle": "Buchdaten bearbeiten",
-    "deleteModalTitle": "Dieses private Buch löschen?"
+    "deleteModalTitle": "Dieses private Buch löschen?",
+    "storyweaver": {
+      "openAction": "Familien-Geschichtenwerkstatt",
+      "createdNotice": "Familien-Minibuch erstellt und sofort lesebereit!",
+      "modalTitle": "Familien-Werkstatt für Leselern-Minibücher",
+      "modalDescription": "Erstellen Sie gemeinsam ein 3–4-seitiges vietnamesisches Minibuch passend zur Klassenstufe inklusive Übungswörtern.",
+      "stagePreparing": "Wortschatz und Klassenstufenrahmen werden vorbereitet…",
+      "stageWeaving": "Ihre vietnamesische Familiengeschichte wird gewoben…",
+      "themeRequiredError": "Bitte geben Sie ein Thema ein (mindestens 2 Zeichen).",
+      "genericError": "Minibuch konnte gerade nicht erstellt werden. Bitte erneut versuchen.",
+      "wordsUsedLabel": "Eingebaute Übungswörter: {words}",
+      "readTogetherNow": "Jetzt gemeinsam lesen",
+      "openBookDetail": "Buchdetails öffnen",
+      "childLabel": "Für Kind",
+      "gradeLabel": "Ziel-Klassenstufe",
+      "themeLabel": "Geschichtenthema",
+      "themePlaceholder": "z. B. sonniger Morgengarten, kleine Katze…",
+      "titleOptionalLabel": "Buchtitel (optional)",
+      "titleOptionalPlaceholder": "Leer lassen für automatischen Titelvorschlag",
+      "styleModeLabel": "Leseformat",
+      "styleDuet": "Eltern-Kind-Wechsellesen (Dialog)",
+      "stylePoem": "4-zeiliges Kinderreimgedicht",
+      "styleProse": "Kurze Erzählprosa",
+      "pageCountLabel": "Umfang des Minibuchs",
+      "threePages": "3 kompakte Seiten",
+      "fourPages": "4 vollständige Seiten",
+      "customWordsLabel": "Zusätzliche Übungswörter (kommagetrennt)",
+      "customWordsPlaceholder": "z. B. Sonnenschein, fleißig, Blume",
+      "submitAction": "Minibuch jetzt erstellen",
+      "safetyFootnote": "Automatisch auf Kindersicherheit geprüft und privat im Familienregal gespeichert."
+    }
   },
   "privateManager": {
     "backToMyBooks": "Zurück zu Meine Bücher",
@@ -539,5 +569,12 @@
     "enableError": "Einstellung für Probenbeiträge konnte nicht aktualisiert werden.",
     "disabledNotice": "Probenbeitrag für dieses Buch beendet. Es werden keine neuen Proben mehr verwendet.",
     "disableError": "Probenbeitrag konnte derzeit nicht beendet werden."
+  },
+  "readability": {
+    "matched": "Klassenstufengerecht",
+    "tooHard": "Anspruchsvoll (Klasse {min}–{max})",
+    "tooEasy": "Leicht zum Aufwärmen (Klasse {min}–{max})",
+    "estimatedGrade": "Geschätzt Klasse {min}–{max}",
+    "phonicsScore": "Lautlese-Bereitschaft {score}%"
   }
 }

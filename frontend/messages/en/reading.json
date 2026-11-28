@@ -468,5 +468,31 @@
     "keepTrying": "Try reading slowly and clearly.",
     "wordsRead": "{count, plural, =0 {No words read} one {Read # word} other {Read # words}}"
   },
-  "learningContentNotice": "Vietnamese reading content is displayed left-to-right to maintain correct spelling."
+  "learningContentNotice": "Vietnamese reading content is displayed left-to-right to maintain correct spelling.",
+  "pageKinds": {
+    "TEXT_ONLY": "Prose",
+    "TEXT_AND_IMAGE": "Illustrated Story",
+    "IMAGE_PRIMARY": "Picture Page",
+    "COMIC": "Comic / Dialogue",
+    "POEM": "Children's Poem",
+    "EXERCISE": "Activity Page",
+    "MULTI_COLUMN": "Multi-column",
+    "TEXT_OVER_IMAGE": "Text on Artwork",
+    "LOW_QUALITY": "Needs Review"
+  },
+  "duet": {
+    "toggleLabel": "Parent & Child Duet",
+    "toggleActive": "Duet Mode Active",
+    "parentTurnBadge": "Parent's lead turn",
+    "childTurnBadge": "Your turn to read!",
+    "listenParentSample": "Listen to sample",
+    "completeParentTurn": "Parent finished — Child's turn",
+    "turnCounter": "Turn {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Explore Page Artwork & Sentences",
+    "subtitle": "Build vocabulary and sentence skills directly from the page you just read.",
+    "pictureCta": "Describe Page Art",
+    "shooterCta": "Build Page Sentences"
+  }
 }

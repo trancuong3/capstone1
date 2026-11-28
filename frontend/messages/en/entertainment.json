@@ -538,7 +538,8 @@
       "who": "Who or what is there?",
       "action": "What are they doing?",
       "where": "Where & what color?"
-    }
+    },
+    "studioIllustrationBadge": "Clean Illustration"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "No playback detected. Tap listen to try again.",

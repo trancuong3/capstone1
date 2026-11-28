@@ -12,6 +12,7 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  WandSparkles,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +26,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { FamilyStoryweaverModal } from "@/components/books/family-storyweaver-modal";
+import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
@@ -138,6 +141,7 @@ function ParentMyBooksContent({
   const [statusFilter, setStatusFilter] = useState<BookStatusFilter>("ALL");
 
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showStoryweaverModal, setShowStoryweaverModal] = useState(false);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [minGrade, setMinGrade] = useState<number>(1);
@@ -497,6 +501,16 @@ function ParentMyBooksContent({
           </Button>
           <Button
             className="w-auto"
+            data-testid="open-storyweaver-modal"
+            fullWidth={false}
+            onClick={() => setShowStoryweaverModal(true)}
+            variant="secondary"
+          >
+            <WandSparkles aria-hidden="true" className="size-4" />
+            {t("myBooks.storyweaver.openAction")}
+          </Button>
+          <Button
+            className="w-auto"
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
           >
@@ -507,6 +521,15 @@ function ParentMyBooksContent({
           </Button>
         </div>
       </header>
+
+      <FamilyStoryweaverModal
+        isOpen={showStoryweaverModal}
+        onClose={() => setShowStoryweaverModal(false)}
+        onCreated={() => {
+          setActionNotice(t("myBooks.storyweaver.createdNotice"));
+          void loadBooks();
+        }}
+      />
 
       <div
         role="note"
@@ -893,6 +916,10 @@ function ParentMyBooksContent({
                         )}{" "}
                         · {gradeLabel}
                       </p>
+                      <ReadabilityBadge
+                        className="mt-2"
+                        readability={book.readability}
+                      />
                     </div>
 
                     {isSuspended && book.suspended_reason ? (
