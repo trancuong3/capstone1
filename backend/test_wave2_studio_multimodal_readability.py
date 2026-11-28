@@ -63,7 +63,7 @@ class Wave2StudioMultimodalReadabilityTests(unittest.IsolatedAsyncioTestCase):
         )
         rep_hard = analyse_vietnamese_readability(hard_text, min_grade=1, max_grade=1)
         self.assertEqual(rep_hard.grade_match_status, "TOO_HARD")
-        self.assertGreater(rep_hard.advanced_rhyme_ratio, 0.0)
+        self.assertGreater(rep_hard.complex_phonics_ratio, 0.0)
 
     def test_duet_reading_segments_studio_v2_blocks_and_poem_fallback(self) -> None:
         raw_tokens = [
