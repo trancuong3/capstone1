@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ReadingReportPage from "@/app/sessions/[sessionId]/report/page";
+import ReadingReportPage from "@/app/(app)/sessions/[sessionId]/report/page";
 
 const api = vi.hoisted(() => ({
   getSessionReports: vi.fn(),

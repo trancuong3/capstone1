@@ -85,7 +85,9 @@ async def get_history(
     actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[ParentEmailDeliveryRead]:
-    effective_limit = limit if isinstance(limit, int) else 10
+    effective_limit = (
+        limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
+    )
     return await build_service(db).list_history(actor_id, limit=effective_limit)
 
 

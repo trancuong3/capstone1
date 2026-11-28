@@ -214,9 +214,7 @@ function describeToolCheckScope(
   if (scope.local_ai_enforced) {
     parts.push(t("privateManager.toolScopeLocalModel"));
   } else {
-    parts.push(
-      "soát chính tả & kiểm tra an toàn qua dịch vụ AI đám mây bảo mật",
-    );
+    parts.push(t("privateManager.toolScopeCloudAi"));
   }
   if (!scope.image_visual_safety_checked) {
     parts.push(t("privateManager.toolScopeNoImage"));
@@ -1323,7 +1321,7 @@ function ParentPrivateBookManagerContent({
               href="/studio/tasks"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />
-              Trung tâm tác vụ
+              {t("privateManager.taskCenterLink")}
             </Link>
             <Button
               className="min-h-11 w-auto px-3 text-xs"
@@ -1337,7 +1335,9 @@ function ParentPrivateBookManagerContent({
               variant="secondary"
             >
               <ImageIcon aria-hidden="true" className="size-3.5" />
-              {showCoverStudio ? "Đóng ảnh bìa" : "Đổi ảnh bìa"}
+              {showCoverStudio
+                ? t("privateManager.closeCoverStudio")
+                : t("privateManager.changeCoverAction")}
             </Button>
             <Button
               className="min-h-10 w-auto px-3 text-xs"
@@ -1613,10 +1613,7 @@ function ParentPrivateBookManagerContent({
             {t("privateManager.uploadSubtitle")}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Minh bạch quyền riêng tư: Sách riêng chỉ hiển thị trong tài khoản
-            gia đình; văn bản trang sách tải lên được rà soát chính tả và an
-            toàn trẻ em tự động (mô hình cục bộ hoặc dịch vụ AI đám mây bảo mật
-            tùy cấu hình máy chủ) và mặc định không dùng để huấn luyện OCR.
+            {t("privateManager.uploadPrivacyTransparency")}
           </p>
         </div>
 
@@ -2681,7 +2678,13 @@ function ParentPrivateBookManagerContent({
                         </>
                       ) : null}
                       <button
-                        aria-label={`Mở tranh minh họa trang ${page.page_number}`}
+                        aria-expanded={isIllustrationStudioOpen}
+                        aria-label={t(
+                          isIllustrationStudioOpen
+                            ? "privateManager.closePageIllustrationAria"
+                            : "privateManager.openPageIllustrationAria",
+                          { page: page.page_number },
+                        )}
                         className="inline-flex min-h-11 items-center gap-1 rounded-control border border-primary/30 bg-sky/50 px-2.5 text-xs font-semibold text-primary-hover hover:bg-sky disabled:opacity-50"
                         disabled={isSuspended || isPageBusy || busyKey !== null}
                         onClick={() => {
@@ -2694,11 +2697,17 @@ function ParentPrivateBookManagerContent({
                       >
                         <ImageIcon aria-hidden="true" className="size-3.5" />
                         {isIllustrationStudioOpen
-                          ? "Đóng minh họa"
-                          : "Minh họa trang"}
+                          ? t("privateManager.closePageIllustrationAction")
+                          : t("privateManager.pageIllustrationAction")}
                       </button>
                       <button
-                        aria-label={`Xem khối chữ OCR trang ${page.page_number}`}
+                        aria-expanded={isSmartOcrOpen}
+                        aria-label={t(
+                          isSmartOcrOpen
+                            ? "privateManager.closePageOcrBlocksAria"
+                            : "privateManager.openPageOcrBlocksAria",
+                          { page: page.page_number },
+                        )}
                         className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
                         disabled={isPageBusy || busyKey !== null}
                         onClick={() => {
@@ -2710,7 +2719,9 @@ function ParentPrivateBookManagerContent({
                         type="button"
                       >
                         <FileSearch aria-hidden="true" className="size-3.5" />
-                        {isSmartOcrOpen ? "Đóng khối OCR" : "Khối chữ OCR"}
+                        {isSmartOcrOpen
+                          ? t("privateManager.closePageOcrBlocksAction")
+                          : t("privateManager.openPageOcrBlocksAction")}
                       </button>
                       <button
                         aria-label={t(

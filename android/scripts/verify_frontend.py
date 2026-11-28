@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Validate that an HTTPS origin serves the actual server-backed ViRead Next.js login.
+"""Validate that an HTTPS origin serves the actual server-backed ViRead Next.js login,
+and optionally verify mobile WebView HTTPS/CORS/auth-401 readiness against FastAPI.
 
-The check is read-only. It never submits credentials or follows redirects to other
-origins. Android packaging must fail closed when the target origin is not verified.
+The check is strictly read-only. It never submits credentials or follows redirects to
+other origins. Android packaging must fail closed when the target origin is not verified.
 
 Default mode enforces a public HTTPS origin on port 443 using system trust anchors.
 Explicit LAN acceptance mode (`lan_mode=True` or `VIREAD_LAN_MODE=1`) additionally
@@ -12,6 +13,7 @@ certificate and hostname verification (never disabling TLS verification).
 """
 from __future__ import annotations
 
+import argparse
 import ipaddress
 import json
 import os
@@ -25,6 +27,7 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_ope
 REDIRECT_CODES = {301, 302, 303, 307, 308}
 USER_AGENT = "ViRead-Android-CI/1.0"
 DEFAULT_TIMEOUT_SECONDS = 18
+BACKEND_AUTH_PREFLIGHT_PATH = "/profiles/children"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -108,6 +111,34 @@ def canonical_origin(value: str, *, lan_mode: bool = False) -> str:
     return f"https://{hostname}"
 
 
+def canonical_backend_url(value: str, *, lan_mode: bool = False) -> str:
+    url = (value or "").strip()
+    try:
+        parsed = urlsplit(url)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid backend URL") from exc
+
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or ":" in hostname
+    ):
+        raise ValueError(
+            "Backend URL must be an HTTPS URL without credentials, query, or fragment"
+        )
+
+    origin_only = f"https://{hostname}" if port is None else f"https://{hostname}:{port}"
+    normalized_origin = canonical_origin(origin_only, lan_mode=lan_mode)
+    clean_path = parsed.path.rstrip("/")
+    return f"{normalized_origin}{clean_path}"
+
+
 def _build_ssl_context(*, lan_mode: bool, ca_file: str | None) -> ssl.SSLContext:
     if lan_mode:
         if not ca_file or not ca_file.strip():
@@ -130,19 +161,49 @@ def _build_ssl_context(*, lan_mode: bool, ca_file: str | None) -> ssl.SSLContext
     return ctx
 
 
-def _read(url: str, opener, *, accept: str = "text/html") -> tuple[int, str, str, str]:
-    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+def _header_get(headers, name: str) -> str:
+    if headers is None:
+        return ""
+    direct = headers.get(name)
+    if direct is not None:
+        return str(direct)
+    target = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == target and value is not None:
+            return str(value)
+    return ""
+
+
+def _request(
+    url: str,
+    opener,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    read_body_statuses: set[int] | None = None,
+) -> tuple[int, dict[str, str], str]:
+    req_headers = {"User-Agent": USER_AGENT}
+    if headers:
+        req_headers.update(headers)
+    request = Request(url, headers=req_headers, method=method)
     try:
         response = opener.open(request, timeout=DEFAULT_TIMEOUT_SECONDS)
     except HTTPError as exc:
-        response = exc  # NoRedirect yields the redirect as an HTTPError.
+        response = exc  # NoRedirect and 401/4xx responses surface via HTTPError.
     with response:
         status = response.getcode()
-        headers = response.headers
-        location = headers.get("Location", "") or ""
-        content_type = headers.get("Content-Type", "") or ""
-        body = response.read(300_000).decode("utf-8", "replace") if status == 200 else ""
-        return status, location, content_type, body
+        raw_headers = response.headers or {}
+        header_map = {str(k): str(v) for k, v in raw_headers.items()}
+        should_read = status == 200 if read_body_statuses is None else (status in read_body_statuses)
+        body = response.read(300_000).decode("utf-8", "replace") if should_read else ""
+        return status, header_map, body
+
+
+def _read(url: str, opener, *, accept: str = "text/html") -> tuple[int, str, str, str]:
+    status, headers, body = _request(url, opener, method="GET", headers={"Accept": accept})
+    location = _header_get(headers, "Location")
+    content_type = _header_get(headers, "Content-Type")
+    return status, location, content_type, body
 
 
 def _is_viread_next_document(content_type: str, body: str) -> bool:
@@ -178,6 +239,85 @@ def verify_backend_health(health_url: str, opener) -> None:
         raise ValueError("Backend health JSON is missing database readiness status")
 
 
+def verify_backend_mobile_preflight(
+    backend_url: str,
+    frontend_origin: str,
+    opener,
+    *,
+    lan_mode: bool = False,
+) -> None:
+    """Read-only mobile WebView -> FastAPI HTTPS, CORS preflight, and 401 JSON verification."""
+    backend_base = canonical_backend_url(backend_url, lan_mode=lan_mode)
+    verify_backend_health(f"{backend_base}/health", opener)
+
+    protected_url = f"{backend_base}{BACKEND_AUTH_PREFLIGHT_PATH}"
+    opt_status, opt_headers, _ = _request(
+        protected_url,
+        opener,
+        method="OPTIONS",
+        headers={
+            "Origin": frontend_origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+        read_body_statuses=set(),
+    )
+    if opt_status not in {200, 204}:
+        raise ValueError(
+            f"Backend CORS preflight OPTIONS returned HTTP {opt_status}, expected 200 or 204"
+        )
+
+    allow_origin = _header_get(opt_headers, "Access-Control-Allow-Origin").strip()
+    if allow_origin != frontend_origin:
+        raise ValueError(
+            f"Backend CORS Access-Control-Allow-Origin '{allow_origin}' does not match mobile frontend origin '{frontend_origin}'"
+        )
+
+    allow_methods = {
+        token.strip().upper()
+        for token in _header_get(opt_headers, "Access-Control-Allow-Methods").split(",")
+        if token.strip()
+    }
+    if "*" not in allow_methods and "GET" not in allow_methods:
+        raise ValueError("Backend CORS Access-Control-Allow-Methods does not allow GET")
+
+    allow_headers = {
+        token.strip().lower()
+        for token in _header_get(opt_headers, "Access-Control-Allow-Headers").split(",")
+        if token.strip()
+    }
+    if "*" not in allow_headers and "authorization" not in allow_headers:
+        raise ValueError(
+            "Backend CORS Access-Control-Allow-Headers does not allow Authorization bearer tokens"
+        )
+
+    auth_status, auth_headers, auth_body = _request(
+        protected_url,
+        opener,
+        method="GET",
+        headers={
+            "Accept": "application/json",
+            "Origin": frontend_origin,
+        },
+        read_body_statuses={401},
+    )
+    if auth_status != 401:
+        raise ValueError(
+            f"Unauthenticated backend check at {BACKEND_AUTH_PREFLIGHT_PATH} returned HTTP {auth_status}, expected 401"
+        )
+    auth_ct = _header_get(auth_headers, "Content-Type").lower()
+    if "application/json" not in auth_ct:
+        raise ValueError("Unauthenticated 401 response did not return application/json")
+    try:
+        auth_payload = json.loads(auth_body)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Unauthenticated 401 response returned invalid JSON") from exc
+    if not isinstance(auth_payload, dict) or not any(
+        key in auth_payload for key in ("detail", "error", "message")
+    ):
+        raise ValueError("Unauthenticated 401 JSON payload missing error detail")
+
+
 def verify_frontend(
     origin: str,
     opener=None,
@@ -185,8 +325,11 @@ def verify_frontend(
     lan_mode: bool = False,
     ca_file: str | None = None,
     backend_health_url: str | None = None,
+    backend_url: str | None = None,
 ) -> None:
     base = canonical_origin(origin, lan_mode=lan_mode)
+    if backend_url:
+        canonical_backend_url(backend_url, lan_mode=lan_mode)
     base_parsed = urlsplit(base)
     expected_host = (base_parsed.hostname or "").lower()
     expected_port = 443 if base_parsed.port is None else base_parsed.port
@@ -238,17 +381,38 @@ def verify_frontend(
     if backend_health_url:
         verify_backend_health(backend_health_url, opener)
 
+    if backend_url:
+        verify_backend_mobile_preflight(backend_url, base, opener, lan_mode=lan_mode)
 
-def main() -> int:
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Read-only HTTPS readiness preflight for ViRead Android WebView frontend & backend."
+    )
+    parser.add_argument(
+        "--frontend-url",
+        default=None,
+        help="Override VIREAD_FRONTEND_URL HTTPS origin",
+    )
+    parser.add_argument(
+        "--backend-url",
+        default=None,
+        help="Optional FastAPI HTTPS base URL for /health + OPTIONS CORS + 401 JSON preflight",
+    )
+    args = parser.parse_args([] if argv is None else argv)
+
     lan_mode = os.environ.get("VIREAD_LAN_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
     ca_file = os.environ.get("VIREAD_LAN_CA_CERT", "").strip() or None
+    frontend_origin = (args.frontend_url or os.environ.get("VIREAD_FRONTEND_URL", "")).strip()
     backend_health_url = os.environ.get("VIREAD_BACKEND_HEALTH_URL", "").strip() or None
+    backend_url = (args.backend_url or os.environ.get("VIREAD_BACKEND_URL", "")).strip() or None
     try:
         verify_frontend(
-            os.environ.get("VIREAD_FRONTEND_URL", ""),
+            frontend_origin,
             lan_mode=lan_mode,
             ca_file=ca_file,
             backend_health_url=backend_health_url,
+            backend_url=backend_url,
         )
     except Exception as exc:
         print(
@@ -257,9 +421,10 @@ def main() -> int:
         )
         return 1
     mode_label = "LAN acceptance HTTPS" if lan_mode else "public HTTPS"
-    print(f"Frontend root routing and ViRead Next.js /login HTML verified over {mode_label}.")
+    backend_note = " + FastAPI CORS/401 preflight" if backend_url else ""
+    print(f"Frontend root routing and ViRead Next.js /login HTML{backend_note} verified over {mode_label}.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

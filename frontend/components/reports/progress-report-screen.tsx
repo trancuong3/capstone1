@@ -394,7 +394,9 @@ function ProgressReportContent({
           }
           tone="error"
         >
-          {t("overview.notFoundDescription")}
+          {state.status === "not-found"
+            ? t("overview.notFoundDescription")
+            : t("overview.loadErrorDescription")}
         </StatusMessage>
         {retryButton}
       </section>
