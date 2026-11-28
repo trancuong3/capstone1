@@ -3,6 +3,7 @@
 import Image from "next/image";
 import {
   ArrowRight,
+  BookHeart,
   BookOpen,
   Brain,
   Coffee,
@@ -19,6 +20,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -29,6 +31,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -37,9 +40,15 @@ import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import {
+  createVocabularyNotebookService,
+  type VocabularyNotebookListDTO,
+  type VocabularyNotebookService,
+} from "@/lib/api/vocabulary-notebook-service";
 import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
+import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
 import type {
   CrossGameRecommendationDTO,
   EntertainmentRecommendationsDTO,
@@ -51,6 +60,7 @@ const ONBOARDING_STORAGE_KEY = "viread:entertainment-v4-onboarding-done";
 
 interface Props {
   readonly initialRecommendations?: EntertainmentRecommendationsDTO | null;
+  readonly vocabularyService?: VocabularyNotebookService;
 }
 
 function ViReadMascot({ reducedMotion }: { readonly reducedMotion: boolean }) {
@@ -199,8 +209,14 @@ function HubSelectedChildSync({
 
 export function EntertainmentScreen({
   initialRecommendations = null,
+  vocabularyService,
 }: Props = {}) {
   const tRaw = useTranslations("entertainment");
+  const tGlossary = useWordGlossaryTranslations();
+  const resolvedVocabService = useMemo(
+    () => vocabularyService ?? createVocabularyNotebookService(),
+    [vocabularyService],
+  );
   const teacherPersona = useTeacherPersona();
   const t = useCallback(
     (
@@ -259,6 +275,9 @@ export function EntertainmentScreen({
   const [loadingRecsForChildId, setLoadingRecsForChildId] = useState<
     string | null
   >(null);
+  const [notebookData, setNotebookData] =
+    useState<VocabularyNotebookListDTO | null>(null);
+  const [notebookDrawerOpen, setNotebookDrawerOpen] = useState(false);
 
   const storedShowOnboarding = useSyncExternalStore(
     emptySubscribe,
@@ -370,6 +389,20 @@ export function EntertainmentScreen({
     teacherPersona.gender,
   ]);
 
+  useEffect(() => {
+    if (!activeChildId) return;
+    const controller = new AbortController();
+    void resolvedVocabService
+      .listNotebook(activeChildId, 20, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setNotebookData(data);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [activeChildId, resolvedVocabService]);
+
   const recommendations =
     fetchedRecommendations &&
     (!activeChildId || fetchedRecommendations.child_id === activeChildId)
@@ -426,10 +459,57 @@ export function EntertainmentScreen({
       item,
     ]),
   );
+  const activeChildNotebook =
+    notebookData && (!activeChildId || notebookData.child_id === activeChildId)
+      ? notebookData
+      : null;
+  const notebookBonusWords = useMemo(() => {
+    if (!activeChildNotebook) return [];
+    const difficultNormSet = new Set(
+      (recommendations?.focus_difficult_words ?? []).map((w) =>
+        w.trim().toLowerCase(),
+      ),
+    );
+    const candidates = activeChildNotebook.storytelling_words?.length
+      ? activeChildNotebook.storytelling_words
+      : activeChildNotebook.items.map((item) => item.word);
+    return candidates
+      .filter((w) => Boolean(w.trim()) && !difficultNormSet.has(w.trim().toLowerCase()))
+      .slice(0, 3);
+  }, [activeChildNotebook, recommendations?.focus_difficult_words]);
+
   const primaryRec = recommendations?.primary_recommendation ?? null;
-  const focusWordsForLaunch = primaryRec?.target_words.length
+  const baseFocusWordsForLaunch = primaryRec?.target_words.length
     ? primaryRec.target_words
     : (recommendations?.focus_difficult_words ?? []);
+  const focusWordsForLaunch = Array.from(
+    new Set([...baseFocusWordsForLaunch, ...notebookBonusWords]),
+  );
+  const pictureCardHref = notebookBonusWords.length
+    ? `/entertainment/picture-description?focus=${encodeURIComponent(
+        Array.from(
+          new Set([
+            ...(recommendationByGame.get("PICTURE_DESCRIPTION")?.target_words ??
+              []),
+            ...notebookBonusWords,
+          ]),
+        )
+          .slice(0, 5)
+          .join(","),
+      )}`
+    : "/entertainment/picture-description";
+  const memoryCardHref = notebookBonusWords.length
+    ? `/entertainment/memory-game?focus=${encodeURIComponent(
+        Array.from(
+          new Set([
+            ...(recommendationByGame.get("MEMORY_GAME")?.target_words ?? []),
+            ...notebookBonusWords,
+          ]),
+        )
+          .slice(0, 5)
+          .join(","),
+      )}`
+    : "/entertainment/memory-game";
   const autopilotHref = (() => {
     if (!primaryRec) return null;
     const baseHref = primaryRec.href;
@@ -546,6 +626,24 @@ export function EntertainmentScreen({
               ? t("hub.reducedMotionActive")
               : t("hub.reduceMotion")}
           </Button>
+          {activeChildId ? (
+            <Button
+              className="min-h-12 px-4"
+              data-testid="hub-open-vocabulary-notebook-btn"
+              fullWidth={false}
+              onClick={() => setNotebookDrawerOpen(true)}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+              {activeChildNotebook && activeChildNotebook.total > 0
+                ? tGlossary("hubNotebookButton", {
+                    count: activeChildNotebook.total,
+                  })
+                : tGlossary("hubNotebookButtonEmpty")}
+            </Button>
+          ) : null}
           <Button
             className="min-h-12 px-4"
             fullWidth={false}
@@ -643,6 +741,35 @@ export function EntertainmentScreen({
                   <Volume2
                     aria-hidden="true"
                     className="size-3.5 text-amber-700"
+                  />
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {word}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {notebookBonusWords.length > 0 ? (
+            <div
+              className="flex flex-wrap items-center gap-2 pt-1"
+              data-testid="hub-notebook-bonus-words"
+            >
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900">
+                <BookHeart aria-hidden="true" className="size-3.5" />
+                {tGlossary("bonusStoryWordsLabel")}
+              </span>
+              {notebookBonusWords.map((word) => (
+                <button
+                  aria-label={`Nghe từ yêu thích ${word}`}
+                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50/90 px-3 py-1 text-xs font-bold text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  data-testid={`hub-notebook-word-${word}`}
+                  key={word}
+                  onClick={() => handleSpeakFocusWord(word)}
+                  type="button"
+                >
+                  <Volume2
+                    aria-hidden="true"
+                    className="size-3.5 text-emerald-700"
                   />
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     {word}
@@ -788,7 +915,7 @@ export function EntertainmentScreen({
           ) : null}
           <ButtonLink
             className="mt-auto min-h-12"
-            href="/entertainment/picture-description"
+            href={pictureCardHref}
             size="compact"
           >
             {t("hub.pictureCta")}{" "}
@@ -919,7 +1046,7 @@ export function EntertainmentScreen({
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
-            href="/entertainment/memory-game"
+            href={memoryCardHref}
             size="compact"
           >
             {t("hub.memoryCta")}{" "}
@@ -927,6 +1054,19 @@ export function EntertainmentScreen({
           </ButtonLink>
         </article>
       </div>
+
+      {activeChildId ? (
+        <VocabularyNotebookDrawer
+          childAlias={profileBadgeAlias}
+          childId={activeChildId}
+          initialNotebook={activeChildNotebook}
+          onClose={() => setNotebookDrawerOpen(false)}
+          onNotebookChange={setNotebookData}
+          open={notebookDrawerOpen}
+          service={resolvedVocabService}
+          speechPlayer={speechPlayer}
+        />
+      ) : null}
 
       {/* Healthy Natural Break Cue (Anti-Addiction, Zero Dark Patterns) */}
       <footer className="flex items-center gap-3 rounded-card border border-border bg-white/80 px-5 py-4 text-sm text-muted">

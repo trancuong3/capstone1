@@ -47,3 +47,4 @@ from .smart_book_studio import (
     PageOcrExtraction,
     SmartStudioJob,
 )
+from .vocabulary_notebook import ChildFavoriteWord, WordGlossaryCache

@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  BookHeart,
   Brain,
   CheckCircle2,
   Clock,
@@ -28,6 +29,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -48,6 +50,12 @@ import {
   createSpeechService,
   type SpeechService,
 } from "@/lib/api/speech-service";
+import {
+  createVocabularyNotebookService,
+  type VocabularyNotebookListDTO,
+  type VocabularyNotebookService,
+} from "@/lib/api/vocabulary-notebook-service";
+import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -199,11 +207,20 @@ function renderStars(count: number, ariaLabel: string) {
 
 export interface MemoryGameScreenProps {
   readonly service?: MemoryGameService;
+  readonly vocabularyService?: VocabularyNotebookService;
 }
 
-export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
+export function MemoryGameScreen({
+  service,
+  vocabularyService,
+}: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
   const tCommon = useTranslations("common");
+  const tGlossary = useWordGlossaryTranslations();
+  const resolvedVocabService = useMemo(
+    () => vocabularyService ?? createVocabularyNotebookService(),
+    [vocabularyService],
+  );
   const defaultErrorMessage = t("memoryGame.defaultError");
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
@@ -246,6 +263,41 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       return [];
     }
   });
+  const [notebookData, setNotebookData] =
+    useState<VocabularyNotebookListDTO | null>(null);
+  const [notebookDrawerOpen, setNotebookDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!childId) return;
+    const controller = new AbortController();
+    void resolvedVocabService
+      .listNotebook(childId, 12, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setNotebookData(data);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, resolvedVocabService]);
+
+  const activeNotebook =
+    notebookData && notebookData.child_id === childId ? notebookData : null;
+  const notebookBonusWords = useMemo(() => {
+    if (!activeNotebook) return [];
+    const raw = activeNotebook.storytelling_words?.length
+      ? activeNotebook.storytelling_words
+      : activeNotebook.items.map((item) => item.word);
+    return raw.filter(Boolean).slice(0, 3);
+  }, [activeNotebook]);
+  const combinedFocusWords = useMemo(
+    () =>
+      Array.from(new Set([...urlFocusWords, ...notebookBonusWords])).slice(
+        0,
+        6,
+      ),
+    [notebookBonusWords, urlFocusWords],
+  );
 
   // Catalog & history
   const [catalog, setCatalog] = useState<MemoryThemesCatalogDTO | null>(null);
@@ -610,7 +662,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               new Set([
                 ...session.scene_spec.matched_focus_words,
                 ...(session.scene_spec.creative_focus_words ?? []),
-                ...urlFocusWords,
+                ...combinedFocusWords,
                 ...session.scene_spec.objects.flatMap((obj) => [
                   obj.name_vi,
                   obj.color_vi,
@@ -619,7 +671,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             )
               .filter(Boolean)
               .slice(0, 18)
-          : urlFocusWords;
+          : combinedFocusWords;
         const sttRes = await speechService.transcribe(audioBlob, {
           languageCode: "vi",
           keyterms,
@@ -675,11 +727,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     [
       cancelAutoSubmit,
       clearSilenceStopTimer,
+      combinedFocusWords,
       recorder,
       session,
       speechService,
       t,
-      urlFocusWords,
     ],
   );
 
@@ -1077,7 +1129,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         theme_key: selectedTheme,
         timer_mode: timerMode,
         recall_mode: recallMode,
-        ...(urlFocusWords.length > 0 ? { focus_words: urlFocusWords } : {}),
+        ...(combinedFocusWords.length > 0
+          ? { focus_words: combinedFocusWords }
+          : {}),
       });
       setSession(created);
       setRemainingSeconds(created.timer_seconds);
@@ -1416,9 +1470,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         new Set([
           ...(session.scene_spec.creative_focus_words ?? []),
           ...session.scene_spec.matched_focus_words,
+          ...notebookBonusWords,
         ]),
       )
-    : [];
+    : notebookBonusWords;
 
   return (
     <section
@@ -1511,8 +1566,60 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             )}
             {calmSound ? t("memoryGame.calmSound") : t("memoryGame.soundMuted")}
           </Button>
+          <Button
+            className="min-h-11"
+            data-testid="memory-open-notebook-btn"
+            fullWidth={false}
+            onClick={() => setNotebookDrawerOpen(true)}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+            {activeNotebook && activeNotebook.total > 0
+              ? tGlossary("hubNotebookButton", { count: activeNotebook.total })
+              : tGlossary("hubNotebookButtonEmpty")}
+          </Button>
         </div>
       </div>
+
+      {notebookBonusWords.length > 0 ? (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-card border border-amber-200 bg-amber-50/75 px-4 py-2.5"
+          data-testid="memory-notebook-bonus-words"
+        >
+          <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-950">
+            <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+            {tGlossary("bonusStoryWordsLabel")}
+          </span>
+          {notebookBonusWords.map((word) => (
+            <button
+              className="viread-learning-content inline-flex min-h-8 items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-0.5 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+              data-testid={`memory-notebook-word-${word}`}
+              dir="ltr"
+              key={word}
+              lang="vi"
+              onClick={() => speakVietnamesePrompt(word, { wordSample: true })}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" className="size-3 text-amber-600" />
+              {word}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <VocabularyNotebookDrawer
+        childAlias={child.alias}
+        childId={child.id}
+        initialNotebook={activeNotebook}
+        onClose={() => setNotebookDrawerOpen(false)}
+        onNotebookChange={setNotebookData}
+        open={notebookDrawerOpen}
+        service={resolvedVocabService}
+        showGameLinks={false}
+        speechPlayer={speechPlayer}
+      />
 
       {/* Stage progress pills */}
       <nav

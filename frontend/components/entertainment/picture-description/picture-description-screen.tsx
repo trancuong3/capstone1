@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  BookHeart,
   BookOpen,
   CheckCircle2,
   ChevronDown,
@@ -45,6 +46,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -71,6 +73,12 @@ import {
   createSpeechService,
   type SpeechService,
 } from "@/lib/api/speech-service";
+import {
+  createVocabularyNotebookService,
+  type VocabularyNotebookListDTO,
+  type VocabularyNotebookService,
+} from "@/lib/api/vocabulary-notebook-service";
+import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
 import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
@@ -385,9 +393,20 @@ function renderStars(count: number, ariaLabel: string) {
   );
 }
 
-export function PictureDescriptionScreen() {
+export interface PictureDescriptionScreenProps {
+  readonly vocabularyService?: VocabularyNotebookService;
+}
+
+export function PictureDescriptionScreen({
+  vocabularyService,
+}: PictureDescriptionScreenProps = {}) {
   const tRaw = useTranslations("entertainment");
   const tCommon = useTranslations("common");
+  const tGlossary = useWordGlossaryTranslations();
+  const resolvedVocabService = useMemo(
+    () => vocabularyService ?? createVocabularyNotebookService(),
+    [vocabularyService],
+  );
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
@@ -429,6 +448,9 @@ export function PictureDescriptionScreen() {
       return [];
     }
   });
+  const [notebookData, setNotebookData] =
+    useState<VocabularyNotebookListDTO | null>(null);
+  const [notebookDrawerOpen, setNotebookDrawerOpen] = useState(false);
   const [micCountdown, setMicCountdown] = useState<number | null>(null);
   const [isAutoSubmitPending, setIsAutoSubmitPending] = useState(false);
 
@@ -564,6 +586,38 @@ export function PictureDescriptionScreen() {
   const pictureVoiceSessionId = childId
     ? `game_picture_${childId}`
     : "game_picture";
+
+  useEffect(() => {
+    if (!childId) return;
+    const controller = new AbortController();
+    void resolvedVocabService
+      .listNotebook(childId, 12, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setNotebookData(data);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, resolvedVocabService]);
+
+  const activeNotebook =
+    notebookData && notebookData.child_id === childId ? notebookData : null;
+  const notebookBonusWords = useMemo(() => {
+    if (!activeNotebook) return [];
+    const raw = activeNotebook.storytelling_words?.length
+      ? activeNotebook.storytelling_words
+      : activeNotebook.items.map((item) => item.word);
+    return raw.filter(Boolean).slice(0, 3);
+  }, [activeNotebook]);
+  const combinedFocusWords = useMemo(
+    () =>
+      Array.from(new Set([...urlFocusWords, ...notebookBonusWords])).slice(
+        0,
+        6,
+      ),
+    [notebookBonusWords, urlFocusWords],
+  );
 
   useEffect(() => {
     lockSessionVoice(pictureVoiceSessionId);
@@ -1050,7 +1104,9 @@ export function PictureDescriptionScreen() {
           sample_key: sample.sample_key,
           refresh_ai_guide: options?.refreshAiGuide,
           teacher_gender: teacherPersona.gender,
-          ...(urlFocusWords.length > 0 ? { target_words: urlFocusWords } : {}),
+          ...(combinedFocusWords.length > 0
+            ? { target_words: combinedFocusWords }
+            : {}),
         },
         controller.signal,
       );
@@ -1097,7 +1153,9 @@ export function PictureDescriptionScreen() {
           source_type: "BOOK_PAGE",
           book_page_id: page.page_id,
           teacher_gender: teacherPersona.gender,
-          ...(urlFocusWords.length > 0 ? { target_words: urlFocusWords } : {}),
+          ...(combinedFocusWords.length > 0
+            ? { target_words: combinedFocusWords }
+            : {}),
         },
         controller.signal,
       );
@@ -1169,7 +1227,9 @@ export function PictureDescriptionScreen() {
           source_type: "CUSTOM_UPLOAD",
           image_file: uploadFile,
           teacher_gender: teacherPersona.gender,
-          ...(urlFocusWords.length > 0 ? { target_words: urlFocusWords } : {}),
+          ...(combinedFocusWords.length > 0
+            ? { target_words: combinedFocusWords }
+            : {}),
         },
         controller.signal,
       );
@@ -1392,7 +1452,7 @@ export function PictureDescriptionScreen() {
               new Set([
                 ...(session.target_words ?? []),
                 ...(session.guide.target_words ?? []),
-                ...urlFocusWords,
+                ...combinedFocusWords,
                 ...session.guide.suggested_vocabulary.map((item) => item.word),
               ]),
             )
@@ -1583,7 +1643,7 @@ export function PictureDescriptionScreen() {
       new Set([
         ...(session.target_words ?? []),
         ...(session.guide.target_words ?? []),
-        ...urlFocusWords,
+        ...combinedFocusWords,
       ]),
     );
     const effectiveInputMode = overrideMode ?? inputMode;
@@ -2143,6 +2203,7 @@ export function PictureDescriptionScreen() {
         new Set([
           ...(session.target_words ?? []),
           ...(session.guide.target_words ?? []),
+          ...notebookBonusWords,
         ]),
       )
     : [];
@@ -2201,6 +2262,75 @@ export function PictureDescriptionScreen() {
       data-reduced-motion={reducedMotion ? "true" : "false"}
     >
       {headerBlock}
+
+      {childId ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-amber-200 bg-amber-50/75 px-4 py-2.5"
+          data-testid="picture-notebook-bridge-bar"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-950">
+              <BookHeart aria-hidden="true" className="size-4 text-amber-700" />
+              {tGlossary("bonusStoryWordsLabel")}
+            </span>
+            {notebookBonusWords.length > 0 ? (
+              notebookBonusWords.map((word) => (
+                <button
+                  className="viread-learning-content inline-flex min-h-8 items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-0.5 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+                  data-testid={`picture-notebook-word-${word}`}
+                  dir="ltr"
+                  key={word}
+                  lang="vi"
+                  onClick={() => {
+                    if (session) {
+                      handleInsertVocabWord(word);
+                    } else if (calmSound) {
+                      void speechPlayer
+                        .play(word, { wordSample: true, bypassSessionLock: true })
+                        .catch(() => undefined);
+                    }
+                  }}
+                  type="button"
+                >
+                  <Sparkles aria-hidden="true" className="size-3 text-amber-600" />
+                  {word}
+                </button>
+              ))
+            ) : (
+              <span className="text-xs font-semibold text-muted">
+                {tGlossary("bonusStoryWordsHint")}
+              </span>
+            )}
+          </div>
+          <Button
+            className="min-h-9 w-auto!"
+            data-testid="picture-open-notebook-btn"
+            onClick={() => setNotebookDrawerOpen(true)}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <BookHeart aria-hidden="true" className="size-3.5" />
+            {activeNotebook && activeNotebook.total > 0
+              ? tGlossary("hubNotebookButton", { count: activeNotebook.total })
+              : tGlossary("hubNotebookButtonEmpty")}
+          </Button>
+        </div>
+      ) : null}
+
+      {childId ? (
+        <VocabularyNotebookDrawer
+          childAlias={selectedChild.alias}
+          childId={childId}
+          initialNotebook={activeNotebook}
+          onClose={() => setNotebookDrawerOpen(false)}
+          onNotebookChange={setNotebookData}
+          open={notebookDrawerOpen}
+          service={resolvedVocabService}
+          showGameLinks={false}
+          speechPlayer={speechPlayer}
+        />
+      ) : null}
 
       {actionError ? (
         <StatusMessage tone="error">{actionError}</StatusMessage>

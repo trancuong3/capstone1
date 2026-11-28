@@ -35,6 +35,7 @@ from app.api.routes import karaoke_practice
 from app.api.routes import karaoke_processing
 from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
+from app.api.routes import vocabulary_notebook
 
 api_router = APIRouter()
 api_router.include_router(karaoke_simple_import.router, prefix="/karaoke", tags=["Karaoke Simple Import"])
@@ -96,3 +97,8 @@ api_router.include_router(ocr_extraction.router, prefix="/studio/ocr", tags=["Sm
 api_router.include_router(ocr_extraction.studio_router, prefix="/studio", tags=["Smart Book Studio OCR"])
 api_router.include_router(book_assets.router, prefix="/studio", tags=["Smart Book Studio Assets"])
 api_router.include_router(global_tasks.router, prefix="/studio", tags=["Smart Book Studio Tasks"])
+api_router.include_router(
+    vocabulary_notebook.router,
+    prefix="/vocabulary",
+    tags=["Vocabulary Notebook"],
+)

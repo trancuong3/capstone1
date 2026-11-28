@@ -17,6 +17,7 @@ import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
 import { scanInstantVi } from "../features/scan_instant";
+import { wordGlossaryVi } from "../features/word_glossary";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 export const viMessages: MessagesDictionary = {
@@ -39,6 +40,7 @@ export const viMessages: MessagesDictionary = {
   notifications,
   accessibility,
   scanInstant: scanInstantVi,
+  wordGlossary: wordGlossaryVi,
 };
 
 export default viMessages;
