@@ -434,6 +434,15 @@ class VietocrV2TrainCompatibilityAndAmpFallbackTests(unittest.TestCase):
                     torch.nn, "attention", fake_attention_mod, create=True
                 )
 
+            if hasattr(torch, "accelerator"):
+                accelerator_stream_patch = patch.object(
+                    torch.accelerator,
+                    "current_stream",
+                    return_value=SimpleNamespace(is_capturing=lambda: False),
+                )
+            else:
+                accelerator_stream_patch = contextmanager(lambda: (yield))()
+
             with (
                 patch.object(train_mod, "prepare_vietocr_training_runtime", return_value={}),
                 patch.object(train_mod, "_write_annotations", side_effect=fake_write_annotations),
@@ -452,6 +461,13 @@ class VietocrV2TrainCompatibilityAndAmpFallbackTests(unittest.TestCase):
                 patch.object(torch, "autocast", side_effect=fake_autocast),
                 patch.object(torch, "load", side_effect=cpu_safe_torch_load),
                 patch.object(torch.amp, "GradScaler", FakeGradScaler),
+                patch.object(
+                    torch.optim.Optimizer,
+                    "_accelerator_graph_capture_health_check",
+                    lambda _self: None,
+                    create=True,
+                ),
+                accelerator_stream_patch,
                 attention_patch,
                 patch.object(torch.cuda, "is_available", return_value=True),
                 patch.object(torch.cuda, "manual_seed_all", MagicMock()),
