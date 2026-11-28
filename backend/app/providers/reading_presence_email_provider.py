@@ -15,14 +15,33 @@ from app.database.config import (
     SMTP_SEND_TIMEOUT_SECONDS,
     SMTP_USERNAME,
 )
+from app.providers.email_layout import (
+    extract_cta_label_from_line,
+    render_reading_presence_html,
+)
 from app.providers.reading_reminder_email_provider import (
     EmailDeliveryNotConfigured,
     email_delivery_is_configured,
 )
-from app.services.i18n.email_templates import render_reading_presence_email
+from app.services.i18n.email_templates import (
+    READING_REMINDER_TEMPLATES,
+    render_reading_presence_email,
+)
 from app.services.i18n.locales import DEFAULT_LOCALE
 
 SUBJECT = "ViRead đã tạm dừng buổi đọc"
+
+
+def _localized_open_app_cta_label(locale: str) -> str:
+    template = READING_REMINDER_TEMPLATES.get(locale) or READING_REMINDER_TEMPLATES["vi"]
+    for paragraph in template["body"].split("\n\n"):
+        if "{app_url}" in paragraph:
+            return extract_cta_label_from_line(
+                paragraph,
+                "{app_url}",
+                fallback="ViRead",
+            )
+    return "ViRead"
 
 
 class PresenceEmailRetryable(Exception):
@@ -61,12 +80,20 @@ def build_presence_message(
         child_alias=child_alias,
         app_url=READING_REMINDER_APP_URL,
     )
+    html_body = render_reading_presence_html(
+        locale=rendered.locale,
+        subject=rendered.subject,
+        plain_body=rendered.body,
+        app_url=READING_REMINDER_APP_URL,
+        cta_label=_localized_open_app_cta_label(rendered.locale),
+    )
     message = EmailMessage()
     message["From"] = formatted_from
     message["To"] = recipient
     message["Subject"] = rendered.subject
     message["Message-ID"] = f"<reading-presence-{alert_id}@{domain}>"
     message.set_content(rendered.body)
+    message.add_alternative(html_body, subtype="html")
     message["Content-Language"] = rendered.locale
     return message
 

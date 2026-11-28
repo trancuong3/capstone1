@@ -262,7 +262,7 @@ export function KaraokeLibraryScreen() {
                 )}
               />
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                 {data.items.map((item) => {
                   const coverUrl = resolveCoverUrl(item);
                   const displayTitle =
@@ -352,9 +352,9 @@ export function KaraokeLibraryScreen() {
                         })}
                       </p>
 
-                      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+                      <div className="mt-auto flex flex-nowrap items-center gap-2 border-t border-border/70 pt-3">
                         <ButtonLink
-                          fullWidth={false}
+                          className="min-w-0 flex-1 whitespace-nowrap px-2.5"
                           href={`/admin/karaoke/${item.song_id}/edit`}
                           size="admin"
                           variant="secondary"
@@ -375,6 +375,7 @@ export function KaraokeLibraryScreen() {
                         </ButtonLink>
                         {item.published_version_id && (
                           <Button
+                            className="shrink-0 whitespace-nowrap px-2.5"
                             disabled={busy}
                             fullWidth={false}
                             onClick={() => setPendingVisibilityItem(item)}
@@ -382,9 +383,9 @@ export function KaraokeLibraryScreen() {
                             variant="outline"
                           >
                             {item.status === "HIDDEN" ? (
-                              <Eye aria-hidden className="size-4" />
+                              <Eye aria-hidden className="size-4 shrink-0" />
                             ) : (
-                              <EyeOff aria-hidden className="size-4" />
+                              <EyeOff aria-hidden className="size-4 shrink-0" />
                             )}
                             {item.status === "HIDDEN"
                               ? t("karaoke.library.showSong")

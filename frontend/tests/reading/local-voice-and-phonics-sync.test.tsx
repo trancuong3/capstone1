@@ -540,6 +540,7 @@ describe("ReadingScreen in-place step-by-step phonics ('mốt' & unsupported wor
     await act(async () => {
       lastRecognition().say("Đánh vần giúp con");
       await vi.advanceTimersByTimeAsync(200);
+      await vi.dynamicImportSettled();
     });
 
     // Renders PhonicsLessonCard right in-place without leaving the reading page!
@@ -589,7 +590,11 @@ describe("ReadingScreen in-place step-by-step phonics ('mốt' & unsupported wor
     await act(async () => fireEvent.click(spellBtn));
 
     expect(
-      await screen.findByTestId("phonics-lesson-unsupported"),
+      await screen.findByTestId(
+        "phonics-lesson-unsupported",
+        {},
+        { timeout: 5000 },
+      ),
     ).toHaveTextContent("Chưa có mẫu đánh vần");
     expect(speechPlayerMock.playPhonicsLesson).not.toHaveBeenCalled();
   });

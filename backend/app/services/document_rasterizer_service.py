@@ -1295,9 +1295,9 @@ def iter_rasterized_spooled_document(
         byte_length=spooled.byte_length,
         header_bytes=spooled.header_bytes,
     )
-    temp_pdf_path: Path | None = None
     page_iter: Iterator[RasterizedDocumentPage] | None = None
     bounded_iter: Iterator[RasterizedDocumentPage] | None = None
+    temp_pdf_path: Path | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
@@ -1307,18 +1307,19 @@ def iter_rasterized_spooled_document(
             # from disk without keeping a 50 MB buffer in Python heap RAM.
             fd, raw_path = tempfile.mkstemp(prefix="viread_pdf_", suffix=".pdf")
             temp_pdf_path = Path(raw_path)
-            spooled.spool_file.seek(0)
             with os.fdopen(fd, "wb") as out_f:
+                spooled.spool_file.seek(0)
                 shutil.copyfileobj(spooled.spool_file, out_f, length=_UPLOAD_SPOOL_CHUNK_BYTES)
             page_iter = _iter_pdf_pages(temp_pdf_path)
         else:
             page_iter = _iter_image_pages(spooled.spool_file, detected)
 
-        def _bounded_iter() -> Iterator[RasterizedDocumentPage]:
+        def _bounded_iter(
+            inner_iter: Iterator[RasterizedDocumentPage] = page_iter,
+        ) -> Iterator[RasterizedDocumentPage]:
             count = 0
             try:
-                assert page_iter is not None
-                for page in page_iter:
+                for page in inner_iter:
                     count += 1
                     if count > MAX_DOCUMENT_PAGES:
                         raise HTTPException(
@@ -1327,27 +1328,22 @@ def iter_rasterized_spooled_document(
                         )
                     yield page
             finally:
-                close_inner = getattr(page_iter, "close", None)
+                close_inner = getattr(inner_iter, "close", None)
                 if callable(close_inner):
                     close_inner()
 
         bounded_iter = _bounded_iter()
         yield clean_name, detected, spooled.source_sha256, bounded_iter
     finally:
-        if bounded_iter is not None:
-            close_bounded = getattr(bounded_iter, "close", None)
-            if callable(close_bounded):
+        for it in (bounded_iter, page_iter):
+            close_fn = getattr(it, "close", None)
+            if callable(close_fn):
                 try:
-                    close_bounded()
+                    close_fn()
                 except Exception:
                     pass
-        if page_iter is not None:
-            close_page_iter = getattr(page_iter, "close", None)
-            if callable(close_page_iter):
-                try:
-                    close_page_iter()
-                except Exception:
-                    pass
+        bounded_iter = None
+        page_iter = None
         if temp_pdf_path is not None:
             try:
                 temp_pdf_path.unlink(missing_ok=True)

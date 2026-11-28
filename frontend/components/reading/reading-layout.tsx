@@ -47,6 +47,7 @@ interface ReadingLayoutProps {
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   retryMode?: boolean;
+  retryFocusKey?: string | null;
   onSkipRetryWord?: () => void;
   retryWordPosition?: number;
   retryWordCount?: number;
@@ -126,6 +127,7 @@ export function ReadingLayout({
   isMicRecording = false,
   isPageTransitioning = false,
   retryMode = false,
+  retryFocusKey = null,
   onSkipRetryWord,
   retryWordPosition = 0,
   retryWordCount = 0,
@@ -302,6 +304,8 @@ export function ReadingLayout({
           onWordClick={onWordClick}
           page={page}
           previewSnapshot={previewSnapshot}
+          retryMode={retryMode}
+          retryFocusKey={retryFocusKey}
           spokenWords={spokenWords}
           skippedWordIds={skippedWordIds}
           repeatedWordIds={repeatedWordIds}

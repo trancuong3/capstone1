@@ -49,7 +49,7 @@ const TAB_ITEMS: readonly {
     id: "user-books",
     icon: BookUser,
     labelKey: "qualityHub.tabs.userBooks",
-    fallbackLabel: "Sách người dùng & Flow 2",
+    fallbackLabel: "Sách người dùng & Đóng góp dữ liệu",
   },
 ];
 
@@ -142,7 +142,7 @@ export function AdminQualityHubScreen({
           undefined,
           "Phân khu quản lý chất lượng sách",
         )}
-        className="grid grid-cols-1 gap-1.5 rounded-xl border border-border bg-surface-subtle p-1.5 sm:grid-cols-2 lg:inline-flex lg:flex-wrap lg:items-center"
+        className="grid grid-cols-1 gap-1.5 rounded-xl border border-border bg-surface-subtle p-1.5 sm:grid-cols-2 xl:inline-flex xl:flex-wrap xl:items-center"
         onKeyDown={handleTabKeyDown}
         role="tablist"
       >

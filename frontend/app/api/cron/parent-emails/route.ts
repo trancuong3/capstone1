@@ -7,8 +7,17 @@ export const maxDuration = 60;
 
 const ALLOWED_SCOPES = new Set(["all", "reminders", "presence", "engagement"]);
 const RETRYABLE_UPSTREAM_STATUSES = new Set([502, 504]);
-const FIRST_ATTEMPT_TIMEOUT_MS = 35_000;
-const RETRY_ATTEMPT_TIMEOUT_MS = 20_000;
+const TOTAL_BUDGET_MS = 55_000;
+const FIRST_ATTEMPT_TIMEOUT_MS = 40_000;
+const MIN_ATTEMPT_TIMEOUT_MS = 8_000;
+const FAST_FAILURE_THRESHOLD_MS = 10_000;
+const RETRY_DELAYS_MS = [500, 2_000, 5_000, 10_000, 12_000] as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
 
 function constantTimeMatch(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate, "utf8");
@@ -40,15 +49,31 @@ async function postDispatchOnce(
   backendSecret: string,
   timeoutMs: number,
 ): Promise<Response> {
-  return fetch(dispatchUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "X-Cron-Secret": backendSecret,
-    },
-    cache: "no-store",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const controller = new AbortController();
+  const timerId = globalThis.setTimeout(() => {
+    controller.abort(
+      typeof DOMException !== "undefined"
+        ? new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          )
+        : new Error("TimeoutError"),
+    );
+  }, timeoutMs);
+  try {
+    return await fetch(dispatchUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "X-Cron-Secret": backendSecret,
+      },
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+  } finally {
+    globalThis.clearTimeout(timerId);
+  }
 }
 
 async function handleCronDispatch(request: NextRequest) {
@@ -84,26 +109,44 @@ async function handleCronDispatch(request: NextRequest) {
     process.env.PARENT_EMAIL_CRON_SECRET?.trim() || cronSecret;
 
   let upstream: Response | null = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const deadlineAt = Date.now() + TOTAL_BUDGET_MS;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs < MIN_ATTEMPT_TIMEOUT_MS) {
+      break;
+    }
+
     const timeoutMs =
-      attempt === 0 ? FIRST_ATTEMPT_TIMEOUT_MS : RETRY_ATTEMPT_TIMEOUT_MS;
+      attempt === 0
+        ? Math.min(FIRST_ATTEMPT_TIMEOUT_MS, remainingMs)
+        : remainingMs;
+    const attemptStartedAt = Date.now();
+
     try {
       upstream = await postDispatchOnce(dispatchUrl, backendSecret, timeoutMs);
-      if (
-        upstream.ok ||
-        !RETRYABLE_UPSTREAM_STATUSES.has(upstream.status) ||
-        attempt === 1
-      ) {
+      if (upstream.ok || !RETRYABLE_UPSTREAM_STATUSES.has(upstream.status)) {
         break;
       }
       await upstream.body?.cancel().catch(() => undefined);
     } catch {
       upstream = null;
-      if (attempt === 1) {
-        return NextResponse.json(
-          { ok: false, error: "UPSTREAM_UNREACHABLE" },
-          { status: 504 },
-        );
+    }
+
+    if (attempt >= RETRY_DELAYS_MS.length) {
+      break;
+    }
+
+    const remainingAfterAttempt = deadlineAt - Date.now();
+    if (remainingAfterAttempt < MIN_ATTEMPT_TIMEOUT_MS) {
+      break;
+    }
+
+    const attemptElapsedMs = Date.now() - attemptStartedAt;
+    if (attemptElapsedMs < FAST_FAILURE_THRESHOLD_MS) {
+      const maxDelayMs = remainingAfterAttempt - MIN_ATTEMPT_TIMEOUT_MS;
+      const delayMs = Math.min(RETRY_DELAYS_MS[attempt] ?? 0, maxDelayMs);
+      if (delayMs > 0) {
+        await sleep(delayMs);
       }
     }
   }

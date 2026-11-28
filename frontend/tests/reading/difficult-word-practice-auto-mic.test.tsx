@@ -373,4 +373,298 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       ),
     );
   });
+
+  it("AUTO-DW-01: hands-free ladder (wrong -> context phrase -> 'đánh vần giúp con' -> partial syllable SPELLING_STEP_ONLY -> full word CORRECT -> auto-advances with autoStart=true)", async () => {
+    class DwRecognition {
+      static instances: DwRecognition[] = [];
+      onresult: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = true;
+      interimResults = true;
+      lang = "vi-VN";
+      constructor() {
+        DwRecognition.instances.push(this);
+      }
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+      abort() {}
+      say(transcript: string, confidence = 0.95) {
+        this.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: true, length: 1, 0: { transcript, confidence } },
+          ],
+        });
+      }
+    }
+    const prevRec = Object.getOwnPropertyDescriptor(
+      window,
+      "SpeechRecognition",
+    );
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: DwRecognition,
+    });
+    try {
+      const phraseWord: DifficultWordDTO = {
+        ...wordItem,
+        normalized_word: "có",
+        display_text: "có",
+        sources: [
+          {
+            book_id: "33333333-3333-4333-8333-333333333333",
+            visibility_scope: "PUBLIC_CATALOG",
+            is_private_book: false,
+            page_id: "55555555-5555-4555-8555-555555555555",
+            page_revision_id: "66666666-6666-4666-8666-666666666666",
+            context_phrase: "Bé có một bông hoa.",
+            last_seen_at: "2026-11-26T00:00:00Z",
+          },
+        ],
+      };
+      const secondWord: DifficultWordDTO = {
+        ...wordItem,
+        normalized_word: "ngập ngừng",
+        display_text: "ngập ngừng",
+      };
+      const onSelectWord = vi.fn();
+
+      // Turn 1: INCORRECT ("cò") -> switches to context phrase
+      // Turn 4 (after phonics + SPELLING_STEP_ONLY): CORRECT ("có")
+      evaluatePracticeWordMock
+        .mockResolvedValueOnce({
+          ...makeAttempt("INCORRECT", "cò"),
+          normalized_word: "có",
+          display_text: "có",
+        })
+        .mockResolvedValueOnce({
+          ...makeAttempt("CORRECT", "có"),
+          normalized_word: "có",
+          display_text: "có",
+          next_recommended_word: "ngập ngừng",
+        });
+
+      const user = userEvent.setup();
+      render(
+        <DifficultWordPracticePanel
+          child={childFixture}
+          onClose={vi.fn()}
+          onProgressSaved={vi.fn(async () => {})}
+          onSelectWord={onSelectWord}
+          word={phraseWord}
+          words={[phraseWord, secondWord]}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+      );
+
+      // Attempt 1: wrong -> context phrase cue & displayed phrase ("có một bông")
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      await waitFor(() =>
+        expect(speechPlayerMock.play).toHaveBeenCalledWith(
+          expect.stringContaining("có một bông"),
+          expect.any(Object),
+        ),
+      );
+      expect(screen.getByText("có một bông")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
+      );
+
+      // Attempt 2: child asks "đánh vần giúp con" -> runs phonics steps & reopens mic
+      DwRecognition.instances.at(-1)!.say("đánh vần giúp con");
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
+      );
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect.stringContaining("Đến lượt con"),
+        expect.any(Object),
+      );
+
+      // Attempt 3: child says partial syllable ("cờ o") -> SPELLING_STEP_ONLY (must NOT evaluate or advance!)
+      const evalCallsBeforePartial = evaluatePracticeWordMock.mock.calls.length;
+      DwRecognition.instances.at(-1)!.say("cờ o");
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(4),
+      );
+      expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(
+        evalCallsBeforePartial,
+      );
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect.stringContaining("Con đánh vần đúng nhịp rồi!"),
+        expect.any(Object),
+      );
+      expect(onSelectWord).not.toHaveBeenCalled();
+
+      // Attempt 4: child says full word "có" -> CORRECT_AFTER_SPELLING -> auto-advances with autoStart=true
+      DwRecognition.instances.at(-1)!.say("có");
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      await waitFor(
+        () =>
+          expect(onSelectWord).toHaveBeenCalledWith("ngập ngừng", {
+            autoStart: true,
+          }),
+        { timeout: 4000 },
+      );
+      expect(screen.getByTestId("word-mastery-outcome")).toHaveAttribute(
+        "data-mastery-outcome",
+        "CORRECT_AFTER_SPELLING",
+      );
+    } finally {
+      if (prevRec) Object.defineProperty(window, "SpeechRecognition", prevRec);
+      else Reflect.deleteProperty(window, "SpeechRecognition");
+    }
+  }, 15_000);
+
+  it("AUTO-DW-02: max attempts encourages & advances, voice 'từ tiếp theo'/'dừng luyện' work, and offline evaluate retries idempotently with same request_id", async () => {
+    class DwRecognition {
+      static instances: DwRecognition[] = [];
+      onresult: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = true;
+      interimResults = true;
+      lang = "vi-VN";
+      constructor() {
+        DwRecognition.instances.push(this);
+      }
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+      abort() {}
+      say(transcript: string, confidence = 0.95) {
+        this.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: true, length: 1, 0: { transcript, confidence } },
+          ],
+        });
+      }
+    }
+    const prevRec = Object.getOwnPropertyDescriptor(
+      window,
+      "SpeechRecognition",
+    );
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: DwRecognition,
+    });
+    try {
+      const onSelectWord = vi.fn();
+      const user = userEvent.setup();
+
+      // 1) Offline failure -> idempotent retry keeps exact same request_id
+      evaluatePracticeWordMock
+        .mockRejectedValueOnce(new Error("Network offline"))
+        .mockResolvedValueOnce(makeAttempt("CORRECT", "một"));
+
+      const { unmount } = render(
+        <DifficultWordPracticePanel
+          child={childFixture}
+          onClose={vi.fn()}
+          onProgressSaved={vi.fn(async () => {})}
+          onSelectWord={onSelectWord}
+          word={wordItem}
+          words={[wordItem, nextWordItem]}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(1),
+      );
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+
+      const retrySaveBtn = await screen.findByRole("button", {
+        name: /Lưu lại kết quả/,
+      });
+      const firstRequestId =
+        evaluatePracticeWordMock.mock.calls[0][1].request_id;
+      await user.click(retrySaveBtn);
+      await waitFor(() =>
+        expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(2),
+      );
+      expect(evaluatePracticeWordMock.mock.calls[1][1].request_id).toBe(
+        firstRequestId,
+      );
+      unmount();
+
+      // 2) Voice "dừng luyện" -> PAUSED, then "từ tiếp theo" -> auto-advances
+      const { unmount: unmountPause } = render(
+        <DifficultWordPracticePanel
+          child={childFixture}
+          onClose={vi.fn()}
+          onProgressSaved={vi.fn(async () => {})}
+          onSelectWord={onSelectWord}
+          word={wordItem}
+          words={[wordItem, nextWordItem]}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
+      );
+      DwRecognition.instances.at(-1)!.say("dừng luyện");
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      expect(
+        await screen.findByRole("button", { name: /Tiếp tục luyện/ }),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Tiếp tục luyện/ }));
+      await waitFor(() =>
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
+      );
+      onSelectWord.mockClear();
+      DwRecognition.instances.at(-1)!.say("từ tiếp theo");
+      await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      expect(onSelectWord).toHaveBeenCalledWith("có", { autoStart: true });
+      unmountPause();
+
+      // 3) Max attempts (3 incorrect) -> encourages & auto-advances
+      evaluatePracticeWordMock.mockResolvedValue(
+        makeAttempt("INCORRECT", "mốt"),
+      );
+      onSelectWord.mockClear();
+      render(
+        <DifficultWordPracticePanel
+          child={childFixture}
+          onClose={vi.fn()}
+          onProgressSaved={vi.fn(async () => {})}
+          onSelectWord={onSelectWord}
+          word={wordItem}
+          words={[wordItem, nextWordItem]}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /Bắt đầu luyện/ }));
+      for (let i = 1; i <= 3; i += 1) {
+        await waitFor(() =>
+          expect(speechRecorderMock.start).toHaveBeenCalledTimes(3 + i),
+        );
+        await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+      }
+      await waitFor(() =>
+        expect(speechPlayerMock.play).toHaveBeenCalledWith(
+          expect.stringContaining("từ này mình luyện thêm sau"),
+          expect.any(Object),
+        ),
+      );
+      await waitFor(
+        () =>
+          expect(onSelectWord).toHaveBeenCalledWith("có", { autoStart: true }),
+        { timeout: 4000 },
+      );
+    } finally {
+      if (prevRec) Object.defineProperty(window, "SpeechRecognition", prevRec);
+      else Reflect.deleteProperty(window, "SpeechRecognition");
+    }
+  }, 20_000);
 });

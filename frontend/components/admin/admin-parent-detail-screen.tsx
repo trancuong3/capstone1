@@ -3,7 +3,6 @@
 import {
   ArrowLeft,
   CalendarDays,
-  Hash,
   Mail,
   Pencil,
   Phone,
@@ -24,6 +23,7 @@ import {
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -32,6 +32,7 @@ import type { TranslateFn } from "@/lib/i18n/types";
 import type { AdminParentDetailDTO } from "@/types/admin";
 
 type LoadError = "auth" | "forbidden" | "not-found" | "unavailable";
+const CHILDREN_PAGE_SIZE = 6;
 
 function getLoadError(error: unknown): LoadError {
   if (!isServiceError(error)) return "unavailable";
@@ -78,6 +79,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
     });
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [childrenPage, setChildrenPage] = useState(1);
   const requestIdRef = useRef(0);
 
   const load = useCallback(
@@ -86,6 +88,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       setLoading(true);
       setError(null);
       setParent(null);
+      setChildrenPage(1);
 
       try {
         const detail = await parents.getById(parentId, signal);
@@ -153,6 +156,19 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
   const resolvedTitle =
     parent?.display_name?.trim() || t("parents.detail.titleFallback");
+  const linkedChildren = parent?.children ?? [];
+  const childrenTotalPages = Math.max(
+    1,
+    Math.ceil(linkedChildren.length / CHILDREN_PAGE_SIZE),
+  );
+  const safeChildrenPage = Math.min(
+    Math.max(1, childrenPage),
+    childrenTotalPages,
+  );
+  const visibleChildren = linkedChildren.slice(
+    (safeChildrenPage - 1) * CHILDREN_PAGE_SIZE,
+    safeChildrenPage * CHILDREN_PAGE_SIZE,
+  );
 
   return (
     <>
@@ -287,15 +303,6 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                   })}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
-                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
-                  <Hash aria-hidden className="size-3.5" />
-                  {t("parents.detail.parentIdLabel", undefined, "Mã phụ huynh")}
-                </dt>
-                <dd className="break-all font-mono text-xs font-semibold text-ink">
-                  {parent.id}
-                </dd>
-              </div>
             </dl>
 
             {contactNotice ? (
@@ -331,33 +338,44 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 description={t("parents.detail.noChildrenDesc")}
               />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {parent.children.map((child) => (
-                  <Card
-                    className="flex-row items-center gap-3.5 bg-white p-4 text-start"
-                    key={child.id}
-                  >
-                    <div
-                      aria-hidden="true"
-                      className="grid size-11 shrink-0 place-items-center rounded-full border border-primary/20 bg-sky text-base font-extrabold text-primary-hover"
+              <div className="grid gap-3.5">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleChildren.map((child) => (
+                    <Card
+                      className="flex-row items-center gap-3.5 bg-white p-4 text-start"
+                      key={child.id}
                     >
-                      {child.alias.trim().charAt(0).toLocaleUpperCase(locale) ||
-                        "B"}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-base font-bold text-ink">
-                        {child.alias}
-                      </h3>
-                      <div className="mt-1 flex items-center gap-2">
-                        <AdminBadge tone="info">
-                          {t("parents.detail.childGrade", {
-                            grade: child.grade,
-                          })}
-                        </AdminBadge>
+                      <div
+                        aria-hidden="true"
+                        className="grid size-11 shrink-0 place-items-center rounded-full border border-primary/20 bg-sky text-base font-extrabold text-primary-hover"
+                      >
+                        {child.alias
+                          .trim()
+                          .charAt(0)
+                          .toLocaleUpperCase(locale) || "B"}
                       </div>
-                    </div>
-                  </Card>
-                ))}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-base font-bold text-ink">
+                          {child.alias}
+                        </h3>
+                        <div className="mt-1 flex items-center gap-2">
+                          <AdminBadge tone="info">
+                            {t("parents.detail.childGrade", {
+                              grade: child.grade,
+                            })}
+                          </AdminBadge>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationBar
+                  compact
+                  onPageChange={setChildrenPage}
+                  page={safeChildrenPage}
+                  pageSize={CHILDREN_PAGE_SIZE}
+                  total={linkedChildren.length}
+                />
               </div>
             )}
           </section>

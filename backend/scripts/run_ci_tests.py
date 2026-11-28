@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 # A normal backend job must not inadvertently load large production OCR weights.
 if os.getenv("VIREAD_REAL_OCR_GATE") == "1":
     raise SystemExit("Backend unit runner refuses VIREAD_REAL_OCR_GATE=1; run the dedicated real OCR gate")
+os.environ.setdefault("DATABASE_FORCE_NULL_POOL", "true")
 
 suite = unittest.defaultTestLoader.discover(
     start_dir=str(ROOT), pattern="test*.py", top_level_dir=str(ROOT)

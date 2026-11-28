@@ -1,16 +1,15 @@
 import { Skeleton } from "@/components/common/skeleton";
 import { translateMessage } from "@/lib/i18n/formatter";
-import { getServerI18n } from "@/lib/i18n/server";
-import { viMessages } from "@/messages/vi";
+import { getServerAdminI18n } from "@/lib/i18n/server";
 
 export default async function ProtectedAdminLoading() {
-  const { locale, messages } = await getServerI18n();
+  const { locale, messages, fallbackMessages } = await getServerAdminI18n();
   return (
     <section
       aria-busy="true"
       aria-label={translateMessage(
         messages,
-        viMessages,
+        fallbackMessages,
         locale,
         "admin.routes.protectedLoadingAria",
       )}
@@ -19,7 +18,7 @@ export default async function ProtectedAdminLoading() {
       <span className="sr-only" role="status">
         {translateMessage(
           messages,
-          viMessages,
+          fallbackMessages,
           locale,
           "admin.routes.protectedLoadingStatus",
         )}

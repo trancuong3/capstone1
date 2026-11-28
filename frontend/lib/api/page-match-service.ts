@@ -112,17 +112,36 @@ export type LocalOcrPageScanJobListDTO = z.infer<
   typeof localOcrPageScanJobListSchema
 >;
 
+export type OcrWorkerHealthStatus = "ready" | "unavailable" | "unreachable";
+
 export interface OcrWorkerHealthSnapshot {
-  readonly mode: string;
+  readonly status: OcrWorkerHealthStatus;
+  readonly mode: string | null;
   readonly ready: boolean;
   readonly workerOnline: boolean;
   readonly queuedCount: number;
+  readonly queueDepth: number;
+  readonly probeDegraded: boolean;
+}
+
+function makeUnreachableSnapshot(): OcrWorkerHealthSnapshot {
+  return {
+    status: "unreachable",
+    mode: null,
+    ready: false,
+    workerOnline: false,
+    queuedCount: 0,
+    queueDepth: 0,
+    probeDegraded: false,
+  };
 }
 
 export async function fetchOcrWorkerHealth(
   signal?: AbortSignal,
-): Promise<OcrWorkerHealthSnapshot | null> {
-  if (typeof fetch !== "function") return null;
+): Promise<OcrWorkerHealthSnapshot> {
+  if (typeof fetch !== "function") {
+    return makeUnreachableSnapshot();
+  }
   try {
     const response = await fetch(`${getApiBaseUrl()}/health`, {
       method: "GET",
@@ -131,14 +150,22 @@ export async function fetchOcrWorkerHealth(
       credentials: "omit",
       signal,
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return makeUnreachableSnapshot();
+    }
     const raw: unknown = await response.json();
-    if (!raw || typeof raw !== "object") return null;
+    if (!raw || typeof raw !== "object") {
+      return makeUnreachableSnapshot();
+    }
     const ocr = (raw as Record<string, unknown>).ocr;
-    if (!ocr || typeof ocr !== "object") return null;
+    if (!ocr || typeof ocr !== "object" || Array.isArray(ocr)) {
+      return makeUnreachableSnapshot();
+    }
     const rec = ocr as Record<string, unknown>;
-    const mode = typeof rec.mode === "string" ? rec.mode : "unknown";
-    const ready = Boolean(rec.ready);
+    const mode =
+      typeof rec.mode === "string" && rec.mode.trim() ? rec.mode.trim() : null;
+    const ready = rec.ready === true;
+    const probeDegraded = rec.probe_degraded === true;
     const workers = Array.isArray(rec.workers) ? rec.workers : [];
     const anyWorkerOnline = workers.some(
       (item) =>
@@ -152,13 +179,26 @@ export async function fetchOcrWorkerHealth(
       rec.queue && typeof rec.queue === "object"
         ? (rec.queue as Record<string, unknown>)
         : null;
-    const queuedCount =
+    const queueDepth =
       typeof queueObj?.queued === "number" && Number.isFinite(queueObj.queued)
         ? Math.max(0, Math.floor(queueObj.queued))
         : 0;
-    return { mode, ready, workerOnline, queuedCount };
+    const status: OcrWorkerHealthStatus = probeDegraded
+      ? "unreachable"
+      : workerOnline
+        ? "ready"
+        : "unavailable";
+    return {
+      status,
+      mode,
+      ready,
+      workerOnline,
+      queuedCount: queueDepth,
+      queueDepth,
+      probeDegraded,
+    };
   } catch {
-    return null;
+    return makeUnreachableSnapshot();
   }
 }
 

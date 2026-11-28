@@ -18,6 +18,11 @@ import {
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError } from "@/lib/api/service-error";
+import {
+  clearUserCache,
+  DEFAULT_USER_CACHE_TTL_MS,
+  writeUserCache,
+} from "@/lib/cache/user-query-cache";
 import type { ChildProfileDTO } from "@/types/child";
 
 const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
@@ -107,12 +112,14 @@ describe("AppStoreProvider", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     window.localStorage.clear();
+    clearUserCache();
     replaceMock.mockReset();
   });
 
   afterEach(() => {
     window.sessionStorage.clear();
     window.localStorage.clear();
+    clearUserCache();
   });
 
   it("does not abort an in-flight API read on initial provider mount", async () => {
@@ -368,5 +375,80 @@ describe("AppStoreProvider", () => {
     expect(
       window.sessionStorage.getItem("viread:selected-child:parent-2"),
     ).toBeNull();
+  });
+
+  it("skips redundant childService.get when fresh dashboard-summary exists, but revalidates when stale or after clearUserCache", async () => {
+    window.sessionStorage.setItem(
+      "viread:selected-child:parent-1",
+      "child-one",
+    );
+    const cachedChild = makeChild("child-one", "parent-1");
+    writeUserCache("parent-1", "dashboard-summary", {
+      profile: null,
+      children: [cachedChild],
+      latest_sessions_by_child: {},
+      source: "dashboard-summary",
+    });
+
+    const getChild = vi.fn().mockResolvedValue(cachedChild);
+    const services = {
+      childService: { get: getChild },
+    } as unknown as AppServices;
+
+    const firstRender = render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-1")}>
+        <AppServicesContext.Provider value={services}>
+          <AppStoreProvider>
+            <ValidatedProbe />
+          </AppStoreProvider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(screen.getByLabelText("Probe status")).toHaveTextContent("ready");
+    expect(getChild).not.toHaveBeenCalled();
+    firstRender.unmount();
+
+    // When cache is cleared (e.g. after a mutation), next mount revalidates via childService.get
+    clearUserCache("parent-1");
+    const secondRender = render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-1")}>
+        <AppServicesContext.Provider value={services}>
+          <AppStoreProvider>
+            <ValidatedProbe />
+          </AppStoreProvider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+    await waitFor(() => expect(getChild).toHaveBeenCalledWith("child-one"));
+    secondRender.unmount();
+
+    // When cache is stale (> DEFAULT_USER_CACHE_TTL_MS), mount still renders ready immediately and revalidates in background
+    getChild.mockClear();
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(10_000);
+    writeUserCache("parent-1", "dashboard-summary", {
+      profile: null,
+      children: [cachedChild],
+      latest_sessions_by_child: {},
+      source: "dashboard-summary",
+    });
+    nowSpy.mockReturnValue(10_000 + DEFAULT_USER_CACHE_TTL_MS + 1_000);
+
+    try {
+      render(
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-1")}>
+          <AppServicesContext.Provider value={services}>
+            <AppStoreProvider>
+              <ValidatedProbe />
+            </AppStoreProvider>
+          </AppServicesContext.Provider>
+        </AuthRuntimeContext.Provider>,
+      );
+      expect(screen.getByLabelText("Probe status")).toHaveTextContent("ready");
+      await waitFor(() => expect(getChild).toHaveBeenCalledWith("child-one"));
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

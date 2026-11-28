@@ -12,6 +12,7 @@ import { SessionReadingReports } from "@/components/reports/session-reading-repo
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import {
   formatPercent,
   getHistoryStatePresentation,
@@ -47,10 +48,26 @@ export function SessionDetailScreen({
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
-  const [eventsPage, setEventsPage] = useState(1);
-  const [comprehensionPage, setComprehensionPage] = useState(1);
-  const EVENTS_PAGE_SIZE = 10;
-  const COMPREHENSION_PAGE_SIZE = 10;
+  const [eventsPageState, setEventsPageState] = useState<{
+    readonly sessionId: string;
+    readonly page: number;
+  }>({ sessionId, page: 1 });
+  const [comprehensionPageState, setComprehensionPageState] = useState<{
+    readonly sessionId: string;
+    readonly page: number;
+  }>({ sessionId, page: 1 });
+  const EVENTS_PAGE_SIZE = 8;
+  const COMPREHENSION_PAGE_SIZE = 6;
+  const rawEventsPage =
+    eventsPageState.sessionId === sessionId ? eventsPageState.page : 1;
+  const rawComprehensionPage =
+    comprehensionPageState.sessionId === sessionId
+      ? comprehensionPageState.page
+      : 1;
+  const setEventsPage = (page: number) =>
+    setEventsPageState({ sessionId, page });
+  const setComprehensionPage = (page: number) =>
+    setComprehensionPageState({ sessionId, page });
 
   useEffect(() => {
     let active = true;
@@ -64,7 +81,10 @@ export function SessionDetailScreen({
         ]);
         if (book.id !== detail.book_id || child.id !== detail.child_id)
           throw new Error("Invalid historical book response");
-        if (active) setState({ status: "ready", detail, child, book });
+        if (active) {
+          hydrateTeacherVoiceFromChildProfile(child);
+          setState({ status: "ready", detail, child, book });
+        }
       } catch (error) {
         if (active)
           setState({
@@ -89,11 +109,11 @@ export function SessionDetailScreen({
       <section
         aria-busy="true"
         aria-label={t("sessions.detail.loadingAria")}
-        className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
+        className="mx-auto flex w-full max-w-[1120px] flex-col gap-3"
       >
-        <Skeleton className="h-28 rounded-card" />
-        <Skeleton className="h-32 rounded-card" />
-        <Skeleton className="h-80 rounded-card" />
+        <Skeleton className="h-20 rounded-card" />
+        <Skeleton className="h-24 rounded-card" />
+        <Skeleton className="h-72 rounded-card" />
       </section>
     );
 
@@ -162,6 +182,19 @@ export function SessionDetailScreen({
     );
 
   const { detail } = state;
+  const totalEventPages = Math.max(
+    1,
+    Math.ceil(detail.events.length / EVENTS_PAGE_SIZE),
+  );
+  const safeEventsPage = Math.min(Math.max(1, rawEventsPage), totalEventPages);
+  const totalComprehensionPages = Math.max(
+    1,
+    Math.ceil(detail.comprehension.length / COMPREHENSION_PAGE_SIZE),
+  );
+  const safeComprehensionPage = Math.min(
+    Math.max(1, rawComprehensionPage),
+    totalComprehensionPages,
+  );
   const metrics = detail.fluency_assessment?.metrics;
   const rangeIsPartial =
     detail.selected_range_pages != null &&
@@ -271,38 +304,68 @@ export function SessionDetailScreen({
     },
   ];
 
-  const comprehensionSection = (
+  const renderComprehensionSection = (embedded: boolean) => (
     <section
       aria-labelledby="session-comprehension-heading"
-      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:p-6"
+      className={
+        embedded
+          ? "flex flex-col gap-2.5 border-t border-border/80 pt-3"
+          : "overflow-hidden rounded-card border border-border bg-white"
+      }
     >
-      <h2
-        className="text-xl font-extrabold text-ink"
-        id="session-comprehension-heading"
+      <div
+        className={
+          embedded
+            ? "flex items-center justify-between gap-2"
+            : "border-b border-border/80 bg-canvas/50 px-3.5 py-2"
+        }
       >
-        {t("sessions.detail.comprehensionTitle")}
-      </h2>
+        <h2
+          className="text-sm font-extrabold text-ink sm:text-base"
+          id="session-comprehension-heading"
+        >
+          {t("sessions.detail.comprehensionTitle")}
+        </h2>
+      </div>
       {availability.comprehension === "unsupported" ||
       availability.comprehension === "partial" ? (
-        <StatusMessage tone="info">
-          {t("sessions.detail.comprehensionPartial")}{" "}
-          {availability.comprehension === "partial"
-            ? t("sessions.detail.comprehensionSupportedHint")
-            : t("sessions.detail.comprehensionUnsupportedHint")}
-        </StatusMessage>
+        <div
+          className={
+            embedded
+              ? undefined
+              : detail.comprehension.length === 0
+                ? "px-3.5 py-2.5"
+                : "px-3.5 pt-2.5"
+          }
+        >
+          <StatusMessage tone="info">
+            {t("sessions.detail.comprehensionPartial")}{" "}
+            {availability.comprehension === "partial"
+              ? t("sessions.detail.comprehensionSupportedHint")
+              : t("sessions.detail.comprehensionUnsupportedHint")}
+          </StatusMessage>
+        </div>
       ) : null}
       {detail.comprehension.length === 0 &&
       availability.comprehension === "absent" ? (
-        <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
-          {t("sessions.detail.noComprehensionQuestions")}
-        </p>
-      ) : (
+        <div className={embedded ? undefined : "p-3.5"}>
+          <p className="rounded-control bg-canvas/70 px-3 py-2.5 text-xs font-medium text-muted sm:text-sm">
+            {t("sessions.detail.noComprehensionQuestions")}
+          </p>
+        </div>
+      ) : detail.comprehension.length > 0 ? (
         <>
-          <ul className="divide-y divide-border rounded-control border border-border">
+          <ul
+            className={
+              embedded
+                ? "divide-y divide-border/70 border-y border-border/70 bg-white"
+                : "divide-y divide-border/70"
+            }
+          >
             {detail.comprehension
               .slice(
-                (comprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
-                comprehensionPage * COMPREHENSION_PAGE_SIZE,
+                (safeComprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
+                safeComprehensionPage * COMPREHENSION_PAGE_SIZE,
               )
               .map(({ answer, question }) => {
                 const answerStatusLabel = answer
@@ -320,10 +383,10 @@ export function SessionDetailScreen({
                       : "bg-canvas text-muted ring-1 ring-inset ring-border";
 
                 return (
-                  <li className="space-y-1.5 p-4" key={question.id}>
+                  <li className="space-y-1 px-3.5 py-2.5" key={question.id}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <p
-                        className="viread-learning-content break-words font-bold text-ink"
+                        className="viread-learning-content break-words text-sm font-bold text-ink"
                         dir="ltr"
                         lang="vi"
                       >
@@ -331,103 +394,116 @@ export function SessionDetailScreen({
                       </p>
                       {answerStatusLabel ? (
                         <span
-                          className={`shrink-0 rounded-control px-2.5 py-0.5 text-xs font-bold ${answerBadgeClass}`}
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold leading-tight ${answerBadgeClass}`}
                         >
                           {answerStatusLabel}
                         </span>
                       ) : null}
                     </div>
-                    <p className="text-xs font-semibold text-muted">
-                      {t("sessions.detail.difficultyLabel", {
-                        difficulty:
-                          question.difficulty ??
-                          t("sessions.detail.notRecorded"),
-                      })}
-                    </p>
-                    <p className="break-words text-sm text-ink">
-                      {answer
-                        ? t("sessions.detail.answerDisplay", {
-                            answer: answer.submitted_answer,
-                            status: answerStatusLabel ?? "",
-                          })
-                        : question.answered
-                          ? t("sessions.detail.answerUnsupported")
-                          : t("sessions.detail.noAnswer")}
-                    </p>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+                      <p className="break-words text-xs text-ink sm:text-sm">
+                        {answer
+                          ? t("sessions.detail.answerDisplay", {
+                              answer: answer.submitted_answer,
+                              status: answerStatusLabel ?? "",
+                            })
+                          : question.answered
+                            ? t("sessions.detail.answerUnsupported")
+                            : t("sessions.detail.noAnswer")}
+                      </p>
+                      <p className="text-xs font-semibold text-muted">
+                        {t("sessions.detail.difficultyLabel", {
+                          difficulty:
+                            question.difficulty ??
+                            t("sessions.detail.notRecorded"),
+                        })}
+                      </p>
+                    </div>
                   </li>
                 );
               })}
           </ul>
-          <PaginationBar
-            ariaLabel={t("sessions.detail.questionsPaginationAria")}
-            compact
-            itemLabel={t("sessions.detail.questionsPaginationItem")}
-            onPageChange={setComprehensionPage}
-            page={comprehensionPage}
-            pageSize={COMPREHENSION_PAGE_SIZE}
-            total={detail.comprehension.length}
-          />
+          {detail.comprehension.length > COMPREHENSION_PAGE_SIZE ? (
+            <div
+              className={
+                embedded ? undefined : "border-t border-border/70 px-3.5 py-2"
+              }
+            >
+              <PaginationBar
+                ariaLabel={t("sessions.detail.questionsPaginationAria")}
+                compact
+                itemLabel={t("sessions.detail.questionsPaginationItem")}
+                onPageChange={setComprehensionPage}
+                page={safeComprehensionPage}
+                pageSize={COMPREHENSION_PAGE_SIZE}
+                total={detail.comprehension.length}
+              />
+            </div>
+          ) : null}
         </>
-      )}
+      ) : null}
     </section>
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 max-w-3xl space-y-2">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3 pb-4">
+      <header className="flex flex-wrap items-start justify-between gap-2.5 border-b border-border pb-3">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
+            <h1 className="book-title text-xl tracking-[-0.02em] text-ink sm:text-2xl">
+              {pageTitle}
+            </h1>
             <span
-              className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
+              className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
             >
               {stateLabel}
             </span>
             {rangeIsPartial ? (
-              <span className="inline-flex items-center rounded-control border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
+              <span className="inline-flex shrink-0 items-center rounded-full border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
                 {t("sessions.detail.partialCompleteBadge")}
               </span>
             ) : null}
           </div>
-          <h1 className="book-title text-3xl text-ink sm:text-[38px]">
-            {pageTitle}
-          </h1>
-          <p className="text-base font-bold text-ink">
-            <span className="viread-learning-content" dir="ltr" lang="vi">
-              {state.book.title}
-            </span>
-            <span className="font-semibold text-muted">
-              {" "}
-              · {state.child.alias}
-            </span>
-          </p>
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
-            <div className="flex gap-1.5">
-              <dt>{t("sessions.detail.startedLabel")}</dt>
-              <dd className="tabular-nums text-ink">
-                {formatSessionDateTime(detail.started_at)}
-              </dd>
-            </div>
-            <div className="flex gap-1.5">
-              <dt>{t("sessions.detail.endedLabel")}</dt>
-              <dd className="tabular-nums text-ink">
-                {detail.ended_at === null
-                  ? t("sessions.detail.endedMissing")
-                  : formatSessionDateTime(detail.ended_at)}
-              </dd>
-            </div>
-          </dl>
+
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted">
+            <p className="text-sm font-bold text-ink">
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {state.book.title}
+              </span>
+              <span className="font-semibold text-muted">
+                {" "}
+                · {state.child.alias}
+              </span>
+            </p>
+            <dl className="flex flex-wrap items-center gap-x-3.5 gap-y-0.5 font-semibold text-muted">
+              <div className="flex items-center gap-1">
+                <dt>{t("sessions.detail.startedLabel")}</dt>
+                <dd className="tabular-nums text-ink">
+                  {formatSessionDateTime(detail.started_at)}
+                </dd>
+              </div>
+              <div className="flex items-center gap-1">
+                <dt>{t("sessions.detail.endedLabel")}</dt>
+                <dd className="tabular-nums text-ink">
+                  {detail.ended_at === null
+                    ? t("sessions.detail.endedMissing")
+                    : formatSessionDateTime(detail.ended_at)}
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <ButtonLink
-            className="sm:w-auto"
-            href={returnHref}
-            variant="secondary"
-          >
-            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
-            {t("sessions.detail.historyLink")}
-          </ButtonLink>
-        </div>
+        <ButtonLink
+          className="h-10 min-h-10! shrink-0 py-0! sm:h-9 sm:min-h-9!"
+          fullWidth={false}
+          href={returnHref}
+          size="admin"
+          variant="outline"
+        >
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+          {t("sessions.detail.historyLink")}
+        </ButtonLink>
       </header>
 
       {rangeIsPartial ? (
@@ -459,11 +535,11 @@ export function SessionDetailScreen({
 
       <section
         aria-labelledby="session-overview-heading"
-        className="rounded-card border border-border bg-white"
+        className="overflow-hidden rounded-card border border-border bg-white"
       >
-        <div className="border-b border-border px-4 py-3.5 sm:px-6">
+        <div className="border-b border-border/80 bg-canvas/50 px-3.5 py-2">
           <h2
-            className="text-lg font-extrabold text-ink"
+            className="text-sm font-extrabold text-ink sm:text-base"
             id="session-overview-heading"
           >
             {t("sessions.detail.summaryTitle")}
@@ -472,33 +548,47 @@ export function SessionDetailScreen({
 
         {availability.fluency === "unsupported" ||
         availability.fluency === "partial" ? (
-          <div className="px-4 pt-4 sm:px-6">
+          <div className="px-3.5 pt-2.5">
             <StatusMessage tone="info">
               {t("sessions.detail.summaryPartialDesc")}
             </StatusMessage>
           </div>
         ) : null}
 
-        <dl className="grid grid-cols-2 sm:grid-cols-3">
+        <dl
+          className={
+            summaryItems.length === 4
+              ? "grid grid-cols-2 sm:grid-cols-4"
+              : "grid grid-cols-2 sm:grid-cols-3"
+          }
+        >
           {summaryItems.map(({ label, value, isMissing }, index) => {
+            const isFourGrid = summaryItems.length === 4;
             const cellBorders = [
-              "border-border p-3.5 sm:px-6 sm:py-4",
+              "flex flex-col justify-between border-border/80 px-3 py-2 sm:px-3.5 sm:py-2.5",
               index % 2 === 0 ? "border-e sm:border-e-0" : "",
               index >= 2 ? "border-t" : "",
-              index === 2 ? "sm:border-t-0" : "",
-              index >= 3 ? "sm:border-t" : "",
-              index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
+              isFourGrid
+                ? [
+                    index >= 2 ? "sm:border-t-0" : "",
+                    index < 3 ? "sm:border-e" : "sm:border-e-0",
+                  ].join(" ")
+                : [
+                    index === 2 ? "sm:border-t-0" : "",
+                    index >= 3 ? "sm:border-t" : "",
+                    index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
+                  ].join(" "),
             ]
               .filter(Boolean)
               .join(" ");
             return (
               <div className={cellBorders} key={label}>
-                <dt className="text-xs font-bold text-muted">{label}</dt>
+                <dt className="text-[11px] font-bold text-muted">{label}</dt>
                 <dd
                   className={
                     isMissing
-                      ? "mt-1 text-sm font-semibold text-muted"
-                      : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
+                      ? "mt-0.5 text-xs font-semibold text-muted sm:text-sm"
+                      : "mt-0.5 text-base font-extrabold leading-snug tabular-nums text-primary sm:text-lg"
                   }
                 >
                   {value}
@@ -511,19 +601,21 @@ export function SessionDetailScreen({
 
       <SessionReadingReports sessionId={sessionId} />
 
-      {showComprehensionSectionDirectly ? comprehensionSection : null}
+      {showComprehensionSectionDirectly
+        ? renderComprehensionSection(false)
+        : null}
 
-      <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
+      <details className="group rounded-card border border-border bg-white px-3.5 py-2.5">
+        <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 text-sm font-extrabold text-primary [&::-webkit-details-marker]:hidden">
           <span>{t("sessions.detail.otherInfoTitle")}</span>
           <ChevronDown
             aria-hidden="true"
             className="size-4 shrink-0 transition-transform group-open:rotate-180"
           />
         </summary>
-        <div className="mt-4 flex flex-col gap-5 border-t border-border pt-4">
-          <section className="flex flex-col gap-3">
-            <h2 className="text-xl font-extrabold text-ink">
+        <div className="mt-2.5 flex flex-col gap-3.5 border-t border-border pt-3">
+          <section className="flex flex-col gap-2.5">
+            <h2 className="text-sm font-extrabold text-ink sm:text-base">
               {t("sessions.detail.eventsTitle")}
             </h2>
             {availability.events === "unsupported" ||
@@ -541,8 +633,8 @@ export function SessionDetailScreen({
               <>
                 <SessionEventList
                   events={detail.events.slice(
-                    (eventsPage - 1) * EVENTS_PAGE_SIZE,
-                    eventsPage * EVENTS_PAGE_SIZE,
+                    (safeEventsPage - 1) * EVENTS_PAGE_SIZE,
+                    safeEventsPage * EVENTS_PAGE_SIZE,
                   )}
                 />
                 <PaginationBar
@@ -550,7 +642,7 @@ export function SessionDetailScreen({
                   compact
                   itemLabel={t("sessions.detail.eventsPaginationItem")}
                   onPageChange={setEventsPage}
-                  page={eventsPage}
+                  page={safeEventsPage}
                   pageSize={EVENTS_PAGE_SIZE}
                   total={detail.events.length}
                 />
@@ -558,7 +650,9 @@ export function SessionDetailScreen({
             ) : null}
           </section>
 
-          {!showComprehensionSectionDirectly ? comprehensionSection : null}
+          {!showComprehensionSectionDirectly
+            ? renderComprehensionSection(true)
+            : null}
         </div>
       </details>
     </section>

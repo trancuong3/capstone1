@@ -185,11 +185,11 @@ describe("karaoke admin editor", () => {
     await screen.findByText(/Bài hát vừa thay đổi/);
     expect(screen.getByLabelText("Tên bài hát")).toHaveValue("Không được mất");
     expect(screen.getByRole("button", { name: "Lưu bản nháp" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Tải lại từ máy chủ" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại bản đã lưu" }));
     const cancelDialog = screen.getByRole("alertdialog");
     fireEvent.click(within(cancelDialog).getByRole("button", { name: "Hủy" }));
     expect(service.get).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Tải lại từ máy chủ" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại bản đã lưu" }));
     const confirmDialog = screen.getByRole("alertdialog");
     fireEvent.click(
       within(confirmDialog).getByRole("button", { name: "Tải lại bản lưu" }),

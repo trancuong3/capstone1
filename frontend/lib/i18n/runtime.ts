@@ -6,7 +6,10 @@ import {
 } from "@/lib/i18n/locales";
 import { readLocaleCookie } from "@/lib/i18n/persistence";
 import type { MessagesDictionary, TranslationParams } from "@/lib/i18n/types";
-import { getCachedLocaleMessages } from "@/messages/loader";
+import {
+  getCachedLocaleMessages,
+  withCachedRuntimeNamespaces,
+} from "@/messages/loader";
 import { viMessages } from "@/messages/vi";
 
 /**
@@ -24,7 +27,7 @@ export function getActiveClientLocale(): SupportedLocale {
 
 /**
  * Translates a UI key synchronously from cached active messages with safe
- * fallback to `viMessages`.
+ * fallback to `viMessages` and any lazy-loaded runtime namespaces (e.g. `admin`).
  */
 export function translateRuntime(
   key: string,
@@ -32,11 +35,17 @@ export function translateRuntime(
   defaultValue?: string,
 ): string {
   const locale = getActiveClientLocale();
-  const activeMessages: MessagesDictionary =
-    getCachedLocaleMessages(locale) ?? viMessages;
+  const activeMessages: MessagesDictionary = withCachedRuntimeNamespaces(
+    locale,
+    getCachedLocaleMessages(locale) ?? viMessages,
+  );
+  const fallbackMessages: MessagesDictionary = withCachedRuntimeNamespaces(
+    DEFAULT_LOCALE,
+    viMessages,
+  );
   return translateMessage(
     activeMessages,
-    viMessages,
+    fallbackMessages,
     locale,
     key,
     params,

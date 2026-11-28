@@ -333,4 +333,80 @@ describe("OAuth callback", () => {
     );
     expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
+
+  it("allows Vercel preview origins when VERCEL_ENV=preview without weakening production or spoofed hosts", async () => {
+    const harness = makeSupabase();
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+
+    const prevSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    const prevVercelEnv = process.env.VERCEL_ENV;
+    const prevVercelUrl = process.env.VERCEL_URL;
+    const prevBranchUrl = process.env.VERCEL_BRANCH_URL;
+
+    process.env.NEXT_PUBLIC_SITE_URL = "https://viread-frontend.vercel.app";
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_URL = "viread-git-feat-m3.vercel.app";
+    process.env.VERCEL_BRANCH_URL = "https://viread-branch-m3.vercel.app";
+
+    try {
+      const previewReq = new NextRequest(
+        new URL("/auth/callback?code=oauth-code", "http://0.0.0.0:3000"),
+        {
+          headers: {
+            "x-forwarded-host": "viread-git-feat-m3.vercel.app",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const previewResp = await GET(previewReq);
+      expect(previewResp.headers.get("location")).toBe(
+        "https://viread-git-feat-m3.vercel.app/dashboard",
+      );
+
+      const branchReq = new NextRequest(
+        new URL("/auth/callback?code=oauth-code", "http://0.0.0.0:3000"),
+        {
+          headers: {
+            "x-forwarded-host": "viread-branch-m3.vercel.app",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const branchResp = await GET(branchReq);
+      expect(branchResp.headers.get("location")).toBe(
+        "https://viread-branch-m3.vercel.app/dashboard",
+      );
+
+      // Spoofed host must still be rejected in preview
+      const spoofedPreviewReq = new NextRequest(
+        new URL("/auth/callback?code=oauth-code", "http://0.0.0.0:3000"),
+        {
+          headers: {
+            "x-forwarded-host": "evil.example.org",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const spoofedPreviewResp = await GET(spoofedPreviewReq);
+      expect(spoofedPreviewResp.headers.get("location")).toBe(
+        "https://viread-frontend.vercel.app/dashboard",
+      );
+
+      // Production ignores VERCEL_URL / VERCEL_BRANCH_URL even if set
+      process.env.VERCEL_ENV = "production";
+      const prodResp = await GET(previewReq);
+      expect(prodResp.headers.get("location")).toBe(
+        "https://viread-frontend.vercel.app/dashboard",
+      );
+    } finally {
+      if (prevSiteUrl === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+      else process.env.NEXT_PUBLIC_SITE_URL = prevSiteUrl;
+      if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = prevVercelEnv;
+      if (prevVercelUrl === undefined) delete process.env.VERCEL_URL;
+      else process.env.VERCEL_URL = prevVercelUrl;
+      if (prevBranchUrl === undefined) delete process.env.VERCEL_BRANCH_URL;
+      else process.env.VERCEL_BRANCH_URL = prevBranchUrl;
+    }
+  });
 });

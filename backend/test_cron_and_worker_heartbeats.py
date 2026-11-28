@@ -636,7 +636,11 @@ class CronIsolationAndHeartbeatSweepTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(
                     cron_svc, "_sweep_ocr_leases_and_heartbeats", side_effect=_slow_ocr_reap
                 ),
-                patch.object(cron_svc, "_remaining_budget", side_effect=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                patch.object(
+                    cron_svc,
+                    "_remaining_budget",
+                    side_effect=lambda *_a, _it=iter([1.0]): next(_it, 0.0),
+                ),
             ):
                 await cron_svc.run_scheduled_cron_dispatch(
                     run_remote_sweeps=True,
@@ -1387,6 +1391,7 @@ class OcrOutboxAndTrainingMaintenanceTests(unittest.IsolatedAsyncioTestCase):
                 res = await viread_ocr_training_auto_worker.run_maintenance_once()
 
             self.assertEqual(res, {"ok": True, "colab_activity": False})
+            self.assertGreaterEqual(cron_svc.TRAINING_MAINTENANCE_TIMEOUT_SECONDS, 12.0)
             expire_mock.assert_awaited_once()
             colab_mock.assert_awaited_once()
             self.assertIsNotNone(

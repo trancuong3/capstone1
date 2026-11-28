@@ -664,7 +664,11 @@ class BookAssetsV2WiringAndTextFreeGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ocr_gate_mode_reporting_and_route_wiring(self) -> None:
         # 1) Remote worker mode returns None -> explicitly reports opencv_only_remote_worker
-        with patch.dict(os.environ, {"VIREAD_OCR_MODE": "remote_worker"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"VIREAD_OCR_MODE": "remote_worker", "VIREAD_OCR_WORKER_PROCESS": ""},
+            clear=False,
+        ):
             self.assertIsNone(_build_default_ocr_check_fn())
 
         page_png, word_bboxes, canonical_text = _make_storybook_page_png()
@@ -934,8 +938,8 @@ class GlobalTasksV2WorkersAndZeroDuplicateJobsTests(unittest.IsolatedAsyncioTest
         self.assertTrue(ran_ocr)
         ocr_job = next(j for j in self.state.tables[SmartStudioJob] if j.Id == ocr_task.task.id)
         self.assertEqual(ocr_job.Status, "SUCCEEDED")
-        self.assertEqual(ocr_job.ProgressCompleted, 1)
-        self.assertEqual(ocr_job.ProgressTotal, 1)
+        self.assertEqual(ocr_job.ProgressCompleted, 2)
+        self.assertEqual(ocr_job.ProgressTotal, 2)
         self.assertEqual(ocr_job.ResultRefJson.get("page_id"), str(self.page1_id))
         self.assertGreaterEqual(len(self.state.tables[PageOcrExtraction]), 1)
         self.assertGreaterEqual(scheduler.get_status()["total_completed"], 1)

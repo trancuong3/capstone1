@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { TaskProgressView } from "@/components/tasks/task-progress-view";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -85,10 +86,18 @@ function statusBadgeTone(status: GlobalTaskStatus): string {
   }
 }
 
+const TASKS_PAGE_SIZE = 6;
+
 export function GlobalTaskCenterDrawer() {
   const t = useTranslations("common");
+  const tOcr = useTranslations("ocr");
   const taskCenter = useOptionalAiTaskCenter();
   const [clockMs, setClockMs] = useState<number>(() => Date.now());
+  const scopeKey = taskCenter?.scopeKey ?? "";
+  const [tasksPageState, setTasksPageState] = useState<{
+    readonly scopeKey: string;
+    readonly page: number;
+  }>({ scopeKey, page: 1 });
 
   const isOpen = taskCenter?.isOpen ?? false;
   const activeCount = taskCenter?.activeCount ?? 0;
@@ -122,6 +131,14 @@ export function GlobalTaskCenterDrawer() {
 
   const isAdminPortal = actorRole === "admin";
   const fullTasksPageHref = isAdminPortal ? "/admin/tasks" : "/studio/tasks";
+  const rawTasksPage =
+    tasksPageState.scopeKey === scopeKey ? tasksPageState.page : 1;
+  const totalTaskPages = Math.max(1, Math.ceil(tasks.length / TASKS_PAGE_SIZE));
+  const safeTasksPage = Math.min(Math.max(1, rawTasksPage), totalTaskPages);
+  const visibleTasks = tasks.slice(
+    (safeTasksPage - 1) * TASKS_PAGE_SIZE,
+    safeTasksPage * TASKS_PAGE_SIZE,
+  );
   const drawerTitle = isAdminPortal
     ? t("taskCenter.adminTitle", undefined, "Tác vụ AI quản trị")
     : t("taskCenter.parentTitle", undefined, "Tác vụ AI của tôi");
@@ -222,18 +239,25 @@ export function GlobalTaskCenterDrawer() {
           </div>
         </div>
 
-        {workerOnline === false && activeCount > 0 ? (
+        {workerOnline === false ? (
           <div
             className="mx-4 mt-3 flex items-start gap-2.5 rounded-control border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-900 sm:mx-5"
+            data-testid="global-task-center-worker-offline-banner"
             role="status"
           >
             <WifiOff aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
-              {t(
-                "taskCenter.workerOfflineBanner",
-                undefined,
-                "Máy chủ OCR đang tạm tắt — Các tác vụ của bạn đã lưu trong hàng chờ và sẽ tự tiếp tục khi máy chủ bật lại.",
-              )}
+              {activeCount > 0
+                ? t(
+                    "taskCenter.workerOfflineBanner",
+                    undefined,
+                    "Máy chủ OCR đang tạm tắt — Các tác vụ của bạn đã lưu trong hàng chờ và sẽ tự tiếp tục khi máy chủ bật lại.",
+                  )
+                : tOcr(
+                    "serviceStatus.taskCenterOfflineIdleBanner",
+                    undefined,
+                    "Dịch vụ OCR hiện chưa sẵn sàng — Các trang mới tải lên sẽ được lưu an toàn vào hàng chờ và tự động xử lý ngay khi OCR hoạt động trở lại.",
+                  )}
             </span>
           </div>
         ) : null}
@@ -282,7 +306,7 @@ export function GlobalTaskCenterDrawer() {
               </p>
             </div>
           ) : (
-            tasks.map((task) => {
+            visibleTasks.map((task) => {
               const isBusy = pendingActionJobIds.has(task.id);
               const isActive = ACTIVE_GLOBAL_TASK_STATUSES.has(task.status);
               const elapsedText = formatElapsed(
@@ -405,6 +429,25 @@ export function GlobalTaskCenterDrawer() {
             })
           )}
         </div>
+
+        {tasks.length > TASKS_PAGE_SIZE ? (
+          <div className="border-t border-border bg-canvas/40 px-4 py-2.5 sm:px-5">
+            <PaginationBar
+              ariaLabel={t(
+                "taskCenter.title",
+                undefined,
+                "Trung tâm tác vụ AI",
+              )}
+              compact
+              onPageChange={(nextPage) =>
+                setTasksPageState({ scopeKey, page: nextPage })
+              }
+              page={safeTasksPage}
+              pageSize={TASKS_PAGE_SIZE}
+              total={tasks.length}
+            />
+          </div>
+        ) : null}
 
         <div className="border-t border-border bg-canvas/40 px-4 py-3 sm:px-5">
           <Link

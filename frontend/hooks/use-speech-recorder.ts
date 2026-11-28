@@ -370,7 +370,19 @@ export function useSpeechRecorder(
             audioContextRef.current = ctx;
 
             if (ctx.state === "suspended") {
-              void ctx.resume().catch(() => undefined);
+              await Promise.race([
+                ctx.resume().catch(() => undefined),
+                new Promise<void>((resolve) => {
+                  setTimeout(resolve, 150);
+                }),
+              ]);
+              if (
+                generation !== streamGenerationRef.current ||
+                recorderRef.current !== recorder ||
+                !isRecordingRef.current
+              ) {
+                return;
+              }
             }
 
             const source = ctx.createMediaStreamSource(stream);

@@ -41,15 +41,15 @@
     "books": "Biblioteca de libros",
     "metadataQuality": "Calidad del libro",
     "auditLogs": "Registros de auditoría",
-    "training": "Entrenamiento OCR",
+    "training": "Modelos de lectura de texto",
     "health": "Operaciones",
     "moreTitle": "Más administración",
     "mobileQualityShort": "Calidad",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Texto",
     "mobileMoreDescriptions": {
       "auditLogs": "Seguimiento de registros de auditoría de administración",
-      "training": "Entrenar y operar el modelo VietOCR V2",
-      "health": "Estado del sistema, trabajador OCR y voz"
+      "training": "Entrenar y gestionar modelos de reconocimiento de texto",
+      "health": "Estado del sistema, reconocimiento de texto y voz"
     }
   },
   "accountMenu": {

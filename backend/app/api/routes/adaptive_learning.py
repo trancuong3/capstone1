@@ -35,7 +35,8 @@ async def get_child_adaptive_profile(
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> AdaptiveProfileRead:
-    return await _service(db).get_adaptive_profile(child_id, parent_id, window_days=window_days)
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    return await _service(db).get_adaptive_profile(child_id, parent_id, window_days=resolved_window)
 
 
 @router.get(
@@ -68,7 +69,8 @@ async def get_child_parent_entertainment_analytics(
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> ParentEntertainmentAnalyticsRead:
-    return await _service(db).get_parent_analytics(child_id, parent_id, window_days=window_days)
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    return await _service(db).get_parent_analytics(child_id, parent_id, window_days=resolved_window)
 
 
 @router.post("/children/{child_id}/evidence", response_model=SkillEvidenceRead)

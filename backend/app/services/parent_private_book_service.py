@@ -255,14 +255,14 @@ def _parent_safe_notice(sub: ParentBookPageSubmission) -> str | None:
     """Return a parent-appropriate explanation without exposing sensitive raw excerpts to children."""
     status_val = sub.WorkflowStatus
     if status_val == "CHECKING":
-        return "Hệ thống đang chạy OCR, rà chính tả và Tool Check cho trang này."
+        return "Hệ thống đang nhận diện chữ, rà chính tả và kiểm tra an toàn nội dung cho trang này."
     if status_val == "PASSED_READY_TO_ADD":
         if sub.ProofreadSuggestionsJson and sub.SpellingAcceptedAt is None:
-            return "Tool Check đã đạt. Hãy xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách."
-        return "Trang đã đạt toàn bộ kiểm tra OCR, chính tả và Tool Check. Bạn có thể thêm vào sách."
+            return "Kiểm tra an toàn nội dung đã đạt. Hãy xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách."
+        return "Trang đã đạt toàn bộ kiểm tra nhận diện chữ, chính tả và an toàn nội dung. Bạn có thể thêm vào sách."
     if status_val == "NEEDS_ADMIN_REVIEW":
         if sub.IsImageOnly:
-            return "Trang không phát hiện chữ hoặc chỉ có hình ảnh. Tool Check chỉ kiểm tra văn bản nên trang này cần Admin xem xét trực tiếp."
+            return "Trang không phát hiện chữ hoặc chỉ có hình ảnh. Hệ thống kiểm tra an toàn nội dung chỉ kiểm tra văn bản nên trang này cần Admin xem xét trực tiếp."
         if sub.ToolCheckPolicyBlocked:
             return "Trang này có nội dung bị chính sách an toàn cho trẻ gắn cờ mức nghiêm trọng. Bạn cần chỉnh sửa nội dung hoặc gửi Admin xem xét."
         return "Trang này cần Admin xem xét trước khi có thể thêm vào sách riêng."
@@ -283,9 +283,23 @@ def _parent_safe_notice(sub: ParentBookPageSubmission) -> str | None:
     return None
 
 
+def _default_local_ai_enforced() -> bool:
+    try:
+        from app.services.ocr_ai.config import OcrCorrectionConfig
+
+        return not OcrCorrectionConfig.private_book_allow_cloud_ai()
+    except Exception:
+        return True
+
+
 def _build_scope(raw: dict[str, Any] | None) -> ToolCheckScopeRead:
     data = raw if isinstance(raw, dict) else {}
     default_local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
+    local_enforced = (
+        bool(data["local_ai_enforced"])
+        if "local_ai_enforced" in data and data["local_ai_enforced"] is not None
+        else default_local_ai_enforced
+    )
     return ToolCheckScopeRead(
         modality=str(data.get("modality") or "TEXT_ONLY_WITH_OCR_IMAGE_PROOFREAD"),
         covers_all_chunks=bool(data.get("covers_all_chunks", False)),
@@ -294,7 +308,7 @@ def _build_scope(raw: dict[str, Any] | None) -> ToolCheckScopeRead:
         image_visual_safety_checked=bool(data.get("image_visual_safety_checked", False)),
         requires_admin_visual_review=bool(data.get("requires_admin_visual_review", False)),
         copyright_scanner_status=str(data.get("copyright_scanner_status") or "NOT_CONFIGURED"),
-        local_ai_enforced=bool(data.get("local_ai_enforced", default_local_ai_enforced)),
+        local_ai_enforced=local_enforced,
     )
 
 
@@ -485,12 +499,12 @@ class ParentPrivateBookService:
         if ocr_contribution is not None and getattr(ocr_contribution, "enabled", False):
             privacy_notice = (
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này. "
-                "Đóng góp mẫu OCR (Luồng 2) đang BẬT cho cuốn sách này — bạn có thể ngừng đóng góp bất kỳ lúc nào."
+                "Đóng góp dữ liệu cải thiện nhận diện chữ đang BẬT cho cuốn sách này — bạn có thể ngừng đóng góp bất kỳ lúc nào."
             )
         else:
             privacy_notice = (
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. "
-                "Sách này hiện không được dùng để huấn luyện OCR."
+                "Sách này hiện không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ."
             )
         try:
             from app.services.ocr_ai.config import OcrCorrectionConfig
@@ -2476,7 +2490,7 @@ class ParentPrivateBookService:
                 ):
                     raise HTTPException(
                         status_code=409,
-                        detail="Trang chưa hoàn tất sạch OCR, rà chính tả và Tool Check cho đúng phiên bản hiện tại.",
+                        detail="Trang chưa hoàn tất nhận diện chữ, rà chính tả và kiểm tra an toàn nội dung cho đúng phiên bản hiện tại.",
                     )
                 if (sub_row.ProofreadSuggestionsJson or []) and sub_row.SpellingAcceptedAt is None:
                     if payload.accept_spelling:

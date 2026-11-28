@@ -213,12 +213,15 @@ export function GlobalTaskCenter({
           aria-hidden="true"
           className={cn(
             "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums",
-            activeCount > 0
-              ? "bg-primary text-white"
-              : failedCount > 0
-                ? "bg-danger text-white"
-                : "bg-amber-600 text-white",
+            allActiveWaitingForWorker
+              ? "bg-amber-600 text-white"
+              : activeCount > 0
+                ? "bg-primary text-white"
+                : failedCount > 0
+                  ? "bg-danger text-white"
+                  : "bg-amber-600 text-white",
           )}
+          data-testid="global-task-center-sidebar-count"
         >
           {highlightCount}
         </span>

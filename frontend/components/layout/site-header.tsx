@@ -55,7 +55,7 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             <LanguageSelector variant="compact" />
           </div>
         ) : (
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-3">
+          <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
             <nav
               aria-label={tNav("accountMenu.accountNavAria")}
               className="flex shrink-0 items-center gap-2 sm:gap-3"
@@ -63,10 +63,10 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
               <ButtonLink
                 aria-current={isLoginActive ? "page" : undefined}
                 href="/login"
-                size="compact"
+                size="admin"
                 variant={isLoginActive ? "primary" : "quiet"}
                 className={cn(
-                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
+                  "h-11! min-h-11! w-auto whitespace-nowrap px-3! py-2! text-sm! leading-5 sm:min-w-32 sm:px-4! sm:text-label!",
                   !isLoginActive && "border border-border",
                 )}
               >
@@ -75,10 +75,10 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
               <ButtonLink
                 aria-current={isRegisterActive ? "page" : undefined}
                 href="/register"
-                size="compact"
+                size="admin"
                 variant={isLoginActive ? "quiet" : "primary"}
                 className={cn(
-                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
+                  "h-11! min-h-11! w-auto whitespace-nowrap px-3! py-2! text-sm! leading-5 sm:min-w-32 sm:px-4! sm:text-label!",
                   isLoginActive && "border border-border",
                 )}
               >

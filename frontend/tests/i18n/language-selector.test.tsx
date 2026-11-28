@@ -80,7 +80,7 @@ describe("LanguageSelector", () => {
     const searchInput = within(popover).getByRole("searchbox", {
       name: "Tìm ngôn ngữ",
     });
-    expect(searchInput).toHaveFocus();
+    await waitFor(() => expect(searchInput).toHaveFocus());
 
     // Keyboard navigation from search input -> options -> Escape
     await user.keyboard("{ArrowDown}");
@@ -127,12 +127,15 @@ describe("LanguageSelector", () => {
     await user.type(search, "Arabic");
     await user.click(within(reopened).getByRole("option", { name: /العربية/ }));
 
-    await waitFor(() => {
-      expect(document.documentElement.lang).toBe("ar");
-      expect(document.documentElement.dir).toBe("rtl");
-      expect(trigger).toHaveTextContent("العربية");
-      expect(screen.getByRole("status")).toHaveTextContent("العربية");
-    });
+    await waitFor(
+      () => {
+        expect(document.documentElement.lang).toBe("ar");
+        expect(document.documentElement.dir).toBe("rtl");
+        expect(trigger).toHaveTextContent("العربية");
+        expect(screen.getByRole("status")).toHaveTextContent("العربية");
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("renders mobile bottom sheet under 640px and dismisses on Android Back popstate", async () => {

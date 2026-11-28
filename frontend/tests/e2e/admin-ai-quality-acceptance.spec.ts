@@ -715,7 +715,7 @@ test.describe("Admin AI Quality, Rights, Safety & Parent Reports E2E", () => {
     await expect(verifyBtn).toBeEnabled();
     await verifyBtn.click();
 
-    await expect(page.getByText(/Đã xác minh revision/).first()).toBeVisible();
+    await expect(page.getByText(/Đã xác minh bản chữ/).first()).toBeVisible();
     await assertNoHorizontalOverflow(page, "E2E 1");
     await captureScreenshot(page, testInfo.project.name, "e2e1-ocr-verified");
     monitor.assertClean("E2E 1");
@@ -759,9 +759,9 @@ test.describe("Admin AI Quality, Rights, Safety & Parent Reports E2E", () => {
 
     const workflowCard = page.getByTestId("admin-ai-workflow");
     await expect(workflowCard).toBeVisible();
-    await expect(workflowCard).toContainText(/ollama/i);
+    await expect(workflowCard).not.toContainText(/ollama/i);
     // Must stay NEEDS_REVIEW (AI never auto-verifies)
-    await expect(page.getByText("Đã xác minh revision")).toHaveCount(0);
+    await expect(page.getByText("Đã xác minh bản chữ")).toHaveCount(0);
 
     await assertNoHorizontalOverflow(page, "E2E 2");
     await captureScreenshot(

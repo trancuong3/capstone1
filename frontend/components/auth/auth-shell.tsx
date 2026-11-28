@@ -29,6 +29,7 @@ export function AuthShell({ children }: AuthShellProps) {
                 alt=""
                 src="/images/reading-studio.webp"
                 fill
+                loading="eager"
                 sizes="(min-width: 1024px) 560px, 1px"
                 className="object-cover object-[41%_center]"
               />
