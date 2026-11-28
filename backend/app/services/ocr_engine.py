@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -36,6 +37,7 @@ from app.services.ocr_evidence import (
 from app.services.viread_vietocr_v2_preprocessing import preprocess_line_array
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
 
 # The Windows setup script keeps the pinned Vietnamese model inside this
 # checkout instead of writing into Program Files. Tesseract expects the parent
@@ -767,44 +769,69 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     load_fallback_reason: str | None = None
     with _engine_lock:
         if not _ocr_dependencies_loaded:
-            _ocr_dependencies_loaded = True
-            try:
-                import torch as torch_runtime
-                torch = torch_runtime
-            except Exception as exc:
-                torch = None
-                _vietocr_import_status = "not_installed"
-                _vietocr_import_error = type(exc).__name__
-            try:
-                from paddleocr import PaddleOCR as paddle_runtime
-                PaddleOCR = paddle_runtime
+            if torch is None:
+                try:
+                    import torch as torch_runtime
+                    torch = torch_runtime
+                except Exception as exc:
+                    torch = None
+                    try:
+                        package_version("torch")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                    _vietocr_import_error = type(exc).__name__
+            if PaddleOCR is None:
+                os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
+                if "lmdb.cffi" in sys.modules or (
+                    "lmdb" in sys.modules and "lmdb.cpython" not in sys.modules
+                ):
+                    for _lmdb_mod in ("lmdb", "lmdb.cffi", "lmdb.cpython"):
+                        sys.modules.pop(_lmdb_mod, None)
+                try:
+                    from paddleocr import PaddleOCR as paddle_runtime
+                    PaddleOCR = paddle_runtime
+                    _paddle_import_status = "success"
+                    _paddle_import_error = None
+                except Exception as exc:
+                    PaddleOCR = None
+                    try:
+                        package_version("paddleocr")
+                    except PackageNotFoundError:
+                        _paddle_import_status = "not_installed"
+                        _paddle_import_error = None
+                    else:
+                        _paddle_import_status = "not_initialized"
+                        _paddle_import_error = type(exc).__name__
+            elif _paddle_import_status not in ("success", "not_installed"):
                 _paddle_import_status = "success"
                 _paddle_import_error = None
-            except Exception as exc:
-                PaddleOCR = None
+            if Cfg is None or Predictor is None:
                 try:
-                    package_version("paddleocr")
-                except PackageNotFoundError:
-                    _paddle_import_status = "not_installed"
-                else:
-                    _paddle_import_status = "not_initialized"
-                    _paddle_import_error = type(exc).__name__
-            try:
-                from vietocr.tool.config import Cfg as vietocr_config
-                from vietocr.tool.predictor import Predictor as vietocr_predictor
-                _install_safe_vietocr_downloaders()
-                Cfg, Predictor = vietocr_config, vietocr_predictor
+                    from vietocr.tool.config import Cfg as vietocr_config
+                    from vietocr.tool.predictor import Predictor as vietocr_predictor
+                    _install_safe_vietocr_downloaders()
+                    Cfg, Predictor = vietocr_config, vietocr_predictor
+                    _vietocr_import_status = "success"
+                    _vietocr_import_error = None
+                except Exception as exc:
+                    Cfg = Predictor = None
+                    try:
+                        package_version("vietocr")
+                    except PackageNotFoundError:
+                        _vietocr_import_status = "not_installed"
+                        _vietocr_import_error = None
+                    else:
+                        _vietocr_import_status = "not_initialized"
+                        _vietocr_import_error = type(exc).__name__
+            elif _vietocr_import_status not in ("success", "not_installed"):
                 _vietocr_import_status = "success"
                 _vietocr_import_error = None
-            except Exception as exc:
-                Cfg = Predictor = None
-                try:
-                    package_version("vietocr")
-                except PackageNotFoundError:
-                    _vietocr_import_status = "not_installed"
-                else:
-                    _vietocr_import_status = "not_initialized"
-                    _vietocr_import_error = type(exc).__name__
+            _ocr_dependencies_loaded = (
+                _paddle_import_status in ("success", "not_installed")
+                and _vietocr_import_status in ("success", "not_installed")
+            )
 
         if _paddle_engine is None:
             if PaddleOCR is None:

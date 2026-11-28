@@ -1,6 +1,7 @@
 # Safely stop the ViRead Local Voice Worker started by Start-ViReadVoiceWorker.ps1.
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime"
+    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [int]$Port = 8010
 )
 
 $ErrorActionPreference = "Stop"

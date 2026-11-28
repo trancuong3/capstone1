@@ -706,6 +706,117 @@ class DualEngineOcrTests(unittest.TestCase):
                     },
                 )
 
+    def test_transient_lmdb_distutils_error_recovers_on_second_get_ocr_engines_call(self):
+        """Transient lmdb/cffi DistutilsPlatformError must not permanently lock PaddleOCR=None."""
+        import builtins
+        from contextlib import ExitStack
+        import sys
+        from types import ModuleType
+
+        self.assertEqual(os.environ.get("LMDB_FORCE_CPYTHON"), "1")
+
+        class DistutilsPlatformError(Exception):
+            pass
+
+        real_import = builtins.__import__
+        paddle_import_attempts = 0
+        saw_clean_lmdb_state_on_retry = False
+        mock_paddle_instance = MagicMock()
+        mock_paddle_cls = MagicMock(return_value=mock_paddle_instance)
+        mock_vietocr_instance = MagicMock()
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            nonlocal paddle_import_attempts, saw_clean_lmdb_state_on_retry
+            if name == "paddleocr":
+                paddle_import_attempts += 1
+                if paddle_import_attempts == 1:
+                    sys.modules["lmdb"] = ModuleType("lmdb")
+                    sys.modules["lmdb.cffi"] = ModuleType("lmdb.cffi")
+                    sys.modules.pop("lmdb.cpython", None)
+                    raise DistutilsPlatformError("Unable to find vcvarsall.bat")
+                saw_clean_lmdb_state_on_retry = (
+                    "lmdb.cffi" not in sys.modules
+                    and "lmdb" not in sys.modules
+                    and os.environ.get("LMDB_FORCE_CPYTHON") == "1"
+                )
+                fake_mod = ModuleType("paddleocr")
+                fake_mod.PaddleOCR = mock_paddle_cls
+                return fake_mod
+            return real_import(name, globals, locals, fromlist, level)
+
+        def fake_pkg_version(pkg_name: str) -> str:
+            if pkg_name == "paddleocr":
+                return "2.9.1"
+            return "0.3.12"
+
+        saved_lmdb = {
+            key: sys.modules[key]
+            for key in ("lmdb", "lmdb.cffi", "lmdb.cpython")
+            if key in sys.modules
+        }
+        try:
+            for key in ("lmdb", "lmdb.cffi", "lmdb.cpython"):
+                sys.modules.pop(key, None)
+            with ExitStack() as stack:
+                for attr, val in (
+                    ("_ocr_dependencies_loaded", False),
+                    ("torch", MagicMock()),
+                    ("PaddleOCR", None),
+                    ("Cfg", MagicMock()),
+                    ("Predictor", MagicMock()),
+                    ("_paddle_engine", None),
+                    ("_vietocr_engine", mock_vietocr_instance),
+                    ("_vietocr_active_profile", "ORIGINAL"),
+                    ("_vietocr_active_checkpoint_sha", ocr_engine._ORIGINAL_VIETOCR_SHA256),
+                    ("_vietocr_active_config_sha", None),
+                    ("_vietocr_active_storage_path", None),
+                    ("_paddle_import_status", "not_initialized"),
+                    ("_paddle_import_error", None),
+                    ("_vietocr_import_status", "success"),
+                    ("_vietocr_import_error", None),
+                    ("_paddle_initialization_status", "not_initialized"),
+                    ("_paddle_initialization_error", None),
+                ):
+                    stack.enter_context(patch.object(ocr_engine, attr, val))
+                stack.enter_context(
+                    patch.object(ocr_engine, "_active_viread_model", return_value=None)
+                )
+                stack.enter_context(
+                    patch.object(ocr_engine, "package_version", side_effect=fake_pkg_version)
+                )
+                stack.enter_context(patch("builtins.__import__", side_effect=fake_import))
+
+                with self.assertRaises(ocr_engine.OcrEngineUnavailable):
+                    ocr_engine._get_ocr_engines()
+
+                self.assertFalse(ocr_engine._ocr_dependencies_loaded)
+                self.assertIsNone(ocr_engine.PaddleOCR)
+                self.assertEqual(ocr_engine._paddle_import_status, "not_initialized")
+                self.assertEqual(ocr_engine._paddle_import_error, "DistutilsPlatformError")
+                self.assertEqual(
+                    ocr_engine._paddle_initialization_error, "DistutilsPlatformError"
+                )
+                self.assertIn("lmdb.cffi", sys.modules)
+
+                paddle_eng, viet_eng = ocr_engine._get_ocr_engines()
+                self.assertIs(paddle_eng, mock_paddle_instance)
+                self.assertIs(viet_eng, mock_vietocr_instance)
+                self.assertTrue(saw_clean_lmdb_state_on_retry)
+                self.assertTrue(ocr_engine._ocr_dependencies_loaded)
+                self.assertEqual(ocr_engine._paddle_import_status, "success")
+                self.assertIsNone(ocr_engine._paddle_import_error)
+                self.assertEqual(ocr_engine._paddle_initialization_status, "success")
+                self.assertIsNone(ocr_engine._paddle_initialization_error)
+                self.assertEqual(paddle_import_attempts, 2)
+
+                # Third call must short-circuit without re-running import blocks.
+                ocr_engine._get_ocr_engines()
+                self.assertEqual(paddle_import_attempts, 2)
+        finally:
+            for key in ("lmdb", "lmdb.cffi", "lmdb.cpython"):
+                sys.modules.pop(key, None)
+            sys.modules.update(saved_lmdb)
+
 
 if __name__ == "__main__":
     unittest.main()

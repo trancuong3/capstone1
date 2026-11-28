@@ -1567,19 +1567,84 @@ class OcrInferenceJobService:
         return persisted
 
     @staticmethod
-    def _worker_has_ready_engine(raw_engines: Any) -> bool:
-        """Match collect_remote_ocr_health(): reject explicitly unready non-empty engine dicts."""
-        if not isinstance(raw_engines, dict) or not raw_engines:
+    def _is_single_ocr_engine_ready(info: Any) -> bool:
+        if not isinstance(info, dict):
+            return False
+        if info.get("error"):
+            return False
+        status_upper = str(info.get("status") or "").strip().upper()
+        if status_upper in {"UNAVAILABLE", "FAILED"}:
+            return False
+        detail = str(info.get("detail_status") or "").strip().lower()
+        verified = info.get("inference_verified") is True
+        raw_loaded = info.get("loaded")
+        loaded = raw_loaded is True
+        if verified:
+            return True
+        if raw_loaded is False:
+            return False
+        unready_details = {"failed", "unavailable", "not_installed", "installed", "disabled"}
+        if detail in unready_details:
+            return False
+        if loaded:
             return True
         ready_statuses = {"loaded", "inference_verified", "healthy"}
-        for info in raw_engines.values():
-            if not isinstance(info, dict):
+        return detail in ready_statuses
+
+    @classmethod
+    def _worker_has_ready_engine(cls, raw_engines: Any) -> bool:
+        """Match collect_remote_ocr_health(): require every present primary neural engine to be ready."""
+        if not isinstance(raw_engines, dict) or not raw_engines:
+            return True
+        primary_ids = ("paddleocr", "vietocr")
+        if any(eng_id in raw_engines for eng_id in primary_ids):
+            for eng_id in primary_ids:
+                if eng_id in raw_engines and not cls._is_single_ocr_engine_ready(raw_engines.get(eng_id)):
+                    return False
+            return True
+        return any(
+            cls._is_single_ocr_engine_ready(info)
+            for info in raw_engines.values()
+            if isinstance(info, dict)
+        )
+
+    async def _is_worker_blocked_by_heartbeat(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+    ) -> bool:
+        try:
+            workers = await self.repo.list_worker_heartbeats(limit=50, now=now)
+        except TypeError:
+            if isinstance(self.db, AsyncSession):
+                raise
+            return False
+        if not isinstance(workers, list):
+            return False
+        ttl = timedelta(seconds=worker_heartbeat_ttl_seconds())
+        for worker in workers:
+            if getattr(worker, "WorkerId", None) != worker_id:
                 continue
-            detail = str(info.get("detail_status") or "").strip().lower()
-            verified = bool(info.get("inference_verified", False))
-            loaded = bool(info.get("loaded", False))
-            if (detail in ready_statuses and (loaded or verified or detail == "healthy")) or verified:
+            hb_at = getattr(worker, "LastHeartbeatAt", None)
+            if not isinstance(hb_at, datetime):
+                continue
+            normalized_hb_at = (
+                hb_at if hb_at.tzinfo is not None else hb_at.replace(tzinfo=timezone.utc)
+            )
+            if (now - normalized_hb_at) > ttl:
+                return False
+            status_upper = str(getattr(worker, "Status", "") or "").strip().upper()
+            if status_upper in {"DEGRADED", "STARTING", "OFFLINE"}:
                 return True
+            raw_engines = getattr(worker, "Engines", None)
+            if (
+                isinstance(raw_engines, dict)
+                and raw_engines
+                and not self._worker_has_ready_engine(raw_engines)
+            ):
+                return True
+            return False
         return False
 
     async def has_online_worker(self) -> bool:
@@ -1771,7 +1836,7 @@ class OcrInferenceJobService:
             last_error=_sanitize_error_message(last_error),
         )
         await self.db.commit()
-        if normalized_status in {"OFFLINE", "IDLE", "BUSY"}:
+        if normalized_status in {"OFFLINE", "IDLE", "BUSY", "DEGRADED", "STARTING"}:
             from app.services.remote_ocr_wakeup import invalidate_remote_ocr_health_cache
 
             invalidate_remote_ocr_health_cache()
@@ -1812,6 +1877,10 @@ class OcrInferenceJobService:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc)
+        clean_worker_id = worker_id.strip()[:120]
+        if await self._is_worker_blocked_by_heartbeat(worker_id=clean_worker_id, now=now):
+            await self.db.rollback()
+            return None
         bounded_lease = max(30, min(600, int(lease_seconds)))
         dead_lettered = await self.repo.dead_letter_exhausted_expired_leases(now=now)
         for expired_job in dead_lettered:
@@ -1822,7 +1891,7 @@ class OcrInferenceJobService:
             )
 
         job = await self.repo.claim_next_job(
-            worker_id=worker_id.strip()[:120],
+            worker_id=clean_worker_id,
             lease_seconds=bounded_lease,
             now=now,
         )

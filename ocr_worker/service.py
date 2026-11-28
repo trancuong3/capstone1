@@ -34,6 +34,8 @@ from pydantic import BaseModel, Field
 
 from ocr_worker import __version__
 
+os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
+
 logger = logging.getLogger("ocr_worker.service")
 
 EXPECTED_FLOW1_TRDG_SHA256 = (
@@ -428,6 +430,7 @@ def install_zero_db_config_shim() -> None:
 
 def import_ml_modules_safe_order() -> tuple[Any, Any]:
     """Import torch strictly BEFORE paddle on Windows to prevent WinError 127 DLL load failure."""
+    os.environ.setdefault("LMDB_FORCE_CPYTHON", "1")
     configure_cpu_thread_caps()
     import torch
 
@@ -449,6 +452,8 @@ def get_system_memory_stats() -> dict[str, Any]:
     stats: dict[str, Any] = {
         "ram_total_mb": None,
         "ram_available_mb": None,
+        "pagefile_total_mb": None,
+        "pagefile_available_mb": None,
         "vram_total_mb": None,
         "vram_free_mb": None,
         "cuda_available": False,
@@ -476,6 +481,8 @@ def get_system_memory_stats() -> dict[str, Any]:
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem)):
                 stats["ram_total_mb"] = round(mem.ullTotalPhys / (1024 * 1024), 1)
                 stats["ram_available_mb"] = round(mem.ullAvailPhys / (1024 * 1024), 1)
+                stats["pagefile_total_mb"] = round(mem.ullTotalPageFile / (1024 * 1024), 1)
+                stats["pagefile_available_mb"] = round(mem.ullAvailPageFile / (1024 * 1024), 1)
         except Exception:
             pass
     else:
@@ -823,14 +830,17 @@ class OcrRuntimeManager:
     def engines_snapshot(self) -> dict[str, dict[str, Any]]:
         return {name: state.to_dict() for name, state in self._engines.items()}
 
+    def _is_ready_unlocked(self) -> bool:
+        paddle_st = self._engines["paddleocr"]
+        viet_st = self._engines["vietocr"]
+        return bool(
+            (paddle_st.loaded or paddle_st.inference_verified)
+            and (viet_st.loaded or viet_st.inference_verified)
+        )
+
     def is_ready(self) -> bool:
         with self._state_lock:
-            paddle_st = self._engines["paddleocr"]
-            viet_st = self._engines["vietocr"]
-            return bool(
-                (paddle_st.loaded or paddle_st.inference_verified)
-                and (viet_st.loaded or viet_st.inference_verified)
-            )
+            return self._is_ready_unlocked()
 
     def sync_active_model(
         self,
@@ -1090,19 +1100,15 @@ class OcrRuntimeManager:
                 or sync_info["profile"]
             )
 
-            with self._state_lock:
-                self._model_profile = loaded_profile
-                self._model_sha256 = loaded_sha
-                self._pending_model_resync = False
-                self._engines["paddleocr"].loaded = (
-                    getattr(ocr_engine, "_paddle_engine", None) is not None
-                    or warmup_map.get("paddleocr") == "loaded"
-                )
-                self._engines["vietocr"].loaded = (
-                    getattr(ocr_engine, "_vietocr_engine", None) is not None
-                    or warmup_map.get("vietocr") == "loaded"
-                )
-                self._engines["tesseract_vie"].loaded = self._engines["tesseract_vie"].installed
+            paddle_loaded, viet_loaded = self._sync_engine_load_states(
+                ocr_engine,
+                warmup_map=warmup_map,
+                loaded_profile=loaded_profile,
+                loaded_sha=loaded_sha,
+                update_tesseract_loaded=True,
+            )
+            if not (paddle_loaded and viet_loaded):
+                return self.health_payload()
 
             prebaked_matched = bool(
                 sync_info.get("prebaked_hit") and loaded_sha == sync_info["checkpoint_sha256"]
@@ -1111,8 +1117,70 @@ class OcrRuntimeManager:
                 prebaked_hit=prebaked_matched
             ):
                 self._run_smoke_verification(ocr_engine)
+            else:
+                with self._state_lock:
+                    if self._is_ready_unlocked():
+                        self._last_error = None
 
             return self.health_payload()
+
+    def _sync_engine_load_states(
+        self,
+        ocr_engine: Any,
+        *,
+        warmup_map: dict[str, Any],
+        loaded_profile: str,
+        loaded_sha: str,
+        update_tesseract_loaded: bool = False,
+    ) -> tuple[bool, bool]:
+        paddle_loaded = (
+            getattr(ocr_engine, "_paddle_engine", None) is not None
+            or warmup_map.get("paddleocr") == "loaded"
+        )
+        viet_loaded = (
+            getattr(ocr_engine, "_vietocr_engine", None) is not None
+            or warmup_map.get("vietocr") == "loaded"
+        )
+        paddle_error = (
+            None
+            if paddle_loaded
+            else (
+                getattr(ocr_engine, "_paddle_initialization_error", None)
+                or getattr(ocr_engine, "_paddle_import_error", None)
+                or "not_initialized"
+            )
+        )
+        viet_error = (
+            None
+            if viet_loaded
+            else (
+                getattr(ocr_engine, "_vietocr_initialization_error", None)
+                or getattr(ocr_engine, "_vietocr_import_error", None)
+                or "not_initialized"
+            )
+        )
+        with self._state_lock:
+            self._model_profile = loaded_profile
+            self._model_sha256 = loaded_sha
+            self._pending_model_resync = False
+            self._engines["paddleocr"].loaded = paddle_loaded
+            self._engines["paddleocr"].error = paddle_error
+            if not paddle_loaded:
+                self._engines["paddleocr"].inference_verified = False
+            self._engines["vietocr"].loaded = viet_loaded
+            self._engines["vietocr"].error = viet_error
+            if not viet_loaded:
+                self._engines["vietocr"].inference_verified = False
+            if update_tesseract_loaded:
+                self._engines["tesseract_vie"].loaded = self._engines["tesseract_vie"].installed
+            if not (paddle_loaded and viet_loaded):
+                unloaded_errors: list[str] = []
+                if not paddle_loaded:
+                    unloaded_errors.append(f"paddleocr:{paddle_error}")
+                if not viet_loaded:
+                    unloaded_errors.append(f"vietocr:{viet_error}")
+                self._last_error = "; ".join(unloaded_errors)
+        return paddle_loaded, viet_loaded
 
     def maybe_resync_active_model(
         self,
@@ -1193,18 +1261,16 @@ class OcrRuntimeManager:
                 or runtime_status.get("active_model_profile")
                 or sync_info["profile"]
             )
-            with self._state_lock:
-                self._model_profile = loaded_profile
-                self._model_sha256 = loaded_sha
-                self._pending_model_resync = False
-                self._engines["paddleocr"].loaded = (
-                    getattr(ocr_engine, "_paddle_engine", None) is not None
-                    or warmup_map.get("paddleocr") == "loaded"
-                )
-                self._engines["vietocr"].loaded = (
-                    getattr(ocr_engine, "_vietocr_engine", None) is not None
-                    or warmup_map.get("vietocr") == "loaded"
-                )
+            paddle_loaded, viet_loaded = self._sync_engine_load_states(
+                ocr_engine,
+                warmup_map=warmup_map,
+                loaded_profile=loaded_profile,
+                loaded_sha=loaded_sha,
+            )
+            if paddle_loaded and viet_loaded:
+                with self._state_lock:
+                    if self._is_ready_unlocked():
+                        self._last_error = None
         return True
 
     def _run_smoke_verification(self, ocr_engine: Any) -> None:
@@ -1212,20 +1278,42 @@ class OcrRuntimeManager:
         try:
             result = ocr_engine.extract_text_and_boxes(smoke_bytes)
             statuses = (result.get("metadata") or {}).get("engine_statuses") or {}
+            paddle_verified = statuses.get("paddleocr") == "success"
+            viet_verified = statuses.get("vietocr") == "success"
+            tess_status = statuses.get("tesseract") == "success"
+            if (
+                not tess_status
+                and paddle_verified
+                and viet_verified
+                and self._engines["tesseract_vie"].installed
+            ):
+                tess_status = self._verify_tesseract_smoke(smoke_bytes)
             with self._state_lock:
-                self._engines["paddleocr"].inference_verified = (
-                    statuses.get("paddleocr") == "success"
-                )
-                self._engines["vietocr"].inference_verified = (
-                    statuses.get("vietocr") == "success"
-                )
-                tess_status = statuses.get("tesseract") == "success"
-                if not tess_status and self._engines["tesseract_vie"].installed:
-                    tess_status = self._verify_tesseract_smoke(smoke_bytes)
+                self._engines["paddleocr"].inference_verified = paddle_verified
+                self._engines["vietocr"].inference_verified = viet_verified
                 self._engines["tesseract_vie"].inference_verified = tess_status
-                self._last_error = None
+                if paddle_verified and viet_verified and self._is_ready_unlocked():
+                    self._last_error = None
+                else:
+                    unverified: list[str] = []
+                    if not paddle_verified:
+                        unverified.append(
+                            f"paddleocr:{statuses.get('paddleocr') or 'unverified'}"
+                        )
+                    if not viet_verified:
+                        unverified.append(
+                            f"vietocr:{statuses.get('vietocr') or 'unverified'}"
+                        )
+                    self._last_error = (
+                        f"smoke_verification_incomplete ({', '.join(unverified)})"
+                        if unverified
+                        else (self._last_error or "runtime_not_ready")
+                    )
         except Exception as exc:
-            self._last_error = type(exc).__name__
+            with self._state_lock:
+                self._engines["paddleocr"].inference_verified = False
+                self._engines["vietocr"].inference_verified = False
+                self._last_error = type(exc).__name__
             logger.warning("Startup OCR smoke verification failed: %s", type(exc).__name__)
 
     @staticmethod
@@ -1318,7 +1406,8 @@ class OcrRuntimeManager:
                 self._engines["vietocr"].inference_verified = True
             if statuses.get("tesseract") == "success":
                 self._engines["tesseract_vie"].inference_verified = True
-            self._last_error = None
+            if self._is_ready_unlocked():
+                self._last_error = None
 
         return {
             "full_text": str(result.get("text") or ""),
