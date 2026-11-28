@@ -189,9 +189,7 @@ export function ReadingLayout({
     countdown !== null ||
     isPlayingSample ||
     isReadingWord ||
-    (!suppressSecondaryBanners &&
-      isMicRecording &&
-      isCurrentWordMispronounced);
+    (!suppressSecondaryBanners && isMicRecording && isCurrentWordMispronounced);
   const showCompanionBubble =
     !retryMode && !suppressSecondaryBanners && Boolean(companionBubble);
   const hasFeedbackPanel =
@@ -207,6 +205,7 @@ export function ReadingLayout({
 
   return (
     <section
+      data-latest-transcript={latestTranscript ?? undefined}
       data-reading-focus={isReadingFocusActive ? "active" : "idle"}
       className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-2.5 pt-1 sm:gap-2 sm:px-5 sm:pt-2"
     >

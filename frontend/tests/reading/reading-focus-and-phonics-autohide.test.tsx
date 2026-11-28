@@ -116,7 +116,12 @@ function makePage(
       word_id: `50000000-0000-4000-8000-00000000${String(pageNum).padStart(2, "0")}${String(index).padStart(2, "0")}`,
       word_index: index,
       text: w,
-      bbox: [0.06 + (index % 5) * 0.16, 0.18 + Math.floor(index / 5) * 0.1, 0.12, 0.05] as const,
+      bbox: [
+        0.06 + (index % 5) * 0.16,
+        0.18 + Math.floor(index / 5) * 0.1,
+        0.12,
+        0.05,
+      ] as const,
     })),
   };
 }
@@ -159,7 +164,7 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
 
   return {
     readingService: {
-      getSession: vi.fn(async () => ({
+      get: vi.fn(async () => ({
         id: TEST_SESSION_ID,
         child_id: childFixture.id,
         book_id: bookFixture.id,
@@ -169,9 +174,9 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
         duration_ms: null,
       })),
       getCurrentPage: vi.fn(async () => activePage),
-      getSessionProgress: vi.fn(async () => progress),
-      navigateToPage: vi.fn(async () => progress),
-      completeSessionPage: vi.fn(async () => progress),
+      getPageProgress: vi.fn(async () => progress),
+      navigatePage: vi.fn(async () => progress),
+      completePage: vi.fn(async () => progress),
       getPracticeState: vi.fn(async () => ({
         session_id: TEST_SESSION_ID,
         legacy_evidence_present: false,
@@ -179,7 +184,7 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
         words: [],
       })),
       getCompletionSummary: vi.fn(async () => sessionSummaryFixture),
-      finishSession: vi.fn(async () => ({
+      finish: vi.fn(async () => ({
         id: TEST_SESSION_ID,
         child_id: childFixture.id,
         book_id: bookFixture.id,
@@ -203,10 +208,6 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
         CreatedAt: "2026-11-28T10:00:00Z",
       })),
       createRetryEvent: vi.fn(),
-      getSessionQuestions: vi.fn(async () => ({
-        session_id: TEST_SESSION_ID,
-        questions: [],
-      })),
     } as unknown as ReadingServices["readingService"],
     bookService: {
       get: vi.fn(async () => bookFixture),
@@ -217,6 +218,14 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
     } as unknown as ReadingServices["childService"],
     readingSocketAdapter: {
       subscribe: vi.fn(() => () => {}),
+      sendControl: vi.fn(async () => "LISTENING"),
+      reconnect: vi.fn(async () => "recovered"),
+      getSafetySnapshot: vi.fn(() => ({
+        connection: "connected",
+        scoring_active: false,
+        evidence_valid: false,
+        child_error_events: [],
+      })),
     } as unknown as ReadingServices["readingSocketAdapter"],
   } as unknown as ReadingServices;
 }
