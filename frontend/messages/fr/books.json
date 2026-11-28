@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "Voir les blocs de texte OCR de la page {page}",
     "closePageOcrBlocksAria": "Fermer les blocs de texte OCR de la page {page}",
     "openPageOcrBlocksAction": "Blocs OCR",
-    "closePageOcrBlocksAction": "Fermer les blocs OCR"
+    "closePageOcrBlocksAction": "Fermer les blocs OCR",
+    "retryAllFailedAction": "Réessayer toutes les pages en erreur ({count})",
+    "retryingAllFailedButton": "Mise en file des pages en erreur…",
+    "retryAllSuccessNotice": "{count} page(s) en erreur remise(s) en file d’attente (les étapes déjà réussies sont conservées).",
+    "retryAllQueuedOfflineNotice": "Demandes de nouvel essai enregistrées pour {count} page(s) dans la file OCR. Elles seront traitées automatiquement dès le retour du service OCR.",
+    "retryAllPartialQueueFullNotice": "{retried} page(s) en erreur remise(s) en file ; {skipped} page(s) restante(s) en pause car la file OCR est pleine. Veuillez réessayer dans {seconds} secondes.",
+    "retryAllPartialFailedNotice": "{retried} page(s) en erreur remise(s) en file ; {failed} page(s) n’ont pas pu être mises en file pour le moment.",
+    "retryAllNoneNotice": "Il n’y a aucune page en erreur à réessayer pour le moment.",
+    "queueFullNotice": "La file d’attente OCR est actuellement pleine. Veuillez réessayer dans environ {seconds} secondes."
   },
   "ocrContribution": {
     "cardAria": "Contribuer à l'amélioration de la reconnaissance de texte pour {title}",
@@ -576,5 +584,35 @@
     "tooEasy": "Léger d’échauffement (Niveau {min}–{max})",
     "estimatedGrade": "Niveau est. {min}–{max}",
     "phonicsScore": "Décodage {score}%"
+  },
+  "offlinePack": {
+    "heading": "Pack de lecture hors ligne et Carte QR",
+    "description": "Enregistrez les pages verifiees sur cet appareil pour lire sans reseau ou imprimez une carte QR pour le livre papier.",
+    "readyBadge": "Enregistre ({count} pages)",
+    "downloadButton": "Telecharger le pack hors ligne",
+    "openOfflineReader": "Lire hors ligne",
+    "removeButton": "Supprimer le pack",
+    "syncPendingButton": "Synchroniser ({count})",
+    "stageDownloadingPages": "Telechargement des pages verifiees et de l'audio…",
+    "stageSavingDevice": "Enregistrement securise sur l'appareil…",
+    "savedNotice": "Pack hors ligne ({count} pages) enregistre sur cet appareil.",
+    "removedNotice": "Le pack hors ligne de ce livre a ete supprime.",
+    "downloadError": "Impossible de telecharger le pack pour le moment. Reessayez avec une connexion stable.",
+    "syncedNotice": "{count} session(s) hors ligne synchronisee(s).",
+    "syncDeferredNotice": "Connexion instable — la session reste en file d'attente securisee.",
+    "queuedOfflineNotice": "Session enregistree localement — synchronisation automatique au retour du reseau.",
+    "readerHeaderBadge": "Mode hors ligne · Page {page}/{total}",
+    "listenCachedAudio": "Ecouter l'exemple",
+    "tapWordsHint": "Touchez les mots lus correctement pour noter la progression hors ligne :",
+    "prevPage": "Page precedente",
+    "nextPage": "Page suivante",
+    "finishAndQueueSync": "Terminer et Synchroniser"
+  },
+  "qrCard": {
+    "openButton": "Carte QR imprimable",
+    "modalTitle": "Carte QR de lecture ViRead",
+    "eyebrow": "Marque-page QR pour livre papier",
+    "scanInstruction": "Scannez ce code QR avec l'appareil photo pour ouvrir directement ce livre dans ViRead.",
+    "printButton": "Imprimer la carte QR"
   }
 }

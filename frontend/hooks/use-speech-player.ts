@@ -35,6 +35,9 @@ export interface SpeechPlayer {
       readonly coaching?: boolean;
       readonly wordSample?: boolean;
       readonly speedScale?: number;
+      readonly bypassSessionLock?: boolean;
+      readonly cacheScope?: SpeechPlayOptions["cacheScope"];
+      readonly ephemeral?: boolean;
       readonly signal?: AbortSignal;
     },
   ): Promise<void>;
@@ -82,6 +85,9 @@ export function useSpeechPlayer(): SpeechPlayer {
           readonly coaching?: boolean;
           readonly wordSample?: boolean;
           readonly speedScale?: number;
+          readonly bypassSessionLock?: boolean;
+          readonly cacheScope?: SpeechPlayOptions["cacheScope"];
+          readonly ephemeral?: boolean;
           readonly signal?: AbortSignal;
         },
       ) =>

@@ -47,6 +47,13 @@ import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { createFamilyPedagogyService } from "@/lib/api/family-pedagogy-service";
 import { clearAndroidScheduledReminders } from "@/lib/reading/native-reminder-bridge";
 import {
+  clearAllOfflineReadingPacks,
+  clearOfflineReadingPacksForUser,
+  listPendingOfflineSessions,
+  subscribeOfflinePackChanges,
+  syncPendingOfflineSessions,
+} from "@/lib/offline/offline-reading-pack";
+import {
   clearChildModeLockForUser,
   isChildModeLockedForUser,
   isParentProtectedRoute,
@@ -71,6 +78,8 @@ import {
   hydrateTeacherVoiceFromChildProfile,
   resetTeacherVoiceForActorSwitch,
 } from "@/lib/reading/session-voice-lock";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
+import { installOfflineOutboxReconnectAutoDrain } from "@/lib/offline/offline-session-outbox";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
@@ -218,8 +227,11 @@ export function AppShell({ children }: AppShellProps) {
   const isChildOnboarding =
     pathname === "/children/new" &&
     (availableChildren.length === 0 || isFromRegister);
-  const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
-  const isReadingRoute = pathname.startsWith("/reading/");
+  const normalizedPathname = normalizeRoutePath(pathname);
+  const isBookCatalogRoute = normalizedPathname === "/books";
+  const isBookRoute =
+    isBookCatalogRoute || normalizedPathname.startsWith("/books/");
+  const isReadingRoute = normalizedPathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;
 
   const displayName = resolveDisplayName(
@@ -367,14 +379,54 @@ export function AppShell({ children }: AppShellProps) {
       clearUserCache(prevId);
       clearChildModeLockForUser(prevId);
       void clearAndroidScheduledReminders();
+      void clearOfflineReadingPacksForUser(prevId);
       clearStoredScanJobIds(user?.id ?? null);
       if (!user?.id) {
         clearUserCache();
+        void clearAllOfflineReadingPacks();
       }
       broadcastActorSwitch();
     }
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let disposed = false;
+    const flushIfPendingOnline = async () => {
+      if (
+        disposed ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        return;
+      }
+      const pending = await listPendingOfflineSessions(userId);
+      if (!disposed && pending.length > 0) {
+        await syncPendingOfflineSessions(userId);
+      }
+    };
+    const onOnline = () => {
+      void flushIfPendingOnline();
+    };
+    window.addEventListener("online", onOnline);
+    const unsub = subscribeOfflinePackChanges(() => {
+      // Only auto-flush when online and local outbox has queued items
+      void flushIfPendingOnline();
+    });
+    void flushIfPendingOnline();
+    return () => {
+      disposed = true;
+      window.removeEventListener("online", onOnline);
+      unsub();
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    return installOfflineOutboxReconnectAutoDrain(() => ({
+      parentAccountId: userId,
+      childProfileId: selectedChildId,
+    }));
+  }, [selectedChildId, userId]);
 
   const familyPedagogyService = useMemo(
     () => createFamilyPedagogyService(),
@@ -452,10 +504,15 @@ export function AppShell({ children }: AppShellProps) {
     setIsSigningOut(true);
 
     try {
+      void wipeOfflineAccountData({
+        parentAccountId: userId,
+        reason: "logout",
+      }).catch(() => undefined);
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
       clearChildModeLockForUser(userId);
       void clearAndroidScheduledReminders();
+      void clearAllOfflineReadingPacks();
       clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
       resetTeacherVoiceForActorSwitch();
@@ -494,9 +551,19 @@ export function AppShell({ children }: AppShellProps) {
   if (isBookRoute) {
     return (
       <AiTaskCenterProvider actorId={taskActorId} actorRole={taskActorRole}>
-        <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={cn(
+            "min-h-dvh bg-canvas",
+            isBookCatalogRoute && !isMobileImmersive && "pb-24 sm:pb-8",
+          )}
+        >
           {children}
         </main>
+        {isBookCatalogRoute && !isMobileImmersive ? (
+          <MobileBottomNav pathname={pathname} />
+        ) : null}
       </AiTaskCenterProvider>
     );
   }

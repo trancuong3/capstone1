@@ -34,6 +34,7 @@ from app.services.karaoke_children_catalog import (
     CHILDREN_KARAOKE_PACK,
     build_complete_song_bundle,
     build_ngoi_sao_nho_melody_profile,
+    render_ngoi_sao_nho_cover_webp,
 )
 from app.services.karaoke_melody_extractor import build_musical_profile_payload
 from app.services.karaoke_service import content_issues
@@ -160,7 +161,33 @@ async def seed_database_and_storage(bundles: list[dict]) -> None:
             )
         ).first()
         if existing_demo is not None:
-            _demo_song, demo_ver = existing_demo
+            demo_song, demo_ver = existing_demo
+            demo_cover_ok = False
+            if demo_ver.cover_path:
+                try:
+                    storage.verify(demo_ver.cover_path, demo_song.id)
+                    demo_cover_ok = True
+                except Exception:
+                    demo_cover_ok = False
+            if not demo_cover_ok:
+                demo_cover_webp = render_ngoi_sao_nho_cover_webp()
+                demo_cover_asset_id = uuid5(
+                    NAMESPACE_URL,
+                    f"viread:karaoke:children-pack:cover:ngoi-sao-nho:{demo_ver.id}:v1",
+                )
+                demo_cover_path = (
+                    f"songs/{demo_song.id}/versions/{demo_ver.id}/covers/{demo_cover_asset_id}.webp"
+                )
+                try:
+                    storage.verify(demo_cover_path, demo_song.id, len(demo_cover_webp))
+                except Exception:
+                    storage.remove(demo_cover_path, demo_song.id)
+                    storage.upload(demo_cover_path, demo_song.id, demo_cover_webp, "image/webp")
+                    storage.verify(demo_cover_path, demo_song.id, len(demo_cover_webp))
+                demo_ver.cover_path = demo_cover_path
+                demo_ver.updated_at = utcnow()
+                await db.flush()
+                print(f"[OK] Uploaded & linked cover for 'Ngôi sao nhỏ' ({demo_cover_path})")
             demo_lyrics = (
                 demo_ver.lyrics
                 if isinstance(demo_ver.lyrics, dict)

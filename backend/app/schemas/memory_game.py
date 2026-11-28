@@ -91,6 +91,7 @@ class SceneSpec(BaseModel):
     observation_tips_vi: list[str] = Field(default_factory=list)
     guided_questions_vi: list[str] = Field(default_factory=list)
     creative_prompt_vi: str
+    focus_words: list[str] = Field(default_factory=list)
     matched_focus_words: list[str] = Field(default_factory=list)
     creative_focus_words: list[str] = Field(default_factory=list)
 
@@ -127,11 +128,13 @@ class MemoryThemesCatalogRead(BaseModel):
     timer_options: list[TimerOptionRead]
     grade_recommendations: list[GradeRecommendationRead]
     total_sprites: int
+    focus_difficult_words: list[str] = Field(default_factory=list)
+    recommended_theme_key: ThemeKey | None = None
 
 
 class MemorySessionCreate(BaseModel):
     child_id: UUID
-    theme_key: ThemeSelection = "random"
+    theme_key: ThemeSelection | None = None
     timer_mode: TimerMode = "30S"
     recall_mode: RecallMode = "FREE_RECALL"
     difficulty_level: int | None = Field(default=None, ge=1, le=5)
@@ -209,6 +212,7 @@ class MemoryEvaluationRead(BaseModel):
     creative_followup_vi: str
     support_summary_vi: str | None = None
     used_focus_words: list[str] = Field(default_factory=list)
+    focus_word_feedback_vi: str | None = None
     ai_provider: str = "deterministic-v4"
 
 
@@ -245,6 +249,7 @@ class MemorySessionRead(BaseModel):
     best_creative_score: int = Field(..., ge=0, le=100)
     stars: int = Field(..., ge=0, le=3)
     attempts_count: int = Field(..., ge=0)
+    focus_words: list[str] = Field(default_factory=list)
     scene_spec: SceneSpec
     attempts: list[MemoryAttemptRead] = Field(default_factory=list)
     created_at: datetime

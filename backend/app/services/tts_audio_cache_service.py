@@ -41,6 +41,8 @@ _SCOPE_CACHE_PRIVATE_TTL_SECONDS = 15.0
 _SCOPE_CACHE_MAX_ENTRIES = 1024
 _DAILY_USAGE_CACHE_TTL_SECONDS = 15.0
 _SUMMARY_CACHE_TTL_SECONDS = 15.0
+_MISS_LOOKUP_CACHE_TTL_SECONDS = 15.0
+_MISS_LOOKUP_CACHE_MAX_ENTRIES = 512
 _AUDIO_RAM_LRU_MAX_BYTES = 32 * 1024 * 1024  # 32 MiB bounded server RAM LRU
 _AUDIO_RAM_LRU_MAX_ITEM_BYTES = 4 * 1024 * 1024  # Never pin >4 MiB single clip
 _CONSTRAINED_AUDIO_RAM_LRU_MAX_BYTES = 16 * 1024 * 1024  # 16 MiB on 512 MiB Render Free
@@ -50,6 +52,7 @@ _CACHE_STATE_LOCK = threading.Lock()
 _SCOPE_TARGET_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, Any]]" = OrderedDict()
 _DAILY_USAGE_CACHE: dict[tuple[int, date], tuple[float, dict[str, int]]] = {}
 _SUMMARY_CACHE: dict[tuple[int, int, int, date], tuple[float, dict[str, Any]]] = {}
+_MISS_LOOKUP_CACHE: "OrderedDict[tuple[Any, ...], float]" = OrderedDict()
 _AUDIO_RAM_LRU: "OrderedDict[tuple[str, str], tuple[bytes, str]]" = OrderedDict()
 _AUDIO_RAM_LRU_BYTES = 0
 
@@ -231,6 +234,7 @@ def clear_tts_cache_runtime_metrics() -> None:
         _SCOPE_TARGET_CACHE.clear()
         _DAILY_USAGE_CACHE.clear()
         _SUMMARY_CACHE.clear()
+        _MISS_LOOKUP_CACHE.clear()
         _AUDIO_RAM_LRU.clear()
         _AUDIO_RAM_LRU_BYTES = 0
 
@@ -1334,6 +1338,32 @@ class TtsAudioCacheService:
         bind_key = _db_bind_cache_key(self.db) if is_real_repo else 0
         today = datetime.now(timezone.utc).date()
         usage_cache_key = (bind_key, today)
+        miss_cache_key: tuple[Any, ...] | None = None
+        if is_real_repo and bind_key and use_bg_writes:
+            miss_cache_key = (
+                bind_key,
+                target.scope,
+                str(target.owner_parent_id or "-"),
+                str(target.page_id or "-"),
+                content_sha256,
+                voice_id,
+                model_version or "",
+                preferred_model_version or "",
+                round(float(speed), 2),
+                tuple(formats),
+                bool(allow_speed_fallback),
+                bool(require_word_timings),
+            )
+            now_miss_check = time.monotonic()
+            with _CACHE_STATE_LOCK:
+                miss_exp = _MISS_LOOKUP_CACHE.get(miss_cache_key)
+                if miss_exp is not None:
+                    if miss_exp > now_miss_check:
+                        _MISS_LOOKUP_CACHE.move_to_end(miss_cache_key)
+                        background_tasks.add_task(_bg_record_miss)
+                        self._record_runtime_miss()
+                        return None
+                    _MISS_LOOKUP_CACHE.pop(miss_cache_key, None)
         try:
             daily_limit = get_tts_cache_daily_egress_limit_bytes()
             daily_usage: dict[str, int]
@@ -1531,6 +1561,14 @@ class TtsAudioCacheService:
                 entry = None
 
             if entry is None:
+                if miss_cache_key is not None:
+                    with _CACHE_STATE_LOCK:
+                        _MISS_LOOKUP_CACHE[miss_cache_key] = (
+                            time.monotonic() + _MISS_LOOKUP_CACHE_TTL_SECONDS
+                        )
+                        _MISS_LOOKUP_CACHE.move_to_end(miss_cache_key)
+                        while len(_MISS_LOOKUP_CACHE) > _MISS_LOOKUP_CACHE_MAX_ENTRIES:
+                            _MISS_LOOKUP_CACHE.popitem(last=False)
                 if use_bg_writes:
                     await self._end_read_tx()
                     background_tasks.add_task(_bg_record_miss)
@@ -1865,6 +1903,8 @@ class TtsAudioCacheService:
             )
             await self.db.commit()
             invalidate_tts_cache_summary_cache()
+            with _CACHE_STATE_LOCK:
+                _MISS_LOOKUP_CACHE.clear()
         except Exception as exc:
             await self._safe_rollback()
             still_owned = await _storage_path_owned_by_active_row(bucket, storage_path)

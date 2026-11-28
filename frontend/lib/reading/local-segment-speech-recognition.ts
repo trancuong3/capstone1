@@ -124,10 +124,11 @@ const MIN_SPEECH_MS = 90;
 const MAX_SEGMENT_MS = 3_600;
 const INTERIM_MIN_SPEECH_MS = 140;
 const INTERIM_STEP_MS = 380;
+const WASM_INTERIM_STEP_MS = 750;
 const PAUSE_INTERIM_SILENCE_MS = 100;
 const MIN_NEW_VOICED_INTERIM_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.08);
 const WS_PCM_CHUNK_SAMPLES = 1024; // 64ms @ 16kHz mono Int16 LE (2048 bytes)
-const WS_FLUSH_FALLBACK_TIMEOUT_MS = 3_500;
+const WS_FLUSH_FALLBACK_TIMEOUT_MS = 1_800;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
 const MAX_FLUSH_TRAILING_SILENCE_SAMPLES = Math.floor(
@@ -139,6 +140,9 @@ const INTERIM_MIN_SAMPLES = Math.floor(
 );
 const INTERIM_STEP_SAMPLES = Math.floor(
   (TARGET_SAMPLE_RATE * INTERIM_STEP_MS) / 1000,
+);
+const WASM_INTERIM_STEP_SAMPLES = Math.floor(
+  (TARGET_SAMPLE_RATE * WASM_INTERIM_STEP_MS) / 1000,
 );
 export const EMERGENCY_FAILURE_THRESHOLD = 2;
 export const LOCAL_OUTAGE_RETRY_MS = 45_000;
@@ -1730,7 +1734,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         pending.audioToEncode,
         {
           signal,
-          timeoutMs: 20_000,
+          initTimeoutMs: 8_000,
+          timeoutMs: 12_000,
           voicedDurationMs: pending.voicedDurationMs,
         },
       );
@@ -1747,7 +1752,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         voicedDurationMs: pending.voicedDurationMs,
         source: "local_live_segment",
         signal,
-        timeoutMs: 12_000,
+        timeoutMs: 6_000,
       });
       this.consecutiveTechnicalFailures = 0;
       lastLocalSttOutageAt = 0;
@@ -2633,14 +2638,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const newVoicedSamples = this.voicedSamples - this.lastInterimVoicedSamples;
     const hasFreshSpeech = newVoicedSamples >= MIN_NEW_VOICED_INTERIM_SAMPLES;
     const isPauseBoundaryInterim =
+      !this.usingWasmStt &&
       hasFreshSpeech &&
       silenceMs >= PAUSE_INTERIM_SILENCE_MS &&
       this.voicedSamples >= INTERIM_MIN_SAMPLES &&
       deltaActiveSamples >= Math.floor(TARGET_SAMPLE_RATE * 0.08);
+    const requiredInterimStepSamples = this.usingWasmStt
+      ? WASM_INTERIM_STEP_SAMPLES
+      : INTERIM_STEP_SAMPLES;
     const isRegularInterimStep =
       hasFreshSpeech &&
       this.voicedSamples >= INTERIM_MIN_SAMPLES &&
-      newVoicedSamples >= INTERIM_STEP_SAMPLES;
+      newVoicedSamples >= requiredInterimStepSamples;
 
     if (silenceMs >= SILENCE_FLUSH_MS) {
       if (voicedMs >= MIN_SPEECH_MS) {
@@ -2782,6 +2791,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const interimPromise: Promise<{ text: string }> = usedWasm
       ? getBrowserWasmSttClient().transcribeSamples(combined, {
           signal: interimCtrl.signal,
+          initTimeoutMs: 2_000,
           timeoutMs: 4_000,
           voicedDurationMs,
         })
@@ -3156,7 +3166,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               audioToEncode,
               {
                 signal,
-                timeoutMs: 20_000,
+                initTimeoutMs: 8_000,
+                timeoutMs: 12_000,
                 voicedDurationMs,
               },
             );
@@ -3192,7 +3203,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               voicedDurationMs,
               source: "local_live_segment",
               signal,
-              timeoutMs: 12_000,
+              timeoutMs: 6_000,
             });
             return {
               text: res.text,

@@ -696,7 +696,8 @@
     "practiceTimes": "{count} lần",
     "karaokeWeakSegmentsTitle": "Đoạn hát bé nên luyện chậm 0.85x thêm",
     "openSongAction": "Mở bài hát",
-    "homeTipsTitle": "Gợi ý đồng hành tại nhà cho ba mẹ"
+    "homeTipsTitle": "Gợi ý đồng hành tại nhà cho ba mẹ",
+    "misreadWordsReinforcedLabel": "Từ đọc nhầm đã ôn qua trò chơi"
   },
   "printCertificate": {
     "brandTagline": "Báo cáo tiến bộ đọc sách gia đình",

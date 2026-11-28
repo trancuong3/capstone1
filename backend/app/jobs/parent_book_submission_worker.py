@@ -156,9 +156,13 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
             .limit(limit)
             .with_for_update(skip_locked=True)
         )
+        from app.services.ocr_inference_job_service import _has_live_post_ocr_task
+
         expired = list(result.scalars().all())
         for row in expired:
             if row.WorkflowStatus == "CHECKING" and row.OcrStatus == "PENDING":
+                continue
+            if _has_live_post_ocr_task(row.Id):
                 continue
             targets.append((row.Id, row.SourceStoragePath))
             row.WorkflowStatus = "CANCELLED"
@@ -217,6 +221,13 @@ async def run_once(
             record_worker_success(_WORKER_KEY)
             return False
         submission_id = claimed.Id
+
+    from app.services.ocr_inference_job_service import _has_live_post_ocr_task
+
+    if _has_live_post_ocr_task(submission_id):
+        await _release_submission_lease(submission_id, worker_name)
+        record_worker_success(_WORKER_KEY)
+        return False
 
     stop_heartbeat = asyncio.Event()
     lease_lost = asyncio.Event()

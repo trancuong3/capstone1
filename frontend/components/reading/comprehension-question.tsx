@@ -38,6 +38,7 @@ import {
   getEffectiveTeacherPersona,
   getEffectiveVoiceId,
   lockSessionVoice,
+  setActiveVoiceSession,
 } from "@/lib/reading/session-voice-lock";
 import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
@@ -339,6 +340,7 @@ export function ComprehensionQuestion({
     return () => {
       mountedRef.current = false;
       window.removeEventListener("pagehide", handlePageHide);
+      setActiveVoiceSession(null);
       cleanupVoice();
     };
   }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer, sessionId]);
@@ -1454,7 +1456,9 @@ export function ComprehensionQuestion({
                     childId={child.id}
                     disabled={voicePhase === "listening"}
                     fallbackNotice={speechPlayer.fallbackNotice}
-                    isPreviewing={speechPlayer.isPlaying}
+                    isPreviewing={
+                      speechPlayer.isPlaying && !speechPlayer.isPaused
+                    }
                     onPreview={(sample) => {
                       stopAllVoice();
                       return speechPlayer.play(sample, {

@@ -246,8 +246,7 @@ class FakeAsyncSession:
                 limit_val = getattr(query, "_limit_clause", None)
                 if limit_val is not None and getattr(limit_val, "value", None) is not None:
                     rows = rows[: int(limit_val.value)]
-                attr_key = col.key
-                return _FakeScalarResult([getattr(r, attr_key) for r in rows])
+                return _FakeScalarResult([_resolve_col_val(r, col) for r in rows])
 
             rows = list(self.state.tables.get(model_cls, []))
             for crit in getattr(query, "_where_criteria", ()):
@@ -261,6 +260,17 @@ class FakeAsyncSession:
             return _FakeScalarResult(rows)
         return _FakeScalarResult([])
 
+    def _eval_order_val(self, row: Any, elem: Any) -> Any:
+        if type(elem).__name__ == "Case":
+            for cond, result in getattr(elem, "whens", ()):
+                if _eval_clause(row, cond):
+                    return getattr(result, "value", getattr(result, "effective_value", result))
+            else_expr = getattr(elem, "else_", None)
+            if else_expr is not None:
+                return getattr(else_expr, "value", getattr(else_expr, "effective_value", else_expr))
+            return None
+        return _resolve_col_val(row, elem)
+
     def _apply_ordering(self, rows: list[Any], query: Any) -> None:
         order_clauses = list(getattr(query, "_order_by_clauses", ()))
         for clause in reversed(order_clauses):
@@ -269,10 +279,14 @@ class FakeAsyncSession:
             elem = getattr(clause, "element", clause)
             rows.sort(
                 key=lambda r, el=elem: (
-                    _resolve_col_val(r, el) is None,
-                    str(_resolve_col_val(r, el))
-                    if isinstance(_resolve_col_val(r, el), UUID)
-                    else (_resolve_col_val(r, el) if _resolve_col_val(r, el) is not None else ""),
+                    self._eval_order_val(r, el) is None,
+                    str(self._eval_order_val(r, el))
+                    if isinstance(self._eval_order_val(r, el), UUID)
+                    else (
+                        self._eval_order_val(r, el)
+                        if self._eval_order_val(r, el) is not None
+                        else ""
+                    ),
                 ),
                 reverse=desc,
             )
@@ -332,6 +346,9 @@ def _sample_words(texts: list[str]) -> list[dict[str, Any]]:
 
 class TestOcrInferenceJobsAndResilience(unittest.TestCase):
     def setUp(self) -> None:
+        from app.repositories.ocr_inference_job_repository import reset_ocr_queue_repo_state_for_tests
+
+        reset_ocr_queue_repo_state_for_tests()
         self.state = InMemoryDbState()
         self.db = FakeAsyncSession(self.state)
         self.admin_id = uuid4()
@@ -775,6 +792,27 @@ class TestOcrInferenceJobsAndResilience(unittest.TestCase):
                 async def analyze(self, text):
                     raise TimeoutError("Ollama request timed out")
 
+            # On transient timeout with attempts remaining: defers cleanly (still fail-closed, never PASSED_READY_TO_ADD)
+            with patch(
+                "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                side_effect=lambda: _DummySessionCtx(self.state),
+            ):
+                stage10_deferred = await run_parent_submission_post_ocr(
+                    sub10.Id,
+                    proofread_orchestrator=_OkProofread(),
+                    safety_orchestrator=_BrokenSafety(),
+                    download_bytes=lambda _p: b"img-10",
+                )
+            self.assertEqual(stage10_deferred["status"], "DEFERRED")
+            self.assertEqual(sub10.WorkflowStatus, "CHECKING")
+            self.assertEqual(sub10.ToolCheckStatus, "PENDING")
+            self.assertIsNotNone(sub10.RetryAfter)
+            self.assertEqual(sub10.Attempts, 1)
+            self.assertNotEqual(sub10.WorkflowStatus, "PASSED_READY_TO_ADD")
+
+            # Once post-OCR attempts are exhausted: fails closed to CHECK_FAILED
+            sub10.Attempts = 6
+            sub10.RetryAfter = None
             with patch(
                 "app.services.ocr_inference_job_service.AsyncSessionLocal",
                 side_effect=lambda: _DummySessionCtx(self.state),
@@ -1354,6 +1392,549 @@ class TestOcrInferenceJobsAndResilience(unittest.TestCase):
             self.assertEqual(job_new_model.Status, "QUEUED")
 
         asyncio.run(_scenario())
+
+    def test_reconcile_orphaned_parent_submissions_respects_retry_after_and_active_lease(self) -> None:
+        from app.services.ocr_inference_job_service import (
+            reconcile_orphaned_parent_submissions,
+            schedule_parent_submission_post_ocr,
+            shutdown_post_ocr_tasks,
+        )
+
+        async def _scenario() -> None:
+            now = datetime(2026, 11, 28, 12, 0, 0, tzinfo=timezone.utc)
+            book_id = uuid4()
+
+            def _make_sub(idx: int, **overrides: Any) -> ParentBookPageSubmission:
+                base = dict(
+                    Id=uuid4(),
+                    BookId=book_id,
+                    OwnerParentId=self.family_a,
+                    BatchId=uuid4(),
+                    BatchTotalPages=4,
+                    SourcePageNumber=idx,
+                    IdempotencyKey=f"rec-{idx}",
+                    SourceFileName=f"p{idx}.png",
+                    SourceFormat="IMAGE",
+                    SourceStoragePath=f"private/r{idx}.png",
+                    SourceSha256=hashlib.sha256(f"r-{idx}".encode()).hexdigest(),
+                    ImageWidth=600,
+                    ImageHeight=800,
+                    SubmissionVersion=1,
+                    OptimisticLockVersion=1,
+                    WorkflowStatus="CHECKING",
+                    OcrStatus="COMPLETED",
+                    ProofreadStatus="PENDING",
+                    ToolCheckStatus="PENDING",
+                    Attempts=1,
+                    UpdatedAt=now - timedelta(minutes=5),
+                )
+                base.update(overrides)
+                return ParentBookPageSubmission(**base)
+
+            future_retry = _make_sub(1, RetryAfter=now + timedelta(seconds=60))
+            active_leased = _make_sub(
+                2,
+                WorkerId="web-post-ocr-1234",
+                LeaseExpiresAt=now + timedelta(seconds=120),
+            )
+            due_retry = _make_sub(
+                3,
+                RetryAfter=now - timedelta(seconds=1),
+                UpdatedAt=now - timedelta(seconds=25),
+                Attempts=2,
+            )
+            expired_lease_orphan = _make_sub(
+                4,
+                WorkerId="web-post-ocr-dead",
+                LeaseExpiresAt=now - timedelta(seconds=10),
+                Attempts=1,
+            )
+            self.db.add_all([future_retry, active_leased, due_retry, expired_lease_orphan])
+            await self.db.commit()
+
+            scheduled: list[UUID] = []
+            with patch(
+                "app.services.ocr_inference_job_service.schedule_parent_submission_post_ocr",
+                side_effect=lambda sid: scheduled.append(sid),
+            ):
+                summary = await reconcile_orphaned_parent_submissions(
+                    self.db,  # type: ignore[arg-type]
+                    stale_after_seconds=90,
+                    reschedule=True,
+                    now=now,
+                )
+
+            self.assertEqual(summary["reclaimed_count"], 2)
+            self.assertEqual(summary["failed_count"], 0)
+            self.assertEqual(set(scheduled), {due_retry.Id, expired_lease_orphan.Id})
+            # Future RetryAfter and active lease MUST remain untouched
+            self.assertEqual(future_retry.Attempts, 1)
+            self.assertIsNotNone(future_retry.RetryAfter)
+            self.assertEqual(active_leased.Attempts, 1)
+            self.assertEqual(active_leased.WorkerId, "web-post-ocr-1234")
+            # Due deferred retry clears RetryAfter without double-incrementing Attempts
+            self.assertIsNone(due_retry.RetryAfter)
+            self.assertEqual(due_retry.Attempts, 2)
+            # Expired-lease orphan increments Attempts and clears dead lease
+            self.assertEqual(expired_lease_orphan.Attempts, 2)
+            self.assertIsNone(expired_lease_orphan.WorkerId)
+            self.assertIsNone(expired_lease_orphan.LeaseExpiresAt)
+
+            # schedule_parent_submission_post_ocr deduplicates live task for same submission
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def _slow_runner(_sid: UUID) -> dict[str, Any]:
+                started.set()
+                await release.wait()
+                return {"status": "COMPLETED"}
+
+            with patch(
+                "app.services.ocr_inference_job_service.run_parent_submission_post_ocr",
+                side_effect=_slow_runner,
+            ):
+                t1 = schedule_parent_submission_post_ocr(due_retry.Id)
+                assert t1 is not None
+                await started.wait()
+                t2 = schedule_parent_submission_post_ocr(due_retry.Id)
+                self.assertIsNone(t2)
+                release.set()
+                await t1
+                await shutdown_post_ocr_tasks()
+
+        asyncio.run(_scenario())
+
+    def test_post_ocr_defers_transient_and_non_auth_all_providers_skipped_and_wakes_delayed(self) -> None:
+        from app.services.ai_capability_router import AiErrorKind, get_shared_ai_circuit_breaker
+        from app.services.ocr_ai.exceptions import OcrOrchestrationError
+        from app.services.ocr_inference_job_service import (
+            _is_transient_post_ocr_error,
+            shutdown_post_ocr_tasks,
+        )
+
+        # Invariant from test_admin_ocr_multimodel.py:1407 MUST hold
+        self.assertFalse(_is_transient_post_ocr_error(OcrOrchestrationError("ALL_PROVIDERS_SKIPPED")))
+
+        async def _scenario() -> None:
+            cb = get_shared_ai_circuit_breaker()
+            cb.reset()
+            self.addCleanup(cb.reset)
+
+            img_bytes = b"defer-test-image-bytes"
+            img_sha = hashlib.sha256(img_bytes).hexdigest()
+            cand_hash = compute_candidate_hash("Con mèo nhỏ", source_sha256=img_sha)
+
+            def _seed_sub(key: str) -> ParentBookPageSubmission:
+                sub = ParentBookPageSubmission(
+                    Id=uuid4(),
+                    BookId=uuid4(),
+                    OwnerParentId=self.family_a,
+                    BatchId=uuid4(),
+                    BatchTotalPages=1,
+                    SourcePageNumber=1,
+                    IdempotencyKey=key,
+                    SourceFileName=f"{key}.png",
+                    SourceFormat="IMAGE",
+                    SourceStoragePath=f"private/{key}.png",
+                    SourceSha256=img_sha,
+                    ImageWidth=600,
+                    ImageHeight=800,
+                    SubmissionVersion=1,
+                    OptimisticLockVersion=1,
+                    WorkflowStatus="CHECKING",
+                    OcrStatus="COMPLETED",
+                    OcrText="Con mèo nhỏ",
+                    OcrWordsJson=_sample_words(["Con", "mèo", "nhỏ"]),
+                    CandidateText="Con mèo nhỏ",
+                    CandidateWordsJson=_sample_words(["Con", "mèo", "nhỏ"]),
+                    CandidateHash=cand_hash,
+                    ProofreadStatus="PENDING",
+                    ToolCheckStatus="PENDING",
+                    Attempts=0,
+                )
+                self.db.add(sub)
+                return sub
+
+            # 1. Transient Storage download error retries and succeeds!
+            sub_storage = _seed_sub("storage-retry")
+            dl_calls = {"n": 0}
+
+            def _flaky_download(_path: str) -> bytes:
+                dl_calls["n"] += 1
+                if dl_calls["n"] == 1:
+                    raise TimeoutError("Supabase storage transient timeout")
+                return img_bytes
+
+            class _OkProofread:
+                async def correct(self, text: str, *_a: Any, **_kw: Any) -> str:
+                    return text
+
+            class _CleanSafety:
+                async def analyze(self, _text: str) -> dict[str, Any]:
+                    return {"suitability": "SUITABLE", "findings": [], "provider_events": []}
+
+            with patch(
+                "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                side_effect=lambda: _DummySessionCtx(self.state),
+            ):
+                res_ok = await run_parent_submission_post_ocr(
+                    sub_storage.Id,
+                    proofread_orchestrator=_OkProofread(),
+                    safety_orchestrator=_CleanSafety(),
+                    download_bytes=_flaky_download,
+                )
+            self.assertEqual(dl_calls["n"], 2)
+            self.assertEqual(res_ok["status"], "PASSED_READY_TO_ADD")
+            self.assertIsNone(sub_storage.WorkerId)
+            self.assertIsNone(sub_storage.LeaseExpiresAt)
+
+            # 2. Non-auth ALL_PROVIDERS_SKIPPED (quota CB open) -> DEFERRED + delayed wakeup fires!
+            sub_quota = _seed_sub("quota-skipped")
+            cb.record_failure("quota_group:gemini", kind=AiErrorKind.RATE_LIMIT, http_status=429)
+
+            class _SkippedProofread:
+                async def correct(self, *_a: Any, **_kw: Any) -> str:
+                    raise OcrOrchestrationError("ALL_PROVIDERS_SKIPPED")
+
+            woken = asyncio.Event()
+            reconcile_calls: list[dict[str, Any]] = []
+
+            async def _spy_reconcile(*_a: Any, **kwargs: Any) -> dict[str, Any]:
+                reconcile_calls.append(kwargs)
+                woken.set()
+                return {"reclaimed_count": 1, "failed_count": 0}
+
+            with (
+                patch.dict(os.environ, {"VIREAD_POST_OCR_TEST_DEFER_SECONDS": "0.03"}, clear=False),
+                patch(
+                    "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                    side_effect=lambda: _DummySessionCtx(self.state),
+                ),
+                patch(
+                    "app.services.ocr_inference_job_service.reconcile_orphaned_parent_submissions",
+                    side_effect=_spy_reconcile,
+                ),
+            ):
+                res_def = await run_parent_submission_post_ocr(
+                    sub_quota.Id,
+                    proofread_orchestrator=_SkippedProofread(),
+                    safety_orchestrator=_CleanSafety(),
+                    download_bytes=lambda _p: img_bytes,
+                )
+                self.assertEqual(res_def["status"], "DEFERRED")
+                self.assertEqual(sub_quota.WorkflowStatus, "CHECKING")
+                self.assertEqual(sub_quota.ProofreadStatus, "PENDING")
+                self.assertEqual(sub_quota.Attempts, 1)
+                self.assertIsNotNone(sub_quota.RetryAfter)
+                self.assertIsNone(sub_quota.WorkerId)
+                self.assertIsNone(sub_quota.LeaseExpiresAt)
+                await asyncio.wait_for(woken.wait(), timeout=2.0)
+                await shutdown_post_ocr_tasks()
+            self.assertEqual(len(reconcile_calls), 1)
+
+            # 3. Auth-only CB open + ALL_PROVIDERS_SKIPPED -> fails closed immediately (NO deferral)
+            cb.reset()
+            cb.record_failure("provider:gemini_primary", kind=AiErrorKind.AUTH_FAILURE, http_status=401)
+            sub_auth = _seed_sub("auth-skipped")
+            with patch(
+                "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                side_effect=lambda: _DummySessionCtx(self.state),
+            ):
+                res_auth = await run_parent_submission_post_ocr(
+                    sub_auth.Id,
+                    proofread_orchestrator=_SkippedProofread(),
+                    safety_orchestrator=_CleanSafety(),
+                    download_bytes=lambda _p: img_bytes,
+                )
+            self.assertEqual(res_auth["status"], "CHECK_FAILED")
+            self.assertEqual(sub_auth.WorkflowStatus, "CHECK_FAILED")
+            self.assertEqual(sub_auth.ProofreadStatus, "FAILED")
+            self.assertIsNone(sub_auth.RetryAfter)
+
+        asyncio.run(_scenario())
+
+    def test_enqueue_job_429_backpressure_and_interactive_local_scan_reserved_headroom(self) -> None:
+        from fastapi import HTTPException
+
+        async def _scenario() -> None:
+            svc = self._svc()
+            env = {
+                "VIREAD_OCR_MAX_ACTIVE_QUEUE_JOBS": "5",
+                "VIREAD_OCR_MAX_ACTIVE_JOBS_PER_USER": "2",
+                "VIREAD_OCR_INTERACTIVE_RESERVED_SLOTS": "2",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                # Family A fills its per-user cap (2 active non-interactive jobs)
+                j1 = await svc.enqueue_job(
+                    job_kind=JOB_KIND_PARENT_SUBMISSION,
+                    owner_user_id=self.family_a,
+                    submission_id=uuid4(),
+                    image_path="p/1.png",
+                    image_sha256="1" * 64,
+                    idempotency_key="bp-a1",
+                )
+                await svc.enqueue_job(
+                    job_kind=JOB_KIND_PARENT_SUBMISSION,
+                    owner_user_id=self.family_a,
+                    submission_id=uuid4(),
+                    image_path="p/2.png",
+                    image_sha256="2" * 64,
+                    idempotency_key="bp-a2",
+                )
+                # Idempotent retry is NEVER blocked by backpressure!
+                j1_dup = await svc.enqueue_job(
+                    job_kind=JOB_KIND_PARENT_SUBMISSION,
+                    owner_user_id=self.family_a,
+                    submission_id=j1.SubmissionId,
+                    image_path="p/1.png",
+                    image_sha256="1" * 64,
+                    idempotency_key="bp-a1",
+                )
+                self.assertEqual(j1_dup.Id, j1.Id)
+
+                # Family A's 3rd active job hits per-user 429 OCR_QUEUE_FULL
+                with self.assertRaises(HTTPException) as user_cap_ctx:
+                    await svc.enqueue_job(
+                        job_kind=JOB_KIND_PARENT_SUBMISSION,
+                        owner_user_id=self.family_a,
+                        submission_id=uuid4(),
+                        image_path="p/3.png",
+                        image_sha256="3" * 64,
+                    )
+                self.assertEqual(user_cap_ctx.exception.status_code, 429)
+                self.assertEqual(user_cap_ctx.exception.detail["code"], "OCR_QUEUE_FULL")
+                self.assertEqual(user_cap_ctx.exception.detail["retry_after_seconds"], 30)
+
+                # Family B takes slot #3 (reaching non_interactive_cap = 5 - 2 = 3)
+                await svc.enqueue_job(
+                    job_kind=JOB_KIND_PARENT_SUBMISSION,
+                    owner_user_id=self.family_b,
+                    submission_id=uuid4(),
+                    image_path="p/b1.png",
+                    image_sha256="4" * 64,
+                )
+                # Family B's next non-interactive job is rejected because 2 slots are reserved for LOCAL_PAGE_SCAN!
+                with self.assertRaises(HTTPException) as reserved_ctx:
+                    await svc.enqueue_job(
+                        job_kind=JOB_KIND_PARENT_SUBMISSION,
+                        owner_user_id=self.family_b,
+                        submission_id=uuid4(),
+                        image_path="p/b2.png",
+                        image_sha256="5" * 64,
+                    )
+                self.assertEqual(reserved_ctx.exception.status_code, 429)
+                self.assertEqual(reserved_ctx.exception.detail["code"], "OCR_QUEUE_FULL")
+
+                # Interactive LOCAL_PAGE_SCAN succeeds in reserved slots #4 and #5!
+                scan4 = await svc.enqueue_job(
+                    job_kind=JOB_KIND_LOCAL_SCAN,
+                    owner_user_id=self.family_a,
+                    image_path="local-scans/4.jpg",
+                    image_sha256="6" * 64,
+                    priority=PRIORITY_LOCAL_SCAN,
+                )
+                scan5 = await svc.enqueue_job(
+                    job_kind=JOB_KIND_LOCAL_SCAN,
+                    owner_user_id=self.family_b,
+                    image_path="local-scans/5.jpg",
+                    image_sha256="7" * 64,
+                    priority=PRIORITY_LOCAL_SCAN,
+                )
+                self.assertEqual(scan4.Status, "QUEUED")
+                self.assertEqual(scan5.Status, "QUEUED")
+
+                # Slot #6 exceeds max_global=5 -> even LOCAL_PAGE_SCAN gets 429 OCR_QUEUE_FULL
+                with self.assertRaises(HTTPException) as global_ctx:
+                    await svc.enqueue_job(
+                        job_kind=JOB_KIND_LOCAL_SCAN,
+                        owner_user_id=self.family_b,
+                        image_path="local-scans/6.jpg",
+                        image_sha256="8" * 64,
+                        priority=PRIORITY_LOCAL_SCAN,
+                    )
+                self.assertEqual(global_ctx.exception.status_code, 429)
+                self.assertEqual(global_ctx.exception.detail["queue_depth"], 5)
+
+        asyncio.run(_scenario())
+
+    def test_starvation_boost_priority_25_sql_next_retry_filter_and_owner_fairness(self) -> None:
+        from app.repositories.ocr_inference_job_repository import (
+            PRIORITY_STARVATION_BOOST,
+            reset_ocr_queue_repo_state_for_tests,
+        )
+
+        self.assertEqual(PRIORITY_STARVATION_BOOST, 25)
+
+        async def _scenario() -> None:
+            reset_ocr_queue_repo_state_for_tests()
+            svc = self._svc()
+            now = datetime.now(timezone.utc)
+
+            # Seed 25 aged FAILED_RETRYABLE jobs with future NextRetryAt so a naive LIMIT 20 would starve job #26!
+            for idx in range(25):
+                retry_row = OcrInferenceJob(
+                    Id=uuid4(),
+                    JobKind=JOB_KIND_PARENT_SUBMISSION,
+                    Status="FAILED_RETRYABLE",
+                    Priority=PRIORITY_PARENT_SUBMISSION,
+                    OwnerUserId=self.family_a,
+                    ImagePath=f"p/retry-{idx}.png",
+                    ImageSha256=hashlib.sha256(f"retry-{idx}".encode()).hexdigest(),
+                    AttemptCount=1,
+                    MaxAttempts=3,
+                    NextRetryAt=now + timedelta(minutes=5),
+                    CreatedAt=now - timedelta(minutes=20) + timedelta(seconds=idx),
+                    UpdatedAt=now - timedelta(minutes=1),
+                )
+                self.db.add(retry_row)
+
+            eligible_aged = OcrInferenceJob(
+                Id=uuid4(),
+                JobKind=JOB_KIND_PARENT_SUBMISSION,
+                Status="QUEUED",
+                Priority=PRIORITY_PARENT_SUBMISSION,
+                OwnerUserId=self.family_b,
+                ImagePath="p/eligible-aged.png",
+                ImageSha256=hashlib.sha256(b"eligible-aged").hexdigest(),
+                AttemptCount=0,
+                MaxAttempts=3,
+                CreatedAt=now - timedelta(minutes=10),
+                UpdatedAt=now - timedelta(minutes=10),
+            )
+            self.db.add(eligible_aged)
+            await self.db.commit()
+
+            boosted = await svc.repo.boost_aged_waiting_jobs(now=now)
+            self.assertEqual(boosted, 1)
+            self.assertEqual(eligible_aged.Priority, 25)
+
+            # Per-owner fairness tie-breaking within equal priority band (50)
+            self.state.tables[OcrInferenceJob].clear()
+            reset_ocr_queue_repo_state_for_tests()
+            a1 = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=self.family_a,
+                submission_id=uuid4(),
+                image_path="p/a1.png",
+                image_sha256="a1" * 32,
+                priority=PRIORITY_PARENT_SUBMISSION,
+            )
+            a2 = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=self.family_a,
+                submission_id=uuid4(),
+                image_path="p/a2.png",
+                image_sha256="a2" * 32,
+                priority=PRIORITY_PARENT_SUBMISSION,
+            )
+            b1 = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=self.family_b,
+                submission_id=uuid4(),
+                image_path="p/b1.png",
+                image_sha256="b1" * 32,
+                priority=PRIORITY_PARENT_SUBMISSION,
+            )
+            a1.CreatedAt = now - timedelta(seconds=30)
+            a2.CreatedAt = now - timedelta(seconds=20)
+            b1.CreatedAt = now - timedelta(seconds=10)
+            await self.db.commit()
+
+            c1 = await svc.claim_next_job(worker_id="w-fair")
+            c2 = await svc.claim_next_job(worker_id="w-fair")
+            c3 = await svc.claim_next_job(worker_id="w-fair")
+            assert c1 is not None and c2 is not None and c3 is not None
+            self.assertEqual(c1["job_id"], str(a1.Id))
+            # Family B gets served before Family A's 2nd queued job at equal priority!
+            self.assertEqual(c2["job_id"], str(b1.Id))
+            self.assertEqual(c3["job_id"], str(a2.Id))
+
+        asyncio.run(_scenario())
+
+    def test_admin_page_upload_dead_letter_preserves_processing_lifecycle_and_sets_ocr_failed(self) -> None:
+        async def _scenario() -> None:
+            book_id = uuid4()
+            page_id = uuid4()
+            book = Book(
+                Id=book_id,
+                Title="Sách Admin",
+                MinGrade=1,
+                MaxGrade=3,
+                LifecycleStatus="ACTIVE",
+            )
+            page = BookPage(
+                Id=page_id,
+                BookId=book_id,
+                PageNumber=1,
+                ImagePath=f"books/{book_id}/pages/{page_id}/p1.png",
+                Width=800,
+                Height=1000,
+                LifecycleStatus="PROCESSING",
+                ProcessingMeta={},
+            )
+            self.db.add_all([book, page])
+            await self.db.commit()
+
+            svc = self._svc()
+            job = await svc.enqueue_job(
+                job_kind=JOB_KIND_ADMIN_UPLOAD,
+                owner_user_id=self.admin_id,
+                book_id=book_id,
+                page_id=page_id,
+                image_path=page.ImagePath,
+                image_sha256="f" * 64,
+                max_attempts=1,
+            )
+            await self.db.commit()
+            claim = await svc.claim_next_job(worker_id="w-admin-1")
+            assert claim is not None
+
+            res = await svc.fail_job(
+                job_id=job.Id,
+                worker_id="w-admin-1",
+                fencing_token=int(claim["fencing_token"]),
+                error_code="CORRUPT_IMAGE_DECODE",
+                retryable=False,
+            )
+            self.assertEqual(res["status"], "DEAD_LETTER")
+            # MUST remain PROCESSING to satisfy PostgreSQL CHECK constraint!
+            self.assertEqual(page.LifecycleStatus, "PROCESSING")
+            self.assertTrue(page.ProcessingMeta["ocr_failed"])
+            self.assertEqual(page.ProcessingMeta["last_ocr_error_code"], "CORRUPT_IMAGE_DECODE")
+            self.assertIn("ocr_dead_lettered_at", page.ProcessingMeta)
+
+            # Also verify _cleanup_local_scan_temp_object persists temp_image_cleaned=True with commit
+            scan_job = await svc.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=self.family_a,
+                image_path="local-scans/tmp-clean.jpg",
+                image_sha256="9" * 64,
+                priority=PRIORITY_LOCAL_SCAN,
+            )
+            await self.db.commit()
+            commit_spy = AsyncMock(wraps=self.db.commit)
+            with (
+                patch.object(self.db, "commit", commit_spy),
+                patch("app.services.ocr_inference_job_service.storage_service.delete_object"),
+            ):
+                await svc._cleanup_local_scan_temp_object(scan_job)
+            self.assertTrue(scan_job.ProcessingMeta.get("temp_image_cleaned"))
+            self.assertGreaterEqual(commit_spy.await_count, 1)
+
+        asyncio.run(_scenario())
+
+    def test_ocr_queue_indexes_migration_contains_all_five_partial_indexes(self) -> None:
+        sql = (
+            REPO_ROOT / "supabase" / "migrations" / "20261129010000_ocr_queue_indexes.sql"
+        ).read_text(encoding="utf-8")
+        for idx_name in (
+            "idx_ocr_inference_jobs_active_status",
+            "idx_ocr_inference_jobs_dead_letter",
+            "idx_ocr_inference_jobs_succeeded_completed",
+            "idx_ocr_inference_jobs_sha256_cache",
+            "idx_ocr_inference_jobs_sha256_active",
+        ):
+            self.assertIn(f"CREATE INDEX IF NOT EXISTS {idx_name}", sql)
 
 
 if __name__ == "__main__":

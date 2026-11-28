@@ -322,7 +322,8 @@
     "listenPhonics": "Nghe đánh vần",
     "listeningRetry": "Đang nghe bé…",
     "readAgain": "Đọc lại",
-    "stepsAria": "Các bước đánh vần"
+    "stepsAria": "Các bước đánh vần",
+    "autoHideHint": "Đánh vần xong · Tự ẩn để bé nhìn rõ chữ…"
   },
   "companion": {
     "teacherFemaleTitle": "Cô giáo AI",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "Đánh vần mẫu · Đọc nối cụm từ",
     "quickFixTitle": "Khen bé · Tự sửa rất nhanh!",
     "phonicsWinTitle": "Khen bé · Đánh vần giỏi quá!",
-    "overcameWordTitle": "Hoan hô · Bé đã vượt qua chữ khó!"
+    "overcameWordTitle": "Hoan hô · Bé đã vượt qua chữ khó!",
+    "dismissAria": "Ẩn lời nhắn hướng dẫn"
   },
   "tutor": {
     "title": "Từ này mình đọc thế nào nhỉ?",
@@ -494,5 +496,12 @@
     "subtitle": "Tiếp tục mở rộng vốn từ và câu văn từ chính trang sách bé vừa đọc.",
     "pictureCta": "Tả tranh trang sách",
     "shooterCta": "Xếp câu trang sách"
+  },
+  "lucBat": {
+    "toggleLabel": "Nhịp thơ Lục Bát 6–8",
+    "toggleActive": "Đang bật nhịp Lục Bát",
+    "coupletBadge": "{count} cặp câu 6–8",
+    "beatGuide": "Nhịp ngắt 2/2/2 (câu 6) · 2/2/2/2 (câu 8)",
+    "rhymePairLabel": "Vần lưng chữ thứ 6: “{sixthLuc}” ↔ “{sixthBat}”"
   }
 }

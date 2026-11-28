@@ -30,14 +30,24 @@ import {
   getTaskAlertAckState,
   resetTaskAlertAckMemoryCache,
   subscribeTaskAlertAck,
+  type TaskAlertSignatureInput,
 } from "@/lib/tasks/task-alert-acknowledgment";
 import {
   ACTIVE_GLOBAL_TASK_STATUSES,
   type GlobalTaskActorRole,
   type GlobalTaskItem,
   type GlobalTaskListResponse,
+  type GlobalTaskStatus,
   type StudioTasksChangedDetail,
 } from "@/types/global-tasks";
+
+export interface OptimisticTaskAckPatch {
+  readonly source?: GlobalTaskItem["source"];
+  readonly status?: GlobalTaskStatus;
+  readonly updated_at?: string | null;
+  readonly completed_at?: string | null;
+  readonly attempt_count?: number | null;
+}
 
 export interface TaskAlertAckOptions {
   /**
@@ -48,6 +58,13 @@ export interface TaskAlertAckOptions {
    * `PENDING_ADMIN` or Admin safety decision -> `WAITING_FOR_REVIEW`).
    */
   readonly includeNextSync?: boolean;
+  /**
+   * Optional post-action server fields returned directly by the mutation API
+   * (`updated_at`, `status`, `attempt_count`, etc.) so the post-action
+   * signature is persisted synchronously to `localStorage` even if the user
+   * reloads before the follow-up `/studio/{portal}/tasks` sync returns.
+   */
+  readonly optimisticTask?: OptimisticTaskAckPatch;
 }
 
 interface PendingSyncAckRule {
@@ -55,7 +72,8 @@ interface PendingSyncAckRule {
   readonly taskId?: string | null;
   readonly bookId?: string | null;
   readonly bookPageId?: string | null;
-  readonly createdAtMs: number;
+  readonly jobTypes?: readonly string[];
+  readonly minSyncSeq: number;
   readonly expiresAtMs: number;
 }
 
@@ -89,6 +107,7 @@ export interface AiTaskCenterContextValue {
     target: {
       readonly bookId?: string | null;
       readonly bookPageId?: string | null;
+      readonly jobTypes?: readonly string[];
     },
     options?: TaskAlertAckOptions,
   ) => void;
@@ -135,6 +154,13 @@ function matchesPendingSyncAckRule(
   task: GlobalTaskItem,
   rule: PendingSyncAckRule,
 ): boolean {
+  if (
+    rule.jobTypes &&
+    rule.jobTypes.length > 0 &&
+    !rule.jobTypes.includes(task.job_type)
+  ) {
+    return false;
+  }
   if (rule.taskId) {
     return task.id === rule.taskId;
   }
@@ -247,6 +273,7 @@ export function AiTaskCenterProvider({
   const activeAbortRef = useRef<AbortController | null>(null);
   const latestScopeRef = useRef<string | null>(scopeKey);
   const isPanelOpenRef = useRef<boolean>(false);
+  const syncRequestSeqRef = useRef<number>(0);
   const pendingSyncAckRulesRef = useRef<PendingSyncAckRule[]>([]);
 
   const consumePendingSyncAcks = useCallback(
@@ -255,6 +282,7 @@ export function AiTaskCenterProvider({
       targetActorId: string,
       targetRole: GlobalTaskActorRole,
       tasks: readonly GlobalTaskItem[],
+      requestSeq: number,
     ) => {
       if (pendingSyncAckRulesRef.current.length === 0) return;
       const now = Date.now();
@@ -264,7 +292,7 @@ export function AiTaskCenterProvider({
         if (rule.expiresAtMs <= now) {
           continue;
         }
-        if (rule.scopeKey === targetScope) {
+        if (rule.scopeKey === targetScope && rule.minSyncSeq <= requestSeq) {
           activeForScope.push(rule);
         } else {
           remaining.push(rule);
@@ -290,16 +318,13 @@ export function AiTaskCenterProvider({
   );
 
   const dropPendingSyncAcksBefore = useCallback(
-    (targetScope: string, requestStartedAtMs: number) => {
+    (targetScope: string, requestSeq: number) => {
       if (pendingSyncAckRulesRef.current.length === 0) return;
       const now = Date.now();
       pendingSyncAckRulesRef.current = pendingSyncAckRulesRef.current.filter(
         (rule) =>
           rule.expiresAtMs > now &&
-          !(
-            rule.scopeKey === targetScope &&
-            rule.createdAtMs <= requestStartedAtMs
-          ),
+          !(rule.scopeKey === targetScope && rule.minSyncSeq <= requestSeq),
       );
     },
     [],
@@ -412,7 +437,7 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
-      const requestStartedAtMs = Date.now();
+      const requestSeq = ++syncRequestSeqRef.current;
 
       try {
         const rawData = await resolvedService.listTasks({
@@ -433,7 +458,7 @@ export function AiTaskCenterProvider({
         );
         if (!sanitized) {
           // Scope mismatch (e.g. token switched mid-flight): discard cleanly & wipe cache.
-          dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
+          dropPendingSyncAcksBefore(targetScope, requestSeq);
           clearGlobalTasksMemoryCache();
           setFeedState({
             scopeKey: targetScope,
@@ -448,6 +473,7 @@ export function AiTaskCenterProvider({
           targetActorId,
           targetRole,
           sanitized.tasks,
+          requestSeq,
         );
         setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
         setFeedState({
@@ -466,7 +492,7 @@ export function AiTaskCenterProvider({
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
-        dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
+        dropPendingSyncAcksBefore(targetScope, requestSeq);
         const message =
           err instanceof Error && err.message
             ? err.message
@@ -523,7 +549,7 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
-      const requestStartedAtMs = Date.now();
+      const requestSeq = ++syncRequestSeqRef.current;
       void resolvedService
         .listTasks({
           portal: targetRole,
@@ -544,7 +570,7 @@ export function AiTaskCenterProvider({
             targetRole,
           );
           if (!sanitized) {
-            dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
+            dropPendingSyncAcksBefore(targetScope, requestSeq);
             clearGlobalTasksMemoryCache();
             setFeedState({
               scopeKey: targetScope,
@@ -559,6 +585,7 @@ export function AiTaskCenterProvider({
             targetActorId,
             targetRole,
             sanitized.tasks,
+            requestSeq,
           );
           setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
           setFeedState({
@@ -579,7 +606,7 @@ export function AiTaskCenterProvider({
           if (err instanceof DOMException && err.name === "AbortError") {
             return;
           }
-          dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
+          dropPendingSyncAcksBefore(targetScope, requestSeq);
           const message =
             err instanceof Error && err.message
               ? err.message
@@ -814,18 +841,105 @@ export function AiTaskCenterProvider({
         pendingSyncAckRulesRef.current.push({
           scopeKey,
           taskId,
-          createdAtMs: now,
+          minSyncSeq: syncRequestSeqRef.current + 1,
           expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
         });
       }
-      const targetTasks =
+      const patch = options?.optimisticTask;
+      const matchedTasks =
         typeof taskOrId === "string"
           ? scopedTasks.filter((item) => item.id === taskId)
           : [taskOrId];
-      if (targetTasks.length === 0) return;
-      acknowledgeTaskAlerts(scopeKey, targetTasks, effectiveActorId, actorRole);
+
+      if (matchedTasks.length === 0) {
+        if (
+          patch &&
+          taskId &&
+          patch.source &&
+          patch.status &&
+          patch.updated_at &&
+          typeof patch.attempt_count === "number"
+        ) {
+          const synthetic: TaskAlertSignatureInput = {
+            id: taskId,
+            source: patch.source,
+            status: patch.status,
+            updated_at: patch.updated_at,
+            completed_at: patch.completed_at ?? null,
+            created_at: patch.updated_at,
+            attempt_count: patch.attempt_count,
+          };
+          acknowledgeTaskAlerts(
+            scopeKey,
+            [synthetic],
+            effectiveActorId,
+            actorRole,
+          );
+        }
+        return;
+      }
+
+      if (patch) {
+        const patchedTasks = matchedTasks.map((item) => {
+          if (patch.source && item.source !== patch.source) {
+            return item;
+          }
+          return {
+            ...item,
+            status: patch.status ?? item.status,
+            updated_at: patch.updated_at || item.updated_at,
+            completed_at:
+              patch.completed_at !== undefined
+                ? patch.completed_at
+                : item.completed_at,
+            attempt_count:
+              typeof patch.attempt_count === "number"
+                ? patch.attempt_count
+                : item.attempt_count,
+          };
+        });
+        acknowledgeTaskAlerts(
+          scopeKey,
+          patchedTasks,
+          effectiveActorId,
+          actorRole,
+        );
+        if (scopedData && effectiveActorId && actorRole) {
+          const patchedByKey = new Map(
+            patchedTasks.map((item) => [`${item.source}:${item.id}`, item]),
+          );
+          const nextFeed = sanitizeScopedTaskFeed(
+            {
+              ...scopedData,
+              tasks: scopedData.tasks.map(
+                (item) => patchedByKey.get(`${item.source}:${item.id}`) ?? item,
+              ),
+            },
+            effectiveActorId,
+            actorRole,
+          );
+          if (nextFeed) {
+            setCachedGlobalTasksSnapshot(effectiveActorId, actorRole, nextFeed);
+            setFeedState((prev) => ({
+              scopeKey,
+              data: nextFeed,
+              error: prev.scopeKey === scopeKey ? prev.error : null,
+              isRefreshing:
+                prev.scopeKey === scopeKey ? prev.isRefreshing : false,
+            }));
+          }
+        }
+        return;
+      }
+
+      acknowledgeTaskAlerts(
+        scopeKey,
+        matchedTasks,
+        effectiveActorId,
+        actorRole,
+      );
     },
-    [actorRole, effectiveActorId, scopeKey, scopedTasks],
+    [actorRole, effectiveActorId, scopeKey, scopedData, scopedTasks],
   );
 
   const markTargetAlertsSeen = useCallback(
@@ -833,12 +947,16 @@ export function AiTaskCenterProvider({
       target: {
         readonly bookId?: string | null;
         readonly bookPageId?: string | null;
+        readonly jobTypes?: readonly string[];
       },
       options?: TaskAlertAckOptions,
     ) => {
       if (!scopeKey) return;
       const targetBookId = target.bookId?.trim() || null;
       const targetPageId = target.bookPageId?.trim() || null;
+      const normalizedJobTypes = target.jobTypes
+        ?.map((jt) => jt.trim())
+        .filter((jt) => jt.length > 0);
       if (!targetBookId && !targetPageId) return;
       if (options?.includeNextSync) {
         const now = Date.now();
@@ -846,11 +964,22 @@ export function AiTaskCenterProvider({
           scopeKey,
           bookId: targetBookId,
           bookPageId: targetPageId,
-          createdAtMs: now,
+          jobTypes:
+            normalizedJobTypes && normalizedJobTypes.length > 0
+              ? normalizedJobTypes
+              : undefined,
+          minSyncSeq: syncRequestSeqRef.current + 1,
           expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
         });
       }
       const matchedTasks = scopedTasks.filter((item) => {
+        if (
+          normalizedJobTypes &&
+          normalizedJobTypes.length > 0 &&
+          !normalizedJobTypes.includes(item.job_type)
+        ) {
+          return false;
+        }
         if (targetPageId) {
           if (item.book_page_id !== targetPageId) return false;
           if (targetBookId && item.book_id && item.book_id !== targetBookId) {

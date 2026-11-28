@@ -1,0 +1,103 @@
+import type { MessageTree } from "@/lib/i18n/types";
+
+export const phonemeGardenVi = {
+  pageTitle: "Vườn Chữ Âm Vị & Hộ Chiếu Đọc Sách",
+  pageSubtitle:
+    "7 luống hoa âm vị tiếng Việt và bộ sưu tập tem sách kỷ niệm lớn dần theo nhịp riêng của bé.",
+  privacyBadge: "Riêng tư gia đình (PARENT_PRIVATE)",
+  calmBanner:
+    "Vườn chữ chỉ lớn dần — không có xu ảo, không xếp hạng thi đua và hoa không bao giờ héo khi bé nghỉ ngơi.",
+  selectChildLabel: "Chọn hồ sơ của bé",
+  childOptionLabel: "{alias} (Lớp {grade})",
+  hubHeaderBadge: "Vườn Chữ & Hộ Chiếu",
+  openFullGardenLink: "Mở toàn cảnh Vườn Chữ",
+  viewPassportButton: "Mở Sổ Tem Sách ({count})",
+  closePassportButton: "Đóng sổ tem",
+  retryAction: "Tải lại nhẹ nhàng",
+  loadingGarden: "Đang chăm tưới khu vườn âm vị của bé...",
+  errorGarden: "Chưa tải được khu vườn lúc này. Ba mẹ thử tải lại nhé.",
+  noChildrenTitle: "Chưa có hồ sơ của bé",
+  noChildrenDescription:
+    "Ba mẹ hãy tạo hồ sơ cho bé để bắt đầu gieo mầm 7 luống hoa âm vị tiếng Việt.",
+  createChildAction: "Tạo hồ sơ cho bé",
+  browseBooksAction: "Đọc sách cùng bé",
+  practiceWordsAction: "Ôn từ khó",
+  statsBloomedBeds: "{count}/7 luống nở hoa",
+  statsMasteredWords: "{count} từ thành thạo",
+  statsCompletedBooks: "{count} tem sách hoàn thành",
+  statsCompletedSessions: "{count} buổi đọc tích lũy",
+  bedsListAria: "7 luống hoa âm vị tiếng Việt",
+  stageSeed: "Hạt giống",
+  stageSprout: "Nảy mầm",
+  stageBud: "Kết nụ",
+  stageBloom: "Nở hoa",
+  bedMasteredCount: "{count} từ vững vàng",
+  bedPracticedCount: "Đã làm quen {count} từ",
+  bedMasteredWordsLabel: "Từ đã nở hoa:",
+  bedSeedWaitingHint: "Đang chờ gieo mầm qua trang sách",
+  bedNextStageHint: "Thêm {count} từ thành thạo để sang giai đoạn tiếp theo",
+  bedBloomedHint: "Luống hoa đã nở rộ bền vững",
+  passportModalTitle: "Hộ Chiếu Đọc Sách & Sổ Tem Kỷ Niệm",
+  passportModalSubtitle:
+    "Lưu giữ từng cuốn sách {alias} đã đọc trọn vẹn và các cột mốc tích lũy êm đềm.",
+  bookStampsHeading: "Tem Sách Đã Hoàn Thành ({count})",
+  bookStampsEmpty:
+    "Chưa có tem sách hoàn thành — mỗi cuốn sách đọc xong sẽ in dấu một con tem riêng tại đây.",
+  bookStampSessionsBadge: "{count} lần đọc trọn vẹn",
+  bookStampCompletedOn: "Hoàn thành: {date}",
+  milestoneStampsHeading: "Dấu Ấn Hành Trình Tích Lũy",
+  milestoneUnlockedBadge: "Đã đạt cột mốc",
+  milestoneProgressBadge: "Tiến độ êm: {current}/{target}",
+} as const satisfies MessageTree;
+
+export type PhonemeGardenMessageKey = keyof typeof phonemeGardenVi;
+
+export const phonemeGardenEn: Record<PhonemeGardenMessageKey, string> = {
+  pageTitle: "Vietnamese Phoneme Garden & Reading Passport",
+  pageSubtitle:
+    "7 Vietnamese phonics flower beds and commemorative book stamps that grow gently at your child's own pace.",
+  privacyBadge: "Family Private (PARENT_PRIVATE)",
+  calmBanner:
+    "This garden only grows — zero virtual coins, zero leaderboards, and flowers never wilt when taking days off.",
+  selectChildLabel: "Select child profile",
+  childOptionLabel: "{alias} (Grade {grade})",
+  hubHeaderBadge: "Phoneme Garden & Stamps",
+  openFullGardenLink: "Open full Phoneme Garden",
+  viewPassportButton: "Open Book Stamp Album ({count})",
+  closePassportButton: "Close album",
+  retryAction: "Retry gently",
+  loadingGarden: "Tending your child's phoneme garden...",
+  errorGarden: "Unable to load the phoneme garden right now. Please try again.",
+  noChildrenTitle: "No child profile yet",
+  noChildrenDescription:
+    "Create a child profile first to start growing the 7 Vietnamese phonics flower beds.",
+  createChildAction: "Create child profile",
+  browseBooksAction: "Browse books together",
+  practiceWordsAction: "Practice tricky words",
+  statsBloomedBeds: "{count}/7 beds in bloom",
+  statsMasteredWords: "{count} mastered words",
+  statsCompletedBooks: "{count} book stamps earned",
+  statsCompletedSessions: "{count} cumulative sessions",
+  bedsListAria: "7 Vietnamese phonics flower beds",
+  stageSeed: "Seed",
+  stageSprout: "Sprout",
+  stageBud: "Bud",
+  stageBloom: "Bloom",
+  bedMasteredCount: "{count} mastered words",
+  bedPracticedCount: "{count} practiced words",
+  bedMasteredWordsLabel: "Bloomed words:",
+  bedSeedWaitingHint: "Ready to sprout as your child reads",
+  bedNextStageHint: "{count} more mastered word(s) to reach the next stage",
+  bedBloomedHint: "In full lasting bloom",
+  passportModalTitle: "Reading Passport & Commemorative Stamp Album",
+  passportModalSubtitle:
+    "Celebrates every distinct book {alias} has finished and calm cumulative reading milestones.",
+  bookStampsHeading: "Completed Book Stamps ({count})",
+  bookStampsEmpty:
+    "No completed book stamps yet — finishing a book awards its own commemorative stamp here.",
+  bookStampSessionsBadge: "Finished {count} time(s)",
+  bookStampCompletedOn: "Completed: {date}",
+  milestoneStampsHeading: "Cumulative Journey Milestones",
+  milestoneUnlockedBadge: "Milestone reached",
+  milestoneProgressBadge: "Calm progress: {current}/{target}",
+};

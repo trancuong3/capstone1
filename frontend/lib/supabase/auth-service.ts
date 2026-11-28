@@ -9,6 +9,7 @@ import type {
 } from "@supabase/supabase-js";
 
 import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
+import { wipeOfflineAccountData } from "@/lib/offline/offline-hygiene";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import type {
@@ -284,7 +285,14 @@ export function createSupabaseAuthService(
     createIsolatedReauthenticationClient;
   let recoveryUserId: string | null = null;
 
-  const signOutQuietly = async () => {
+  const signOutQuietly = async (
+    parentAccountId?: string | null,
+    reason: "inactive_profile" | "auth_clear" = "inactive_profile",
+  ) => {
+    void wipeOfflineAccountData({
+      parentAccountId: parentAccountId ?? null,
+      reason,
+    }).catch(() => undefined);
     try {
       await supabase.auth.signOut({ scope: "local" });
     } catch {
@@ -557,7 +565,7 @@ export function createSupabaseAuthService(
 
       const role = readParentRole(data);
       if (!role) {
-        await signOutQuietly();
+        await signOutQuietly(userData.user.id, "inactive_profile");
         throw unexpectedAuthError();
       }
 
@@ -566,6 +574,7 @@ export function createSupabaseAuthService(
 
     async signOut() {
       recoveryUserId = null;
+      await wipeOfflineAccountData({ reason: "logout" }).catch(() => undefined);
       const { error } = await runProviderOperation(() =>
         supabase.auth.signOut({ scope: "local" }),
       );

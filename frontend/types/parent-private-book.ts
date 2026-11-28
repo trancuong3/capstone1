@@ -9,6 +9,9 @@ export const sourceUsageTypeSchema = z.enum([
 ]);
 export type SourceUsageType = z.infer<typeof sourceUsageTypeSchema>;
 
+export const scanSaveModeSchema = z.enum(["create_book", "append_page"]);
+export type ScanSaveMode = z.infer<typeof scanSaveModeSchema>;
+
 export const submissionWorkflowStatusSchema = z.enum([
   "CHECKING",
   "PASSED_READY_TO_ADD",
@@ -101,6 +104,21 @@ const safeMediaUrlSchema = z
       return false;
     }
   });
+
+export const safeMediaUrlForScanSaveSchema = safeMediaUrlSchema;
+
+export const saveScanToMyBooksResponseSchema = z.object({
+  book_id: z.string(),
+  page_id: z.string(),
+  page_number: z.number().int().positive(),
+  revision_id: z.string().nullable().optional(),
+  title: z.string().optional(),
+  visibility_scope: z.literal("PARENT_PRIVATE").optional(),
+  reader_href: safeMediaUrlSchema,
+});
+export type SaveScanToMyBooksResponseDTO = z.infer<
+  typeof saveScanToMyBooksResponseSchema
+>;
 
 export const toolCheckScopeSchema = z.object({
   modality: z.string(),

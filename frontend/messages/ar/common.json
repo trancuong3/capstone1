@@ -164,7 +164,10 @@
     "childEmptyDesc": "لا يوجد ملف طفل بعد. أنشئ ملفاً لحفظ الكتب وإعدادات الصوت والتقدم بشكل منفصل!",
     "childCreateBtn": "إنشاء ملف طفل",
     "childPickerPrompt": "لأي طفل تريد فتح هذه الصفحة؟",
-    "quickActionGateIntro": "قبل فتح **{label}**، لنتحقق من ملف الطفل المحدد."
+    "quickActionGateIntro": "قبل فتح **{label}**، لنتحقق من ملف الطفل المحدد.",
+    "scopePublic": "مساعدة الضيوف",
+    "scopeParent": "مساعدة أولياء الأمور",
+    "scopeAdmin": "مساعدة الإدارة"
   },
   "taskCenter": {
     "backgroundProcessing": "جارٍ المعالجة في الخلفية…",

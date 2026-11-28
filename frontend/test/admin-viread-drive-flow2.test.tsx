@@ -657,4 +657,68 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       ).toBeInTheDocument();
     });
   });
+
+  it("renders 1-Click Google Colab link and simplified T4 GPU / token guidance in Flow 2", async () => {
+    const base = makeOverview();
+    mockService.overview = vi.fn().mockResolvedValue({
+      ...base,
+      worker_status: {
+        local_training_enabled: false,
+        local_gpu_ready: false,
+        web_heavy_workers_disabled: true,
+        execution_mode: "COLAB",
+      },
+      jobs: [
+        {
+          job_id: "77777777-7777-4777-8777-777777777777",
+          profile: "FLOW2_ADMIN_VERIFIED",
+          target: "COLAB",
+          status: "WAITING_FOR_COLAB_WORKER",
+          dataset_version_id: "99999999-9999-4999-8999-999999999999",
+          manifest_sha256: "b".repeat(64),
+          config_sha256: "c".repeat(64),
+          parent_checkpoint_sha256: "a".repeat(64),
+          run_id: null,
+          run_status: null,
+          run_config_sha256: null,
+          candidate_has_benchmark: false,
+          attempts: 0,
+          progress: {},
+          last_error_code: null,
+          metadata: {},
+          created_at: "2026-11-21T10:00:00+00:00",
+          updated_at: "2026-11-21T10:00:00+00:00",
+        },
+      ],
+    });
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá/i }),
+    );
+
+    const colabLink = await screen.findByRole("link", {
+      name: /Mở Google Colab \(1-Click\)/i,
+    });
+    expect(colabLink).toHaveAttribute(
+      "href",
+      "https://colab.research.google.com/github/trancuong3/capstone1/blob/main/ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb",
+    );
+    expect(colabLink).toHaveAttribute("target", "_blank");
+    expect(colabLink).toHaveAttribute("rel", "noopener noreferrer");
+
+    expect(screen.getByText(/Đang có tác vụ chờ Colab/i)).toBeInTheDocument();
+    expect(screen.getByText(/T4 GPU\s*→\s*Run all/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/VIREAD_TRAINING_WORKER_TOKEN/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Không cần thiết lập OAuth/i)).toBeInTheDocument();
+  });
 });

@@ -455,6 +455,65 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"detail": {"code": "SPEECH_UNAVAILABLE"}})
 
+    def test_speech_to_text_route_enforces_overall_timeout_cap(self):
+        async def _slow_transcribe(**_kwargs):
+            await asyncio.sleep(1.0)
+
+        orchestrator = MagicMock()
+        orchestrator.transcribe = AsyncMock(side_effect=_slow_transcribe)
+        with (
+            patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator),
+            patch.object(voice_routes, "_STT_REQUEST_TIMEOUT_SECONDS", 0.05),
+        ):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.webm", b"audio-bytes", "audio/webm")},
+                )
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(response.json(), {"detail": {"code": "STT_TIMEOUT"}})
+
+    def test_elevenlabs_transcribe_uses_9s_timeout_and_respects_max_retries_zero(self):
+        seen_timeouts: list[httpx.Timeout] = []
+        calls = 0
+
+        class MockAsyncClient:
+            def __init__(self, **kwargs):
+                if "timeout" in kwargs:
+                    seen_timeouts.append(kwargs["timeout"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                nonlocal calls
+                calls += 1
+                return httpx.Response(503, json={"detail": {"code": "server_error"}})
+
+        provider = ElevenLabsVoiceProvider(api_key="unit-test-secret")
+        with patch(
+            "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
+            MockAsyncClient,
+        ):
+            with self.assertRaises(VoiceProviderError) as caught:
+                asyncio.run(
+                    provider.transcribe(
+                        audio=b"audio-bytes",
+                        filename="reading.webm",
+                        content_type="audio/webm",
+                        language_code="vi",
+                        max_retries=0,
+                    )
+                )
+        self.assertEqual(caught.exception.code, "STT_TEMPORARILY_UNAVAILABLE")
+        self.assertEqual(calls, 1)
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertEqual(seen_timeouts[0].read, 9.0)
+        self.assertEqual(seen_timeouts[0].connect, 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

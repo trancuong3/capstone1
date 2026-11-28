@@ -164,7 +164,10 @@
     "childEmptyDesc": "Gia đình mình chưa có hồ sơ bé nào. Hãy tạo hồ sơ bé để lưu riêng sách, giọng đọc và tiến bộ của con nhé!",
     "childCreateBtn": "Tạo hồ sơ bé",
     "childPickerPrompt": "Ba mẹ muốn mở trang này cho bé nào ạ?",
-    "quickActionGateIntro": "Trước khi mở **{label}**, mình kiểm tra nhanh hồ sơ bé đang chọn nhé."
+    "quickActionGateIntro": "Trước khi mở **{label}**, mình kiểm tra nhanh hồ sơ bé đang chọn nhé.",
+    "scopePublic": "Hỗ trợ Khách",
+    "scopeParent": "Hỗ trợ Phụ huynh",
+    "scopeAdmin": "Hỗ trợ Quản trị"
   },
   "taskCenter": {
     "backgroundProcessing": "Đang xử lý nền…",

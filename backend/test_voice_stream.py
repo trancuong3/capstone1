@@ -377,6 +377,31 @@ class VoiceStreamProxyTests(unittest.TestCase):
         self.assertEqual(body["local"]["tts_precision"], "hybrid")
         self.assertEqual(len(body["local"]["active_voices"]), 8)
 
+    def test_ws_stream_fails_fast_when_local_circuit_breaker_open(self) -> None:
+        dial_called = False
+
+        @asynccontextmanager
+        async def _should_not_dial(_url: str, _headers: dict[str, str]):
+            nonlocal dial_called
+            dial_called = True
+            yield FakeWorkerWs()
+
+        voice_routes.open_local_stt_ws = _should_not_dial  # type: ignore[assignment]
+        with self._build_client(override_auth=True) as client:
+            orch = voice_routes.get_voice_orchestrator()
+            orch.local.trip_connect_circuit("LOCAL_VOICE_UNAVAILABLE")
+            try:
+                with client.websocket_connect("/voice/stt-stream") as ws:
+                    err = ws.receive_json()
+                    self.assertEqual(err["code"], "LOCAL_STT_UNAVAILABLE")
+                    self.assertTrue(err["retryable"])
+                    with self.assertRaises(WebSocketDisconnect) as ctx:
+                        ws.receive_text()
+                    self.assertEqual(ctx.exception.code, 4503)
+                self.assertFalse(dial_called)
+            finally:
+                orch.local._clear_remote_circuit()
+
 
 if __name__ == "__main__":
     unittest.main()

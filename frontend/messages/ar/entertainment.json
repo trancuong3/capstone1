@@ -27,7 +27,7 @@
     "defaultGreeting": "مرحبًا يا بطل! هل تريد اليوم حكاية بالصور أم تركيب الجمل أم الغناء أم لعبة الذاكرة؟",
     "defaultRecommendationReason": "يرتبط كل نشاط بلطف بالكتب التي يقرأها الطفل لتثبيت الكلمات دون أي ضغط.",
     "focusDifficultWordsLabel": "كلمات يراجعها الطفل بلطف:",
-    "playSuggestedCta": "العب النشاط المقترح الآن",
+    "playSuggestedCta": "العب الآن مع البومة",
     "onboardingRegionAria": "دليل التعرف على منطقة اللعب والتعلّم",
     "onboardingCounter": "دليل سريع ({current}/{total})",
     "onboardingStep1Title": "١. اختر ركن اللعب المفضل",
@@ -57,7 +57,15 @@
     "memoryCta": "ابدأ لعبة الذاكرة",
     "breakReminderTitle": "استراحة مريحة للعين:",
     "defaultBreakReminder": "نحو ١٠–١٥ دقيقة لكل جلسة مثالية للحفاظ على صحة العينين والتعلّم بسلاسة.",
-    "recommendationLoadError": "تعذر تحميل توصيات التعلّم الآن."
+    "recommendationLoadError": "تعذر تحميل توصيات التعلّم الآن.",
+    "autoPlayFlowOn": "التشغيل التلقائي",
+    "autoPlayFlowOff": "التشغيل التلقائي (متوقف)",
+    "quickPlayCta": "دخول سريع",
+    "quickPlayCardAria": "دخول سريع: {title}",
+    "misreadWordsChipTitle": "كلمات للمراجعة:",
+    "magicQuestCta": "✨ مغامرة الكلمات السحرية 60 ثانية (مراجعة الآن)",
+    "magicQuestNoBookHint": "لا يوجد كتاب مطابق بعد؟ تنسج بومة ViRead قصة سحرية في 60 ثانية تُحذف تلقائيًا بعد اللعب!",
+    "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
   },
   "karaoke": {
     "title": "كاراوكي الأطفال",
@@ -92,7 +100,10 @@
       "coverAlt": "غلاف الألبوم لـ {title}",
       "songInfo": "معلومات الأغنية",
       "gradeRange": "الصف {min}–{max}",
-      "singSongAction": "اغنية {title}"
+      "singSongAction": "اغنية {title}",
+      "reviewDifficultWordsLabel": "كلمات للتدريب:",
+      "singNowAction": "غنِّ الآن",
+      "difficultWordsBoostHint": "تظهر الأغاني التي تحتوي على الكلمات التي يتدرب عليها طفلك أولاً."
     },
     "playerScreen": {
       "backToLibrary": "العودة إلى مكتبة الأغاني",
@@ -250,8 +261,12 @@
         "weakestSegmentTitle": "مقطع يُنصح بالتدرب عليه · السطر {number}",
         "retrySegmentSlow": "تدرّب على هذا المقطع (0.85x)",
         "segmentReportSummary": "تقرير حسب المقاطع ({count} أسطر)",
-        "segmentLineHeader": "السطر {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "السطر {number} ({start}–{end})",
+        "practiceWeakestNow": "تدرّب الآن على أضعف سطر (0.85×)"
+      },
+      "autoplayPreparing": "جارٍ تجهيز الأغنية تلقائيًا…",
+      "autoplayTapToStart": "المس مرة واحدة لبدء الموسيقى",
+      "autoplayTapHint": "يحتاج المتصفح إلى لمسة سريعة لتشغيل الموسيقى والميكروفون."
     },
     "score": {
       "regionAria": "دقة الكلمات",
@@ -332,6 +347,49 @@
       },
       "lyricsOnlyFallbackGuidance": "لم يكن تحليل Web Audio مفعلًا على هذا الجهاز، لذا تم تقييم الكلمات فقط هذه المرة.",
       "mildSpeakerBleedGuidance": "تسرب قليل من صوت السماعة للميكروفون. السماعات ستجعل التقييم أكثر دقة!"
+    },
+    "magicChant": {
+      "libraryBadge": "✨ Instant · Auto-clears after chant",
+      "libraryCardTitle": "✨ 80 BPM Magic Rhythm Chant · Clap Beats & Review Words (Auto-clears)",
+      "libraryCardDesc": "No matching song yet? ViRead Owl weaves an 80 BPM rhythmic chant from your review words!",
+      "libraryOpenCta": "Open Magic Rhythm Chant",
+      "loadingTitle": "ViRead Owl is setting the beat and weaving your chant…",
+      "loadingStage1": "Picking focus words…",
+      "loadingStage2": "Composing 80 BPM rhyme lines…",
+      "errorTitle": "Magic chant needs a quick retry",
+      "errorBody": "Please tap Retry to weave a fresh rhythm chant.",
+      "expiredNotice": "The previous chant dissolved after 15 minutes — Owl wove a fresh one for you!",
+      "lineBadge": "Chant Line {current}/{total}",
+      "step1ClapPrompt": "Step 1: Tap the drum pad for {beats} steady beats!",
+      "step2SpeakPrompt": "Step 2: Speak «{word}» aloud in rhythm!",
+      "step2NoMicPrompt": "Step 2: Listen to the chant and complete this line!",
+      "listenLineBtn": "Hear chant line",
+      "clapBeatBtn": "Tap beat ({current}/{total})",
+      "speakWordBtn": "Speak «{word}»",
+      "stopListeningBtn": "Done speaking",
+      "listenWordSlowBtn": "Hear slow model",
+      "listeningStatus": "ViRead Owl is listening…",
+      "evaluatingStatus": "Checking your spoken word…",
+      "unclearVoiceRetry": "Couldn't hear clearly — bring the mic closer and say «{word}» again! (No strike used)",
+      "strike1Gentle": "Almost! Listen slowly to «{word}» (0.88×) and try again!",
+      "strike2Phonics": "Let's sound out «{word}» step by step!",
+      "strike3RescueReady": "Owl Assist ready! Tap Owl Boost to keep your rhythm star!",
+      "owlRescueBtn": "🦉 Owl Boost",
+      "finishNoMicBtn": "✨ Listen & Complete Line",
+      "toggleNoMicOn": "No-Mic Mode: Clap Beats & Listen",
+      "toggleNoMicOff": "Play without Mic",
+      "micDeniedFallbackNotice": "Microphone is unavailable — Owl enabled No-Mic Mode: Clap Beats & Listen!",
+      "spokenPraise": "Wonderful! You spoke «{word}» right in rhythm!",
+      "rescuePraise": "Hooray for great effort! Your rhythm star lit up!",
+      "noMicPraise": "Great job! You clapped the beat and heard «{word}»!",
+      "nextLineBtn": "Next chant line",
+      "openFinaleBtn": "Open Glowing Chant Scroll",
+      "finaleEyebrow": "Chant Scroll Illuminated",
+      "listenFullChantBtn": "Hear full rhythm chant",
+      "dissolveBtn": "✨ Release chant scroll to the starry sky",
+      "dissolvedBadge": "Temporary chant cleared · Word mastery saved",
+      "playAnotherBtn": "Weave another rhythm chant",
+      "backToLibraryBtn": "Back to song library"
     }
   },
   "pictureDescription": {
@@ -539,6 +597,21 @@
       "action": "ماذا يفعل؟",
       "where": "أين وما اللون؟"
     },
+    "practicingWordsBadge": "كلمات قيد المراجعة",
+    "cardDifficultWordsTag": "كلمات للتدريب: {words}",
+    "matchedDifficultWordBanner": "كلمات تمت مراجعتها: {words}",
+    "autoPlayOn": "التشغيل التلقائي",
+    "autoPlayOff": "التشغيل التلقائي (متوقف)",
+    "quickPlayAutopilotBtn": "العب الآن (اختيار تلقائي لصورة المراجعة)",
+    "openingAutopilotPrompt": "انظر إلى هذه الصورة وأخبرني بما تراه!",
+    "autoMicBlockedFallback": "اضغط على التحدث بالميكروفون لتروي قصتك!",
+    "autoSubmitCountdown": "سيتم الإرسال خلال {seconds} ث",
+    "submitNowAction": "أرسل الآن",
+    "pauseAutoAction": "إيقاف التلقائي مؤقتًا",
+    "autoPausedNotice": "تم إيقاف الإرسال التلقائي — اضغط على إرسال عند الانتهاء من قصتك.",
+    "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
+    "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
+    "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",
     "studioIllustrationBadge": "رسم توضيحي نقي"
   },
   "karaokeRuntime": {

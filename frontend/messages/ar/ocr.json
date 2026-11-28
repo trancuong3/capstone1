@@ -102,7 +102,12 @@
     "captureAndScan": "التقط & امسح الآن",
     "autoScanOn": "المسح التلقائي: مُفَعَّل",
     "autoScanOff": "المسح التلقائي: مُعطَّل",
-    "fallbackUploadAction": "التقط بالكاميرا / اختر صورة واضحة"
+    "fallbackUploadAction": "التقط بالكاميرا / اختر صورة واضحة",
+    "spotlightModeOn": "تسليط الضوء على أسطر الكتاب الورقي: مفعل",
+    "spotlightModeOff": "تسليط الضوء على أسطر الكتاب الورقي: متوقف",
+    "spotlightLineBadge": "السطر {current}/{total}",
+    "spotlightPrevLine": "السطر السابق",
+    "spotlightNextLine": "السطر التالي"
   },
   "review": {
     "title": "مراجعة نص الصفحة",

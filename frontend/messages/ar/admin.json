@@ -1293,7 +1293,24 @@
       "rejected": "تم رفض إصدار الصفحة.",
       "suspendedWithTitle": "تم تعليق الكتاب الخاص \"{title}\" للعائلة المالكة. لا يمكنهم قراءته فورا."
     },
-    "kpiAria": "نظرة عامة على قائمة انتظار كتب المستخدمين"
+    "kpiAria": "نظرة عامة على قائمة انتظار كتب المستخدمين",
+    "subtabHardRadar": "رادار عينات OCR الصعبة",
+    "hardRadar": {
+      "heading": "رادار عينات OCR الصعبة (ارتباط تعثر القراءة -> Flow 2)",
+      "privacyNotice": "يجمع فقط الكتب العامة والكتب الخاصة الموافَق عليها صراحة في Flow 2 مع تصفية البيانات الشخصية وإخفاء الهوية بالكامل.",
+      "loading": "جار ربط ثقة OCR مع إشارات إعادة المحاولة…",
+      "loadError": "تعذر تحميل رادار عينات OCR الصعبة.",
+      "totalCandidates": "إجمالي الكلمات ذات الأولوية",
+      "catalogCount": "كلمات المكتبة العامة",
+      "consentedPrivateCount": "كلمات Flow 2 الموافق عليها",
+      "empty": "لا توجد كلمات OCR منخفضة الثقة مرتبطة بتعثر القراءة حاليا.",
+      "scopeCatalog": "المكتبة العامة",
+      "scopeConsentedPrivate": "موافقة Flow 2",
+      "scoreLabel": "الأولوية {score}/100",
+      "pageLineMeta": "صفحة {page} · سطر {line}",
+      "signalSummary": "ثقة OCR: {conf}% · محاولات فاشلة: {retries} · عدم تطابق: {mismatches} · جلسات مغفلة: {sessions}",
+      "inspectOcrAction": "فحص صفحة OCR"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "افتح دفتر الملاحظات",
     "colabGuideSuffix": "، ثم انقر على",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "مهمة بانتظار Colab",
+    "colabGuideSummary": "انقر على فتح Google Colab (بنقرة واحدة)، واختر Runtime → Change runtime type → T4 GPU → Run all، ثم أدخل VIREAD_TRAINING_WORKER_TOKEN لاستلام المهمة وتشغيلها تلقائياً.",
+    "colabGuideNoOauthNote": "لا يلزم إعداد OAuth أو ربط Drive يدوياً في Colab؛ يمكنك استخدام أي حساب Google Colab.",
+    "openColabBtn": "فتح Google Colab (بنقرة واحدة)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

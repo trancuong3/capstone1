@@ -129,6 +129,8 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ["lucide-react"],
     ...(isPlaywrightDev
       ? {
+          cpus: 1,
+          workerThreads: true,
           devMemoryThresholdRestart: false,
           serverComponentsHmrCache: false,
           webpackMemoryOptimizations: true,

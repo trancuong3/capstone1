@@ -109,17 +109,23 @@ export function FamilyReadingDesk({
 
   const recent =
     summarySource === "dashboard-summary" ? summaryRecent : fallbackRecent;
+  const isPassportTab = Boolean(child && deskTab === "passport");
 
   return (
     <section
-      className="family-reading-desk order-2 md:order-1"
-      aria-labelledby="desk-title"
+      className={`family-reading-desk order-2 md:order-1${
+        isPassportTab ? " family-reading-desk--passport" : ""
+      }`}
+      aria-label={
+        isPassportTab ? tParent("passport.passportTabLabel") : undefined
+      }
+      aria-labelledby={isPassportTab ? undefined : "desk-title"}
     >
       <div className="desk-copy">
         {child ? (
           <div
             aria-label={tParent("passport.tabGroupAria")}
-            className="mb-3 inline-flex items-center gap-1 rounded-full border border-border bg-white/90 p-1"
+            className="mb-4 inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-border bg-white/90 p-1"
             role="tablist"
           >
             <button
@@ -154,8 +160,7 @@ export function FamilyReadingDesk({
             </button>
           </div>
         ) : null}
-
-        {child && deskTab === "passport" ? (
+        {isPassportTab && child ? (
           <ReadingPassportPanel childAlias={child.alias} childId={child.id} />
         ) : (
           <>
@@ -232,16 +237,18 @@ export function FamilyReadingDesk({
           </>
         )}
       </div>
-      <div className="desk-illustration">
-        <Image
-          alt=""
-          src="/images/reading-studio.webp"
-          fill
-          priority
-          sizes="(min-width: 1000px) 380px, 100vw"
-          className="object-cover"
-        />
-      </div>
+      {!isPassportTab ? (
+        <div className="desk-illustration">
+          <Image
+            alt=""
+            src="/images/reading-studio.webp"
+            fill
+            priority
+            sizes="(min-width: 1000px) 380px, 100vw"
+            className="object-cover"
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

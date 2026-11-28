@@ -145,6 +145,8 @@ class OcrCorrectionOrchestrator:
         async def run() -> str:
             corrected_by_chunk: dict[int, tuple[str, ...]] = {}
             disabled_families: set[str] = set()
+            disabled_providers: set[str] = set()
+            healthy_providers: set[str] = set()
             for chunk in plan.chunks:
                 try:
                     crop = await asyncio.to_thread(
@@ -159,6 +161,8 @@ class OcrCorrectionOrchestrator:
                     chunk=chunk,
                     crop=crop,
                     disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
+                    healthy_providers=healthy_providers,
                     deadline=deadline,
                     on_provider_event=on_provider_event,
                     on_uncertain_tokens=on_uncertain_tokens,
@@ -194,15 +198,18 @@ class OcrCorrectionOrchestrator:
         *,
         provider: OcrCorrectionProvider,
         disabled_families: set[str],
+        disabled_providers: set[str] | None = None,
         deadline: float | None,
     ) -> float | None:
         if deadline is None or self._is_local_provider(provider):
             return None
+        skipped_providers = disabled_providers or set()
         current_index = self.providers.index(provider)
         remaining_after = [
             candidate
             for candidate in self.providers[current_index:]
             if candidate.family not in disabled_families
+            and candidate.name not in skipped_providers
         ]
         has_local_fallback = any(
             self._is_local_provider(candidate) for candidate in remaining_after
@@ -228,8 +235,13 @@ class OcrCorrectionOrchestrator:
 
     async def _correct_chunk(
         self, *, chunk_id, chunk, crop, disabled_families, deadline=None,
+        disabled_providers=None, healthy_providers=None,
         on_provider_event=None, on_uncertain_tokens=None,
     ):
+        if disabled_providers is None:
+            disabled_providers = set()
+        if healthy_providers is None:
+            healthy_providers = set()
         attempted = False
         has_valid_response = False
         has_valid_cloud_response = False
@@ -237,7 +249,7 @@ class OcrCorrectionOrchestrator:
         unresolved_indices = set(range(chunk.expected_word_count))
         request_chunk = chunk
         for provider in self.providers:
-            if provider.family in disabled_families:
+            if provider.name in disabled_providers or provider.family in disabled_families:
                 continue
             is_local = self._is_local_provider(provider)
             # Uncertainty is not provider unavailability. Once a cloud model
@@ -287,7 +299,7 @@ class OcrCorrectionOrchestrator:
             started = time.perf_counter()
             attempt_number = sum(
                 1 for prior in self.providers[: self.providers.index(provider)]
-                if prior.family not in disabled_families
+                if prior.family not in disabled_families and prior.name not in disabled_providers
             )
             log_diagnostic(
                 logger,
@@ -313,14 +325,15 @@ class OcrCorrectionOrchestrator:
                 cloud_timeout = self._cloud_attempt_timeout(
                     provider=provider,
                     disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
                     deadline=deadline,
                 )
                 if cloud_timeout is not None and cloud_timeout <= 0:
                     raise OcrProviderError(
                         provider=provider.name,
-                        code="PROVIDER_TIMEOUT",
+                        code="BUDGET_EXHAUSTED",
                         status_code=504,
-                        disables_family=True,
+                        disables_family=False,
                     )
                 coro = provider.correct_chunk(
                     chunk=request_chunk,
@@ -340,7 +353,7 @@ class OcrCorrectionOrchestrator:
                 else:
                     result = await coro
             except OcrProviderError as exc:
-                if cb is not None and provider_key is not None:
+                if cb is not None and provider_key is not None and exc.code != "BUDGET_EXHAUSTED":
                     kind, trips_quota = classify_ocr_provider_error(
                         exc.code, exc.upstream_status_code
                     )
@@ -353,17 +366,29 @@ class OcrCorrectionOrchestrator:
                             retry_after_seconds=exc.retry_after_seconds,
                         )
                         prov_probe_acquired = False
-                        if trips_quota and quota_key is not None:
+                        # Isolate per-model daily `limit: 0` caps to `provider:*` so healthy
+                        # sibling models in the same family are never locked out for 6 hours.
+                        if trips_quota and quota_key is not None and not exc.limit_zero:
                             cb.record_failure(
                                 quota_key,
                                 kind=kind,
                                 http_status=exc.upstream_status_code,
-                                limit_zero=exc.limit_zero,
+                                limit_zero=False,
                                 retry_after_seconds=exc.retry_after_seconds,
                             )
                             quota_probe_acquired = False
                 if exc.disables_family:
-                    disabled_families.add(provider.family)
+                    is_family_wide_error = (
+                        not exc.limit_zero
+                        and (
+                            exc.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}
+                            or exc.upstream_status_code in {401, 403, 429}
+                        )
+                    )
+                    if is_family_wide_error:
+                        disabled_families.add(provider.family)
+                    else:
+                        disabled_providers.add(provider.name)
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 self._emit_provider_event(
                     on_provider_event,
@@ -378,6 +403,7 @@ class OcrCorrectionOrchestrator:
                 )
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -413,6 +439,7 @@ class OcrCorrectionOrchestrator:
                 )
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -440,6 +467,7 @@ class OcrCorrectionOrchestrator:
                 if quota_key is not None:
                     cb.record_success(quota_key)
             has_valid_response = True
+            healthy_providers.add(provider.name)
             if not is_local:
                 has_valid_cloud_response = True
             uncertain = set(result.uncertain_word_indices)
@@ -461,6 +489,7 @@ class OcrCorrectionOrchestrator:
                 request_chunk = self._chunk_with_words(chunk, working_words)
                 next_provider = self._next_provider_name(
                     provider, disabled_families,
+                    disabled_providers=disabled_providers,
                     skip_local=has_valid_cloud_response,
                 )
                 log_diagnostic(
@@ -577,11 +606,12 @@ class OcrCorrectionOrchestrator:
 
     def _next_provider_name(
         self, current: OcrCorrectionProvider, disabled_families: set[str],
-        *, skip_local: bool = False,
+        *, disabled_providers: set[str] | None = None, skip_local: bool = False,
     ) -> str:
+        skipped_providers = disabled_providers or set()
         current_index = self.providers.index(current)
         for provider in self.providers[current_index + 1 :]:
-            if provider.family not in disabled_families:
+            if provider.family not in disabled_families and provider.name not in skipped_providers:
                 if skip_local and (
                     provider.family == "ollama"
                     or provider.name.lower().startswith("ollama")

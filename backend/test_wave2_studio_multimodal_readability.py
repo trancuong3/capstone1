@@ -230,6 +230,120 @@ class Wave2StudioMultimodalReadabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 422)
         self.assertEqual(exc_info.exception.detail, "UNSAFE_STORY_PROMPT")
 
+    async def test_storyweaver_create_full_flow_persists_book_pages_and_v2_metadata(self) -> None:
+        from contextlib import asynccontextmanager
+
+        from app.models import Book, BookPage, PageRevision, PageRevisionWord
+        from app.models.smart_book_studio import BookStyleBible, PageOcrExtraction
+
+        actor_id = uuid4()
+        child_id = uuid4()
+        added_rows: list[Any] = []
+        uploaded: list[tuple[str, bytes, str, str | None]] = []
+
+        class _FakeDb:
+            def __init__(self) -> None:
+                self.commits = 0
+                self.rollbacks = 0
+
+            async def scalar(self, query: Any) -> Any:
+                sql_str = str(query)
+                if "profiles" in sql_str.lower():
+                    return "parent"
+                if "childprofiles" in sql_str.lower():
+                    return SimpleNamespace(Id=child_id, ParentId=actor_id, Grade=2)
+                return None
+
+            def add(self, obj: Any) -> None:
+                if getattr(obj, "Id", None) is None:
+                    obj.Id = uuid4()
+                added_rows.append(obj)
+
+            def add_all(self, objs: list[Any]) -> None:
+                for obj in objs:
+                    self.add(obj)
+
+            async def flush(self, objs: Any = None) -> None:
+                _ = objs
+
+            async def commit(self) -> None:
+                self.commits += 1
+
+            async def rollback(self) -> None:
+                self.rollbacks += 1
+
+            @asynccontextmanager
+            async def begin_nested(self):
+                yield self
+
+        def _fake_upload(path: str, data: bytes, mime: str, *, bucket_name: str | None = None, upsert: bool = False) -> None:
+            _ = upsert
+            uploaded.append((path, data, mime, bucket_name))
+
+        fake_db = _FakeDb()
+        fake_detail = {
+            "book": {
+                "id": str(uuid4()),
+                "title": "Chuyến khám phá khu vườn nắng sớm",
+                "author": "Gia đình & Trạm Sáng Tạo ViRead",
+                "min_grade": 2,
+                "max_grade": 2,
+                "lifecycle_status": "ACTIVE",
+                "visibility_scope": "PARENT_PRIVATE",
+                "moderation_status": "ACTIVE",
+                "suspended_reason": None,
+                "source_declaration": "[SELF_AUTHORED] Trạm Sáng Tạo Sách Mỏng Gia Đình (DUET_DIALOGUE)",
+                "committed_page_count": 3,
+                "pending_submission_count": 0,
+                "flagged_submission_count": 0,
+                "failed_submission_count": 0,
+                "ready_to_add_count": 0,
+                "readable_for_children": True,
+                "has_held_multipage_batch": False,
+                "privacy_notice": "Riêng tư",
+                "created_at": "2026-11-28T00:00:00Z",
+            },
+            "pages": [],
+            "submissions": [],
+        }
+
+        with (
+            patch(
+                "app.services.warmup_micro_story_service.WarmupMicroStoryService._collect_due_words",
+                new=AsyncMock(return_value=[("nắng sớm", 1)]),
+            ),
+            patch(
+                "app.services.family_storyweaver_service.FamilyStoryweaverService._try_generate_cloud_story",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.services.family_storyweaver_service.ParentPrivateBookService.get_book",
+                new=AsyncMock(return_value=fake_detail),
+            ),
+        ):
+            svc = FamilyStoryweaverService(fake_db, upload_fn=_fake_upload)
+            req = ParentStoryweaverRequest(
+                child_id=child_id,
+                theme="khu vườn nắng sớm",
+                page_count=3,
+                target_grade=2,
+                style_mode="DUET_DIALOGUE",
+                custom_words=["bông hoa"],
+            )
+            res = await svc.create_storyweaver_book(actor_id, req, base_url="http://testserver")
+
+        self.assertEqual(len(uploaded), 3)
+        self.assertTrue(all(mime == "image/webp" for _, _, mime, _ in uploaded))
+        self.assertEqual(fake_db.commits, 2)  # main book commit + optional V2 metadata commit
+        self.assertEqual(len([r for r in added_rows if isinstance(r, Book)]), 1)
+        self.assertEqual(len([r for r in added_rows if isinstance(r, BookPage)]), 3)
+        self.assertEqual(len([r for r in added_rows if isinstance(r, PageRevision)]), 3)
+        self.assertGreater(len([r for r in added_rows if isinstance(r, PageRevisionWord)]), 10)
+        self.assertEqual(len([r for r in added_rows if isinstance(r, BookStyleBible)]), 1)
+        self.assertEqual(len([r for r in added_rows if isinstance(r, PageOcrExtraction)]), 3)
+        self.assertEqual(res.generation_source, "DETERMINISTIC_TEMPLATE")
+        self.assertIn("bông hoa", res.target_words_used)
+
     async def test_direct_call_picture_catalog_unwraps_query_defaults(self) -> None:
         actor_id = uuid4()
         child_id = uuid4()

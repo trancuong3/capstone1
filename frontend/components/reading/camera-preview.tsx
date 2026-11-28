@@ -2,6 +2,8 @@
 
 import {
   Camera,
+  ChevronLeft,
+  ChevronRight,
   FileImage,
   Play,
   RefreshCw,
@@ -25,10 +27,147 @@ import {
   scanCameraFrameForBook,
   scanCameraFrameGlobal,
   type CameraPageMatchDTO,
+  type CameraSpotlightLineDTO,
 } from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
+
+export interface CameraSpotlightOverlayProps {
+  readonly spotlightLines: readonly CameraSpotlightLineDTO[];
+  readonly pageQuad?: readonly (readonly [number, number])[] | null;
+  readonly activeIndex: number;
+  readonly onActiveIndexChange: (nextIndex: number) => void;
+  readonly onProceedToReading?: () => void;
+  readonly matchedPageNumber?: number | null;
+}
+
+export function CameraSpotlightOverlay({
+  spotlightLines,
+  pageQuad,
+  activeIndex,
+  onActiveIndexChange,
+  onProceedToReading,
+  matchedPageNumber,
+}: CameraSpotlightOverlayProps) {
+  const t = useTranslations("ocr");
+  const { formatNumber } = useI18n();
+  if (spotlightLines.length === 0) return null;
+
+  const safeIndex = Math.min(
+    Math.max(0, activeIndex),
+    spotlightLines.length - 1,
+  );
+  const activeLine = spotlightLines[safeIndex];
+  const toSvgPoints = (pts: readonly (readonly [number, number])[]) =>
+    pts.map(([x, y]) => `${x},${y}`).join(" ");
+
+  return (
+    <div
+      className="absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5"
+      data-testid="camera-line-spotlight-overlay"
+    >
+      <svg
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 h-full w-full"
+        data-testid="camera-line-spotlight-svg"
+        preserveAspectRatio="none"
+        viewBox="0 0 1 1"
+      >
+        {pageQuad && pageQuad.length === 4 ? (
+          <polygon
+            fill="rgba(8, 116, 103, 0.08)"
+            points={toSvgPoints(pageQuad)}
+            stroke="rgba(255, 255, 255, 0.75)"
+            strokeDasharray="0.015 0.01"
+            strokeWidth="0.004"
+          />
+        ) : null}
+        {spotlightLines.map((line, idx) => {
+          const isCurrent = idx === safeIndex;
+          return (
+            <polygon
+              data-line-index={line.line_index}
+              data-spotlight-active={isCurrent ? "true" : "false"}
+              fill={
+                isCurrent
+                  ? "rgba(250, 204, 21, 0.34)"
+                  : "rgba(255, 255, 255, 0.08)"
+              }
+              key={`${line.line_index}-${idx}`}
+              points={toSvgPoints(line.points)}
+              stroke={isCurrent ? "#F59E0B" : "rgba(255,255,255,0.35)"}
+              strokeWidth={isCurrent ? "0.006" : "0.0025"}
+            />
+          );
+        })}
+      </svg>
+
+      <div className="relative z-10 flex items-center justify-between gap-2">
+        <span className="rounded-full bg-amber-400 px-3 py-1 text-xs font-extrabold text-ink shadow">
+          {t("camera.spotlightLineBadge", {
+            current: formatNumber(safeIndex + 1),
+            total: formatNumber(spotlightLines.length),
+          })}
+        </span>
+      </div>
+
+      <div className="relative z-10 rounded-card border border-white/25 bg-ink/90 p-3 text-white shadow-lg backdrop-blur-xs">
+        <p
+          className="viread-learning-content text-base font-extrabold leading-snug text-amber-200 sm:text-lg"
+          dir="ltr"
+          lang="vi"
+        >
+          {activeLine.text}
+        </p>
+        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <Button
+              className="min-h-10 w-auto px-2.5 text-xs"
+              disabled={safeIndex <= 0}
+              onClick={() => onActiveIndexChange(safeIndex - 1)}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <ChevronLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+              {t("camera.spotlightPrevLine")}
+            </Button>
+            <Button
+              className="min-h-10 w-auto px-2.5 text-xs"
+              disabled={safeIndex >= spotlightLines.length - 1}
+              onClick={() => onActiveIndexChange(safeIndex + 1)}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              {t("camera.spotlightNextLine")}
+              <ChevronRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </Button>
+          </div>
+          {onProceedToReading ? (
+            <Button
+              className="min-h-10 w-auto px-3 text-xs"
+              onClick={onProceedToReading}
+              size="compact"
+              type="button"
+            >
+              {t("scanner.openMatchedPage", {
+                page: formatNumber(matchedPageNumber ?? 1),
+              })}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface CameraPreviewProps {
   children?: ReactNode;
@@ -75,6 +214,14 @@ export function CameraPreview({
   const [cameraSessionNonce, setCameraSessionNonce] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(true);
+  const [spotlightHoldMode, setSpotlightHoldMode] = useState(false);
+  const [spotlightLineIndex, setSpotlightLineIndex] = useState(0);
+  const [capturedFrameUrl, setCapturedFrameUrl] = useState<string | null>(null);
+  const [pendingMatchRedirect, setPendingMatchRedirect] = useState<{
+    readonly bookId: string;
+    readonly page: ReadingPageDTO;
+    readonly confidence: number;
+  } | null>(null);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
   const [ocrUnavailableBanner, setOcrUnavailableBanner] = useState<
     string | null
@@ -322,16 +469,35 @@ export function CameraPreview({
             if (response.matched) {
               if (response.matched_page && resolvedBookId) {
                 setScanResult(response);
+                setSpotlightLineIndex(0);
                 setAutoScan(false);
                 scanAbortRef.current?.abort();
                 scanAbortRef.current = null;
-                stopCamera();
-                onPageDetected?.(response.matched_page);
-                onBookPageDetected?.(
-                  resolvedBookId,
-                  response.matched_page,
-                  response.confidence,
-                );
+                if (
+                  spotlightHoldMode &&
+                  response.spotlight_lines &&
+                  response.spotlight_lines.length > 0
+                ) {
+                  try {
+                    setCapturedFrameUrl(canvas.toDataURL("image/jpeg", 0.85));
+                  } catch {
+                    setCapturedFrameUrl(null);
+                  }
+                  setPendingMatchRedirect({
+                    bookId: resolvedBookId,
+                    page: response.matched_page,
+                    confidence: response.confidence,
+                  });
+                  stopCamera();
+                } else {
+                  stopCamera();
+                  onPageDetected?.(response.matched_page);
+                  onBookPageDetected?.(
+                    resolvedBookId,
+                    response.matched_page,
+                    response.confidence,
+                  );
+                }
               } else {
                 setScanResult({
                   ...response,
@@ -404,6 +570,7 @@ export function CameraPreview({
     isScanning,
     onBookPageDetected,
     onPageDetected,
+    spotlightHoldMode,
     stopCamera,
     t,
   ]);
@@ -587,13 +754,46 @@ export function CameraPreview({
           </div>
         ) : (
           <>
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="h-full w-full object-cover"
-            />
+            {capturedFrameUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                alt=""
+                className="h-full w-full object-cover"
+                src={capturedFrameUrl}
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="h-full w-full object-cover"
+              />
+            )}
+
+            {isMatched &&
+            scanResult?.spotlight_lines &&
+            scanResult.spotlight_lines.length > 0 ? (
+              <CameraSpotlightOverlay
+                activeIndex={spotlightLineIndex}
+                matchedPageNumber={scanResult.matched_page?.page_number ?? null}
+                onActiveIndexChange={setSpotlightLineIndex}
+                onProceedToReading={
+                  pendingMatchRedirect
+                    ? () => {
+                        onPageDetected?.(pendingMatchRedirect.page);
+                        onBookPageDetected?.(
+                          pendingMatchRedirect.bookId,
+                          pendingMatchRedirect.page,
+                          pendingMatchRedirect.confidence,
+                        );
+                      }
+                    : undefined
+                }
+                pageQuad={scanResult.page_quad}
+                spotlightLines={scanResult.spotlight_lines}
+              />
+            ) : null}
 
             {/* Khung căn chỉnh sách 4 góc (Portrait-friendly Framing Guide Overlay) */}
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 sm:p-8">
@@ -665,6 +865,27 @@ export function CameraPreview({
           variant="secondary"
         >
           {autoScan ? t("camera.autoScanOn") : t("camera.autoScanOff")}
+        </Button>
+
+        <Button
+          aria-pressed={spotlightHoldMode}
+          className="min-h-12 w-full sm:col-span-2"
+          data-testid="toggle-spotlight-hold-btn"
+          onClick={() => {
+            setSpotlightHoldMode((prev) => !prev);
+            if (capturedFrameUrl) {
+              setCapturedFrameUrl(null);
+              setPendingMatchRedirect(null);
+              resumeCamera();
+            }
+          }}
+          type="button"
+          variant="quiet"
+        >
+          <Sparkles aria-hidden="true" className="size-4 text-primary" />
+          {spotlightHoldMode
+            ? t("camera.spotlightModeOn")
+            : t("camera.spotlightModeOff")}
         </Button>
 
         {onPickDeviceImage ? (

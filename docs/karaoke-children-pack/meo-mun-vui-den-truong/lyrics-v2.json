@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "c556407a-b164-5098-8153-66281c0975bd",
+      "text": "Nắng sớm lên hồng trên mái trường",
+      "start_ms": 2449,
+      "end_ms": 6735,
+      "syllables": [
+        {
+          "id": "d4758769-4929-5348-b022-21d71c38f32d",
+          "text": "Nắng",
+          "start_ms": 2449,
+          "end_ms": 3000
+        },
+        {
+          "id": "a5fc77f1-9ef7-50c9-a841-00031d9c5b3d",
+          "text": "sớm",
+          "start_ms": 3000,
+          "end_ms": 3551
+        },
+        {
+          "id": "10252482-87ee-5e79-b2ac-52ce64232984",
+          "text": "lên",
+          "start_ms": 3551,
+          "end_ms": 4102
+        },
+        {
+          "id": "ee7156a7-5cc9-594e-a151-cb6cce5c2708",
+          "text": "hồng",
+          "start_ms": 4102,
+          "end_ms": 4653
+        },
+        {
+          "id": "5be94033-bdb6-5a86-9d21-abb578eaf8d6",
+          "text": "trên",
+          "start_ms": 4653,
+          "end_ms": 5204
+        },
+        {
+          "id": "98862ab7-4e63-5b62-8408-46d7e65700b4",
+          "text": "mái",
+          "start_ms": 5204,
+          "end_ms": 5755
+        },
+        {
+          "id": "1d470a02-4b51-5e92-9ad8-7ae0b0f2d951",
+          "text": "trường",
+          "start_ms": 5755,
+          "end_ms": 6735
+        }
+      ]
+    },
+    {
+      "id": "e55ed3e0-86b4-5832-9d9c-7ff96635b99f",
+      "text": "Mèo Mun đeo cặp bước trên đường",
+      "start_ms": 7347,
+      "end_ms": 11633,
+      "syllables": [
+        {
+          "id": "2d841daa-8d40-558e-93b7-9c1e9d056901",
+          "text": "Mèo",
+          "start_ms": 7347,
+          "end_ms": 7898
+        },
+        {
+          "id": "bfc7fa37-b1ef-5f3a-a9bb-5bb81bbed3d7",
+          "text": "Mun",
+          "start_ms": 7898,
+          "end_ms": 8449
+        },
+        {
+          "id": "593f246e-70de-5c13-9a44-4f017e720f92",
+          "text": "đeo",
+          "start_ms": 8449,
+          "end_ms": 9000
+        },
+        {
+          "id": "d778f206-c542-500d-98f2-2b6ffddefbee",
+          "text": "cặp",
+          "start_ms": 9000,
+          "end_ms": 9551
+        },
+        {
+          "id": "e08e1eb3-392e-57df-8c3e-54eef38f6cab",
+          "text": "bước",
+          "start_ms": 9551,
+          "end_ms": 10102
+        },
+        {
+          "id": "68ec71eb-8e6c-53b7-aff7-45427699799d",
+          "text": "trên",
+          "start_ms": 10102,
+          "end_ms": 10653
+        },
+        {
+          "id": "75398b4e-41ce-505b-a1b6-a26dd07152ba",
+          "text": "đường",
+          "start_ms": 10653,
+          "end_ms": 11633
+        }
+      ]
+    },
+    {
+      "id": "96f9d0a2-906a-56f5-86aa-59a60963a1b8",
+      "text": "Cô giáo hiền hòa tươi mắt cười",
+      "start_ms": 12245,
+      "end_ms": 16531,
+      "syllables": [
+        {
+          "id": "24f0b58d-bd44-5e0c-9d55-582069f2b2c6",
+          "text": "Cô",
+          "start_ms": 12245,
+          "end_ms": 12796
+        },
+        {
+          "id": "d138eba4-65ce-5410-a64a-819202b43d4e",
+          "text": "giáo",
+          "start_ms": 12796,
+          "end_ms": 13347
+        },
+        {
+          "id": "54e7b334-c6ea-53af-8cbf-abfb7ecb53c0",
+          "text": "hiền",
+          "start_ms": 13347,
+          "end_ms": 13898
+        },
+        {
+          "id": "0c95b340-c681-5de0-8504-ac0ba6d2c72e",
+          "text": "hòa",
+          "start_ms": 13898,
+          "end_ms": 14449
+        },
+        {
+          "id": "a0d0a33d-bfe5-55e1-a1d3-e68ddc06cbcf",
+          "text": "tươi",
+          "start_ms": 14449,
+          "end_ms": 15000
+        },
+        {
+          "id": "bb70a514-5506-5e9d-ac6e-8eef1eb2681d",
+          "text": "mắt",
+          "start_ms": 15000,
+          "end_ms": 15551
+        },
+        {
+          "id": "c3139413-02fa-528a-a1cf-6052e66de8b2",
+          "text": "cười",
+          "start_ms": 15551,
+          "end_ms": 16531
+        }
+      ]
+    },
+    {
+      "id": "7106d0d3-2ce1-5f89-bbc4-9589e68a3f24",
+      "text": "Đánh vần tròn tiếng chữ thêm tươi",
+      "start_ms": 17143,
+      "end_ms": 21429,
+      "syllables": [
+        {
+          "id": "1793aaad-0556-5b04-af50-c79c345bce12",
+          "text": "Đánh",
+          "start_ms": 17143,
+          "end_ms": 17694
+        },
+        {
+          "id": "dc61d476-4c15-5b15-a758-0feda822cbe3",
+          "text": "vần",
+          "start_ms": 17694,
+          "end_ms": 18245
+        },
+        {
+          "id": "84f1ea87-aecc-5f43-81c4-4e617681db26",
+          "text": "tròn",
+          "start_ms": 18245,
+          "end_ms": 18796
+        },
+        {
+          "id": "18e1291e-38c5-5da1-93f4-7d8da985db4f",
+          "text": "tiếng",
+          "start_ms": 18796,
+          "end_ms": 19347
+        },
+        {
+          "id": "bb6ed49b-1226-5b2f-91de-e20b17be1576",
+          "text": "chữ",
+          "start_ms": 19347,
+          "end_ms": 19898
+        },
+        {
+          "id": "ff2ae790-1325-53a4-8384-7cfdf61601a2",
+          "text": "thêm",
+          "start_ms": 19898,
+          "end_ms": 20449
+        },
+        {
+          "id": "136e942d-8d47-5421-b16c-f3c9957790ae",
+          "text": "tươi",
+          "start_ms": 20449,
+          "end_ms": 21429
+        }
+      ]
+    },
+    {
+      "id": "0d23a9e3-fd81-59ec-a4ad-fc8449c52f2a",
+      "text": "Tờ ê tê đọc vang cùng bạn",
+      "start_ms": 22041,
+      "end_ms": 26327,
+      "syllables": [
+        {
+          "id": "803236e4-f89a-591e-8976-8f49432d0684",
+          "text": "Tờ",
+          "start_ms": 22041,
+          "end_ms": 22592
+        },
+        {
+          "id": "c2af9349-9142-55d4-a1c3-32f6a996c572",
+          "text": "ê",
+          "start_ms": 22592,
+          "end_ms": 23143
+        },
+        {
+          "id": "da4b597d-1218-5cc3-acc7-c6dc0a3b05f0",
+          "text": "tê",
+          "start_ms": 23143,
+          "end_ms": 23694
+        },
+        {
+          "id": "00dac7ee-6e63-5b23-b193-5bdb31f9ea90",
+          "text": "đọc",
+          "start_ms": 23694,
+          "end_ms": 24245
+        },
+        {
+          "id": "0272844c-8eb6-5495-ae33-eb6783601164",
+          "text": "vang",
+          "start_ms": 24245,
+          "end_ms": 24796
+        },
+        {
+          "id": "56818cd8-ce62-56e7-bde7-27e747ab947d",
+          "text": "cùng",
+          "start_ms": 24796,
+          "end_ms": 25347
+        },
+        {
+          "id": "c754d0a6-ef6c-5c01-be8b-6177ce615d6b",
+          "text": "bạn",
+          "start_ms": 25347,
+          "end_ms": 26327
+        }
+      ]
+    },
+    {
+      "id": "aaf99ea0-a1cb-5a41-89b2-dc795961a81b",
+      "text": "Mỗi ngày đến lớp thật là vui",
+      "start_ms": 26939,
+      "end_ms": 31225,
+      "syllables": [
+        {
+          "id": "c8bf05f4-4103-5b8e-b5bd-7b38a21ea499",
+          "text": "Mỗi",
+          "start_ms": 26939,
+          "end_ms": 27490
+        },
+        {
+          "id": "61a68b57-ba3b-51d4-9a49-13868a85f7e9",
+          "text": "ngày",
+          "start_ms": 27490,
+          "end_ms": 28041
+        },
+        {
+          "id": "4fb92e5c-aa81-553a-9646-28f1726dba25",
+          "text": "đến",
+          "start_ms": 28041,
+          "end_ms": 28592
+        },
+        {
+          "id": "dc047cdb-5ef0-5ed4-bb17-1c9e3cbc6d42",
+          "text": "lớp",
+          "start_ms": 28592,
+          "end_ms": 29143
+        },
+        {
+          "id": "2df523ce-1c49-5a71-b337-304991556fe9",
+          "text": "thật",
+          "start_ms": 29143,
+          "end_ms": 29694
+        },
+        {
+          "id": "20232e38-64b7-532b-87b8-c5e3c50d5f03",
+          "text": "là",
+          "start_ms": 29694,
+          "end_ms": 30245
+        },
+        {
+          "id": "e5a6d365-9b37-5ce0-890c-f62c1160f869",
+          "text": "vui",
+          "start_ms": 30245,
+          "end_ms": 31225
+        }
+      ]
+    }
+  ]
+}

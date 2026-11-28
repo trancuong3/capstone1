@@ -15,7 +15,6 @@ export const PUBLIC_ASSISTANT_NAV_ALLOWLIST = new Set<string>([
   "/register",
   "/forgot-password",
   "/reset-password",
-  "/admin/login",
 ]);
 
 export const PARENT_ASSISTANT_NAV_ALLOWLIST = new Set<string>([
@@ -37,13 +36,14 @@ export const PARENT_ASSISTANT_NAV_ALLOWLIST = new Set<string>([
   "/entertainment/sentence-shooter",
   "/entertainment/picture-description",
   "/karaoke",
+  "/achievements",
+  "/learning-train",
   "/help-support",
   "/book-reports",
   "/studio/tasks",
 ]);
 
 export const ADMIN_ASSISTANT_NAV_ALLOWLIST = new Set<string>([
-  ...PARENT_ASSISTANT_NAV_ALLOWLIST,
   "/admin",
   "/admin/books",
   "/admin/books/new",
@@ -146,15 +146,9 @@ export function isSafeAssistantQuickActionHref(
     if (isAdminPath(href)) {
       return false;
     }
-    return (
-      PARENT_ASSISTANT_NAV_ALLOWLIST.has(href) ||
-      PUBLIC_ASSISTANT_NAV_ALLOWLIST.has(href)
-    );
+    return PARENT_ASSISTANT_NAV_ALLOWLIST.has(href);
   }
-  return (
-    ADMIN_ASSISTANT_NAV_ALLOWLIST.has(href) ||
-    PUBLIC_ASSISTANT_NAV_ALLOWLIST.has(href)
-  );
+  return ADMIN_ASSISTANT_NAV_ALLOWLIST.has(href);
 }
 
 export function hasMobileBottomNavPath(pathname: string): boolean {

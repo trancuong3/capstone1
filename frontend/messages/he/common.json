@@ -164,7 +164,10 @@
     "childEmptyDesc": "אין עדיין פרופיל ילד. צרו פרופיל לשמירת ספרים, קול והתקדמות בנפרד!",
     "childCreateBtn": "יצירת פרופיל ילד",
     "childPickerPrompt": "עבור איזה ילד לפתוח דף זה?",
-    "quickActionGateIntro": "לפני פתיחת **{label}**, נבדוק איזה פרופיל ילד נבחר."
+    "quickActionGateIntro": "לפני פתיחת **{label}**, נבדוק איזה פרופיל ילד נבחר.",
+    "scopePublic": "עזרת אורחים",
+    "scopeParent": "עזרת הורים",
+    "scopeAdmin": "עזרת ניהול"
   },
   "taskCenter": {
     "backgroundProcessing": "מעבד ברקע…",

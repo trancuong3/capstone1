@@ -15,6 +15,7 @@ import {
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminFlow2CandidatesPanel } from "@/components/admin/admin-flow2-candidates-panel";
+import { AdminOcrHardSampleRadarPanel } from "@/components/admin/admin-ocr-hard-sample-radar-panel";
 import {
   AdminBadge,
   AdminDrawer,
@@ -223,9 +224,9 @@ export const AdminUserBooksQualitySection = memo(
     const { bookContentQuality } = useAdminServices();
     const t = useTranslations("admin");
     const { formatDateTime, formatNumber } = useI18n();
-    const [subTab, setSubTab] = useState<"moderation" | "flow2_candidates">(
-      "moderation",
-    );
+    const [subTab, setSubTab] = useState<
+      "moderation" | "flow2_candidates" | "ocr_hard_radar"
+    >("moderation");
 
     const [statusFilter, setStatusFilter] = useState<
       "" | AdminUserBookQueueFilter
@@ -515,13 +516,20 @@ export const AdminUserBooksQualitySection = memo(
           onKeyDown={(event) => {
             if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
               event.preventDefault();
+              const order: Array<
+                "moderation" | "flow2_candidates" | "ocr_hard_radar"
+              > = ["moderation", "flow2_candidates", "ocr_hard_radar"];
+              const idx = order.indexOf(subTab);
+              const delta = event.key === "ArrowRight" ? 1 : -1;
               const nextSub =
-                subTab === "moderation" ? "flow2_candidates" : "moderation";
+                order[(idx + delta + order.length) % order.length];
               setSubTab(nextSub);
               const targetId =
                 nextSub === "moderation"
                   ? "user-books-subtab-moderation"
-                  : "user-books-subtab-flow2";
+                  : nextSub === "flow2_candidates"
+                    ? "user-books-subtab-flow2"
+                    : "user-books-subtab-hard-radar";
               document.getElementById(targetId)?.focus();
             }
           }}
@@ -561,6 +569,23 @@ export const AdminUserBooksQualitySection = memo(
           >
             {t("userBooks.subtabFlow2")}
           </button>
+          <button
+            aria-controls="user-books-subpanel-hard-radar"
+            aria-selected={subTab === "ocr_hard_radar"}
+            className={cn(
+              "inline-flex min-h-9 items-center rounded-control px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+              subTab === "ocr_hard_radar"
+                ? "bg-white text-primary shadow-2xs ring-1 ring-border"
+                : "text-muted hover:bg-white/75 hover:text-ink",
+            )}
+            id="user-books-subtab-hard-radar"
+            onClick={() => setSubTab("ocr_hard_radar")}
+            role="tab"
+            tabIndex={subTab === "ocr_hard_radar" ? 0 : -1}
+            type="button"
+          >
+            {t("userBooks.subtabHardRadar")}
+          </button>
         </div>
 
         {subTab === "flow2_candidates" ? (
@@ -570,6 +595,14 @@ export const AdminUserBooksQualitySection = memo(
             role="tabpanel"
           >
             <AdminFlow2CandidatesPanel />
+          </div>
+        ) : subTab === "ocr_hard_radar" ? (
+          <div
+            aria-labelledby="user-books-subtab-hard-radar"
+            id="user-books-subpanel-hard-radar"
+            role="tabpanel"
+          >
+            <AdminOcrHardSampleRadarPanel />
           </div>
         ) : (
           <div

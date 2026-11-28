@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Cpu,
+  ExternalLink,
   HardDrive,
   Layers,
   RefreshCw,
@@ -99,6 +100,9 @@ const WAITING_TRAINING_JOB_STATUSES = new Set([
   "WAITING_FOR_DATA",
   "WAITING_FOR_COLAB_WORKER",
 ]);
+
+const COLAB_WORKER_NOTEBOOK_URL =
+  "https://colab.research.google.com/github/trancuong3/capstone1/blob/main/ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb";
 
 function TrainingJobProgressBar({
   job,
@@ -1218,20 +1222,63 @@ export function AdminVireadTrainingScreen() {
                       ) : null}
                     </div>
                   ) : null}
-                  {hasWaitingColabJob ? (
-                    <div className="mt-3 rounded-control border border-primary/25 bg-sky p-3 text-xs text-ink">
-                      <p className="font-bold text-primary-hover">
+                  {hasWaitingColabJob ||
+                  data.worker_status?.execution_mode !== "LOCAL" ? (
+                    <div
+                      className="mt-3 rounded-control border border-primary/25 bg-sky p-3.5 text-xs text-ink"
+                      data-testid="flow2-colab-guide"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold text-primary-hover">
+                          {t(
+                            "training.colabGuideTitle",
+                            undefined,
+                            "Hướng dẫn vận hành hệ thống huấn luyện",
+                          )}
+                        </p>
+                        {hasWaitingColabJob ? (
+                          <AdminBadge dot tone="info">
+                            {t(
+                              "training.colabWaitingBadge",
+                              undefined,
+                              "Đang có tác vụ chờ Colab",
+                            )}
+                          </AdminBadge>
+                        ) : null}
+                      </div>
+                      <p className="mt-1.5 leading-relaxed">
                         {t(
-                          "training.colabGuideTitle",
+                          "training.colabGuideSummary",
                           undefined,
-                          "Hướng dẫn vận hành hệ thống huấn luyện",
+                          "Nhấn Mở Google Colab (1-Click), chọn Runtime → Change runtime type → T4 GPU → Run all và nhập VIREAD_TRAINING_WORKER_TOKEN để tự động nhận và chạy tác vụ.",
                         )}
                       </p>
-                      <p className="mt-1 leading-relaxed">
-                        Hệ thống sẽ tự động gửi tác vụ khi kết nối huấn luyện từ
-                        xa sẵn sàng. Hãy đảm bảo phiên xử lý đang hoạt động và
-                        đã bật khóa bảo mật huấn luyện.
+                      <p className="mt-1 leading-relaxed text-muted">
+                        {t(
+                          "training.colabGuideNoOauthNote",
+                          undefined,
+                          "Không cần thiết lập OAuth hay kết nối Drive thủ công trên Colab; bạn có thể dùng bất kỳ tài khoản Google Colab nào.",
+                        )}
                       </p>
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <a
+                          className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-control border border-primary/35 bg-white px-3 py-1.5 text-center text-sm leading-5 font-bold text-primary-hover transition-colors hover:bg-surface-subtle focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:whitespace-nowrap"
+                          data-testid="flow2-open-colab-link"
+                          href={COLAB_WORKER_NOTEBOOK_URL}
+                          rel="noopener noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="size-4 shrink-0"
+                          />
+                          {t(
+                            "training.openColabBtn",
+                            undefined,
+                            "Mở Google Colab (1-Click)",
+                          )}
+                        </a>
+                      </div>
                     </div>
                   ) : null}
                 </div>

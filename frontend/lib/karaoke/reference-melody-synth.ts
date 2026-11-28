@@ -84,6 +84,7 @@ export function createReferenceMelodySynth(): ReferenceMelodySynth {
   let lastTriggeredKey: string | null = null;
   let lastCurrentMs = -1;
   let warmupTimers: ReturnType<typeof setTimeout>[] = [];
+  let activeWarmupFinish: (() => void) | null = null;
   let activeNodes: { osc: OscillatorNode; gain: GainNode }[] = [];
 
   const ensureContext = (): AudioContext | null => {
@@ -168,6 +169,11 @@ export function createReferenceMelodySynth(): ReferenceMelodySynth {
   const clearWarmupTimers = () => {
     for (const timer of warmupTimers) clearTimeout(timer);
     warmupTimers = [];
+    if (activeWarmupFinish) {
+      const finish = activeWarmupFinish;
+      activeWarmupFinish = null;
+      finish();
+    }
   };
 
   const stop = () => {
@@ -238,8 +244,18 @@ export function createReferenceMelodySynth(): ReferenceMelodySynth {
         { step: "high", midi: 72 + keyShift }, // Đô 5 (Cao)
       ];
       return new Promise<void>((resolve) => {
+        let settled = false;
+        const finishWarmup = () => {
+          if (settled) return;
+          settled = true;
+          activeWarmupFinish = null;
+          onStep?.(null, null);
+          resolve();
+        };
+        activeWarmupFinish = finishWarmup;
         steps.forEach((item, index) => {
           const t = setTimeout(() => {
+            if (settled) return;
             const info = midiToVietnameseSolfege(item.midi);
             onStep?.(item.step, `${info.registerVi} · ${info.labelVi}`);
             triggerGentleTone(item.midi, 820, 0.14);
@@ -248,9 +264,8 @@ export function createReferenceMelodySynth(): ReferenceMelodySynth {
         });
         const doneTimer = setTimeout(
           () => {
-            onStep?.(null, null);
             warmupTimers = [];
-            resolve();
+            finishWarmup();
           },
           steps.length * 950 + 250,
         );

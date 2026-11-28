@@ -596,9 +596,10 @@ class ColabWorkerTests(unittest.TestCase):
                 upload_calls.append(cand["checkpoint_sha256"])
                 return "33333333-3333-4333-8333-333333333333", "CANDIDATE", Path(cand["candidate_path"])
 
+            # Default VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS=0 disables remote mid-run syncs
             with (
                 patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
-                patch.object(RemoteBackendJobStateStore, "sync", side_effect=requests.HTTPError("502 Bad Gateway")),
+                patch.object(RemoteBackendJobStateStore, "sync", side_effect=AssertionError("remote sync disabled by default")),
                 patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
                 patch.object(worker, "heartbeat_loop"),
                 patch.object(worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
@@ -609,7 +610,25 @@ class ColabWorkerTests(unittest.TestCase):
                 patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=fake_run_training)}),
             ):
                 worker.process_job(job)
+            self.assertEqual(upload_calls, [cand_sha])
 
+            # When explicitly opted in via env var, mid-run sync failures still do not abort training
+            upload_calls.clear()
+            with (
+                patch.dict("os.environ", {"VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS": "500"}),
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", side_effect=requests.HTTPError("502 Bad Gateway")) as sync_mock,
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
+                patch.object(worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                patch.object(worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                patch.object(worker, "upload_candidate", side_effect=fake_upload),
+                patch.object(worker, "call", return_value={}),
+                patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=fake_run_training)}),
+            ):
+                worker.process_job({**job, "id": "11111111-1111-4111-8111-111111111112"})
+            self.assertGreaterEqual(sync_mock.call_count, 1)
             self.assertEqual(upload_calls, [cand_sha])
             worker.session.close()
 
@@ -826,10 +845,32 @@ class ColabWorkerTests(unittest.TestCase):
             ):
                 worker.process_job(job)
 
-            # Only post-training sync happened before upload; NO sync after /finish!
-            self.assertEqual(events, ["sync", "finish"])
+            # RemoteBackendJobStateStore skips redundant mid-run/post-train syncs; NO sync after /finish!
+            self.assertEqual(events, ["finish"])
 
-            # Error before /finish MUST still trigger final sync in finally
+            # LocalDriveJobStateStore still syncs before upload_candidate
+            from .colab_state_store import LocalDriveJobStateStore
+            events.clear()
+            local_worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, drive_root=Path(temp_dir) / "drive")
+            try:
+                with (
+                    patch.object(LocalDriveJobStateStore, "restore", return_value={}),
+                    patch.object(LocalDriveJobStateStore, "sync", fake_sync),
+                    patch.object(local_worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                    patch.object(local_worker, "heartbeat_loop"),
+                    patch.object(local_worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
+                    patch.object(local_worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                    patch.object(local_worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                    patch.object(local_worker, "upload_candidate", return_value=("run-1", "CANDIDATE", fake_cand)),
+                    patch.object(local_worker, "call", side_effect=fake_call),
+                    patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=lambda **_kw: dict(cand_payload))}),
+                ):
+                    local_worker.process_job({**job, "id": "abababab-abab-4bab-8bab-abababababab"})
+                self.assertEqual(events, ["sync", "finish"])
+            finally:
+                local_worker.session.close()
+
+            # Error before /finish MUST still trigger final sync in finally for RemoteBackendJobStateStore
             events.clear()
             with (
                 patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
@@ -968,18 +1009,66 @@ class ColabWorkerTests(unittest.TestCase):
             ):
                 worker.process_job(job)
 
+            # RemoteBackendJobStateStore skips redundant post-train and pre-benchmark syncs
             self.assertEqual(
                 events,
                 [
-                    "sync-1",
                     "gc_collect",
                     "empty_cache",
                     "run_locked_benchmark",
-                    "sync-2",
                     "post_benchmarks",
                     "finish:BENCHMARKED",
                 ],
             )
+            self.assertEqual(sync_calls[0], 0)
+
+            # LocalDriveJobStateStore continues to sync before upload and before benchmark
+            from .colab_state_store import LocalDriveJobStateStore
+            events.clear()
+            sync_calls[0] = 0
+            local_worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, drive_root=Path(temp_dir) / "drive")
+            try:
+                def local_sync(_self):
+                    sync_calls[0] += 1
+                    events.append(f"sync-{sync_calls[0]}")
+                    return {}
+
+                with (
+                    patch.object(LocalDriveJobStateStore, "restore", return_value={}),
+                    patch.object(LocalDriveJobStateStore, "sync", local_sync),
+                    patch.object(local_worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                    patch.object(local_worker, "heartbeat_loop"),
+                    patch.object(local_worker, "dataset", side_effect=fake_dataset),
+                    patch.object(local_worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                    patch.object(local_worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                    patch.object(local_worker, "upload_candidate", return_value=("run-1", "CANDIDATE", fake_cand)),
+                    patch.object(local_worker, "call", side_effect=fake_call),
+                    patch(f"{__package__}.colab_worker.sha256_file", side_effect=fake_sha256),
+                    patch(f"{__package__}.colab_worker.gc.collect", side_effect=lambda: events.append("gc_collect")),
+                    patch.dict(
+                        sys.modules,
+                        {
+                            "torch": fake_torch,
+                            f"{__package__}.train": types.SimpleNamespace(run_training=lambda **_kw: dict(cand_payload)),
+                            f"{__package__}.benchmark": types.SimpleNamespace(run_locked_benchmark=fake_run_locked_benchmark),
+                        },
+                    ),
+                ):
+                    local_worker.process_job(job)
+                self.assertEqual(
+                    events,
+                    [
+                        "sync-1",
+                        "gc_collect",
+                        "empty_cache",
+                        "run_locked_benchmark",
+                        "sync-2",
+                        "post_benchmarks",
+                        "finish:BENCHMARKED",
+                    ],
+                )
+            finally:
+                local_worker.session.close()
             worker.session.close()
 
     def test_colab_worker_notebook_rerun_safety_guards(self):
@@ -1146,6 +1235,111 @@ class ColabWorkerTests(unittest.TestCase):
                 worker.upload_candidate(job, {"checkpoint_sha256": hashlib.sha256(b"ckpt-bytes").hexdigest()}, upload_dir)
             self.assertEqual(complete_timeouts, [600])
             worker.session.close()
+
+    def test_materialize_dataset_extracts_pack_shards_and_falls_back_for_missing_items(self):
+        import io
+        import tarfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_download_workers = 4
+            run_dir = Path(temp_dir) / "run"
+            run_dir.mkdir()
+
+            receipt_bytes = b'{"version_sha256":"' + (b"r" * 44) + b'"}'
+            receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
+            p1 = b"pack-image-1"
+            p2 = b"pack-image-2"
+            p3 = b"pack-image-3-fallback"
+            p_unused = b"unrelated-crop"
+            s1 = hashlib.sha256(p1).hexdigest()
+            s2 = hashlib.sha256(p2).hexdigest()
+            s3 = hashlib.sha256(p3).hexdigest()
+            s_unused = hashlib.sha256(p_unused).hexdigest()
+
+            def _make_tar(entries: list[tuple[str, bytes]]) -> bytes:
+                buf = io.BytesIO()
+                with tarfile.open(fileobj=buf, mode="w") as tf:
+                    for name, data in entries:
+                        info = tarfile.TarInfo(name=name)
+                        info.size = len(data)
+                        tf.addfile(info, io.BytesIO(data))
+                return buf.getvalue()
+
+            tar1 = _make_tar([
+                (f"{s1}.png", p1),
+                (f"{s_unused}.png", p_unused),
+                (f"{s3}.png", b"corrupt-bytes"),
+            ])
+            tar2 = _make_tar([(f"nested/{s2}", p2)])
+            tar1_sha = hashlib.sha256(tar1).hexdigest()
+            tar2_sha = hashlib.sha256(tar2).hexdigest()
+
+            dataset = {
+                "version_sha256": receipt_sha,
+                "manifest_url": "/books/admin/viread-training/worker/jobs/j/artifact-stream?token=receipt",
+                "pack_shards": [
+                    {"storage_ref": "gdrive://pack1", "sha256": tar1_sha, "download_url": "https://cdn.example/pack1.tar"},
+                    {"storage_ref": "gdrive://pack2", "sha256": tar2_sha, "download_url": "https://cdn.example/pack2.tar"},
+                    {"storage_ref": "gdrive://no-url-shard"},
+                ],
+            }
+            items = [
+                {"sample_id": "id1", "group_id": "g1", "label": "Một", "source_flow": "FLOW1_VERIFIED", "split": "train", "image_sha256": s1, "image_url": "https://cdn.example/item1"},
+                {"sample_id": "id2", "group_id": "g1", "label": "Hai", "source_flow": "FLOW1_VERIFIED", "split": "train", "image_sha256": s2, "image_url": "https://cdn.example/item2"},
+                {"sample_id": "id3", "group_id": "g2", "label": "Ba", "source_flow": "FLOW1_VERIFIED", "split": "validation", "image_sha256": s3, "image_url": "https://cdn.example/item3"},
+            ]
+            fetched_urls: list[str] = []
+
+            def fake_fetch(url, destination, expected_sha256=None, *, local_drive_candidates=None):
+                fetched_urls.append(url)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if url == dataset["manifest_url"]:
+                    destination.write_bytes(receipt_bytes)
+                elif url == "https://cdn.example/pack1.tar":
+                    destination.write_bytes(tar1)
+                elif url == "https://cdn.example/pack2.tar":
+                    destination.write_bytes(tar2)
+                elif url == "https://cdn.example/item3":
+                    destination.write_bytes(p3)
+                else:
+                    raise AssertionError(f"Unexpected per-item fetch: {url}")
+
+            with patch.object(worker, "_fetch_artifact", side_effect=fake_fetch):
+                manifest_path, out_receipt, img_root = worker.materialize_dataset("j-pack", dataset, items, run_dir)
+
+            self.assertTrue(out_receipt.is_file())
+            self.assertEqual(set(fetched_urls), {
+                dataset["manifest_url"],
+                "https://cdn.example/pack1.tar",
+                "https://cdn.example/pack2.tar",
+                "https://cdn.example/item3",
+            })
+            self.assertEqual((img_root / s1).read_bytes(), p1)
+            self.assertEqual((img_root / s2).read_bytes(), p2)
+            self.assertEqual((img_root / s3).read_bytes(), p3)
+            self.assertFalse((img_root / s_unused).exists())
+            self.assertFalse((run_dir / ".training-pack-shards").exists())
+            written_lines = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["annotation_id"] for row in written_lines], ["id1", "id2", "id3"])
+            worker.session.close()
+
+    def test_colab_worker_notebook_gpu_preflight_and_subprocess_runner(self):
+        nb_path = Path(__file__).with_name("viread_vietocr_v2_colab_worker.ipynb")
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        code_src = "".join(nb["cells"][1].get("source", []))
+        compile(code_src, str(nb_path), "exec")
+        nvidia_idx = code_src.find("nvidia-smi")
+        prompt_idx = code_src.find("WORKER_TOKEN = secret(")
+        self.assertGreaterEqual(nvidia_idx, 0)
+        self.assertLess(nvidia_idx, prompt_idx)
+        self.assertIn("VIREAD_ALLOW_COLAB_CPU", code_src)
+        self.assertIn("T4 GPU", code_src)
+        self.assertIn("subprocess.Popen(", code_src)
+        self.assertIn("bufsize=1", code_src)
+        self.assertIn('"VIREAD_API_BASE": API_BASE', code_src)
+        self.assertIn('"VIREAD_LOCAL_WORK": str(LOCAL_WORK)', code_src)
+        self.assertIn("returncode != 0", code_src)
 
 
 if __name__ == "__main__":

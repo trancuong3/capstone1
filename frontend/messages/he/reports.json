@@ -696,7 +696,8 @@
     "practiceTimes": "{count} פעמים",
     "karaokeWeakSegmentsTitle": "שורות שיר לתרגול איטי ב-0.85x",
     "openSongAction": "פתח שיר",
-    "homeTipsTitle": "טיפים לליווי הורים בבית"
+    "homeTipsTitle": "טיפים לליווי הורים בבית",
+    "misreadWordsReinforcedLabel": "מילות קריאה שתורגלו דרך משחקים"
   },
   "printCertificate": {
     "brandTagline": "דוח התקדמות קריאה משפחתי",

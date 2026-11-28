@@ -1293,7 +1293,24 @@
       "rejected": "Diese Seitenversion wurde abgelehnt.",
       "suspendedWithTitle": "Privates Buch „{title}“ gesperrt. Die besitzende Familie kann es nicht sofort lesen."
     },
-    "kpiAria": "Übersicht zur Moderation von Benutzerbüchern"
+    "kpiAria": "Übersicht zur Moderation von Benutzerbüchern",
+    "subtabHardRadar": "OCR-Schwierigkeitsradar",
+    "hardRadar": {
+      "heading": "OCR-Schwierigkeitsradar (Lesehuerden -> Flow 2)",
+      "privacyNotice": "Beruecksichtigt ausschliesslich Katalogbuecher und aktiv fuer Flow 2 freigegebene Privatbuecher (PII-gefiltert und vollstaendig anonymisiert).",
+      "loading": "OCR-Konfidenz und Lesesignale werden abgeglichen…",
+      "loadError": "OCR-Schwierigkeitsradar konnte nicht geladen werden.",
+      "totalCandidates": "Priorisierte OCR-Woerter",
+      "catalogCount": "Aus Katalogbuechern",
+      "consentedPrivateCount": "Aus Flow-2-Freigaben",
+      "empty": "Keine unsicheren OCR-Woerter mit Lesewiederholungen gefunden.",
+      "scopeCatalog": "Katalogbuch",
+      "scopeConsentedPrivate": "Flow 2 freigegeben",
+      "scoreLabel": "Prioritaet {score}/100",
+      "pageLineMeta": "Seite {page} · Zeile {line}",
+      "signalSummary": "OCR-Konfidenz: {conf}% · Fehlversuche: {retries} · Abweichungen: {mismatches} · Anonyme Sitzungen: {sessions}",
+      "inspectOcrAction": "OCR-Seite pruefen"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "Öffnen Sie das Notebook",
     "colabGuideSuffix": " und klicken Sie auf",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "Aufgabe wartet auf Colab",
+    "colabGuideSummary": "Klicken Sie auf Google Colab öffnen (1-Klick), wählen Sie Runtime → Change runtime type → T4 GPU → Run all und geben Sie VIREAD_TRAINING_WORKER_TOKEN ein, um den Auftrag automatisch zu starten.",
+    "colabGuideNoOauthNote": "Keine OAuth-Einrichtung oder manuelle Drive-Einbindung in Colab erforderlich; jedes Google-Colab-Konto funktioniert.",
+    "openColabBtn": "Google Colab öffnen (1-Klick)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

@@ -1293,7 +1293,24 @@
       "rejected": "גרסת דף זו נדחתה.",
       "suspendedWithTitle": "ספר פרטי \"{title}\" מושעה. המשפחה הבעלים לא יכולה לקרוא מיד."
     },
-    "kpiAria": "סקירת תור פיקוח ספרי משתמשים"
+    "kpiAria": "סקירת תור פיקוח ספרי משתמשים",
+    "subtabHardRadar": "רדאר דגימות OCR מאתגרות",
+    "hardRadar": {
+      "heading": "רדאר דגימות OCR מאתגרות (קושי קריאה -> Flow 2)",
+      "privacyNotice": "מרכז אך ורק ספרי קטלוג ציבורי וספרים פרטיים עם הסכמת Flow 2 פעילה (ללא פרטים מזהים ובאנונימיות מלאה).",
+      "loading": "מצליב רמת ביטחון OCR עם אותות ניסיונות חוזרים…",
+      "loadError": "לא ניתן לטעון את רדאר דגימות ה-OCR.",
+      "totalCandidates": "סה\"כ מילים בעדיפות לבדיקה",
+      "catalogCount": "מילים מקטלוג ציבורי",
+      "consentedPrivateCount": "מילים בהסכמת Flow 2",
+      "empty": "טרם נמצאו מילות OCR בביטחון נמוך המתואמות עם קשיי קריאה.",
+      "scopeCatalog": "קטלוג ציבורי",
+      "scopeConsentedPrivate": "הסכמת Flow 2",
+      "scoreLabel": "עדיפות {score}/100",
+      "pageLineMeta": "עמוד {page} · שורה {line}",
+      "signalSummary": "ביטחון OCR: {conf}% · ניסיונות שנכשלו: {retries} · אי-התאמות: {mismatches} · מפגשים אנונימיים: {sessions}",
+      "inspectOcrAction": "פתיחת עמוד OCR"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "פתח את המחברת",
     "colabGuideSuffix": ", ולאחר מכן לחץ על",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "משימה ממתינה ל-Colab",
+    "colabGuideSummary": "לחצו על פתח את Google Colab (לחיצה אחת), בחרו Runtime → Change runtime type → T4 GPU → Run all והזינו את VIREAD_TRAINING_WORKER_TOKEN כדי להפעיל את המשימה אוטומטית.",
+    "colabGuideNoOauthNote": "אין צורך בהגדרת OAuth או בחיבור Drive ידני ב-Colab; ניתן להשתמש בכל חשבון Google Colab.",
+    "openColabBtn": "פתח את Google Colab (לחיצה אחת)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

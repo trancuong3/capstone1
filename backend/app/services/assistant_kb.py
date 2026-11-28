@@ -59,18 +59,415 @@ class PageContextSpec:
     actions: tuple[KbAction, ...]
 
 
-_ALL_SCOPES: frozenset[AssistantRoleScope] = frozenset({"public", "parent", "admin"})
-_PARENT_SCOPES: frozenset[AssistantRoleScope] = frozenset({"parent", "admin"})
+_PUBLIC_ONLY: frozenset[AssistantRoleScope] = frozenset({"public"})
+_PARENT_ONLY: frozenset[AssistantRoleScope] = frozenset({"parent"})
 _ADMIN_ONLY: frozenset[AssistantRoleScope] = frozenset({"admin"})
 
 
 KB_ARTICLES: tuple[KbArticle, ...] = (
+    # ------------------------------------------------------------------ Public-only KB (strictly isolated!)
+    KbArticle(
+        id="public_viread_overview",
+        title_vi="Tổng quan về ViRead cho khách tìm hiểu",
+        title_en="About ViRead (Guest Overview)",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/", "/login", "/register"),
+        keywords=(
+            "viread la gi",
+            "gioi thieu viread",
+            "viread co nhung chuc nang gi",
+            "viread co nhung tinh nang gi",
+            "chuc nang viread",
+            "tinh nang viread",
+            "bat dau voi viread",
+            "huong dan su dung viread",
+            "huong dan su dung",
+            "lam quen viread",
+            "viread phu hop lop may",
+            "what is viread",
+            "about viread",
+            "getting started with viread",
+            "viread overview",
+            "viread features",
+            "what can i do in viread",
+            "what features does viread offer",
+        ),
+        short_answer_vi=(
+            "ViRead (ReadAlong Vision) đồng hành cùng ba mẹ và bé tiểu học (lớp 1–5) luyện đọc tiếng Việt:\n"
+            "• Kho sách tiếng Việt có kiểm duyệt độ đọc theo lớp, hoặc quét sách giấy gia đình bằng camera.\n"
+            "• Bé đọc to theo từng từ có nhận diện giọng nói, giọng đọc mẫu (TTS), Chuyến Tàu Đọc 5 Phút và câu hỏi đọc hiểu AI Tutor.\n"
+            "• Theo dõi tiến bộ, Vườn Âm Vị & Huy hiệu, nhắc đọc qua email và trò chơi ngôn ngữ.\n"
+            "Đăng nhập (/login) hoặc Đăng ký (/register) để trải nghiệm đầy đủ cho gia đình bạn."
+        ),
+        detailed_answer_vi=(
+            "ViRead (ReadAlong Vision) là nền tảng luyện đọc tiếng Việt dành cho gia đình có bé từ lớp 1 đến lớp 5:\n"
+            "1. Tạo tài khoản phụ huynh tại /register và lập hồ sơ riêng cho từng bé theo lớp 1–5.\n"
+            "2. Chọn sách tiếng Việt phù hợp trình độ hoặc số hóa sách giấy gia đình qua Quét sách & Family StoryWeaver.\n"
+            "3. Bé đọc to tương tác từng từ (hỗ trợ cả nhận diện giọng nói ngoại tuyến trên trình duyệt, Đọc đôi cùng ba mẹ và câu hỏi đọc hiểu AI Tutor).\n"
+            "4. Lưu tiến độ, chứng nhận cột mốc, Vườn Âm Vị và các trò chơi ngôn ngữ thiếu nhi.\n"
+            "Bạn hãy Đăng nhập (/login) hoặc Đăng ký (/register) để mở không gian học đọc của gia đình."
+        ),
+        short_answer_en=(
+            "ViRead (ReadAlong Vision) helps parents and Grade 1–5 children practice Vietnamese reading:\n"
+            "• Curated books with grade readability badges plus paper book camera scanning.\n"
+            "• Word-by-word read-aloud with speech recognition, model TTS voice, 5-Minute Reading Train, and AI Tutor quizzes.\n"
+            "• Progress analytics, Phoneme Garden badges, email reminders, and language games.\n"
+            "Sign in (/login) or Register (/register) to start your family workspace."
+        ),
+        detailed_answer_en=(
+            "ViRead (ReadAlong Vision) is a Vietnamese reading companion for Grade 1–5 families:\n"
+            "1. Register a parent account at /register and add separate profiles per child (Grades 1–5).\n"
+            "2. Browse graded books or digitize family books via Book Scanner and Family StoryWeaver.\n"
+            "3. Practice read-aloud sessions with speech recognition, model TTS voices, Duet Reading, and AI Tutor comprehension checks.\n"
+            "4. Track analytics, Milestone Certificates, Phoneme Garden achievements, and kids language games.\n"
+            "Sign in (/login) or create an account (/register) to begin."
+        ),
+        actions=(
+            KbAction("Đăng nhập", "Sign in", "/login"),
+            KbAction("Đăng ký tài khoản", "Register", "/register"),
+        ),
+        followups_vi=(
+            "Cách đăng ký và xác minh email tài khoản ViRead?",
+            "Quên mật khẩu thì khôi phục thế nào?",
+            "3 bước bắt đầu cho ba mẹ mới gồm gì?",
+        ),
+        followups_en=(
+            "How do I register and verify my email?",
+            "How do I reset a forgotten password?",
+            "How do new parents get started?",
+        ),
+    ),
+    KbArticle(
+        id="public_auth_login_register",
+        title_vi="Đăng nhập, đăng ký và xác minh tài khoản ViRead",
+        title_en="Sign in, register, and email verification",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/login", "/register", "/forgot-password", "/reset-password"),
+        keywords=(
+            "dang nhap",
+            "dang ky",
+            "quen mat khau",
+            "dat lai mat khau",
+            "khoi phuc mat khau",
+            "doi mat khau",
+            "email xac nhan",
+            "xac minh email",
+            "khong nhan duoc email xac nhan",
+            "dang nhap google",
+            "dang nhap facebook",
+            "login",
+            "register",
+            "sign up",
+            "sign in",
+            "forgot password",
+            "reset password",
+            "change password",
+            "verification email",
+            "confirmation email",
+        ),
+        short_answer_vi=(
+            "Hỗ trợ tài khoản ViRead:\n"
+            "• Đăng ký mới (/register): nhập email + mật khẩu và mở liên kết xác minh trong email trên cùng trình duyệt (hãy kiểm tra thêm mục Thư rác).\n"
+            "• Quên mật khẩu (/forgot-password): nhập email để nhận liên kết đặt lại mật khẩu trên cùng trình duyệt/thiết bị.\n"
+            "• Hỗ trợ đăng nhập Google/Facebook tại /login; sau khi đăng nhập mới có thể đổi mật khẩu trong phần cài đặt."
+        ),
+        detailed_answer_vi=(
+            "Hướng dẫn đăng nhập, đăng ký và khôi phục mật khẩu trên ViRead:\n"
+            "1. Đăng ký (/register): điền email thật và mật khẩu, sau đó bấm liên kết xác minh trong email trên cùng trình duyệt vừa đăng ký (ViRead dùng chuẩn bảo mật PKCE).\n"
+            "2. Không nhận được email xác nhận: kiểm tra hộp thư rác/Quảng cáo và chắc chắn email nhập đúng chính tả.\n"
+            "3. Quên mật khẩu (/forgot-password): nhập email đã đăng ký để nhận liên kết đặt lại mật khẩu tại /reset-password trên cùng trình duyệt.\n"
+            "4. Đổi mật khẩu: hãy đăng nhập vào tài khoản của bạn tại /login trước để truy cập mục cài đặt bảo mật."
+        ),
+        short_answer_en=(
+            "ViRead account help:\n"
+            "• Register (/register): sign up with your email & password and open the verification link in the same browser.\n"
+            "• Forgot password (/forgot-password): enter your email and open the recovery link on the same browser/device.\n"
+            "• Google/Facebook sign-in is available on /login; sign in first to manage password settings."
+        ),
+        detailed_answer_en=(
+            "Sign-in, registration, and password recovery on ViRead:\n"
+            "1. Register at /register with a valid email, then open the confirmation link in the same browser (ViRead uses PKCE).\n"
+            "2. Missing confirmation email? Check Spam/Junk and verify spelling.\n"
+            "3. Forgot password? Open /forgot-password, enter your account email, and complete reset at /reset-password in the same browser.\n"
+            "4. To change an existing password, sign in at /login first."
+        ),
+        actions=(
+            KbAction("Trang đăng nhập", "Login page", "/login"),
+            KbAction("Đăng ký tài khoản", "Register", "/register"),
+            KbAction("Quên mật khẩu", "Forgot password", "/forgot-password"),
+        ),
+        followups_vi=(
+            "Không nhận được email xác nhận thì làm sao?",
+            "ViRead có những chức năng gì?",
+            "Cần chuẩn bị micro và camera như thế nào?",
+        ),
+        followups_en=(
+            "I didn't receive the verification email",
+            "What can I do in ViRead?",
+            "How do I prepare mic and camera permissions?",
+        ),
+    ),
+    KbArticle(
+        id="public_onboarding_preview",
+        title_vi="3 bước bắt đầu với ViRead sau khi đăng nhập",
+        title_en="3-step ViRead overview for new families",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/", "/register", "/login"),
+        keywords=(
+            "ba me moi",
+            "nguoi moi",
+            "moi su dung",
+            "3 buoc bat dau",
+            "bat dau nhu the nao",
+            "lan dau su dung",
+            "huong dan nhanh",
+            "new parent",
+            "onboarding",
+            "3 steps",
+            "first time",
+            "quickstart",
+        ),
+        short_answer_vi=(
+            "Sau khi Đăng ký (/register) hoặc Đăng nhập (/login), ba mẹ bắt đầu chỉ với 3 bước:\n"
+            "1. Tạo hồ sơ bé theo lớp (1–5) để tách biệt tiến độ từng con.\n"
+            "2. Chọn sách trong thư viện hoặc quét sách giấy gia đình bằng camera.\n"
+            "3. Kiểm tra micro và bắt đầu buổi đọc tương tác cùng bé."
+        ),
+        detailed_answer_vi=(
+            "Quy trình 3 bước dành cho gia đình mới tham gia ViRead:\n"
+            "1. Đăng ký tài khoản phụ huynh tại /register (hoặc đăng nhập tại /login) và tạo hồ sơ bé theo lớp 1–5.\n"
+            "2. Chọn sách tiếng Việt phù hợp trình độ hoặc chụp trang sách giấy của gia đình.\n"
+            "3. Kiểm tra micro, chọn giọng đọc mẫu và bắt đầu buổi đọc hoặc Chuyến Tàu Đọc 5 Phút cùng bé."
+        ),
+        short_answer_en=(
+            "After registering (/register) or signing in (/login), families start in 3 steps:\n"
+            "1. Create a child profile (Grades 1–5) to keep progress separate.\n"
+            "2. Pick a library book or scan your own paper pages.\n"
+            "3. Test your microphone and launch an interactive reading session."
+        ),
+        detailed_answer_en=(
+            "3-step family quickstart after signing in:\n"
+            "1. Register at /register (or sign in at /login) and create a Grade 1–5 child profile.\n"
+            "2. Browse graded Vietnamese books or scan family paper books.\n"
+            "3. Verify your mic, pick a model voice, and start reading or the 5-Minute Reading Train."
+        ),
+        actions=(
+            KbAction("Đăng ký ngay", "Register now", "/register"),
+            KbAction("Đăng nhập", "Sign in", "/login"),
+        ),
+        followups_vi=(
+            "Cách xác minh email sau khi đăng ký?",
+            "ViRead phù hợp cho bé lớp mấy?",
+            "Khắc phục lỗi micro và camera?",
+        ),
+        followups_en=(
+            "How do I verify my email after signing up?",
+            "Which grade levels is ViRead for?",
+            "How do I fix mic and camera permissions?",
+        ),
+    ),
+    KbArticle(
+        id="public_mic_camera_readiness",
+        title_vi="Chuẩn bị quyền Micro và Camera trên trình duyệt",
+        title_en="Browser microphone and camera readiness",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/", "/login", "/register"),
+        keywords=(
+            "micro",
+            "microphone",
+            "camera",
+            "quyen thiet bi",
+            "cap quyen",
+            "cap quyen micro",
+            "cap quyen camera",
+            "khong nghe",
+            "khong thu tieng",
+            "khong mo duoc camera",
+            "khong nhan giong",
+            "loi micro",
+            "loi camera",
+            "loi am thanh",
+            "device permissions",
+            "mic not working",
+            "camera not working",
+        ),
+        short_answer_vi=(
+            "Để micro & camera hoạt động ổn định khi dùng ViRead:\n"
+            "1. Truy cập qua HTTPS (hoặc localhost) và bấm biểu tượng ổ khóa trên thanh địa chỉ → chọn Cho phép (Allow) Microphone/Camera.\n"
+            "2. Đóng các ứng dụng đang chiếm micro (Zoom, Meet, ghi âm) và tải lại trang.\n"
+            "3. Đăng nhập (/login) để mở bước kiểm tra micro và quét sách dành riêng cho gia đình bạn."
+        ),
+        detailed_answer_vi=(
+            "Hướng dẫn chuẩn bị thiết bị trước khi đăng nhập học đọc trên ViRead:\n"
+            "1. Trên Chrome/Edge máy tính: bấm biểu tượng cài đặt bên trái thanh URL → bật Microphone & Camera → tải lại trang.\n"
+            "2. Trên điện thoại (iOS Safari / Android Chrome / ứng dụng ViRead Android APK): mở Cài đặt máy → Quyền ứng dụng → bật Micro & Máy ảnh.\n"
+            "3. Trình duyệt chỉ cấp quyền micro/camera trên trang HTTPS và khi không bị ứng dụng khác chiếm dụng.\n"
+            "4. Hãy Đăng nhập (/login) hoặc Đăng ký (/register) để vào kiểm tra micro thực tế cho bé."
+        ),
+        short_answer_en=(
+            "Preparing mic & camera for ViRead:\n"
+            "1. Ensure you are on HTTPS (or localhost) and click the address-bar lock/settings icon → Allow Microphone & Camera.\n"
+            "2. Close other apps using the mic (Zoom/Meet) and reload.\n"
+            "3. Sign in (/login) to access your family mic check and book scanner."
+        ),
+        detailed_answer_en=(
+            "Device permission readiness before signing in:\n"
+            "1. Desktop Chrome/Edge: click site settings next to the URL, allow Microphone & Camera, and refresh.\n"
+            "2. Mobile (iOS Safari / Android Chrome / ViRead Android APK): enable Microphone & Camera in OS app settings.\n"
+            "3. Browsers require HTTPS and exclusive microphone access.\n"
+            "4. Sign in (/login) or register (/register) to run the in-app mic readiness check."
+        ),
+        actions=(
+            KbAction("Đăng nhập", "Sign in", "/login"),
+            KbAction("Đăng ký", "Register", "/register"),
+        ),
+        followups_vi=(
+            "ViRead có những chức năng gì?",
+            "Cách đăng ký tài khoản ViRead?",
+            "Quên mật khẩu thì làm sao?",
+        ),
+        followups_en=(
+            "What features does ViRead offer?",
+            "How do I register a ViRead account?",
+            "How do I reset my password?",
+        ),
+    ),
+    KbArticle(
+        id="public_support_and_privacy",
+        title_vi="Liên hệ hỗ trợ ViRead & bảo mật riêng tư tài khoản",
+        title_en="Contact ViRead support & account privacy",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/", "/login", "/register", "/forgot-password"),
+        keywords=(
+            "bao mat",
+            "rieng tu",
+            "du lieu gia dinh",
+            "phan quyen",
+            "rls",
+            "lien he ho tro",
+            "lien he viread",
+            "email ho tro",
+            "tro giup",
+            "ho tro",
+            "vireadforyou",
+            "privacy",
+            "security",
+            "contact support",
+            "support email",
+        ),
+        short_answer_vi=(
+            "Hỗ trợ & Bảo mật ViRead:\n"
+            "• Email hỗ trợ chính thức: vireadforyou@gmail.com (tuyệt đối không gửi mật khẩu hay mã OTP qua email).\n"
+            "• Dữ liệu mỗi gia đình được cách ly riêng tư (Supabase Auth + RLS); khách chưa đăng nhập chỉ xem được các trang công khai (/login, /register, /forgot-password)."
+        ),
+        detailed_answer_vi=(
+            "Chính sách hỗ trợ và bảo vệ riêng tư cho gia đình trên ViRead:\n"
+            "1. Liên hệ hỗ trợ khi chưa đăng nhập: gửi email tới vireadforyou@gmail.com để được hỗ trợ tài khoản hoặc lỗi kỹ thuật (không bao gồm mật khẩu/token).\n"
+            "2. Cách ly dữ liệu nghiêm ngặt: chỉ phụ huynh đã đăng nhập mới truy cập được hồ sơ bé, sách riêng và báo cáo của chính mình.\n"
+            "3. Trợ lý AI không bao giờ mở hay tiết lộ dữ liệu người dùng khác hoặc khu vực quản trị."
+        ),
+        short_answer_en=(
+            "ViRead Support & Privacy:\n"
+            "• Official support email: vireadforyou@gmail.com (never send passwords or OTP codes).\n"
+            "• Every family account is strictly isolated (Supabase Auth + RLS); signed-out guests stay on public routes (/login, /register, /forgot-password)."
+        ),
+        detailed_answer_en=(
+            "Support and privacy guarantees on ViRead:\n"
+            "1. Contact support anytime at vireadforyou@gmail.com (never include passwords or tokens).\n"
+            "2. Strict tenant isolation ensures only signed-in parents can view their own children, books, and reading reports.\n"
+            "3. The assistant never exposes other users' data or admin routes."
+        ),
+        actions=(
+            KbAction("Đăng nhập", "Sign in", "/login"),
+            KbAction("Đăng ký", "Register", "/register"),
+        ),
+        followups_vi=(
+            "Quên mật khẩu thì khôi phục thế nào?",
+            "ViRead có những chức năng gì?",
+            "Không nhận được email xác nhận thì làm sao?",
+        ),
+        followups_en=(
+            "How do I reset a forgotten password?",
+            "What can I do in ViRead?",
+            "I didn't receive the verification email",
+        ),
+    ),
+    KbArticle(
+        id="public_assistant_tiers",
+        title_vi="Cách Trợ lý ViRead hoạt động theo băng tần & ngoại tuyến",
+        title_en="How ViRead Assistant adapts to bandwidth and offline mode",
+        scopes=_PUBLIC_ONLY,
+        route_prefixes=("/", "/login", "/register"),
+        keywords=(
+            "chatbot",
+            "tro ly viread",
+            "tro ly ai",
+            "ollama",
+            "bang tan",
+            "api phan tang",
+            "an tro ly",
+            "an chatbot",
+            "tiet kiem du lieu",
+            "tiet kiem bang tan",
+            "mang cham",
+            "mang yeu",
+            "3g",
+            "mat mang",
+            "che do ngoai tuyen",
+            "slow 3g",
+            "low bandwidth",
+            "data saver",
+            "offline mode",
+            "viread assistant",
+            "bandwidth mode",
+            "hide assistant",
+        ),
+        short_answer_vi=(
+            "Trợ lý ViRead dùng kiến trúc phân tầng ưu tiên tốc độ:\n"
+            "• Tầng 0: Kho hướng dẫn ViRead nội bộ (<15ms, siêu tiết kiệm dữ liệu 2G/3G).\n"
+            "• Tầng 1 & 2: Cloud AI tốc độ cao (Gemini → Groq) và dự phòng cục bộ.\n"
+            "• Bạn có thể bấm biểu tượng mắt gạch trên tiêu đề khung chat để ẩn trợ lý bất cứ lúc nào."
+        ),
+        detailed_answer_vi=(
+            "Trợ lý ViRead tự động tối ưu theo kết nối mạng của bạn:\n"
+            "1. Chế độ Tiết kiệm (Low bandwidth): trả lời cực gọn từ Tầng 0 để tiết kiệm 3G.\n"
+            "2. Ngoại tuyến: khi mất mạng, trợ lý vẫn tra cứu được hướng dẫn nhanh ngay trên trình duyệt.\n"
+            "3. Bấm nút Ẩn trợ lý để thu gọn thành tai nhỏ ở mép màn hình bất kỳ lúc nào."
+        ),
+        short_answer_en=(
+            "ViRead Assistant uses a fast tiered cascade:\n"
+            "• Tier 0: Local grounded guide (<15ms, ideal for slow 3G/data saver).\n"
+            "• Tier 1 & 2: Fast Cloud AI failover with offline quick-guide fallback.\n"
+            "• Click the Hide icon anytime to tuck the assistant away."
+        ),
+        detailed_answer_en=(
+            "How ViRead Assistant adapts to your network:\n"
+            "1. Saver mode gives ultra-concise Tier 0 answers on slow connections.\n"
+            "2. Offline mode falls back smoothly to the built-in quick guide.\n"
+            "3. Hide the widget anytime into a subtle edge tab."
+        ),
+        actions=(
+            KbAction("Đăng nhập", "Sign in", "/login"),
+            KbAction("Đăng ký", "Register", "/register"),
+        ),
+        followups_vi=(
+            "ViRead có những chức năng gì?",
+            "Cách đăng ký tài khoản ViRead?",
+            "Liên hệ hỗ trợ ViRead ở đâu?",
+        ),
+        followups_en=(
+            "What features does ViRead offer?",
+            "How do I register for ViRead?",
+            "How do I contact ViRead support?",
+        ),
+    ),
+    # ------------------------------------------------------------------ Parent-only KB (strictly isolated!)
     KbArticle(
         id="viread_overview",
         title_vi="Tổng quan về ViRead",
         title_en="About ViRead",
-        scopes=_ALL_SCOPES,
-        route_prefixes=("/", "/login", "/dashboard"),
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/dashboard",),
         keywords=(
             "viread la gi",
             "gioi thieu viread",
@@ -92,120 +489,53 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         ),
         short_answer_vi=(
             "ViRead đồng hành cùng ba mẹ và bé tiểu học (lớp 1–5) luyện đọc tiếng Việt:\n"
-            "• Chọn sách từ thư viện hoặc quét trang sách giấy bằng camera.\n"
-            "• Bé đọc to theo từng từ có micro nhận diện giọng nói, đọc mẫu (TTS) và câu hỏi đọc hiểu.\n"
-            "• Theo dõi tiến bộ, ôn từ cần luyện, đặt lịch nhắc đọc và chơi trò chơi ngôn ngữ."
+            "• Chọn sách có huy hiệu độ đọc theo lớp hoặc tự tạo/quét sách gia đình tại Sách của tôi (/my-books) & Quét sách (/book-scanner).\n"
+            "• Bé đọc to theo từng từ (hỗ trợ Đọc đôi cùng ba mẹ, WASM ngoại tuyến, AI Tutor đọc hiểu) hoặc luyện nhanh trên Chuyến Tàu Đọc 5 Phút (/learning-train).\n"
+            "• Theo dõi Tiến bộ (/reports), Vườn Âm Vị & Huy hiệu (/achievements), Từ cần luyện, nhắc đọc qua email và Góc giải trí (/entertainment)."
         ),
         detailed_answer_vi=(
             "ViRead (ReadAlong Vision) là nền tảng luyện đọc tiếng Việt dành cho gia đình có bé từ lớp 1 đến lớp 5:\n"
-            "1. Tạo hồ sơ bé theo từng lớp để lưu tủ sách và tiến độ riêng.\n"
-            "2. Chọn sách có sẵn ở mục Sách hoặc quét/tải sách giấy gia đình tại Quét sách / Sách của tôi.\n"
-            "3. Cho bé vào buổi đọc tương tác: nhận diện lời đọc từng từ, phát âm mẫu (TTS), hỗ trợ sửa lỗi và câu hỏi đọc hiểu AI Tutor.\n"
-            "4. Xem báo cáo Tiến bộ, Lịch sử buổi đọc, luyện Từ cần luyện, đặt mục tiêu & email nhắc đọc tại Quản lý đọc.\n"
-            "5. Mở rộng vốn từ qua Góc giải trí: Karaoke thiếu nhi, Ghép câu và Mô tả tranh AI."
+            "1. Tạo hồ sơ bé (/children) theo từng lớp để lưu tủ sách, huy hiệu và tiến độ riêng.\n"
+            "2. Chọn sách ở mục Sách (/books) có đánh giá độ đọc tiếng Việt, quét sách giấy (/book-scanner) hoặc sáng tác truyện Family StoryWeaver tại Sách của tôi (/my-books).\n"
+            "3. Cho bé vào buổi đọc tương tác (/reading-preparation → /reading) với nhận diện giọng nói (gồm WASM ngoại tuyến), giọng đọc mẫu AI Teacher Persona, Đọc đôi (Duet Reading) và câu hỏi đọc hiểu AI Tutor.\n"
+            "4. Ôn nhanh mỗi ngày qua Chuyến Tàu Đọc 5 Phút (/learning-train), xem Báo cáo Tiến bộ (/reports), Chứng nhận cột mốc, Vườn Âm Vị (/achievements) và đặt lịch email tại Quản lý đọc (/reading-management).\n"
+            "5. Mở rộng vốn từ qua Góc giải trí (/entertainment): Karaoke đồng dao (/karaoke), Memory Game, Ghép câu và Mô tả tranh AI."
         ),
         short_answer_en=(
             "ViRead helps parents and Grade 1–5 children practice Vietnamese reading:\n"
-            "• Pick catalog books or scan paper pages with your camera.\n"
-            "• Read aloud word-by-word with speech recognition, model voice (TTS), and comprehension quizzes.\n"
-            "• Track progress, practice difficult words, set reading reminders, and play language games."
+            "• Pick graded books or scan/weave family stories in My Books (/my-books) & Book Scanner (/book-scanner).\n"
+            "• Read aloud with speech recognition (including offline WASM), Duet Reading, 5-Minute Reading Train (/learning-train), and AI Tutor quizzes.\n"
+            "• Track Progress (/reports), Phoneme Garden (/achievements), Difficult Words, email reminders, and Entertainment games (/entertainment)."
         ),
         detailed_answer_en=(
             "ViRead (ReadAlong Vision) is a family reading companion for Grade 1–5 learners:\n"
-            "1. Create individual child profiles by grade to keep bookshelves and reports separate.\n"
-            "2. Choose books from the library or scan/upload family books via Book Scanner & My Books.\n"
-            "3. Start guided reading sessions with speech recognition, model TTS voice, gentle retries, and AI Tutor comprehension checks.\n"
-            "4. Review Progress Reports, Session History, Difficult Words practice, and weekly Reading Management goals & email reminders.\n"
-            "5. Reinforce language skills in Entertainment: Karaoke, Sentence Shooter, and Picture Description."
+            "1. Create separate child profiles (/children) by grade.\n"
+            "2. Browse graded Books (/books), scan paper pages (/book-scanner), or create custom Family StoryWeaver books in My Books (/my-books).\n"
+            "3. Run guided sessions (/reading-preparation → /reading) with speech recognition (including on-device WASM), AI Teacher Voice Persona, Duet Reading, and AI Tutor comprehension checks.\n"
+            "4. Practice daily with the 5-Minute Reading Train (/learning-train), review Progress Reports (/reports), Milestone Certificates, Phoneme Garden (/achievements), and Reading Management (/reading-management).\n"
+            "5. Enjoy Entertainment (/entertainment): Kids Karaoke (/karaoke), Memory Game, Sentence Shooter, and Picture Description."
         ),
         actions=(
             KbAction("Về Tổng quan", "Open Dashboard", "/dashboard"),
+            KbAction("Mở kho Sách", "Browse Books", "/books"),
             KbAction("Mở Trợ giúp & hỗ trợ", "Open Help & Support", "/help-support"),
         ),
         followups_vi=(
             "Làm sao tạo hồ sơ cho bé?",
-            "Cách bắt đầu buổi đọc đầu tiên?",
-            "Làm sao quét sách giấy bằng camera?",
+            "Chuyến Tàu Đọc 5 Phút và Vườn Âm Vị là gì?",
+            "Làm sao quét sách giấy hoặc dùng Family StoryWeaver?",
         ),
         followups_en=(
             "How do I create a child profile?",
-            "How do I start a reading session?",
-            "How do I scan a paper book?",
-        ),
-    ),
-    KbArticle(
-        id="auth_login_register",
-        title_vi="Đăng nhập, đăng ký và xác minh tài khoản",
-        title_en="Sign in, register, and email verification",
-        scopes=_ALL_SCOPES,
-        route_prefixes=("/login", "/register", "/forgot-password", "/reset-password"),
-        keywords=(
-            "dang nhap",
-            "dang ky",
-            "quen mat khau",
-            "dat lai mat khau",
-            "khoi phuc mat khau",
-            "email xac nhan",
-            "xac minh email",
-            "khong nhan duoc email xac nhan",
-            "dang nhap google",
-            "dang nhap facebook",
-            "login",
-            "register",
-            "sign up",
-            "sign in",
-            "forgot password",
-            "reset password",
-            "verification email",
-            "confirmation email",
-        ),
-        short_answer_vi=(
-            "Hỗ trợ tài khoản ViRead:\n"
-            "• Đăng ký mới: mở trang Đăng ký, nhập email + mật khẩu và xác minh liên kết gửi về hộp thư (nhớ kiểm tra mục Thư rác).\n"
-            "• Quên mật khẩu: bấm Quên mật khẩu ở trang Đăng nhập và mở liên kết khôi phục trên cùng trình duyệt/thiết bị.\n"
-            "• Tài khoản Google/Facebook có thể đăng nhập trực tiếp hoặc đặt thêm mật khẩu trong mục Cài đặt."
-        ),
-        detailed_answer_vi=(
-            "Hướng dẫn đăng nhập, đăng ký và khôi phục mật khẩu trên ViRead:\n"
-            "1. Đăng ký: vào /register, điền email thật và mật khẩu, sau đó bấm liên kết xác minh trong email trên cùng trình duyệt vừa đăng ký (ViRead dùng chuẩn bảo mật PKCE).\n"
-            "2. Không nhận được email xác nhận: kiểm tra hộp thư rác/Quảng cáo và chắc chắn email nhập đúng chính tả; nếu đang đổi email trong tài khoản, mở Hồ sơ ba mẹ để gửi lại email xác minh.\n"
-            "3. Quên mật khẩu: vào /forgot-password, nhập email để nhận liên kết đặt lại mật khẩu.\n"
-            "4. Đổi mật khẩu sau khi đăng nhập: mở menu tài khoản → Cài đặt. Với tài khoản đăng nhập bằng Google/Facebook, có thể gửi liên kết đặt mật khẩu qua email."
-        ),
-        short_answer_en=(
-            "ViRead account help:\n"
-            "• Register: sign up with your email & password and open the verification link in the same browser.\n"
-            "• Forgot password: use Forgot Password on the login page and open the recovery link on the same browser/device.\n"
-            "• Google/Facebook accounts can sign in directly or request a password setup link in Settings."
-        ),
-        detailed_answer_en=(
-            "Sign-in, registration, and password recovery on ViRead:\n"
-            "1. Register at /register with a valid email, then open the confirmation link in the same browser (ViRead uses PKCE).\n"
-            "2. Missing confirmation email? Check Spam/Junk and verify spelling. For pending email changes, open Parent Profile to resend verification.\n"
-            "3. Forgot password? Open /forgot-password, enter your account email, and complete reset in the same browser.\n"
-            "4. To change your password while signed in, open Account Menu → Settings."
-        ),
-        actions=(
-            KbAction("Trang đăng nhập", "Login page", "/login"),
-            KbAction("Quên mật khẩu", "Forgot password", "/forgot-password"),
-            KbAction("Cài đặt tài khoản", "Account settings", "/settings"),
-        ),
-        followups_vi=(
-            "Không nhận được email xác nhận thì làm sao?",
-            "Làm sao đổi mật khẩu tài khoản?",
-            "ViRead có những chức năng gì?",
-        ),
-        followups_en=(
-            "I didn't receive the verification email",
-            "How do I change my password?",
-            "What can I do in ViRead?",
+            "What are 5-Minute Reading Train and Phoneme Garden?",
+            "How do I scan a book or use Family StoryWeaver?",
         ),
     ),
     KbArticle(
         id="child_profiles",
         title_vi="Tạo và quản lý hồ sơ bé",
         title_en="Create and manage child profiles",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/children", "/dashboard", "/profile"),
         keywords=(
             "ho so be",
@@ -262,9 +592,9 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
     ),
     KbArticle(
         id="parent_profile_settings",
-        title_vi="Hồ sơ ba mẹ, cài đặt mật khẩu và ngôn ngữ",
-        title_en="Parent profile, password settings, and language",
-        scopes=_PARENT_SCOPES,
+        title_vi="Hồ sơ ba mẹ, cài đặt mật khẩu, mã PIN 4 số và ngôn ngữ",
+        title_en="Parent profile, password, 4-digit Parent PIN, and language settings",
+        scopes=_PARENT_ONLY,
         route_prefixes=("/profile", "/settings"),
         keywords=(
             "ho so ba me",
@@ -277,6 +607,9 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "chuyen ngon ngu",
             "ngon ngu giao dien",
             "cai dat tai khoan",
+            "ma pin",
+            "pin 4 so",
+            "parent pin",
             "parent profile",
             "change password",
             "account settings",
@@ -286,25 +619,25 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         short_answer_vi=(
             "Quản lý tài khoản ba mẹ & giao diện:\n"
             "• Sửa tên hiển thị, số điện thoại, ảnh đại diện hoặc yêu cầu đổi email tại Hồ sơ ba mẹ (/profile).\n"
-            "• Đổi mật khẩu tại Cài đặt (/settings).\n"
+            "• Đổi mật khẩu và bật Khóa PIN Phụ huynh 4 chữ số (bảo vệ chế độ An toàn cho bé) tại Cài đặt (/settings).\n"
             "• Đổi ngôn ngữ giao diện (11 ngôn ngữ, giữ nguyên nội dung học đọc tiếng Việt) bằng nút chọn ngôn ngữ trên thanh đầu trang hoặc menu tài khoản."
         ),
         detailed_answer_vi=(
             "Các thiết lập tài khoản phụ huynh trên ViRead:\n"
             "1. Hồ sơ ba mẹ (/profile): bấm Chỉnh sửa hồ sơ để cập nhật họ tên, số điện thoại liên hệ, ảnh đại diện hoặc yêu cầu đổi email (email mới chỉ có hiệu lực sau khi xác minh).\n"
-            "2. Cài đặt bảo mật (/settings): đổi mật khẩu hiện tại sang mật khẩu mới, hoặc yêu cầu email đặt mật khẩu nếu đăng nhập qua Google/Facebook.\n"
+            "2. Cài đặt bảo mật (/settings): đổi mật khẩu hiện tại, gửi email đặt mật khẩu cho tài khoản Google/Facebook, và thiết lập Khóa PIN Phụ huynh 4 chữ số (tự khóa 5 phút nếu nhập sai 5 lần).\n"
             "3. Ngôn ngữ giao diện: ViRead hỗ trợ 11 ngôn ngữ (Tiếng Việt, English, Français, Deutsch, Español, 日本語, 한국어, 中文, العربية, עברית) mà vẫn giữ nguyên nội dung sách & nhận diện đọc tiếng Việt."
         ),
         short_answer_en=(
             "Parent account & interface settings:\n"
             "• Update display name, contact phone, avatar, or email in Parent Profile (/profile).\n"
-            "• Change your password in Settings (/settings).\n"
+            "• Change your password and configure the 4-digit Parent PIN Lock in Settings (/settings).\n"
             "• Switch between 11 UI languages via the language selector in the header or account menu (Vietnamese reading content remains intact)."
         ),
         detailed_answer_en=(
             "Managing your ViRead parent account:\n"
             "1. Parent Profile (/profile): click Edit Profile to update display name, phone number, avatar, or request an email change (requires verification).\n"
-            "2. Settings (/settings): change your password or send a password setup link for Google/Facebook accounts.\n"
+            "2. Settings (/settings): change your password, send a password setup link for Google/Facebook sign-in, or enable the 4-digit Parent PIN Lock (5-attempt / 5-minute lockout).\n"
             "3. Language: switch among 11 supported interface languages (including RTL Arabic/Hebrew) while preserving Vietnamese reading and speech pipelines."
         ),
         actions=(
@@ -326,7 +659,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="books_and_reading_start",
         title_vi="Chọn sách, chuẩn bị đọc và bắt đầu buổi đọc",
         title_en="Choose books, reading preparation, and starting a session",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/books", "/reading-preparation", "/dashboard"),
         keywords=(
             "chon sach",
@@ -388,7 +721,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="active_reading_controls",
         title_vi="Hướng dẫn màn hình đọc, giọng đọc mẫu và sửa từ sai",
         title_en="Active reading screen, model voice (TTS), and word retries",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading",),
         keywords=(
             "man hinh doc",
@@ -460,7 +793,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="device_permissions_mic_camera",
         title_vi="Khắc phục lỗi micro, camera và quyền thiết bị",
         title_en="Troubleshooting microphone, camera, and device permissions",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading-preparation", "/reading", "/book-scanner", "/entertainment"),
         keywords=(
             "micro",
@@ -526,7 +859,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="book_scanner_and_my_books",
         title_vi="Quét sách giấy (OCR) và Sách của tôi",
         title_en="Book Scanner (OCR) and My Books",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/book-scanner", "/my-books"),
         keywords=(
             "quet sach",
@@ -596,7 +929,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="reports_sessions_difficult_words",
         title_vi="Báo cáo tiến bộ, lịch sử đọc và ôn từ cần luyện",
         title_en="Progress reports, reading history, and difficult words practice",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reports", "/sessions"),
         keywords=(
             "bao cao",
@@ -660,7 +993,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="reading_management_reminders",
         title_vi="Quản lý đọc, mục tiêu tuần và email nhắc đọc",
         title_en="Reading management, weekly goals, and email reminders",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading-management",),
         keywords=(
             "quan ly doc",
@@ -723,7 +1056,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="entertainment_games_karaoke",
         title_vi="Góc giải trí: Karaoke, Lật thẻ ghi nhớ, Ghép câu và Mô tả tranh AI",
         title_en="Entertainment: Karaoke, Memory Game, Sentence Shooter, and Picture Description",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/entertainment", "/karaoke"),
         keywords=(
             "giai tri",
@@ -796,7 +1129,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="ai_tutor_comprehension",
         title_vi="AI Tutor & Câu hỏi đọc hiểu sau buổi đọc",
         title_en="AI Tutor & post-reading comprehension quiz",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading", "/sessions", "/reports"),
         keywords=(
             "ai tutor",
@@ -849,7 +1182,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="book_reports_and_support",
         title_vi="Báo lỗi nội dung sách và liên hệ hỗ trợ ViRead",
         title_en="Report book content issues and contact ViRead support",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/help-support", "/book-reports"),
         keywords=(
             "bao loi sach",
@@ -910,7 +1243,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="assistant_bandwidth_tiers",
         title_vi="Cách Trợ lý ViRead hoạt động theo API phân tầng & băng tần",
         title_en="How ViRead Assistant tiered APIs, Ollama, and bandwidth modes work",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/", "/dashboard", "/help-support"),
         keywords=(
             "chatbot",
@@ -981,8 +1314,8 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
     # ------------------------------------------------------------------ Admin-only KB (strictly isolated!)
     KbArticle(
         id="admin_books_ocr_review",
-        title_vi="Quản trị kho sách, OCR và duyệt revision VERIFIED",
-        title_en="Admin book catalog, OCR review, and VERIFIED revisions",
+        title_vi="Quản trị kho sách, OCR (Gemini vs Qwen3-VL / VietOCR) và duyệt VERIFIED",
+        title_en="Admin book catalog, OCR review (Gemini vs Qwen3-VL / VietOCR), and VERIFIED revisions",
         scopes=_ADMIN_ONLY,
         route_prefixes=("/admin/books",),
         keywords=(
@@ -992,34 +1325,40 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "verified",
             "ai sua",
             "tao sach",
+            "sua sach",
             "upload trang",
+            "qwen3-vl",
+            "vietocr",
+            "tesseract",
+            "paddleocr",
+            "gemini ocr",
             "admin books",
             "ocr review",
             "needs_review",
         ),
         short_answer_vi=(
             "Quy trình quản trị sách & OCR tại /admin/books:\n"
-            "1. Tạo sách mới (/admin/books/new) và tải lên ảnh các trang sách.\n"
-            "2. Mở chi tiết sách → duyệt từng trang OCR (NEEDS_REVIEW), dùng nút AI sửa nếu cần, chỉnh tay độ chính xác từng từ rồi xác minh thành VERIFIED.\n"
-            "3. Sách chỉ đủ điều kiện phê duyệt khi mọi trang hoạt động đều đã hoàn tất OCR, rà soát nội dung và Child Safety."
+            "1. Tạo/sửa sách (/admin/books/new, /admin/books/[bookId]/edit) và tải ảnh từng trang.\n"
+            "2. Mở trang duyệt OCR (/admin/books/[bookId]/pages/[pageId]): đối chiếu kết quả giữa Gemini, Ollama Qwen3-VL và các engine VietOCR/PaddleOCR/Tesseract, chạy AI sửa tách biệt nếu cần rồi duyệt sang VERIFIED.\n"
+            "3. Sách chỉ đủ điều kiện xuất bản khi mọi trang active đã có revision VERIFIED hiện hành, Proofreading và Child Safety."
         ),
         detailed_answer_vi=(
-            "Hướng dẫn vận hành Kho sách Quản trị (/admin/books):\n"
-            "1. Tạo/Sửa sách: vào /admin/books/new để nhập metadata, bìa sách và tải ảnh từng trang.\n"
-            "2. OCR & AI sửa: thao tác Quét OCR và nút AI sửa là hai luồng tách biệt. Sau khi OCR trích xuất, Admin kiểm tra bounding box và văn bản, có thể chạy AI sửa theo lô rồi duyệt thủ công sang trạng thái VERIFIED.\n"
-            "3. Xuất bản an toàn: trước khi phê duyệt sách cho thư viện thiếu nhi, đảm bảo mọi trang active có revision VERIFIED hiện hành, Proofreading và đánh giá Child Safety hợp lệ."
+            "Hướng dẫn vận hành Kho sách & Duyệt OCR Quản trị (/admin/books):\n"
+            "1. Tạo & Chỉnh sửa sách: vào /admin/books/new để tạo sách mới hoặc /admin/books/[bookId]/edit để cập nhật metadata, lớp, bản quyền và danh sách trang.\n"
+            "2. Bàn duyệt OCR từng trang (/admin/books/[bookId]/pages/[pageId]): thao tác Quét OCR và nút AI sửa là hai luồng tách biệt. Admin xem lại độ tin cậy từng từ từ PaddleOCR, VietOCR, Tesseract và bản đối chiếu Gemini hoặc Ollama Qwen3-VL cục bộ, chỉnh bounding box/chữ sai rồi xác minh thành VERIFIED.\n"
+            "3. Xuất bản an toàn: đảm bảo mọi trang active có revision VERIFIED hiện hành, Proofreading và đánh giá Child Safety GRADE_1_TO_5 hợp lệ."
         ),
         short_answer_en=(
             "Admin book & OCR workflow (/admin/books):\n"
-            "1. Create books (/admin/books/new) and upload page images.\n"
-            "2. Review NEEDS_REVIEW OCR revisions, optionally run AI proofreading, verify text/boxes, and mark VERIFIED.\n"
+            "1. Create or edit books (/admin/books/new, /admin/books/[bookId]/edit) and upload page images.\n"
+            "2. Open page OCR review (/admin/books/[bookId]/pages/[pageId]) to compare Gemini, Ollama Qwen3-VL, VietOCR, PaddleOCR, and Tesseract word verdicts, run separate AI proofreading if needed, and mark VERIFIED.\n"
             "3. Publish only after OCR, proofreading, and Child Safety checks are current on all active pages."
         ),
         detailed_answer_en=(
-            "Admin Book Catalog operations (/admin/books):\n"
-            "1. Create books and upload pages at /admin/books/new.\n"
-            "2. OCR scan and AI proofreading are separate steps; review word boxes and text before verifying revisions to VERIFIED.\n"
-            "3. Book approval requires current OCR, proofreading, and Child Safety results plus rights confirmation on all active pages."
+            "Admin Book Catalog & OCR Review (/admin/books):\n"
+            "1. Create books (/admin/books/new) and update metadata/rights/pages (/admin/books/[bookId]/edit).\n"
+            "2. On /admin/books/[bookId]/pages/[pageId], OCR scan and AI proofreading remain separate steps; compare PaddleOCR/VietOCR/Tesseract signals with Gemini or local Ollama Qwen3-VL before verifying to VERIFIED.\n"
+            "3. Book approval requires current OCR, proofreading, and GRADE_1_TO_5 Child Safety results plus rights confirmation on all active pages."
         ),
         actions=(
             KbAction("Mở Kho sách Admin", "Open Admin Books", "/admin/books"),
@@ -1157,7 +1496,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="global_ai_task_center",
         title_vi="Trung tâm tác vụ AI & Theo dõi tiến trình chạy nền",
         title_en="AI Task Center & background job progress",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/studio/tasks", "/my-books", "/book-scanner", "/dashboard"),
         keywords=(
             "tac vu ai",
@@ -1208,7 +1547,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="voice_settings_lock_and_offline_audio",
         title_vi="Khóa giọng đọc theo buổi, giọng 3 miền & audio ngoại tuyến",
         title_en="Session Voice Lock, regional voices & offline audio cache",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading", "/reading-preparation", "/settings"),
         keywords=(
             "khoa giong doc",
@@ -1260,7 +1599,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="smart_studio_covers_illustrations",
         title_vi="Smart Studio: Tạo ảnh bìa & minh họa sách AI",
         title_en="Smart Studio: AI book covers & page illustrations",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/my-books", "/book-scanner", "/studio/tasks"),
         keywords=(
             "smart studio",
@@ -1309,7 +1648,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="reading_presence_and_email_prefs",
         title_vi="Nhắc đọc qua email & trạng thái đang đọc trực tuyến",
         title_en="Email reading reminders & live reading presence",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/settings", "/profile", "/dashboard"),
         keywords=(
             "nhac doc email",
@@ -1357,7 +1696,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="viread_system_architecture_and_privacy",
         title_vi="Bảo mật riêng tư & phạm vi dữ liệu tài khoản ViRead",
         title_en="Account privacy & strict own-scope data isolation",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/", "/settings", "/profile", "/help-support"),
         keywords=(
             "bao mat",
@@ -1451,7 +1790,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="child_selection_gate_and_switching",
         title_vi="Cổng chọn hồ sơ bé & cách chuyển bé trước khi đọc/chơi",
         title_en="Child selection gate & switching profiles before reading or games",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/dashboard", "/children", "/reading-preparation", "/books", "/entertainment"),
         keywords=(
             "cong chon be",
@@ -1511,7 +1850,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="new_parent_onboarding",
         title_vi="Hướng dẫn 3 bước bắt đầu cho ba mẹ mới",
         title_en="3-step quickstart onboarding for new parents",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/", "/dashboard", "/children/new", "/register"),
         keywords=(
             "ba me moi",
@@ -1571,7 +1910,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="multi_child_family_switching",
         title_vi="Gia đình có nhiều bé: chuyển đổi hồ sơ không lẫn dữ liệu",
         title_en="Multi-child families: switching between siblings cleanly",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/children", "/dashboard", "/reports"),
         keywords=(
             "nhieu be",
@@ -1631,7 +1970,7 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
         id="slow_struggling_reader_support",
         title_vi="Hỗ trợ bé đọc chậm, hay vấp từ & luyện phát âm",
         title_en="Supporting slow or struggling readers (0.85x speed & syllable hints)",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         route_prefixes=("/reading-preparation", "/reading", "/reports/difficult-words"),
         keywords=(
             "be doc cham",
@@ -1694,30 +2033,653 @@ KB_ARTICLES: tuple[KbArticle, ...] = (
             "Why can't I switch voices mid-session?",
         ),
     ),
+    KbArticle(
+        id="achievements_phoneme_garden",
+        title_vi="Vườn Âm Vị & Huy hiệu + Hộ chiếu Tem Đọc Sách",
+        title_en="Phoneme Garden, Badges & Book Stamp Passport",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/achievements", "/dashboard"),
+        keywords=(
+            "vuon am vi",
+            "huy hieu",
+            "ho chieu doc sach",
+            "ho chieu tem",
+            "tem doc sach",
+            "thanh tich",
+            "chuoi ngay doc",
+            "achievements",
+            "phoneme garden",
+            "badges",
+            "passport",
+            "book stamp",
+        ),
+        short_answer_vi=(
+            "Vườn Âm Vị & Huy hiệu (/achievements — cần chọn hồ sơ bé trước):\n"
+            "• Theo dõi từng âm/vần tiếng Việt bé đã làm chủ dưới dạng những bông hoa nở trong Vườn Âm Vị.\n"
+            "• Mở Hộ chiếu Tem Đọc Sách để xem tem thưởng theo chuỗi ngày đọc đều đặn, mục tiêu tuần và lời nhắn động viên bằng giọng ba mẹ."
+        ),
+        detailed_answer_vi=(
+            "Khám phá Vườn Âm Vị & Huy hiệu (/achievements) dành riêng cho từng bé (nhớ chọn hồ sơ bé trước):\n"
+            "1. Vườn Âm Vị (Phoneme Garden): thống kê mức độ thuần thục các âm, vần, thanh điệu tiếng Việt qua các buổi đọc và luyện từ khó của bé.\n"
+            "2. Hộ chiếu Tem Đọc Sách (Reading Passport): lưu các con dấu cột mốc đọc sách lành mạnh theo chuỗi ngày đọc & mục tiêu tuần (không gây nghiện).\n"
+            "3. Huy hiệu thành tích & ghi nhận nỗ lực giúp bé hứng thú duy trì thói quen đọc mỗi ngày."
+        ),
+        short_answer_en=(
+            "Phoneme Garden & Badges (/achievements — select a child profile first):\n"
+            "• Watch your child's mastered Vietnamese phonemes bloom inside the Phoneme Garden.\n"
+            "• Open the Book Stamp Passport to see healthy reading-streak stamps and milestone badges."
+        ),
+        detailed_answer_en=(
+            "Inside Phoneme Garden & Achievements (/achievements, requires an active child profile):\n"
+            "1. Phoneme Garden tracks Vietnamese sound, rhyme, and tone mastery from reading sessions.\n"
+            "2. Book Stamp Passport awards intrinsic stamps for consistent reading streaks and completed weekly goals.\n"
+            "3. Every garden and badge collection is tracked independently per child."
+        ),
+        actions=(
+            KbAction("Mở Vườn Âm Vị & Huy hiệu", "Open Achievements", "/achievements"),
+            KbAction("Chuyến Tàu Đọc 5 Phút", "5-Min Reading Train", "/learning-train"),
+        ),
+        followups_vi=(
+            "Chuyến Tàu Đọc 5 Phút hoạt động thế nào?",
+            "Làm sao tải Chứng nhận cột mốc cho bé?",
+            "Tại sao phải chọn hồ sơ bé trước khi mở trang này?",
+        ),
+        followups_en=(
+            "How does the 5-Minute Reading Train work?",
+            "How do I download Milestone Certificates?",
+            "Why must I select a child profile first?",
+        ),
+    ),
+    KbArticle(
+        id="learning_train_daily_practice",
+        title_vi="Chuyến Tàu Đọc 5 Phút hàng ngày",
+        title_en="Daily 5-Minute Reading Train",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/learning-train", "/dashboard"),
+        keywords=(
+            "chuyen tau doc",
+            "chuyen tau 5 phut",
+            "tau doc 5 phut",
+            "luyen doc 5 phut",
+            "luyen doc moi ngay",
+            "learning train",
+            "5 minute reading train",
+            "five minute train",
+            "daily train",
+        ),
+        short_answer_vi=(
+            "Chuyến Tàu Đọc 5 Phút (/learning-train — cần chọn hồ sơ bé trước) là bài tập thích ứng ngắn gọn 3 toa mỗi ngày:\n"
+            "• Toa 1: Khởi động âm/vần và từ bé đang cần củng cố.\n"
+            "• Toa 2: Đọc nhịp điệu cụm câu ngắn có giọng Cô/Thầy AI dẫn.\n"
+            "• Toa 3: Ghép từ hoàn thành câu để nhận tem & kết thúc nhẹ nhàng trong ~5 phút."
+        ),
+        detailed_answer_vi=(
+            "Chuyến Tàu Đọc 5 Phút (/learning-train) giúp bé duy trì nhịp đọc đều đặn ngay cả những ngày bận rộn (cần chọn hồ sơ bé trước):\n"
+            "1. Tự động cá nhân hóa theo trình độ và các từ bé từng vấp.\n"
+            "2. Gồm 3 toa ngắn: Toa 1 (âm/vần & từ mục tiêu), Toa 2 (đọc cụm câu theo nhịp + kiểm tra micro), Toa 3 (ghép câu hoàn chỉnh).\n"
+            "3. Đồng bộ giọng Cô/Thầy AI (Teacher Persona) và ghi nhận trực tiếp vào chuỗi ngày đọc & Vườn Âm Vị (/achievements)."
+        ),
+        short_answer_en=(
+            "The 5-Minute Reading Train (/learning-train — select a child first) is a 3-car daily adaptive workout:\n"
+            "• Car 1: Target sounds and tricky words.\n"
+            "• Car 2: Rhythmic phrase reading with AI Teacher guidance.\n"
+            "• Car 3: Sentence assembly to complete the daily streak in ~5 minutes."
+        ),
+        detailed_answer_en=(
+            "How the 5-Minute Reading Train (/learning-train) works (requires an active child profile):\n"
+            "1. Adapts automatically to your child's grade and recent difficult words.\n"
+            "2. Runs through 3 focused cars: sounds/words, rhythmic phrase reading, and sentence building.\n"
+            "3. Syncs with your chosen AI Teacher Voice Persona and updates streaks and Phoneme Garden (/achievements)."
+        ),
+        actions=(
+            KbAction("Mở Chuyến Tàu Đọc 5 Phút", "Open Reading Train", "/learning-train"),
+            KbAction("Vườn Âm Vị & Huy hiệu", "Phoneme Garden", "/achievements"),
+        ),
+        followups_vi=(
+            "Vườn Âm Vị & Huy hiệu xem ở đâu?",
+            "Đổi giọng Cô giáo / Thầy giáo AI ở đâu?",
+            "Làm sao đặt lịch nhắc đọc hàng tuần?",
+        ),
+        followups_en=(
+            "Where is Phoneme Garden?",
+            "How do I switch AI Teacher Voice Persona?",
+            "How do I schedule weekly reading reminders?",
+        ),
+    ),
+    KbArticle(
+        id="family_storyweaver_and_readability",
+        title_vi="Family StoryWeaver & Huy hiệu Độ đọc Tiếng Việt (Lớp 1–5)",
+        title_en="Family StoryWeaver & Vietnamese Readability Badge (Grades 1–5)",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/my-books", "/books"),
+        keywords=(
+            "storyweaver",
+            "family storyweaver",
+            "sang tac truyen",
+            "tao truyen ai",
+            "truyen cho be",
+            "readability",
+            "readability badge",
+            "do doc",
+            "huy hieu do doc",
+            "phu hop lop",
+            "phonics readiness",
+        ),
+        short_answer_vi=(
+            "Family StoryWeaver & Huy hiệu Độ đọc:\n"
+            "• Family StoryWeaver (trong Sách của tôi /my-books): ba mẹ nhập chủ đề, chọn lớp (1–5), chế độ đọc (như Đối thoại đọc đôi DUET_DIALOGUE) và tối đa 6 từ muốn bé luyện → AI dệt truyện 3–4 trang an toàn cho bé.\n"
+            "• Huy hiệu Độ đọc Tiếng Việt (Readability Badge): hiển thị sách Phù hợp / Hơi khó / Dễ so với lớp của bé kèm điểm sẵn sàng ngữ âm."
+        ),
+        detailed_answer_vi=(
+            "Cá nhân hóa bài đọc cho con với Family StoryWeaver và Readability Badge:\n"
+            "1. Family StoryWeaver (/my-books): bấm nút tạo truyện gia đình để chọn hồ sơ bé, chủ đề (ví dụ 'khu vườn nắng sớm'), độ dài 3–4 trang, phong cách truyện hoặc đối thoại đọc đôi (DUET_DIALOGUE) và chèn các từ bé cần luyện. Truyện được kiểm tra an toàn trẻ em và lưu riêng trong Sách của tôi.\n"
+            "2. Huy hiệu Độ đọc Tiếng Việt: xuất hiện trên thẻ sách thư viện (/books) và sách gia đình (/my-books), ước lượng khoảng lớp 1–5, độ dài âm tiết trung bình và trạng thái Phù hợp (MATCHED), Hơi khó (TOO_HARD) hay Dễ (TOO_EASY) so với lớp của bé."
+        ),
+        short_answer_en=(
+            "Family StoryWeaver & Vietnamese Readability Badge:\n"
+            "• Family StoryWeaver (inside My Books /my-books): enter a theme, grade (1–5), mode (such as DUET_DIALOGUE), and up to 6 practice words to generate a child-safe 3–4 page story.\n"
+            "• Readability Badge: shows whether a book is Matched, Too Hard, or Too Easy for your child's grade plus a phonics readiness score."
+        ),
+        detailed_answer_en=(
+            "Tailoring books to your child's level:\n"
+            "1. Family StoryWeaver (/my-books): create custom 3–4 page family stories by theme, grade (1–5), style (e.g., Duet Dialogue), and target words, automatically screened for child safety.\n"
+            "2. Vietnamese Readability Badge: displayed on Books (/books) and My Books (/my-books), estimating grade band (Grades 1–5), syllable density, and phonics readiness."
+        ),
+        actions=(
+            KbAction("Mở Sách của tôi (StoryWeaver)", "Open My Books", "/my-books"),
+            KbAction("Mở kho Sách", "Browse Books", "/books"),
+        ),
+        followups_vi=(
+            "Đọc đôi (Duet Reading) cùng ba mẹ hoạt động thế nào?",
+            "Smart Studio tạo ảnh bìa và minh họa ra sao?",
+            "Làm sao bắt đầu buổi đọc cho bé?",
+        ),
+        followups_en=(
+            "How does Duet Reading work?",
+            "How does Smart Studio create covers & illustrations?",
+            "How do I start a reading session?",
+        ),
+    ),
+    KbArticle(
+        id="duet_reading_wasm_countdown",
+        title_vi="Đọc đôi (Duet Reading), WASM ngoại tuyến & Đếm ngược tức thì",
+        title_en="Duet Reading, Offline WASM STT/TTS & Instant Countdown",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/reading", "/reading-preparation"),
+        keywords=(
+            "duet",
+            "duet reading",
+            "doc doi",
+            "doc luan phien",
+            "wasm",
+            "sherpa",
+            "ngoai tuyen",
+            "instant countdown",
+            "dem nguoc",
+            "teacher persona",
+            "co giao ai",
+            "thay giao ai",
+        ),
+        short_answer_vi=(
+            "Công nghệ hỗ trợ mượt mà trong buổi đọc (/reading-preparation → /reading):\n"
+            "• Đọc đôi (Duet Reading): ba mẹ/AI và bé luân phiên đọc từng đoạn ngắn để bé bớt ngợp và tự tin hơn.\n"
+            "• WASM STT/TTS ngoại tuyến & Đếm ngược tức thì: trong 3 giây đếm ngược vào bài, ViRead khởi động sẵn mô hình nhận diện giọng nói trên trình duyệt (sherpa-onnx WASM) và bộ đệm audio giúp phản hồi nhanh ngay cả khi mạng yếu."
+        ),
+        detailed_answer_vi=(
+            "Trải nghiệm đọc thông minh và không độ trễ trên ViRead:\n"
+            "1. Đọc đôi (Duet Reading): chia trang sách thành lượt đọc xen kẽ giữa Ba mẹ/AI và Bé, đặc biệt hiệu quả với truyện đối thoại từ Family StoryWeaver hoặc bé mới tập đọc.\n"
+            "2. Nhận diện giọng nói trên thiết bị (Browser WASM STT `sherpa-onnx-zipformer-vi`): tự động kích hoạt ưu tiên trên trình duyệt để chấm từ theo thời gian thực và vẫn hoạt động khi Voice Worker ngoại tuyến.\n"
+            "3. Đếm ngược tức thì (3 giây) & Đồng bộ AI Teacher Voice Persona (Cô giáo / Thầy giáo): chuẩn bị sẵn micro + TTS trong lúc đếm ngược để bé đọc ngay không phải chờ."
+        ),
+        short_answer_en=(
+            "Smooth in-session features (/reading-preparation → /reading):\n"
+            "• Duet Reading: Parent/AI and child take turns reading short segments to build confidence.\n"
+            "• Offline Browser WASM STT/TTS & Instant 3s Countdown: pre-warms on-device Vietnamese speech recognition (sherpa-onnx) and cached TTS during the 3-second countdown."
+        ),
+        detailed_answer_en=(
+            "Low-latency reading technology in ViRead:\n"
+            "1. Duet Reading splits pages into alternating Parent/AI and Child turns.\n"
+            "2. On-device Browser WASM Vietnamese STT (`sherpa-onnx`) runs directly in a Web Worker for low-latency word tracking and offline resilience.\n"
+            "3. The 3-second Instant Countdown warms STT & TTS engines alongside your synced AI Teacher Voice Persona."
+        ),
+        actions=(
+            KbAction("Chuẩn bị buổi đọc", "Reading Preparation", "/reading-preparation"),
+            KbAction("Mở Sách của tôi", "Open My Books", "/my-books"),
+        ),
+        followups_vi=(
+            "Tại sao không đổi được giọng đọc giữa buổi đọc?",
+            "Bé đọc chậm muốn chỉnh tốc độ 0.85x ở đâu?",
+            "Micro không nhận giọng bé phải làm sao?",
+        ),
+        followups_en=(
+            "Why can't I switch voices mid-session?",
+            "How do I set 0.85x speed for a slow reader?",
+            "Microphone isn't picking up my child's voice?",
+        ),
+    ),
+    KbArticle(
+        id="milestone_certificates_and_parent_pin",
+        title_vi="Chứng nhận cột mốc & Khóa PIN Phụ huynh 4 chữ số",
+        title_en="Milestone Certificates & 4-Digit Parent PIN Lock",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/reports", "/sessions", "/settings"),
+        keywords=(
+            "chung nhan",
+            "giay khen",
+            "bang khen",
+            "in a4",
+            "milestone certificate",
+            "certificate",
+            "ma pin",
+            "pin 4 so",
+            "pin lock",
+            "parent pin",
+            "khoa tre em",
+            "child safe mode",
+        ),
+        short_answer_vi=(
+            "Chứng nhận cột mốc & Khóa PIN phụ huynh:\n"
+            "• Chứng nhận cột mốc (/reports và /sessions/[id]/report): bấm In A4 hoặc Tải ảnh PNG chứng nhận để khen thưởng bé sau mỗi cột mốc đọc sách.\n"
+            "• Khóa PIN Phụ huynh 4 chữ số (/settings): bật chế độ An toàn cho bé bằng mã PIN 4 số (tự khóa tạm 5 phút nếu nhập sai 5 lần) để bé không tự ý đổi cài đặt."
+        ),
+        detailed_answer_vi=(
+            "Hai tính năng bảo vệ và khích lệ bé trong gia đình:\n"
+            "1. Chứng nhận cột mốc (Milestone Certificates): tại trang Tiến bộ (/reports) và Báo cáo chi tiết buổi đọc (/sessions/[sessionId]/report), ba mẹ có thể bấm In chứng nhận khổ A4 hoặc tải về ảnh PNG lưu kỷ niệm cho bé.\n"
+            "2. Khóa PIN Phụ huynh 4 chữ số: thiết lập trong Cài đặt (/settings) để khóa các thao tác quản trị gia đình khi đưa máy cho bé tự đọc; mã PIN được băm an toàn (PBKDF2) và giới hạn thử tối đa 5 lần."
+        ),
+        short_answer_en=(
+            "Milestone Certificates & 4-Digit Parent PIN Lock:\n"
+            "• Milestone Certificates (/reports & /sessions/[id]/report): print A4 certificates or download PNG milestone keepsakes.\n"
+            "• 4-Digit Parent PIN Lock (/settings): enable Child-Safe Mode with a 4-digit PIN (5-attempt / 5-minute lockout) so kids stay safely in reading mode."
+        ),
+        detailed_answer_en=(
+            "Encouragement & child-safe protection:\n"
+            "1. Milestone Certificates: available on Progress Reports (/reports) and Session Reports (/sessions/[sessionId]/report) with A4 print and PNG download.\n"
+            "2. 4-Digit Parent PIN Lock: configured in Settings (/settings) with PBKDF2 hashing and a 5-attempt lockout to prevent accidental settings changes by children."
+        ),
+        actions=(
+            KbAction("Xem Tiến bộ & Chứng nhận", "Progress & Certificates", "/reports"),
+            KbAction("Cài đặt & Khóa PIN", "Settings & Parent PIN", "/settings"),
+        ),
+        followups_vi=(
+            "Vườn Âm Vị & Huy hiệu xem ở đâu?",
+            "Làm sao xem báo cáo chi tiết buổi đọc?",
+            "Cách đổi mật khẩu tài khoản ViRead?",
+        ),
+        followups_en=(
+            "Where is Phoneme Garden?",
+            "How do I view detailed session reports?",
+            "How do I change my ViRead password?",
+        ),
+    ),
+    KbArticle(
+        id="android_apk_mobile_app",
+        title_vi="Ứng dụng ViRead Android (APK) trên điện thoại & máy tính bảng",
+        title_en="ViRead Android APK mobile app guide",
+        scopes=_PARENT_ONLY,
+        route_prefixes=("/dashboard", "/help-support", "/reading-preparation"),
+        keywords=(
+            "apk",
+            "android",
+            "ung dung dien thoai",
+            "app viread",
+            "tren dien thoai",
+            "may tinh bang",
+            "mobile app",
+            "android app",
+        ),
+        short_answer_vi=(
+            "Sử dụng ViRead trên Android (APK & trình duyệt di động):\n"
+            "• Hỗ trợ đầy đủ tạo hồ sơ bé, chuyển nhanh hồ sơ trên thanh đầu trang, quét sách giấy bằng camera, đọc to với micro và chơi Góc giải trí.\n"
+            "• Trên Android, hãy cấp quyền Micro & Máy ảnh trong Cài đặt ứng dụng để quét sách và thu âm đọc mượt mà."
+        ),
+        detailed_answer_vi=(
+            "Hướng dẫn dùng ViRead Android APK và thiết bị di động:\n"
+            "1. Quyền thiết bị: vào Cài đặt Android → Ứng dụng → ViRead → Quyền → cho phép Micro và Máy ảnh.\n"
+            "2. Chuyển hồ sơ bé nhanh: dùng nút chuyển bé gọn trên thanh đầu trang trước khi vào Kho sách, Quét sách, Chuyến Tàu Đọc 5 Phút hoặc Vườn Âm Vị.\n"
+            "3. Nếu mạng di động 3G/4G chậm, bật chế độ Tiết kiệm dữ liệu (Low bandwidth) trên Trợ lý ViRead để nhận hướng dẫn nhanh gọn."
+        ),
+        short_answer_en=(
+            "Using ViRead on Android (APK & mobile):\n"
+            "• Supports child switching in the compact top bar, camera book scanning, read-aloud mic sessions, and Entertainment games.\n"
+            "• Enable Microphone and Camera permissions in Android App Settings for smooth scanning and speech capture."
+        ),
+        detailed_answer_en=(
+            "ViRead Android APK tips:\n"
+            "1. Open Android Settings → Apps → ViRead → Permissions and allow Microphone & Camera.\n"
+            "2. Use the compact header child switcher before entering Books, Scanner, Reading Train, or Achievements.\n"
+            "3. Switch the assistant to Data Saver mode when on slow mobile connections."
+        ),
+        actions=(
+            KbAction("Chuẩn bị đọc & micro", "Reading Prep & Mic", "/reading-preparation"),
+            KbAction("Trợ giúp & hỗ trợ", "Help & Support", "/help-support"),
+        ),
+        followups_vi=(
+            "Micro hoặc camera không mở được trên điện thoại?",
+            "Cách quét sách giấy bằng camera?",
+            "Chế độ tiết kiệm băng tần hoạt động thế nào?",
+        ),
+        followups_en=(
+            "Mic or camera won't open on mobile?",
+            "How do I scan a paper book with camera?",
+            "How does Data Saver mode work?",
+        ),
+    ),
+    # ------------------------------------------------------------------ Additional Admin-only KB (strictly isolated!)
+    KbArticle(
+        id="admin_overview_workspace",
+        title_vi="Tổng quan Khu vực Quản trị ViRead (/admin)",
+        title_en="ViRead Admin Workspace Overview (/admin)",
+        scopes=_ADMIN_ONLY,
+        route_prefixes=("/admin",),
+        keywords=(
+            "tong quan admin",
+            "bang dieu khien admin",
+            "trang quan tri",
+            "chuc nang admin",
+            "admin overview",
+            "admin workspace",
+            "admin dashboard",
+        ),
+        short_answer_vi=(
+            "Bảng điều khiển Quản trị (/admin) tập trung toàn bộ công cụ vận hành ViRead:\n"
+            "• Kho sách (/admin/books) & Tạo sách (/admin/books/new): tải trang, quét OCR (Gemini vs Qwen3-VL / Tesseract / VietOCR) và duyệt revision VERIFIED.\n"
+            "• Chất lượng sách (/admin/metadata-quality): Child Safety GRADE_1_TO_5, bản quyền và xử lý báo lỗi từ phụ huynh.\n"
+            "• Bài hát Karaoke (/admin/karaoke), Phụ huynh (/admin/parents), Tác vụ AI (/admin/tasks), Huấn luyện VietOCR (/admin/viread-training), Nhật ký (/admin/audit-logs) & Vận hành (/admin/health)."
+        ),
+        detailed_answer_vi=(
+            "Các phân hệ trong Khu vực Quản trị ViRead (/admin):\n"
+            "1. Nội dung sách: /admin/books, /admin/books/new, /admin/books/[bookId]/edit và màn hình duyệt OCR từng trang /admin/books/[bookId]/pages/[pageId].\n"
+            "2. Kiểm duyệt & An toàn: /admin/metadata-quality (Child Safety GRADE_1_TO_5, Readability, bản quyền, báo cáo sách).\n"
+            "3. Giải trí & Người dùng: /admin/karaoke, /admin/karaoke/new và /admin/parents.\n"
+            "4. Vận hành & AI: /admin/tasks, /admin/viread-training, /admin/audit-logs và /admin/health."
+        ),
+        short_answer_en=(
+            "ViRead Admin Workspace (/admin) centralizes operations:\n"
+            "• Books (/admin/books, /admin/books/new) & per-page OCR review.\n"
+            "• Book Quality (/admin/metadata-quality): Child Safety GRADE_1_TO_5, rights, and parent reports.\n"
+            "• Karaoke (/admin/karaoke), Parents (/admin/parents), AI Tasks (/admin/tasks), VietOCR Training (/admin/viread-training), Audit Logs (/admin/audit-logs), and Health (/admin/health)."
+        ),
+        detailed_answer_en=(
+            "ViRead Admin modules:\n"
+            "1. Catalog & OCR: /admin/books, /admin/books/new, /admin/books/[bookId]/edit, and /admin/books/[bookId]/pages/[pageId].\n"
+            "2. Safety & Moderation: /admin/metadata-quality.\n"
+            "3. Karaoke & Accounts: /admin/karaoke, /admin/karaoke/new, /admin/parents.\n"
+            "4. System & AI Ops: /admin/tasks, /admin/viread-training, /admin/audit-logs, /admin/health."
+        ),
+        actions=(
+            KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
+            KbAction("Chất lượng sách", "Quality Hub", "/admin/metadata-quality"),
+            KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
+        ),
+        followups_vi=(
+            "Quy trình duyệt OCR trang sách (Gemini vs Qwen3-VL / VietOCR)?",
+            "Cách quản lý bài hát Karaoke ở /admin/karaoke?",
+            "Kiểm tra sức khỏe worker ở /admin/health?",
+        ),
+        followups_en=(
+            "How does per-page OCR review work?",
+            "How do I manage Karaoke songs at /admin/karaoke?",
+            "How do I check worker health at /admin/health?",
+        ),
+    ),
+    KbArticle(
+        id="admin_karaoke_and_parents",
+        title_vi="Quản lý bài hát Karaoke (/admin/karaoke) & Phụ huynh (/admin/parents)",
+        title_en="Admin Karaoke Library (/admin/karaoke) & Parents Directory (/admin/parents)",
+        scopes=_ADMIN_ONLY,
+        route_prefixes=("/admin/karaoke", "/admin/parents"),
+        keywords=(
+            "admin karaoke",
+            "tao bai hat karaoke",
+            "quan ly bai hat",
+            "karaoke new",
+            "admin parents",
+            "quan ly phu huynh",
+            "danh sach phu huynh",
+            "ho so phu huynh admin",
+            "manage parents",
+            "manage karaoke",
+        ),
+        short_answer_vi=(
+            "Quản trị Karaoke & Tài khoản Phụ huynh:\n"
+            "• Bài hát Karaoke (/admin/karaoke & /admin/karaoke/new): nhập bài hát đồng dao/thiếu nhi, đồng bộ timeline lời hát và chuyển trạng thái Bản nháp (DRAFT), Đang hiển thị (PUBLISHED) hoặc Đã ẩn (HIDDEN).\n"
+            "• Phụ huynh (/admin/parents): tìm kiếm, xem chi tiết, tạo hoặc cập nhật thông tin tài khoản phụ huynh trong phạm vi quản trị."
+        ),
+        detailed_answer_vi=(
+            "Hướng dẫn quản lý Karaoke và Phụ huynh dành cho Admin:\n"
+            "1. Kho Karaoke (/admin/karaoke): lọc theo trạng thái DRAFT/PUBLISHED/HIDDEN, thêm bài mới tại /admin/karaoke/new, chỉnh sửa timeline lời bài hát tại /admin/karaoke/[songId]/edit và bật/ẩn hiển thị.\n"
+            "2. Quản lý Phụ huynh (/admin/parents): tìm kiếm theo tên/email, mở hồ sơ chi tiết (/admin/parents/[parentId]), chỉnh sửa thông tin liên hệ hợp lệ hoặc xử lý vô hiệu hóa theo quy trình kiểm toán."
+        ),
+        short_answer_en=(
+            "Admin Karaoke & Parents management:\n"
+            "• Karaoke (/admin/karaoke & /admin/karaoke/new): import children's songs, sync lyric timelines, and toggle DRAFT / PUBLISHED / HIDDEN.\n"
+            "• Parents (/admin/parents): search, inspect, create, or update parent account records via admin controls."
+        ),
+        detailed_answer_en=(
+            "Admin workflows for Karaoke & Parents:\n"
+            "1. Karaoke (/admin/karaoke): create songs at /admin/karaoke/new, edit synced lyric timelines at /admin/karaoke/[songId]/edit, and publish/hide entries.\n"
+            "2. Parents (/admin/parents): search accounts, view /admin/parents/[parentId], and manage parent metadata within audited admin boundaries."
+        ),
+        actions=(
+            KbAction("Bài hát Karaoke", "Admin Karaoke", "/admin/karaoke"),
+            KbAction("Thêm bài Karaoke", "New Karaoke", "/admin/karaoke/new"),
+            KbAction("Quản lý Phụ huynh", "Admin Parents", "/admin/parents"),
+        ),
+        followups_vi=(
+            "Cách duyệt OCR trang sách bằng Gemini / Qwen3-VL / VietOCR?",
+            "Xem nhật ký kiểm toán quản trị ở đâu?",
+            "Theo dõi tác vụ AI toàn hệ thống ở /admin/tasks?",
+        ),
+        followups_en=(
+            "How do I review page OCR with Gemini / Qwen3-VL / VietOCR?",
+            "Where are admin audit logs?",
+            "How do I monitor system AI tasks at /admin/tasks?",
+        ),
+    ),
+    KbArticle(
+        id="admin_assistant_and_privacy",
+        title_vi="Nguyên tắc cách ly Quản trị & Trợ lý ViRead Admin",
+        title_en="Admin Isolation Policy & ViRead Admin Assistant",
+        scopes=_ADMIN_ONLY,
+        route_prefixes=("/admin", "/admin/audit-logs"),
+        keywords=(
+            "cach ly admin",
+            "pham vi admin",
+            "nguyen tac bao mat admin",
+            "chatbot admin",
+            "tro ly admin",
+            "admin isolation",
+            "admin privacy",
+            "audit logs",
+        ),
+        short_answer_vi=(
+            "Trợ lý ViRead ở chế độ Quản trị chỉ điều hướng và giải đáp trong phạm vi /admin/* (/admin/books, /admin/metadata-quality, /admin/karaoke, /admin/parents, /admin/tasks, /admin/viread-training, /admin/audit-logs, /admin/health) — tách biệt hoàn toàn khỏi giao diện đọc/chơi của phụ huynh & bé."
+        ),
+        detailed_answer_vi=(
+            "Chính sách bảo mật và phân tách vai trò cho Admin:\n"
+            "1. Mọi lối tắt và gợi ý điều hướng chỉ nằm trong hệ thống trang /admin/*.\n"
+            "2. Trợ lý không mở giao diện khách hàng (/dashboard, /books, /children, /reading/*, /entertainment, /achievements, /learning-train) hoặc trang đăng nhập khách (/login, /register).\n"
+            "3. Mọi thao tác quản trị quan trọng đều được ghi nhận tại Nhật ký kiểm toán (/admin/audit-logs)."
+        ),
+        short_answer_en=(
+            "In Admin mode, ViRead Assistant stays strictly inside /admin/* routes and never navigates into customer reading/game pages or guest auth routes."
+        ),
+        detailed_answer_en=(
+            "Admin workspace isolation rules:\n"
+            "1. Navigation offers and quick actions stay strictly inside /admin/*.\n"
+            "2. Customer pages (/dashboard, /books, /children, /reading/*, /entertainment, /achievements, /learning-train) and guest auth routes are blocked.\n"
+            "3. Sensitive admin actions are recorded in /admin/audit-logs."
+        ),
+        actions=(
+            KbAction("Nhật ký kiểm toán", "Audit Logs", "/admin/audit-logs"),
+            KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
+        ),
+        followups_vi=(
+            "Quy trình duyệt OCR và Child Safety?",
+            "Cách quản lý mô hình VietOCR Flow 2?",
+            "Xem tác vụ AI toàn hệ thống ở đâu?",
+        ),
+        followups_en=(
+            "How do OCR review and Child Safety work?",
+            "How do I manage VietOCR Flow 2 training?",
+            "Where are system-wide AI tasks?",
+        ),
+    ),
 )
 
 
 PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     PageContextSpec(
         prefix="/admin/login",
-        scopes=_ALL_SCOPES,
+        scopes=_PUBLIC_ONLY,
         title_vi="Đăng nhập Quản trị",
         title_en="Admin Sign In",
-        greeting_vi="Cần hỗ trợ đăng nhập tài khoản quản trị hoặc quay về trang đăng nhập phụ huynh?",
-        greeting_en="Need help signing in or returning to the parent login page?",
+        greeting_vi="Trang đăng nhập dành riêng cho Quản trị viên ViRead. Hãy dùng tài khoản quản trị được cấp để tiếp tục.",
+        greeting_en="Sign-in page for authorized ViRead Administrators. Use your assigned admin credentials to continue.",
         prompts_vi=(
-            "Cách đăng nhập và xác minh tài khoản ViRead?",
-            "Quên mật khẩu thì khôi phục thế nào?",
-            "ViRead có những chức năng gì?",
+            "Tài khoản quản trị đăng nhập như thế nào?",
+            "Quên mật khẩu tài khoản thì xử lý thế nào?",
+            "ViRead có những tính năng gì?",
         ),
         prompts_en=(
-            "How do I sign in or verify my ViRead account?",
-            "How do I reset a forgotten password?",
-            "What can I do in ViRead?",
+            "How do administrators sign in?",
+            "How does password recovery work?",
+            "What is ViRead?",
+        ),
+        actions=(),
+    ),
+    PageContextSpec(
+        prefix="/admin/books/new",
+        scopes=_ADMIN_ONLY,
+        title_vi="Tạo sách mới (Admin)",
+        title_en="Create Catalog Book (Admin)",
+        greeting_vi="Nhập metadata sách, tải ảnh bìa và các trang sách để chạy OCR & kiểm duyệt Child Safety.",
+        greeting_en="Enter book metadata, upload cover & page images, and launch OCR & Child Safety checks.",
+        prompts_vi=(
+            "Quy trình tải trang và duyệt OCR VERIFIED?",
+            "Điều kiện Child Safety GRADE_1_TO_5 gồm gì?",
+            "Xem hàng đợi tác vụ AI toàn hệ thống ở đâu?",
+        ),
+        prompts_en=(
+            "What is the OCR upload and VERIFIED review flow?",
+            "What are the GRADE_1_TO_5 Child Safety rules?",
+            "Where do I monitor system AI tasks?",
         ),
         actions=(
-            KbAction("Đăng nhập phụ huynh", "Parent Login", "/login"),
-            KbAction("Quên mật khẩu", "Forgot password", "/forgot-password"),
+            KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
+            KbAction("Chất lượng sách", "Quality Hub", "/admin/metadata-quality"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/books",
+        scopes=_ADMIN_ONLY,
+        title_vi="Kho sách & Duyệt OCR (Admin)",
+        title_en="Admin Book Catalog & OCR Review",
+        greeting_vi="Quản lý sách thư viện, so sánh OCR (Gemini vs Qwen3-VL / VietOCR / Tesseract) và xác minh revision VERIFIED.",
+        greeting_en="Manage catalog books, compare OCR engines (Gemini vs Qwen3-VL / VietOCR / Tesseract), and verify revisions.",
+        prompts_vi=(
+            "Quy trình duyệt OCR trang sách từ NEEDS_REVIEW sang VERIFIED?",
+            "AI sửa (proofreading) và Quét OCR khác nhau thế nào?",
+            "Kiểm tra Child Safety và bản quyền sách ở đâu?",
+        ),
+        prompts_en=(
+            "How do I review OCR from NEEDS_REVIEW to VERIFIED?",
+            "How do OCR scan and AI proofreading differ?",
+            "Where do I review Child Safety and rights?",
+        ),
+        actions=(
+            KbAction("Tạo sách mới", "Create Book", "/admin/books/new"),
+            KbAction("Chất lượng sách", "Quality Hub", "/admin/metadata-quality"),
+            KbAction("Tác vụ Admin", "Admin Tasks", "/admin/tasks"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/karaoke/new",
+        scopes=_ADMIN_ONLY,
+        title_vi="Thêm bài hát Karaoke (Admin)",
+        title_en="New Karaoke Song (Admin)",
+        greeting_vi="Tạo bài hát đồng dao thiếu nhi mới, tải audio/lời bài hát và kiểm tra timeline trước khi xuất bản.",
+        greeting_en="Create a new children's karaoke song, attach audio/lyrics, and verify timing before publishing.",
+        prompts_vi=(
+            "Các trạng thái DRAFT, PUBLISHED, HIDDEN của Karaoke là gì?",
+            "Quay lại danh sách bài hát Karaoke ở đâu?",
+            "Theo dõi tác vụ xử lý Karaoke tại đâu?",
+        ),
+        prompts_en=(
+            "What do DRAFT, PUBLISHED, and HIDDEN mean?",
+            "Where is the Admin Karaoke library?",
+            "Where do I track Karaoke processing jobs?",
+        ),
+        actions=(
+            KbAction("Bài hát Karaoke", "Admin Karaoke", "/admin/karaoke"),
+            KbAction("Tác vụ Admin", "Admin Tasks", "/admin/tasks"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/karaoke",
+        scopes=_ADMIN_ONLY,
+        title_vi="Quản lý Karaoke (Admin)",
+        title_en="Admin Karaoke Library",
+        greeting_vi="Quản lý kho bài hát đồng dao thiếu nhi, chỉnh timeline lời hát và bật/ẩn bài hát.",
+        greeting_en="Manage the children's karaoke library, edit lyric timelines, and toggle visibility.",
+        prompts_vi=(
+            "Cách thêm bài hát Karaoke mới và chỉnh timeline?",
+            "Các trạng thái hiển thị của bài hát Karaoke?",
+            "Theo dõi tác vụ xử lý ở /admin/tasks?",
+        ),
+        prompts_en=(
+            "How do I add and time a new Karaoke song?",
+            "How do Karaoke visibility states work?",
+            "Where do I check background jobs?",
+        ),
+        actions=(
+            KbAction("Thêm bài Karaoke", "New Karaoke", "/admin/karaoke/new"),
+            KbAction("Tác vụ Admin", "Admin Tasks", "/admin/tasks"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/parents",
+        scopes=_ADMIN_ONLY,
+        title_vi="Quản lý Phụ huynh (Admin)",
+        title_en="Admin Parents Directory",
+        greeting_vi="Tìm kiếm, kiểm tra trạng thái tài khoản phụ huynh và cập nhật thông tin quản trị hợp lệ.",
+        greeting_en="Search parent accounts, review profile metadata, and perform audited admin updates.",
+        prompts_vi=(
+            "Quản lý tài khoản phụ huynh tại /admin/parents gồm gì?",
+            "Xem nhật ký kiểm toán thao tác quản trị ở đâu?",
+            "Kiểm tra sức khỏe hệ thống ở đâu?",
+        ),
+        prompts_en=(
+            "What actions are available in Admin Parents?",
+            "Where are admin audit logs recorded?",
+            "Where do I check system health?",
+        ),
+        actions=(
+            KbAction("Nhật ký kiểm toán", "Audit Logs", "/admin/audit-logs"),
+            KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/admin/audit-logs",
+        scopes=_ADMIN_ONLY,
+        title_vi="Nhật ký kiểm toán (Admin)",
+        title_en="Admin Audit Logs",
+        greeting_vi="Truy vết các thao tác quản trị trên sách, kiểm duyệt, tài khoản phụ huynh và cấu hình hệ thống.",
+        greeting_en="Audit administrative actions across books, moderation, parent accounts, and operations.",
+        prompts_vi=(
+            "Nhật ký kiểm toán ghi lại những thao tác nào?",
+            "Kiểm tra sức khỏe worker và AI provider ở đâu?",
+            "Quay lại Kho sách Admin?",
+        ),
+        prompts_en=(
+            "What events appear in Admin Audit Logs?",
+            "Where do I check worker and AI health?",
+            "How do I return to Admin Books?",
+        ),
+        actions=(
+            KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
+            KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
         ),
     ),
     PageContextSpec(
@@ -1743,8 +2705,52 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
         ),
     ),
     PageContextSpec(
+        prefix="/achievements",
+        scopes=_PARENT_ONLY,
+        title_vi="Vườn Âm Vị & Huy hiệu",
+        title_en="Phoneme Garden & Achievements",
+        greeting_vi="Cùng xem các bông hoa âm vị đã nở, huy hiệu và Hộ chiếu Tem Đọc Sách của bé nhé!",
+        greeting_en="Explore your child's blooming Phoneme Garden, badges, and Book Stamp Passport!",
+        prompts_vi=(
+            "Vườn Âm Vị & Hộ chiếu Tem Đọc Sách hoạt động thế nào?",
+            "Chuyến Tàu Đọc 5 Phút giúp bé luyện gì mỗi ngày?",
+            "Làm sao tải Chứng nhận cột mốc cho bé?",
+        ),
+        prompts_en=(
+            "How do Phoneme Garden & Book Stamp Passport work?",
+            "How does the 5-Minute Reading Train work?",
+            "How do I download Milestone Certificates?",
+        ),
+        actions=(
+            KbAction("Chuyến Tàu Đọc 5 Phút", "5-Min Reading Train", "/learning-train"),
+            KbAction("Xem Tiến bộ", "View Progress", "/reports"),
+        ),
+    ),
+    PageContextSpec(
+        prefix="/learning-train",
+        scopes=_PARENT_ONLY,
+        title_vi="Chuyến Tàu Đọc 5 Phút",
+        title_en="5-Minute Reading Train",
+        greeting_vi="Sẵn sàng lên 3 toa tàu luyện đọc 5 phút cùng Cô/Thầy AI cho bé hôm nay!",
+        greeting_en="Ready for today's 3-car 5-Minute Reading Train with your AI Teacher!",
+        prompts_vi=(
+            "Chuyến Tàu Đọc 5 Phút gồm 3 toa luyện gì?",
+            "Vườn Âm Vị & Huy hiệu lưu kết quả ở đâu?",
+            "Đổi giọng Cô giáo / Thầy giáo AI ở đâu?",
+        ),
+        prompts_en=(
+            "What are the 3 cars in the 5-Minute Reading Train?",
+            "Where are Phoneme Garden & badges saved?",
+            "How do I change AI Teacher Voice Persona?",
+        ),
+        actions=(
+            KbAction("Vườn Âm Vị & Huy hiệu", "Achievements", "/achievements"),
+            KbAction("Chuẩn bị buổi đọc", "Reading Prep", "/reading-preparation"),
+        ),
+    ),
+    PageContextSpec(
         prefix="/studio/tasks",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Trung tâm tác vụ AI",
         title_en="AI Task Center",
         greeting_vi="Bạn có thể xem tiến trình quét OCR, tạo ảnh minh họa và audio của tài khoản bạn tại đây.",
@@ -1766,7 +2772,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/entertainment/memory-game",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Memory Game lật thẻ",
         title_en="Memory Card Game",
         greeting_vi="Giúp bé lật cặp thẻ chữ/hình để rèn trí nhớ từ vựng và phản xạ mặt chữ tiếng Việt!",
@@ -1788,7 +2794,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/entertainment/sentence-shooter",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Trò chơi Ghép câu",
         title_en="Sentence Shooter",
         greeting_vi="Cùng bé sắp xếp từ thành câu tiếng Việt hoàn chỉnh, đúng ngữ pháp!",
@@ -1810,7 +2816,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/entertainment/picture-description",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Mô tả tranh AI",
         title_en="AI Picture Description",
         greeting_vi="Bé nhìn tranh kể chuyện bằng giọng nói hoặc gõ câu để nhận sao & gợi ý từ vựng AI!",
@@ -1920,7 +2926,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reading-management",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Quản lý đọc",
         title_en="Reading Management",
         greeting_vi="Tôi có thể hướng dẫn đặt mục tiêu tuần và lịch email nhắc đọc cho bé.",
@@ -1942,7 +2948,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reading-preparation",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Chuẩn bị buổi đọc",
         title_en="Reading Preparation",
         greeting_vi="Sẵn sàng cho buổi đọc! Cần hỗ trợ chọn bé, chọn trang, chỉnh tốc độ 0.85x hay kiểm tra micro?",
@@ -1964,7 +2970,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reading",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Buổi đọc cùng bé",
         title_en="Reading Session",
         greeting_vi="Mình giữ khung thật gọn để không làm bé mất tập trung. Ba mẹ cần hỗ trợ gì?",
@@ -1986,7 +2992,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/book-scanner",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Quét sách giấy",
         title_en="Book Scanner",
         greeting_vi="Tôi có thể hướng dẫn chụp trang sách rõ chữ, so sánh với Sách của tôi và hàng chờ OCR.",
@@ -2008,7 +3014,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/my-books",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Sách của tôi",
         title_en="My Books",
         greeting_vi="Hỏi tôi về tải ảnh/PDF/DOCX, Smart Studio tạo bìa AI và hàng chờ OCR ngoại tuyến.",
@@ -2030,7 +3036,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reports/difficult-words",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Từ cần luyện",
         title_en="Difficult Words",
         greeting_vi="Cần hướng dẫn giúp bé ôn phát âm các từ khó bằng micro tự động?",
@@ -2052,7 +3058,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reports",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Báo cáo tiến bộ",
         title_en="Progress Reports",
         greeting_vi="Tôi có thể giải thích các chỉ số đọc đúng, trôi chảy, hiểu bài và thói quen.",
@@ -2074,7 +3080,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/entertainment",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Góc giải trí",
         title_en="Entertainment",
         greeting_vi="Hỏi tôi về Karaoke, Memory Game lật thẻ, Ghép câu hoặc Mô tả tranh AI cho bé!",
@@ -2096,7 +3102,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/karaoke",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Karaoke thiếu nhi",
         title_en="Kids Karaoke",
         greeting_vi="Hát vui cùng bé! Cần hướng dẫn bật nhạc, theo dõi lời hay kiểm tra âm thanh?",
@@ -2117,7 +3123,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/login",
-        scopes=_ALL_SCOPES,
+        scopes=_PUBLIC_ONLY,
         title_vi="Đăng nhập ViRead",
         title_en="Sign in to ViRead",
         greeting_vi="Chào mừng đến ViRead! Cần hỗ trợ đăng nhập, đăng ký hay quên mật khẩu?",
@@ -2139,19 +3145,19 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/register",
-        scopes=_ALL_SCOPES,
+        scopes=_PUBLIC_ONLY,
         title_vi="Đăng ký ViRead",
         title_en="Register for ViRead",
         greeting_vi="Tạo tài khoản phụ huynh ViRead chỉ trong 1 phút. Hỏi tôi nếu cần hỗ trợ!",
         greeting_en="Create your ViRead parent account in a minute. Ask me if you need help!",
         prompts_vi=(
             "Cách xác minh email sau khi đăng ký?",
-            "Sau khi đăng ký tôi cần làm bước gì tiếp?",
+            "3 bước bắt đầu với ViRead sau khi đăng nhập?",
             "ViRead phù hợp cho bé lớp mấy?",
         ),
         prompts_en=(
             "How do I verify my email after signing up?",
-            "What should I do right after signing up?",
+            "What are the 3 steps after signing in?",
             "Which grade levels is ViRead for?",
         ),
         actions=(
@@ -2160,7 +3166,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/forgot-password",
-        scopes=_ALL_SCOPES,
+        scopes=_PUBLIC_ONLY,
         title_vi="Quên mật khẩu",
         title_en="Forgot Password",
         greeting_vi="Nhập email đã đăng ký để nhận liên kết khôi phục mật khẩu trên cùng trình duyệt nhé.",
@@ -2181,7 +3187,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/reset-password",
-        scopes=_ALL_SCOPES,
+        scopes=_PUBLIC_ONLY,
         title_vi="Đặt lại mật khẩu",
         title_en="Reset Password",
         greeting_vi="Hãy mở liên kết đặt lại mật khẩu trên đúng trình duyệt vừa yêu cầu để đảm bảo bảo mật PKCE.",
@@ -2203,7 +3209,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/books",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Kho sách ViRead",
         title_en="ViRead Book Library",
         greeting_vi="Chọn cuốn sách phù hợp lớp của bé hoặc tải sách giấy gia đình tại Sách của tôi.",
@@ -2225,7 +3231,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/children/new",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Tạo hồ sơ bé mới",
         title_en="Create Child Profile",
         greeting_vi="Bước 1 rất nhanh: nhập tên và chọn lớp (1–5) để tạo không gian đọc riêng cho bé!",
@@ -2247,7 +3253,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/children",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Hồ sơ bé",
         title_en="Child Profiles",
         greeting_vi="Quản lý hồ sơ từng bé theo lớp 1–5 để lưu riêng tủ sách, báo cáo và từ cần luyện.",
@@ -2269,7 +3275,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/profile",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Hồ sơ ba mẹ",
         title_en="Parent Profile",
         greeting_vi="Cập nhật tên hiển thị, số điện thoại, ảnh đại diện hoặc đổi email xác minh tại đây.",
@@ -2291,7 +3297,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/settings",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Cài đặt tài khoản",
         title_en="Account Settings",
         greeting_vi="Đổi mật khẩu bảo mật hoặc gửi liên kết đặt mật khẩu cho tài khoản Google/Facebook.",
@@ -2313,7 +3319,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/sessions",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Lịch sử buổi đọc",
         title_en="Reading History",
         greeting_vi="Xem lại từng buổi đọc đã hoàn thành, điểm đọc hiểu và các từ bé cần ôn thêm.",
@@ -2335,7 +3341,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/help-support",
-        scopes=_ALL_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Trợ giúp & hỗ trợ",
         title_en="Help & Support",
         greeting_vi="Cần hỏi nhanh về tính năng ViRead, báo lỗi sách hay gửi phản hồi cho đội ngũ?",
@@ -2357,7 +3363,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/book-reports",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Báo cáo sách",
         title_en="Book Reports",
         greeting_vi="Theo dõi trạng thái xử lý các báo lỗi chữ hoặc trang sách bạn đã gửi.",
@@ -2379,7 +3385,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
     ),
     PageContextSpec(
         prefix="/dashboard",
-        scopes=_PARENT_SCOPES,
+        scopes=_PARENT_ONLY,
         title_vi="Tổng quan gia đình",
         title_en="Family Dashboard",
         greeting_vi="Xin chào ba mẹ! Tôi hỗ trợ mọi tính năng trên ViRead — chọn gợi ý hoặc đặt câu hỏi nhé.",
@@ -2404,7 +3410,7 @@ PAGE_CONTEXT_SPECS: tuple[PageContextSpec, ...] = (
 
 _DEFAULT_PUBLIC_CONTEXT = PageContextSpec(
     prefix="/",
-    scopes=_ALL_SCOPES,
+    scopes=_PUBLIC_ONLY,
     title_vi="Trợ lý ViRead",
     title_en="ViRead Assistant",
     greeting_vi="Xin chào! Tôi là Trợ lý ViRead — hỏi tôi bất cứ điều gì về sản phẩm nhé.",
@@ -2427,24 +3433,48 @@ _DEFAULT_PUBLIC_CONTEXT = PageContextSpec(
 
 _DEFAULT_PARENT_CONTEXT = PageContextSpec(
     prefix="/",
-    scopes=_PARENT_SCOPES,
+    scopes=_PARENT_ONLY,
     title_vi="Trợ lý ViRead",
     title_en="ViRead Assistant",
     greeting_vi="Xin chào ba mẹ! Hỏi tôi bất kỳ thao tác nào trong ViRead nhé.",
     greeting_en="Hi! Ask me how to use any feature in ViRead.",
     prompts_vi=(
         "Cách bắt đầu buổi đọc cho bé?",
-        "Làm sao quét sách giấy hoặc tải PDF?",
+        "Chuyến Tàu Đọc 5 Phút và Vườn Âm Vị là gì?",
         "Khắc phục lỗi micro không thu tiếng?",
     ),
     prompts_en=(
         "How do I start a reading session?",
-        "How do I scan a paper book or upload PDF?",
+        "What are 5-Minute Reading Train and Phoneme Garden?",
         "How do I fix microphone issues?",
     ),
     actions=(
         KbAction("Về Tổng quan", "Dashboard", "/dashboard"),
         KbAction("Trợ giúp & hỗ trợ", "Help & Support", "/help-support"),
+    ),
+)
+
+_DEFAULT_ADMIN_CONTEXT = PageContextSpec(
+    prefix="/admin",
+    scopes=_ADMIN_ONLY,
+    title_vi="Trợ lý Quản trị ViRead",
+    title_en="ViRead Admin Assistant",
+    greeting_vi="Xin chào Quản trị viên! Hỏi tôi về kho sách, duyệt OCR, Child Safety, Karaoke hay vận hành hệ thống.",
+    greeting_en="Hello Admin! Ask about catalog books, OCR review, Child Safety, Karaoke, or operations.",
+    prompts_vi=(
+        "Quy trình tải sách và duyệt OCR VERIFIED?",
+        "Kiểm tra Child Safety và bản quyền sách?",
+        "Xem trạng thái vận hành hệ thống ở đâu?",
+    ),
+    prompts_en=(
+        "How do I upload and verify book OCR?",
+        "How do Child Safety & rights checks work?",
+        "Where is system health monitoring?",
+    ),
+    actions=(
+        KbAction("Kho sách Admin", "Admin Books", "/admin/books"),
+        KbAction("Chất lượng sách", "Quality Hub", "/admin/metadata-quality"),
+        KbAction("Vận hành hệ thống", "System Health", "/admin/health"),
     ),
 )
 
@@ -2546,7 +3576,7 @@ def _prefer_english(locale: str) -> bool:
 
 
 _PUBLIC_ALLOWED_HREFS: frozenset[str] = frozenset(
-    {"/", "/login", "/register", "/forgot-password", "/reset-password", "/admin/login"}
+    {"/", "/login", "/register", "/forgot-password", "/reset-password"}
 )
 
 _PARENT_STATIC_NAV_ALLOWLIST: frozenset[str] = frozenset(
@@ -2569,13 +3599,15 @@ _PARENT_STATIC_NAV_ALLOWLIST: frozenset[str] = frozenset(
         "/entertainment/sentence-shooter",
         "/entertainment/picture-description",
         "/karaoke",
+        "/achievements",
+        "/learning-train",
         "/help-support",
         "/book-reports",
         "/studio/tasks",
     }
 )
 
-_ADMIN_STATIC_NAV_ALLOWLIST: frozenset[str] = _PARENT_STATIC_NAV_ALLOWLIST | frozenset(
+_ADMIN_STATIC_NAV_ALLOWLIST: frozenset[str] = frozenset(
     {
         "/admin",
         "/admin/books",
@@ -2591,15 +3623,37 @@ _ADMIN_STATIC_NAV_ALLOWLIST: frozenset[str] = _PARENT_STATIC_NAV_ALLOWLIST | fro
     }
 )
 
+ScopeBoundaryReason = Literal[
+    "other_user",
+    "admin_area",
+    "customer_area",
+    "guest_to_customer_area",
+    "guest_area",
+]
+
+
+def _is_admin_path(path: str) -> bool:
+    return path == "/admin" or path.startswith("/admin/")
+
 
 def _is_protected_admin_path(path: str) -> bool:
-    return (path == "/admin" or path.startswith("/admin/")) and path != "/admin/login"
+    return _is_admin_path(path) and path != "/admin/login"
 
 
 def sanitize_scoped_path(current_path: str, role_scope: AssistantRoleScope) -> str:
     clean = sanitize_current_path(current_path)
-    if role_scope != "admin" and _is_protected_admin_path(clean):
-        return "/"
+    if role_scope == "public":
+        if clean == "/admin/login":
+            return "/admin/login"
+        if _is_protected_admin_path(clean) or clean not in _PUBLIC_ALLOWED_HREFS:
+            return "/"
+        return clean
+    if role_scope == "parent":
+        if _is_admin_path(clean) or clean in _PUBLIC_ALLOWED_HREFS:
+            return "/dashboard"
+        return clean
+    if not _is_protected_admin_path(clean):
+        return "/admin"
     return clean
 
 
@@ -2610,30 +3664,66 @@ def _is_href_allowed_for_scope(href: str, role_scope: AssistantRoleScope) -> boo
     if role_scope == "public":
         return clean in _PUBLIC_ALLOWED_HREFS
     if role_scope == "parent":
-        if _is_protected_admin_path(clean):
-            return False
-        return clean in _PARENT_STATIC_NAV_ALLOWLIST or clean in _PUBLIC_ALLOWED_HREFS
-    return clean in _ADMIN_STATIC_NAV_ALLOWLIST or clean in _PUBLIC_ALLOWED_HREFS
+        return clean in _PARENT_STATIC_NAV_ALLOWLIST
+    return clean in _ADMIN_STATIC_NAV_ALLOWLIST
+
+
+def is_quick_action_href_allowed(href: str, role_scope: AssistantRoleScope) -> bool:
+    """Strict disjoint allowlist check for assistant quick-action links."""
+    return _is_href_allowed_for_scope(href, role_scope)
 
 
 def is_navigation_href_allowed(href: str, role_scope: AssistantRoleScope) -> bool:
-    """Strict allowlist check for interactive Yes/No navigation offers."""
-    clean = sanitize_current_path(href)
-    if clean != href or ".." in clean or "?" in clean or "#" in clean:
-        return False
-    if role_scope == "public":
-        return clean in _PUBLIC_ALLOWED_HREFS
-    if role_scope == "parent":
-        return clean in _PARENT_STATIC_NAV_ALLOWLIST
-    return clean in _ADMIN_STATIC_NAV_ALLOWLIST
+    """Strict disjoint allowlist check for interactive Yes/No navigation offers."""
+    return _is_href_allowed_for_scope(href, role_scope)
+
+
+_CUSTOMER_PATH_RE = re.compile(
+    r"(?<!/admin)(?:^|[\s\"'(])/(?:"
+    r"dashboard|my-books|book-scanner|children|reading-management|reading-preparation|"
+    r"entertainment|achievements|learning-train|book-reports|studio/tasks|"
+    r"reports|sessions|profile|settings|books|karaoke|reading"
+    r")(?:/[a-z0-9_-]+)*(?=$|[\s\"'),.?!])"
+)
+
+_GUEST_AUTH_PATH_RE = re.compile(
+    r"(?<!/admin)(?:^|[\s\"'(])/(?:login|register|forgot-password|reset-password)(?=$|[\s\"'),.?!])"
+)
+
+_ADMIN_PATH_RE = re.compile(
+    r"(?:^|[\s\"'(])/admin(?:/[a-z0-9_-]+)*(?=$|[\s\"'),.?!])"
+)
+
+_OTHER_USER_PRIVATE_ACCESS_RE = re.compile(
+    r"\b(?:xem|mo|sua|doi|xoa|lay|doc|truy cap|vao)\b.*\b"
+    r"(?:email|tai khoan|ho so be|ho so con|lich su doc|mat khau|ma pin)\b.*\b"
+    r"(?:nguoi khac|user khac|phu huynh khac|khach hang khac|ban toi|hang xom|nguoi la)\b"
+)
+
+_NAV_INTENT_MARKERS: tuple[str, ...] = (
+    " mo ",
+    " vao ",
+    " di den ",
+    " chuyen sang ",
+    " chuyen toi ",
+    " truy cap ",
+    " cho toi xem trang ",
+    " dua toi den ",
+    " open ",
+    " go to ",
+    " navigate to ",
+    " take me to ",
+    " switch to ",
+    " access ",
+)
 
 
 def detect_disallowed_scope_request(
     message: str,
     *,
     role_scope: AssistantRoleScope,
-) -> Literal["admin_area", "other_user"] | None:
-    """Detect attempts to navigate into /admin/* (non-admin) or another user's private space."""
+) -> ScopeBoundaryReason | None:
+    """Enforce strict 4-way role & tenant boundary checks before cache or LLM calls."""
     folded = fold_vietnamese(message)
     if not folded:
         return None
@@ -2644,28 +3734,129 @@ def detect_disallowed_scope_request(
         "tai khoan khac",
         "tai khoan nguoi khac",
         "phu huynh khac",
+        "khach hang khac",
         "gia dinh khac",
         "ho so nguoi khac",
+        "ho so cua nguoi khac",
+        "ho so be cua nguoi khac",
         "trang nguoi khac",
         "trang cua nguoi khac",
         "du lieu nguoi khac",
+        "du lieu cua nguoi khac",
+        "lich su doc cua nguoi khac",
+        "email cua nguoi khac",
+        "email cua phu huynh khac",
+        "tai khoan cua nguoi khac",
         "cua nguoi khac",
         "cho nguoi khac",
         "muon xem trang cua",
         "vao tai khoan cua nguoi",
         "doi sang tai khoan cua",
+        "dang nhap vao tai khoan cua",
+        "xem ho so con nha",
+        "xem lich su doc cua be khac",
+        "xem email cua phu huynh",
+        "xem du lieu rieng cua phu huynh",
         "other user",
         "another user",
         "another parent",
+        "another customer",
         "another account",
+        "another family",
         "someone else",
+        "other family",
     )
-    if any(marker in padded for marker in other_user_markers):
+    if any(marker in padded for marker in other_user_markers) or _OTHER_USER_PRIVATE_ACCESS_RE.search(
+        folded
+    ):
         return "other_user"
+
+    if role_scope == "parent":
+        if "/admin/login" in folded or any(
+            marker in padded
+            for marker in (
+                " trang dang nhap admin ",
+                " trang dang nhap quan tri ",
+                " dang nhap quan tri ",
+            )
+        ):
+            return "guest_area"
+        if _GUEST_AUTH_PATH_RE.search(folded) or (
+            any(intent in padded for intent in _NAV_INTENT_MARKERS)
+            and any(
+                target in padded
+                for target in (" trang dang nhap ", " trang dang ky ", " trang quen mat khau ")
+            )
+        ):
+            return "guest_area"
+
+    if role_scope == "admin":
+        if _GUEST_AUTH_PATH_RE.search(folded) or (
+            any(intent in padded for intent in _NAV_INTENT_MARKERS)
+            and any(
+                target in padded
+                for target in (
+                    " trang dang nhap ",
+                    " trang dang ky ",
+                    " trang quen mat khau ",
+                    " login page ",
+                    " register page ",
+                    " forgot password page ",
+                )
+            )
+        ):
+            return "guest_area"
+
+        if _CUSTOMER_PATH_RE.search(folded):
+            return "customer_area"
+        customer_workspace_markers = (
+            " trang khach hang ",
+            " trang phu huynh ",
+            " giao dien phu huynh ",
+            " giao dien khach hang ",
+            " khong gian phu huynh ",
+            " khong gian khach hang ",
+            " vao doc sach cua phu huynh ",
+            " vao doc sach cua be ",
+            " doc sach cua phu huynh ",
+            " doc sach cua be ",
+            " mo trang cua be ",
+            " mo trang khach ",
+            " chuyen sang trang phu huynh ",
+            " chuyen sang khach hang ",
+            " sang trang khach ",
+            " mo dashboard ",
+            " vao dashboard ",
+            " mo ho so be ",
+            " tao ho so be ",
+            " mo sach cua toi ",
+            " mo quet sach ",
+            " mo goc giai tri ",
+            " choi game cua be ",
+            " mo vuon am vi ",
+            " mo chuyen tau doc ",
+            " customer area ",
+            " customer workspace ",
+            " parent workspace ",
+            " parent dashboard ",
+            " open parent ",
+            " switch to parent ",
+            " switch to customer ",
+            " go to dashboard ",
+        )
+        if any(marker in padded for marker in customer_workspace_markers):
+            return "customer_area"
 
     if role_scope != "admin":
         admin_markers = (
-            "/admin",
+            "/admin/books",
+            "/admin/health",
+            "/admin/tasks",
+            "/admin/parents",
+            "/admin/karaoke",
+            "/admin/audit-logs",
+            "/admin/metadata-quality",
+            "/admin/viread-training",
             "trang admin",
             "trang quan tri",
             "vao admin",
@@ -2680,23 +3871,80 @@ def detect_disallowed_scope_request(
             "admin health",
             "admin tasks",
             "admin parents",
+            "admin books",
+            "admin karaoke",
             "audit logs",
+            "nhat ky kiem toan",
             "viread training",
             "viread-training",
+            "vietocr training",
+            "apps script bridge",
+            "flow 2",
         )
+        has_admin_path = bool(_ADMIN_PATH_RE.search(folded))
+        if has_admin_path:
+            if role_scope == "public" and "/admin/login" in folded and not any(
+                intent in padded for intent in _NAV_INTENT_MARKERS
+            ):
+                pass
+            else:
+                return "admin_area"
         if any(marker in padded or marker in folded for marker in admin_markers):
             return "admin_area"
+
+    if role_scope == "public":
+        if _CUSTOMER_PATH_RE.search(folded):
+            return "guest_to_customer_area"
+        has_nav_intent = any(intent in padded for intent in _NAV_INTENT_MARKERS)
+        customer_targets = (
+            " tong quan ",
+            " dashboard ",
+            " ho so be ",
+            " tao ho so be ",
+            " sach cua toi ",
+            " cai dat ",
+            " ho so ba me ",
+            " bao cao tien bo ",
+            " tu can luyen ",
+            " lich su doc ",
+            " tac vu ai ",
+            " quan ly doc ",
+            " vuon am vi ",
+            " chuyen tau doc ",
+            " quet sach ",
+            " chuan bi doc ",
+            " goc giai tri ",
+            " memory game ",
+            " sentence shooter ",
+            " picture description ",
+            " karaoke ",
+            " kho sach ",
+            " bao cao sach ",
+            " child profile ",
+            " my books ",
+            " book scanner ",
+            " reading prep ",
+            " learning train ",
+            " phoneme garden ",
+            " achievements ",
+            " difficult words ",
+            " session history ",
+            " entertainment ",
+        )
+        if has_nav_intent and any(target in padded for target in customer_targets):
+            return "guest_to_customer_area"
+
     return None
 
 
 def format_scope_boundary_reply(
-    reason: Literal["admin_area", "other_user"],
+    reason: ScopeBoundaryReason,
     *,
     role_scope: AssistantRoleScope,
     current_path: str,
     locale: str = "vi",
 ) -> tuple[str, list[AssistantQuickAction], list[str]]:
-    """Return a warm, clear own-scope refusal without offering disallowed routes."""
+    """Return a warm, clear role-scoped refusal without offering disallowed routes."""
     use_en = _prefer_english(locale)
     _, _, page_prompts, page_actions = get_page_context(
         current_path, role_scope=role_scope, locale=locale
@@ -2705,23 +3953,423 @@ def format_scope_boundary_reply(
         if use_en:
             reply = (
                 "I'd love to help with your ViRead learning pages, but admin pages (/admin/*) are strictly "
-                "restricted to authorized administrators. Everything I navigate or open stays safely inside your own user workspace."
+                "restricted to authorized administrators. Everything I navigate or open stays safely inside your own workspace."
             )
         else:
             reply = (
-                "Rất tiếc, mình không thể mở hay chuyển bạn sang khu vực Quản trị (/admin) nhé! "
-                "Vì an toàn tài khoản, trợ lý ViRead chỉ hỗ trợ và điều hướng trong phạm vi các trang dành riêng cho tài khoản của bạn."
+                "Rất tiếc, mình không thể mở hay hướng dẫn các công cụ Quản trị (/admin) nhé! "
+                "Vì an toàn hệ thống, trợ lý ViRead chỉ hỗ trợ và điều hướng trong phạm vi các trang dành cho bạn."
+            )
+    elif reason == "customer_area":
+        if use_en:
+            reply = (
+                "Admin mode is strictly isolated from parent/customer reading and game pages (/dashboard, /books, /children, /reading/*, /entertainment, /achievements, /learning-train). "
+                "To manage catalog books, karaoke, parents, or tasks as Admin, please use /admin/books, /admin/karaoke, /admin/parents, or /admin/tasks."
+            )
+        else:
+            reply = (
+                "Chế độ Quản trị (/admin) được tách biệt hoàn toàn khỏi giao diện đọc sách và trò chơi của phụ huynh/bé (/dashboard, /books, /children, /reading/*, /entertainment, /achievements, /learning-train). "
+                "Nếu bạn cần quản lý sách, karaoke, phụ huynh hay tác vụ hệ thống, hãy thao tác trực tiếp tại /admin/books, /admin/karaoke, /admin/parents hoặc /admin/tasks nhé."
+            )
+    elif reason == "guest_to_customer_area":
+        if use_en:
+            reply = (
+                "Those family workspace pages require signing in first. "
+                "Please sign in at /login or create a free parent account at /register to access your dashboard, child profiles, books, and games."
+            )
+        else:
+            reply = (
+                "Các trang học đọc và quản lý gia đình yêu cầu đăng nhập tài khoản trước nhé! "
+                "Bạn hãy Đăng nhập (/login) hoặc Đăng ký tài khoản phụ huynh (/register) để mở Bảng điều khiển, Hồ sơ bé, Kho sách và Góc giải trí."
+            )
+        if sanitize_scoped_path(current_path, role_scope) != "/admin/login":
+            page_actions = [
+                AssistantQuickAction(
+                    label="Sign in" if use_en else "Đăng nhập",
+                    href="/login",
+                ),
+                AssistantQuickAction(
+                    label="Register" if use_en else "Đăng ký",
+                    href="/register",
+                ),
+            ]
+    elif reason == "guest_area":
+        if use_en:
+            reply = (
+                "You are already signed in to your active workspace, so guest login/registration routes "
+                "and cross-role sign-in pages are hidden here to keep your session safe."
+            )
+        else:
+            reply = (
+                "Bạn đang đăng nhập trong không gian làm việc của mình rồi, nên mình không điều hướng sang trang đăng nhập/đăng ký của khách hay cổng đăng nhập khác vai trò nhé!"
             )
     else:
         if use_en:
             reply = (
-                "For family privacy and security, I can never open or access another user's account, child profiles, "
-                "or private reading pages. You can safely manage everything inside your own ViRead pages."
+                "For family privacy and security, I can never open or access another user's account, email, child profiles, "
+                "or private reading history. Everything stays strictly inside your own authorized scope."
             )
         else:
             reply = (
-                "Vì bảo mật và quyền riêng tư gia đình, mình không thể truy cập hay chuyển bạn sang trang, hồ sơ "
-                "hoặc dữ liệu của người dùng khác nhé! Mọi thao tác đều được giữ an toàn trong phạm vi tài khoản của chính bạn."
+                "Vì bảo mật và quyền riêng tư gia đình, mình không thể truy cập, xem hay chỉnh sửa tài khoản, email, hồ sơ bé "
+                "hoặc lịch sử đọc của người dùng khác nhé! Mọi thao tác đều được cách ly nghiêm ngặt trong phạm vi của bạn."
+            )
+    return reply, page_actions[:3], page_prompts[:3]
+
+
+_VIREAD_DOMAIN_ANCHORS: tuple[str, ...] = (
+    "viread",
+    "readalong",
+    "read along",
+    "hoc doc",
+    "luyen doc",
+    "tap doc",
+    "buoi doc",
+    "man hinh doc",
+    "doc sach",
+    "sach giay",
+    "sach thieu nhi",
+    "sach cua toi",
+    "kho sach",
+    "thu vien sach",
+    "bao cao sach",
+    "quet sach",
+    "scan sach",
+    "ocr",
+    "vietocr",
+    "qwen3-vl",
+    "tesseract",
+    "paddleocr",
+    "ho so be",
+    "ho so phu huynh",
+    "ho so ba me",
+    "phu huynh",
+    "ba me",
+    "cho be",
+    "be doc",
+    "tre em",
+    "bai tho",
+    "truyen doc",
+    "micro",
+    "microphone",
+    "camera",
+    "giong doc",
+    "tts",
+    "stt",
+    "wasm",
+    "sherpa",
+    "0.85x",
+    "voice lock",
+    "khoa giong",
+    "teacher persona",
+    "co giao ai",
+    "thay giao ai",
+    "instant countdown",
+    "vuon am vi",
+    "phoneme garden",
+    "chuyen tau doc",
+    "learning train",
+    "storyweaver",
+    "smart studio",
+    "duet reading",
+    "doc doi",
+    "readability",
+    "huy hieu",
+    "ho chieu",
+    "chung nhan",
+    "milestone certificate",
+    "pin lock",
+    "ma pin",
+    "reading presence",
+    "karaoke",
+    "dong dao",
+    "memory game",
+    "lat the",
+    "sentence shooter",
+    "ghep cau",
+    "picture description",
+    "mo ta tranh",
+    "ai tutor",
+    "doc hieu",
+    "tu can luyen",
+    "tu kho",
+    "danh van",
+    "am vi",
+    "studio/tasks",
+    "tac vu ai",
+    "reading-management",
+    "reading-preparation",
+    "book-scanner",
+    "my-books",
+    "help-support",
+    "vireadforyou",
+    "apk",
+    "android",
+    "bang tan",
+    "3g",
+    "tien trinh ai",
+    "child safety",
+    "metadata quality",
+    "viread-training",
+    "audit-logs",
+    "apps script bridge",
+    "flow 1",
+    "flow 2",
+    "dang nhap",
+    "dang ky",
+    "quen mat khau",
+    "dat lai mat khau",
+    "doi mat khau",
+    "xac minh email",
+    "email nhac doc",
+    "muc tieu tuan",
+    "reading session",
+    "book scanner",
+    "child profile",
+    "phoneme",
+    "certificate",
+)
+
+_GREETING_ONLY_PHRASES: frozenset[str] = frozenset(
+    {
+        "xin chao",
+        "chao",
+        "chao ban",
+        "chao tro ly",
+        "chao viread",
+        "hello",
+        "hi",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "cam on",
+        "thanks",
+        "thank you",
+        "ban la ai",
+        "help",
+        "giup toi",
+    }
+)
+
+_OFF_TOPIC_MARKERS: tuple[str, ...] = (
+    # Weather
+    "thoi tiet",
+    "du bao thoi tiet",
+    "nhiet do hom nay",
+    "troi mua",
+    "troi nang",
+    "weather",
+    "forecast",
+    "temperature today",
+    "will it rain",
+    # Stocks / Crypto / Gold / Forex
+    "gia vang",
+    "vang sjc",
+    "chung khoan",
+    "co phieu",
+    "vnindex",
+    "vn-index",
+    "bitcoin",
+    "ethereum",
+    "crypto",
+    "tien ao",
+    "ty gia",
+    "ngoai te",
+    "stock price",
+    "nasdaq",
+    "gold price",
+    "forex",
+    # Sports
+    "bong da",
+    "ty so",
+    "ket qua tran dau",
+    "lich thi dau",
+    "world cup",
+    "ngoai hang anh",
+    "premier league",
+    "champions league",
+    "football score",
+    "soccer score",
+    "match score",
+    # Cooking / Recipes
+    "nau an",
+    "cong thuc nau",
+    "cach nau",
+    "mon an",
+    "pho bo",
+    "bun bo",
+    "recipe",
+    "how to cook",
+    "bake a cake",
+    "ingredients for",
+    # Homework: Math / Physics / Chemistry
+    "giai toan",
+    "tinh tich phan",
+    "dao ham",
+    "phuong trinh",
+    "bat phuong trinh",
+    "he phuong trinh",
+    "hinh hoc",
+    "vat ly",
+    "hoa hoc",
+    "phan ung hoa hoc",
+    "nguyen tu khoi",
+    "bang tuan hoan",
+    "solve math",
+    "integral",
+    "derivative",
+    "quadratic equation",
+    "physics problem",
+    "chemistry equation",
+    "calculus",
+    "algebra",
+    # General programming outside ViRead
+    "viet code",
+    "lap trinh",
+    "debug code",
+    "python",
+    "javascript",
+    "typescript",
+    "react",
+    "nextjs",
+    "next js",
+    "sql query",
+    "golang",
+    "rust",
+    "leetcode",
+    "thuat toan",
+    "sap xep mang",
+    "binary search",
+    "docker",
+    "kubernetes",
+    "write a python",
+    "write a script",
+    "write a function",
+    "sort an array",
+    # Politics / News
+    "chinh tri",
+    "bau cu",
+    "tong thong",
+    "thu tuong",
+    "quoc hoi",
+    "tin tuc the gioi",
+    "politics",
+    "election",
+    "prime minister",
+    # Travel / Flights / Hotels
+    "du lich",
+    "ve may bay",
+    "dat ve may bay",
+    "khach san",
+    "dat phong",
+    "tour du lich",
+    "flight ticket",
+    "book a hotel",
+    "travel itinerary",
+    # Medical / Legal / Financial advice
+    "chua benh",
+    "uong thuoc",
+    "trieu chung benh",
+    "kham benh",
+    "tu van phap luat",
+    "luat su",
+    "vay von",
+    "lai suat ngan hang",
+    "the tin dung",
+    "medical advice",
+    "diagnose",
+    "prescription",
+    "legal advice",
+    "tax advice",
+    # Lottery / Horoscope / Movies
+    "xo so",
+    "vietlott",
+    "tu vi",
+    "boi toan",
+    "cung hoang dao",
+    "phim chieu rap",
+    "netflix",
+    "horoscope",
+    "lottery",
+    # General essays / trivia
+    "thu do cua",
+    "capital of",
+    "viet bai van",
+    "write an essay",
+)
+
+_ARITHMETIC_HOMEWORK_RE = re.compile(
+    r"(?:tinh|bang bao nhieu|calculate|solve|what is)\s*\d+\s*[\+\-\*\/\^]\s*\d+|\b\d+\s*[\+\-\*\/]\s*\d+\s*=\s*\?"
+)
+
+
+def detect_off_topic_request(
+    message: str,
+    role_scope: AssistantRoleScope = "public",
+) -> bool:
+    """Deterministically detect clearly non-ViRead off-topic prompts without false-positiving on ViRead."""
+    _ = role_scope
+    folded = fold_vietnamese(message)
+    if not folded:
+        return False
+    padded = f" {folded} "
+
+    if any(anchor in padded or anchor in folded for anchor in _VIREAD_DOMAIN_ANCHORS):
+        return False
+
+    if folded in _GREETING_ONLY_PHRASES:
+        return False
+
+    if _ARITHMETIC_HOMEWORK_RE.search(folded):
+        return True
+
+    return any(f" {marker} " in padded or marker in folded for marker in _OFF_TOPIC_MARKERS)
+
+
+def format_off_topic_reply(
+    *,
+    role_scope: AssistantRoleScope,
+    current_path: str,
+    locale: str = "vi",
+) -> tuple[str, list[AssistantQuickAction], list[str]]:
+    """Politely decline non-ViRead topics and redirect back to role-scoped ViRead help."""
+    use_en = _prefer_english(locale)
+    _, _, page_prompts, page_actions = get_page_context(
+        current_path, role_scope=role_scope, locale=locale
+    )
+    if role_scope == "admin":
+        if use_en:
+            reply = (
+                "I'm the ViRead Admin Assistant and only support ViRead administration topics "
+                "(catalog books, OCR review, Child Safety, Karaoke, Parents, AI Tasks, VietOCR Training, Audit Logs, and System Health)."
+            )
+        else:
+            reply = (
+                "Mình là Trợ lý Quản trị ViRead nên chỉ hỗ trợ các nghiệp vụ vận hành trên ViRead "
+                "(Kho sách, Duyệt OCR, Child Safety, Karaoke, Phụ huynh, Tác vụ AI, Huấn luyện VietOCR, Nhật ký kiểm toán và Vận hành hệ thống) nhé!"
+            )
+    elif role_scope == "public":
+        if use_en:
+            reply = (
+                "I specialize exclusively in ViRead (ReadAlong Vision) — helping families explore Vietnamese reading support for Grade 1–5 learners, "
+                "account sign-in/registration, and browser mic/camera readiness. Let me know how I can help with ViRead!"
+            )
+        else:
+            reply = (
+                "Mình chỉ chuyên hỗ trợ về nền tảng luyện đọc tiếng Việt ViRead (ReadAlong Vision), hướng dẫn tính năng cho bé lớp 1–5, "
+                "đăng nhập/đăng ký tài khoản và chuẩn bị thiết bị micro/camera nhé! Bạn muốn tìm hiểu phần nào của ViRead?"
+            )
+    else:
+        if use_en:
+            reply = (
+                "I specialize exclusively in ViRead! I can guide you on child profiles, graded books, scanning paper books, "
+                "5-Minute Reading Train, Phoneme Garden, Duet Reading, progress reports, difficult words, reminders, and kids games."
+            )
+        else:
+            reply = (
+                "Mình chỉ chuyên hỗ trợ các tính năng trong ViRead thôi nhé! Ba mẹ có thể hỏi mình về hồ sơ bé, chọn hoặc quét sách, "
+                "Chuyến Tàu Đọc 5 Phút, Vườn Âm Vị & Huy hiệu, Đọc đôi, báo cáo tiến bộ, từ cần luyện, nhắc đọc hay góc giải trí."
             )
     return reply, page_actions[:3], page_prompts[:3]
 
@@ -2739,6 +4387,118 @@ class _NavRule:
 
 
 _NAV_RULES: tuple[_NavRule, ...] = (
+    # Admin-only nav rules (specific routes before /admin)
+    _NavRule(
+        href="/admin/books/new",
+        phrases=("tao sach moi", "them sach moi", "upload sach moi", "admin/books/new", "new book"),
+        label_vi="Đi đến Tạo sách mới (Admin)",
+        label_en="Go to New Book (Admin)",
+        reason_vi="Tạo đầu sách mới và tải ảnh trang sách lên hệ thống OCR.",
+        reason_en="Create a new catalog book and upload page images.",
+        requires_child_selection=False,
+        scenario_id="admin_books_ocr_review",
+    ),
+    _NavRule(
+        href="/admin/books",
+        phrases=("kho sach admin", "duyet ocr", "qwen3-vl", "needs_review", "revision verified", "admin/books"),
+        label_vi="Đi đến Kho sách Admin",
+        label_en="Go to Admin Books",
+        reason_vi="Quản lý kho sách thư viện, duyệt OCR từng trang và xác minh VERIFIED.",
+        reason_en="Manage catalog books and verify page OCR revisions.",
+        requires_child_selection=False,
+        scenario_id="admin_books_ocr_review",
+    ),
+    _NavRule(
+        href="/admin/metadata-quality",
+        phrases=("chat luong sach", "child safety", "grade_1_to_5", "ban quyen", "metadata-quality", "metadata quality"),
+        label_vi="Đi đến Chất lượng sách (Admin)",
+        label_en="Go to Book Quality Hub",
+        reason_vi="Rà soát Child Safety, chính tả OCR, bản quyền và báo lỗi từ phụ huynh.",
+        reason_en="Review Child Safety, OCR quality, rights, and parent reports.",
+        requires_child_selection=False,
+        scenario_id="admin_quality_child_safety",
+    ),
+    _NavRule(
+        href="/admin/karaoke/new",
+        phrases=("them bai karaoke", "tao bai hat karaoke", "admin/karaoke/new", "new karaoke"),
+        label_vi="Đi đến Thêm bài hát Karaoke (Admin)",
+        label_en="Go to New Karaoke Song",
+        reason_vi="Thêm bài hát thiếu nhi mới và căn timeline lời bài hát.",
+        reason_en="Create a new children's karaoke song and sync lyrics.",
+        requires_child_selection=False,
+        scenario_id="admin_karaoke_and_parents",
+    ),
+    _NavRule(
+        href="/admin/karaoke",
+        phrases=("quan ly karaoke", "bai hat karaoke", "admin/karaoke", "admin karaoke"),
+        label_vi="Đi đến Quản lý Karaoke (Admin)",
+        label_en="Go to Admin Karaoke",
+        reason_vi="Quản lý kho bài hát đồng dao thiếu nhi và trạng thái xuất bản.",
+        reason_en="Manage children's karaoke songs and publish states.",
+        requires_child_selection=False,
+        scenario_id="admin_karaoke_and_parents",
+    ),
+    _NavRule(
+        href="/admin/parents",
+        phrases=("quan ly phu huynh", "danh sach phu huynh", "admin/parents", "admin parents"),
+        label_vi="Đi đến Quản lý Phụ huynh (Admin)",
+        label_en="Go to Admin Parents",
+        reason_vi="Tra cứu và quản lý thông tin tài khoản phụ huynh trong phạm vi quản trị.",
+        reason_en="Search and manage parent accounts via admin controls.",
+        requires_child_selection=False,
+        scenario_id="admin_karaoke_and_parents",
+    ),
+    _NavRule(
+        href="/admin/tasks",
+        phrases=("tac vu admin", "tac vu he thong", "admin/tasks", "admin tasks"),
+        label_vi="Đi đến Tác vụ AI Quản trị",
+        label_en="Go to Admin Tasks",
+        reason_vi="Theo dõi hàng đợi xử lý OCR, sách và media toàn hệ thống.",
+        reason_en="Monitor system-wide OCR and media background tasks.",
+        requires_child_selection=False,
+        scenario_id="admin_task_center_isolation",
+    ),
+    _NavRule(
+        href="/admin/viread-training",
+        phrases=("viread-training", "viread training", "huan luyen vietocr", "flow 2", "apps script bridge", "mo hinh doc chu"),
+        label_vi="Đi đến Huấn luyện VietOCR (Admin)",
+        label_en="Go to OCR Training (Admin)",
+        reason_vi="Quản lý dataset Flow 1/Flow 2, Apps Script Bridge và đánh giá VietOCR.",
+        reason_en="Manage Flow 1/Flow 2 datasets, Apps Script Bridge, and VietOCR runs.",
+        requires_child_selection=False,
+        scenario_id="admin_training_health_ops",
+    ),
+    _NavRule(
+        href="/admin/audit-logs",
+        phrases=("nhat ky kiem toan", "audit logs", "admin/audit-logs", "nhat ky quan tri"),
+        label_vi="Đi đến Nhật ký kiểm toán (Admin)",
+        label_en="Go to Admin Audit Logs",
+        reason_vi="Truy vết các thao tác quản trị và kiểm duyệt trên hệ thống.",
+        reason_en="Inspect administrative audit logs.",
+        requires_child_selection=False,
+        scenario_id="admin_training_health_ops",
+    ),
+    _NavRule(
+        href="/admin/health",
+        phrases=("van hanh he thong", "suc khoe worker", "worker ocr", "admin/health", "admin health"),
+        label_vi="Đi đến Vận hành hệ thống (Admin)",
+        label_en="Go to System Health (Admin)",
+        reason_vi="Kiểm tra trạng thái Database, OCR worker, Voice worker và AI providers.",
+        reason_en="Check DB, OCR, Voice, and AI provider health.",
+        requires_child_selection=False,
+        scenario_id="admin_training_health_ops",
+    ),
+    _NavRule(
+        href="/admin",
+        phrases=("tong quan admin", "bang dieu khien admin", "admin workspace", "admin dashboard"),
+        label_vi="Đi đến Bảng điều khiển Admin",
+        label_en="Go to Admin Dashboard",
+        reason_vi="Quay lại trang tổng quan Khu vực Quản trị ViRead.",
+        reason_en="Return to the ViRead Admin workspace.",
+        requires_child_selection=False,
+        scenario_id="admin_overview_workspace",
+    ),
+    # Parent & Public nav rules
     _NavRule(
         href="/settings",
         phrases=(
@@ -2752,12 +4512,15 @@ _NAV_RULES: tuple[_NavRule, ...] = (
             "thiet lap",
             "nhac doc email",
             "tuy chon email",
+            "ma pin",
+            "pin 4 so",
+            "parent pin",
             "settings",
         ),
-        label_vi="Đi đến trang Cài đặt đổi mật khẩu",
+        label_vi="Đi đến trang Cài đặt & Bảo mật",
         label_en="Go to Password & Settings",
-        reason_vi="Tại trang Cài đặt, bạn có thể đổi mật khẩu và thiết lập bảo mật cho chính tài khoản của mình.",
-        reason_en="Update your own password and account settings safely.",
+        reason_vi="Đổi mật khẩu, bật Khóa PIN 4 chữ số và tùy chọn bảo mật cho tài khoản của bạn.",
+        reason_en="Update your password, 4-digit Parent PIN, and account settings.",
         requires_child_selection=False,
         scenario_id="account_security_and_settings",
     ),
@@ -2827,6 +4590,43 @@ _NAV_RULES: tuple[_NavRule, ...] = (
         scenario_id="child_selection_gate_and_switching",
     ),
     _NavRule(
+        href="/achievements",
+        phrases=(
+            "vuon am vi",
+            "huy hieu",
+            "ho chieu doc sach",
+            "ho chieu tem",
+            "tem doc sach",
+            "phoneme garden",
+            "achievements",
+            "book stamp",
+        ),
+        label_vi="Đi đến Vườn Âm Vị & Huy hiệu",
+        label_en="Go to Phoneme Garden & Badges",
+        reason_vi="Xem các bông hoa âm vị đã nở, huy hiệu và Hộ chiếu Tem Đọc Sách của bé.",
+        reason_en="Explore your child's Phoneme Garden, badges, and reading passport.",
+        requires_child_selection=True,
+        scenario_id="achievements_phoneme_garden",
+    ),
+    _NavRule(
+        href="/learning-train",
+        phrases=(
+            "chuyen tau doc",
+            "chuyen tau 5 phut",
+            "tau doc 5 phut",
+            "luyen doc 5 phut",
+            "learning train",
+            "5 minute reading train",
+            "five minute train",
+        ),
+        label_vi="Đi đến Chuyến Tàu Đọc 5 Phút",
+        label_en="Go to 5-Minute Reading Train",
+        reason_vi="Hoàn thành nhanh 3 toa luyện âm, nhịp điệu và ghép câu chỉ trong 5 phút.",
+        reason_en="Complete today's 3-car 5-minute adaptive reading train.",
+        requires_child_selection=True,
+        scenario_id="five_minute_learning_train",
+    ),
+    _NavRule(
         href="/book-scanner",
         phrases=("quet sach", "chup trang sach", "ocr sach", "scan book", "book scanner"),
         label_vi="Đi đến Quét sách giấy AI",
@@ -2848,11 +4648,11 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/my-books",
-        phrases=("sach cua toi", "tu sach gia dinh", "smart studio", "my books"),
+        phrases=("sach cua toi", "tu sach gia dinh", "smart studio", "storyweaver", "my books"),
         label_vi="Đi đến Sách của tôi",
         label_en="Go to My Books",
-        reason_vi="Mở tủ sách riêng gia đình bạn đã quét hoặc tạo minh họa.",
-        reason_en="Open your private scanned & illustrated books.",
+        reason_vi="Mở tủ sách gia đình đã quét hoặc sáng tác truyện Family StoryWeaver.",
+        reason_en="Open your private scanned books & Family StoryWeaver.",
         requires_child_selection=False,
         scenario_id="quick_scan_vs_my_books",
     ),
@@ -2898,10 +4698,10 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/karaoke",
-        phrases=("karaoke", "hat karaoke"),
+        phrases=("karaoke", "hat karaoke", "dong dao"),
         label_vi="Đi đến Karaoke thiếu nhi",
         label_en="Go to Kids Karaoke",
-        reason_vi="Hát theo lời bài hát chạy khớp nhịp để luyện phát âm.",
+        reason_vi="Hát theo lời bài hát đồng dao chạy khớp nhịp để luyện phát âm.",
         reason_en="Sing along with synchronized lyrics.",
         requires_child_selection=True,
         scenario_id="reluctant_reader_games",
@@ -2947,11 +4747,11 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/reports",
-        phrases=("bao cao", "tien bo", "thong ke doc", "reports", "progress"),
+        phrases=("bao cao", "tien bo", "thong ke doc", "chung nhan", "milestone certificate", "reports", "progress"),
         label_vi="Đi đến Báo cáo tiến bộ",
         label_en="Go to Progress Reports",
-        reason_vi="Xem tốc độ đọc, độ chính xác và xu hướng tiến bộ của bé.",
-        reason_en="Inspect fluency & accuracy analytics.",
+        reason_vi="Xem tốc độ đọc, xu hướng tiến bộ và tải Chứng nhận cột mốc cho bé.",
+        reason_en="Inspect analytics and download Milestone Certificates.",
         requires_child_selection=False,
         scenario_id="reports_and_session_history",
     ),
@@ -2967,7 +4767,14 @@ _NAV_RULES: tuple[_NavRule, ...] = (
     ),
     _NavRule(
         href="/reading-management",
-        phrases=("quan ly doc", "muc tieu tuan", "thoi quen doc", "reading management", "weekly reading"),
+        phrases=(
+            "quan ly doc",
+            "muc tieu tuan",
+            "thoi quen doc",
+            "reading presence",
+            "reading management",
+            "weekly reading",
+        ),
         label_vi="Đi đến Quản lý đọc",
         label_en="Go to Reading Management",
         reason_vi="Đặt mục tiêu đọc hàng tuần, lịch nhắc email và sách đã lưu cho bé.",
@@ -2994,11 +4801,13 @@ _NAV_RULES: tuple[_NavRule, ...] = (
             "be doc cham",
             "slow reader",
             "bat dau buoi doc",
+            "duet reading",
+            "doc doi",
         ),
         label_vi="Đi đến Chuẩn bị buổi đọc & Kiểm tra micro",
         label_en="Go to Reading Preparation & Mic Check",
-        reason_vi="Chọn phạm vi trang, tốc độ đọc mẫu (kể cả 0.85x) và kiểm tra micro trước khi đọc.",
-        reason_en="Configure page range, voice speed (including 0.85x) & mic check before reading.",
+        reason_vi="Chọn phạm vi trang, Đọc đôi, tốc độ đọc mẫu (kể cả 0.85x) và kiểm tra micro trước khi đọc.",
+        reason_en="Configure page range, Duet mode, voice speed (including 0.85x) & mic check before reading.",
         requires_child_selection=True,
         scenario_id="reading_prep_and_mic_check",
     ),
@@ -3054,6 +4863,8 @@ def resolve_navigation_offer(
 ) -> AssistantNavigationOffer | None:
     """Return a single safe own-scope navigation offer when user asks how/where to navigate or act."""
     if detect_disallowed_scope_request(message, role_scope=role_scope) is not None:
+        return None
+    if detect_off_topic_request(message, role_scope=role_scope):
         return None
     folded = fold_vietnamese(message)
     if not folded:
@@ -3119,6 +4930,78 @@ def get_page_context(
 ) -> tuple[str, str, list[str], list[AssistantQuickAction]]:
     """Return contextual (page_title, greeting, suggested_prompts, quick_actions) for a path."""
     clean_path = sanitize_scoped_path(current_path, role_scope)
+    use_en = _prefer_english(locale)
+
+    if role_scope == "admin" and clean_path.startswith("/admin/books/"):
+        if "/pages/" in clean_path:
+            return (
+                "Page OCR Review (Admin)" if use_en else "Duyệt OCR Trang sách (Admin)",
+                (
+                    "Compare Gemini, Ollama Qwen3-VL, VietOCR, PaddleOCR, and Tesseract results before marking VERIFIED."
+                    if use_en
+                    else "Đối chiếu kết quả Gemini, Ollama Qwen3-VL, VietOCR, PaddleOCR và Tesseract trước khi duyệt VERIFIED."
+                ),
+                (
+                    [
+                        "How do I verify an OCR revision to VERIFIED?",
+                        "How do OCR scan and AI proofreading differ?",
+                        "Where do I review Child Safety findings?",
+                    ]
+                    if use_en
+                    else [
+                        "Quy trình duyệt revision OCR từ NEEDS_REVIEW sang VERIFIED?",
+                        "Quét OCR và AI sửa (proofreading) khác nhau thế nào?",
+                        "Kiểm tra Child Safety và bản quyền ở đâu?",
+                    ]
+                ),
+                [
+                    AssistantQuickAction(
+                        label="Admin Books" if use_en else "Kho sách Admin",
+                        href="/admin/books",
+                    ),
+                    AssistantQuickAction(
+                        label="Quality Hub" if use_en else "Chất lượng sách",
+                        href="/admin/metadata-quality",
+                    ),
+                    AssistantQuickAction(
+                        label="OCR Training" if use_en else "Mô hình đọc chữ",
+                        href="/admin/viread-training",
+                    ),
+                ],
+            )
+        if clean_path.endswith("/edit"):
+            return (
+                "Edit Book Metadata (Admin)" if use_en else "Chỉnh sửa Sách (Admin)",
+                (
+                    "Update grade band, rights evidence, cover, and page order before final approval."
+                    if use_en
+                    else "Cập nhật thông tin sách, lớp, bằng chứng bản quyền và thứ tự trang trước khi phê duyệt."
+                ),
+                (
+                    [
+                        "What is required before approving a book?",
+                        "How do I review page OCR revisions?",
+                        "Where is Child Safety GRADE_1_TO_5 checked?",
+                    ]
+                    if use_en
+                    else [
+                        "Điều kiện để phê duyệt xuất bản một cuốn sách?",
+                        "Quy trình duyệt OCR từng trang thế nào?",
+                        "Kiểm tra Child Safety GRADE_1_TO_5 ở đâu?",
+                    ]
+                ),
+                [
+                    AssistantQuickAction(
+                        label="Admin Books" if use_en else "Kho sách Admin",
+                        href="/admin/books",
+                    ),
+                    AssistantQuickAction(
+                        label="Quality Hub" if use_en else "Chất lượng sách",
+                        href="/admin/metadata-quality",
+                    ),
+                ],
+            )
+
     chosen: PageContextSpec | None = None
     for spec in PAGE_CONTEXT_SPECS:
         if role_scope not in spec.scopes:
@@ -3127,9 +5010,13 @@ def get_page_context(
             chosen = spec
             break
     if chosen is None:
-        chosen = _DEFAULT_PUBLIC_CONTEXT if role_scope == "public" else _DEFAULT_PARENT_CONTEXT
+        if role_scope == "public":
+            chosen = _DEFAULT_PUBLIC_CONTEXT
+        elif role_scope == "admin":
+            chosen = _DEFAULT_ADMIN_CONTEXT
+        else:
+            chosen = _DEFAULT_PARENT_CONTEXT
 
-    use_en = _prefer_english(locale)
     title = chosen.title_en if use_en else chosen.title_vi
     greeting = chosen.greeting_en if use_en else chosen.greeting_vi
     prompts = list(chosen.prompts_en if use_en else chosen.prompts_vi)
@@ -3243,8 +5130,6 @@ def retrieve_kb_matches(
             direct_score = 1.0
         else:
             unexplained_count = len(query_token_set - article_token_set)
-            # Penalize direct Tier 0 hijacking when the user asks about specific concepts
-            # not addressed in the canned article, or asks long multi-part questions.
             long_query_penalty = max(0, len(query_token_set) - 6) * 0.06
             unexplained_penalty = unexplained_count * 0.16
             coverage_factor = 0.40 + 0.60 * token_overlap
@@ -3284,20 +5169,43 @@ def format_kb_answer(
     )
 
     if not matches:
-        if use_en:
+        if role_scope == "admin":
             reply = (
-                "I'm the ViRead Support Assistant. I can help you with accounts, child profiles, "
-                "choosing or scanning books, reading sessions & microphone checks, progress reports, "
-                "difficult words, reading reminders, and entertainment games.\n"
-                "Try asking a specific question (for example: how to scan a book or fix mic permissions) "
-                "or open Help & Support."
+                (
+                    "I'm the ViRead Admin Operations Assistant. I can help with catalog books & OCR review (/admin/books), "
+                    "Child Safety & metadata quality (/admin/metadata-quality), Karaoke (/admin/karaoke), Parents (/admin/parents), "
+                    "Admin Tasks (/admin/tasks), VietOCR training (/admin/viread-training), Audit Logs (/admin/audit-logs), and System Health (/admin/health)."
+                )
+                if use_en
+                else (
+                    "Tôi là Trợ lý Quản trị ViRead — có thể hỗ trợ về Kho sách & Duyệt OCR (/admin/books), "
+                    "Chất lượng & Child Safety (/admin/metadata-quality), Karaoke (/admin/karaoke), Phụ huynh (/admin/parents), "
+                    "Tác vụ AI (/admin/tasks), Huấn luyện VietOCR (/admin/viread-training), Nhật ký (/admin/audit-logs) và Vận hành (/admin/health)."
+                )
+            )
+        elif role_scope == "public":
+            reply = (
+                (
+                    "I'm the ViRead Assistant. I can explain ViRead's Vietnamese reading features for Grade 1–5 families, "
+                    "help with sign-in (/login), registration (/register), password reset (/forgot-password), and mic/camera readiness."
+                )
+                if use_en
+                else (
+                    "Tôi là Trợ lý ViRead — có thể giới thiệu các tính năng luyện đọc tiếng Việt cho bé lớp 1–5, "
+                    "hỗ trợ Đăng nhập (/login), Đăng ký (/register), Quên mật khẩu (/forgot-password) và chuẩn bị micro/camera."
+                )
             )
         else:
             reply = (
-                "Tôi là Trợ lý ViRead — có thể hướng dẫn bạn về tài khoản, hồ sơ bé, chọn hoặc quét sách giấy, "
-                "buổi đọc & micro/giọng đọc mẫu, báo cáo tiến bộ, từ cần luyện, nhắc đọc qua email và góc giải trí.\n"
-                "Bạn hãy hỏi cụ thể hơn một chút (ví dụ: “Làm sao quét sách giấy?” hoặc “Micro không nhận giọng bé?”) "
-                "hoặc chọn một gợi ý nhanh bên dưới nhé."
+                (
+                    "I'm the ViRead Support Assistant. I can help with child profiles, graded books & Family StoryWeaver, "
+                    "Book Scanner, 5-Minute Reading Train, Phoneme Garden, Duet Reading, progress reports, difficult words, reminders, and games."
+                )
+                if use_en
+                else (
+                    "Tôi là Trợ lý ViRead — có thể hướng dẫn bạn về hồ sơ bé, chọn sách & Family StoryWeaver, quét sách giấy, "
+                    "Chuyến Tàu Đọc 5 Phút, Vườn Âm Vị & Huy hiệu, Đọc đôi, báo cáo tiến bộ, từ cần luyện, nhắc đọc và góc giải trí."
+                )
             )
         return reply, page_actions[:3], page_prompts[:3]
 
@@ -3361,7 +5269,14 @@ def build_rag_grounding_block(
 
     for match in matches:
         art = match.article
+        if role_scope not in art.scopes:
+            continue
         content = art.short_answer_vi if bandwidth == "low" else art.detailed_answer_vi
-        routes = ", ".join(action.href for action in art.actions) or ", ".join(art.route_prefixes)
+        safe_routes = [
+            action.href
+            for action in art.actions
+            if _is_href_allowed_for_scope(action.href, role_scope)
+        ]
+        routes = ", ".join(safe_routes) or ", ".join(art.route_prefixes)
         lines.append(f"[{art.id}] {art.title_vi} (routes: {routes})\n{content}")
     return "\n\n".join(lines)

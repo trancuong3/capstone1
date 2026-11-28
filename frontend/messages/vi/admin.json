@@ -1293,7 +1293,24 @@
       "rejected": "Đã từ chối phiên bản trang này.",
       "suspendedWithTitle": "Đã đình chỉ sách riêng \"{title}\". Gia đình sở hữu không thể mở đọc ngay lập tức."
     },
-    "kpiAria": "Tổng quan hàng đợi sách người dùng"
+    "kpiAria": "Tổng quan hàng đợi sách người dùng",
+    "subtabHardRadar": "Radar mẫu khó OCR",
+    "hardRadar": {
+      "heading": "Radar Mẫu Khó OCR (Tương quan Luyện Đọc → Flow 2)",
+      "privacyNotice": "Chỉ tổng hợp sách danh mục công khai và sách riêng đã bật đồng thuận Flow 2 hợp lệ (đã lọc PII và ẩn danh tuyệt đối tài khoản gia đình).",
+      "loading": "Đang tổng hợp tín hiệu mẫu khó OCR…",
+      "loadError": "Không thể tải Radar mẫu khó OCR. Vui lòng thử lại.",
+      "totalCandidates": "Tổng từ cần ưu tiên rà soát",
+      "catalogCount": "Từ thuộc sách danh mục",
+      "consentedPrivateCount": "Từ sách riêng đã đồng thuận Flow 2",
+      "empty": "Chưa phát hiện mẫu từ OCR độ tin cậy thấp trùng khớp điểm vấp đọc.",
+      "scopeCatalog": "Sách danh mục",
+      "scopeConsentedPrivate": "Flow 2 đã đồng thuận",
+      "scoreLabel": "Điểm ưu tiên {score}/100",
+      "pageLineMeta": "Trang {page} · Dòng {line}",
+      "signalSummary": "Độ tin cậy OCR: {conf}% · Thử đọc lại lỗi: {retries} · Lệch đối chiếu: {mismatches} · Số phiên ẩn danh: {sessions}",
+      "inspectOcrAction": "Mở trang OCR"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "Mở notebook",
     "colabGuideSuffix": ", rồi bấm",
     "colabGuideTitle": "Hướng dẫn vận hành hệ thống huấn luyện",
+    "colabWaitingBadge": "Đang có tác vụ chờ Colab",
+    "colabGuideSummary": "Nhấn Mở Google Colab (1-Click), chọn Runtime → Change runtime type → T4 GPU → Run all và nhập VIREAD_TRAINING_WORKER_TOKEN để tự động nhận và chạy tác vụ.",
+    "colabGuideNoOauthNote": "Không cần thiết lập OAuth hay kết nối Drive thủ công trên Colab; bạn có thể dùng bất kỳ tài khoản Google Colab nào.",
+    "openColabBtn": "Mở Google Colab (1-Click)",
     "driveUnavailableDesc": "Hệ thống hiện chưa có thông tin cấu hình kho lưu trữ đám mây.",
     "driveUnavailableTitle": "Chưa có cấu hình kho lưu trữ",
     "errors": {

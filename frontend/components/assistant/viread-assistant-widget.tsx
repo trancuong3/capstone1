@@ -20,12 +20,15 @@ import { Skeleton } from "@/components/common/skeleton";
 import { useI18n } from "@/hooks/use-i18n";
 import {
   hasMobileBottomNavPath,
+  inferAssistantRoleScope,
   isAdminPath,
   isReadingSessionPath,
 } from "@/lib/assistant/route-helpers";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
 import type {
   AssistantMessage,
+  AssistantRoleScope,
   AssistantVisibilityState,
 } from "@/types/assistant";
 
@@ -321,7 +324,14 @@ export function ViReadAssistantWidget() {
   const [openTrigger, setOpenTrigger] = useState(0);
   const [isImmersiveEvent, setIsImmersiveEvent] = useState(false);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  const [activeUserId, setActiveUserId] = useState<string | null | undefined>(
+    undefined,
+  );
   const shouldRetryOnRemountRef = useRef(false);
+
+  const currentRoleScope = inferAssistantRoleScope(pathname);
+  const prevRoleScopeRef = useRef<AssistantRoleScope>(currentRoleScope);
+  const prevUserIdRef = useRef<string | null | undefined>(undefined);
 
   const visibility: AssistantVisibilityState = isOpen
     ? "open"
@@ -330,6 +340,83 @@ export function ViReadAssistantWidget() {
   const isReadingRoute = isReadingSessionPath(pathname);
   const isAdminRoute = isAdminPath(pathname);
   const hasBottomNav = hasMobileBottomNavPath(pathname) && !isImmersiveEvent;
+
+  useEffect(() => {
+    let active = true;
+    let authEventReceived = false;
+    let subscription: { unsubscribe: () => void } | null = null;
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      void supabase.auth
+        .getSession()
+        .then(({ data }) => {
+          if (!active || authEventReceived) return;
+          const initialUserId = data.session?.user?.id ?? null;
+          if (
+            prevUserIdRef.current !== undefined &&
+            prevUserIdRef.current !== initialUserId
+          ) {
+            setMessages([]);
+          }
+          prevUserIdRef.current = initialUserId;
+          setActiveUserId(initialUserId);
+        })
+        .catch(() => {
+          if (!active || authEventReceived) return;
+          prevUserIdRef.current = null;
+          setActiveUserId(null);
+        });
+
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if (!active) return;
+        authEventReceived = true;
+        const nextUserId = session?.user?.id ?? null;
+        const shouldResetHistory =
+          event === "SIGNED_OUT" ||
+          (prevUserIdRef.current !== undefined &&
+            prevUserIdRef.current !== nextUserId) ||
+          (event === "SIGNED_IN" && prevUserIdRef.current === undefined);
+        prevUserIdRef.current = nextUserId;
+        if (shouldResetHistory) {
+          setMessages([]);
+        }
+        setActiveUserId(nextUserId);
+      });
+      subscription = data.subscription;
+    } catch {
+      queueMicrotask(() => {
+        if (active && !authEventReceived) {
+          prevUserIdRef.current = null;
+          setActiveUserId(null);
+        }
+      });
+    }
+
+    return () => {
+      active = false;
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const roleChanged = prevRoleScopeRef.current !== currentRoleScope;
+    const userChanged =
+      activeUserId !== undefined &&
+      prevUserIdRef.current !== undefined &&
+      prevUserIdRef.current !== activeUserId;
+
+    if (roleChanged) {
+      prevRoleScopeRef.current = currentRoleScope;
+    }
+    if (activeUserId !== undefined) {
+      prevUserIdRef.current = activeUserId;
+    }
+
+    if (roleChanged || userChanged) {
+      setMessages([]);
+    }
+  }, [activeUserId, currentRoleScope]);
 
   useEffect(() => {
     const handleOpenEvent = () => {
@@ -512,6 +599,7 @@ export function ViReadAssistantWidget() {
         positionClass={panelPositionClass}
       >
         <ViReadAssistantPanel
+          activeUserId={activeUserId}
           autoFocusTrigger={openTrigger}
           hasBottomNav={hasBottomNav}
           isAdminRoute={isAdminRoute}

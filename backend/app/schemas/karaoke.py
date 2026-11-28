@@ -223,6 +223,7 @@ class SongCard(Contract):
     max_grade: int
     duration_ms: int
     cover_url: str | None
+    matched_difficult_words: list[str] = Field(default_factory=list)
 
 
 class SongList(Contract):

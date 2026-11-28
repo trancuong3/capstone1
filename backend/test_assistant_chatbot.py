@@ -26,13 +26,24 @@ from app.schemas.assistant import (
     AssistantHistoryTurn,
     AssistantNavigationOffer,
 )
+from app.services import assistant_kb
 from app.services.assistant_kb import (
     KB_ARTICLES,
     PAGE_CONTEXT_SPECS,
+    _ADMIN_ONLY,
+    _ADMIN_STATIC_NAV_ALLOWLIST,
     _NAV_RULES,
+    _PARENT_ONLY,
+    _PARENT_STATIC_NAV_ALLOWLIST,
+    _PUBLIC_ALLOWED_HREFS,
+    _PUBLIC_ONLY,
+    detect_disallowed_scope_request,
+    detect_off_topic_request,
     is_navigation_href_allowed,
+    is_quick_action_href_allowed,
     resolve_navigation_offer,
     retrieve_kb_matches,
+    sanitize_scoped_path,
 )
 from app.services.assistant_service import (
     AssistantConfig,
@@ -744,6 +755,8 @@ class AssistantApiRouteTests(unittest.TestCase):
             "/entertainment/sentence-shooter",
             "/entertainment/picture-description",
             "/karaoke",
+            "/achievements",
+            "/learning-train",
         }
         non_gated_routes = {
             "/settings",
@@ -762,6 +775,17 @@ class AssistantApiRouteTests(unittest.TestCase):
             "/dashboard",
             "/login",
             "/register",
+            "/admin",
+            "/admin/books",
+            "/admin/books/new",
+            "/admin/metadata-quality",
+            "/admin/viread-training",
+            "/admin/health",
+            "/admin/audit-logs",
+            "/admin/parents",
+            "/admin/karaoke",
+            "/admin/karaoke/new",
+            "/admin/tasks",
         }
         seen_hrefs: set[str] = set()
         for rule in _NAV_RULES:
@@ -887,6 +911,330 @@ class AssistantApiRouteTests(unittest.TestCase):
         )
         self.assertIn("GUEST SCOPE", captured_public_system)
         self.assertNotIn("CHILD PROFILE GATE", captured_public_system)
+
+    def test_strictly_disjoint_scopes_and_route_allowlists(self) -> None:
+        self.assertFalse(hasattr(assistant_kb, "_ALL_SCOPES"))
+        self.assertFalse(hasattr(assistant_kb, "_PARENT_SCOPES"))
+        self.assertEqual(_PUBLIC_ONLY, frozenset({"public"}))
+        self.assertEqual(_PARENT_ONLY, frozenset({"parent"}))
+        self.assertEqual(_ADMIN_ONLY, frozenset({"admin"}))
+
+        # Route allowlists are 100% pairwise disjoint and exclude /admin/login.
+        self.assertEqual(_PUBLIC_ALLOWED_HREFS & _PARENT_STATIC_NAV_ALLOWLIST, set())
+        self.assertEqual(_PUBLIC_ALLOWED_HREFS & _ADMIN_STATIC_NAV_ALLOWLIST, set())
+        self.assertEqual(_PARENT_STATIC_NAV_ALLOWLIST & _ADMIN_STATIC_NAV_ALLOWLIST, set())
+        self.assertNotIn("/admin/login", _PUBLIC_ALLOWED_HREFS)
+        self.assertNotIn("/admin/login", _PARENT_STATIC_NAV_ALLOWLIST)
+        self.assertNotIn("/admin/login", _ADMIN_STATIC_NAV_ALLOWLIST)
+
+        for article in KB_ARTICLES:
+            self.assertEqual(
+                len(article.scopes),
+                1,
+                msg=f"KB article {article.id} must belong to strictly one scope",
+            )
+            only_scope = next(iter(article.scopes))
+            for action in article.actions:
+                self.assertTrue(
+                    is_quick_action_href_allowed(action.href, only_scope),
+                    msg=f"Action {action.href} invalid for {only_scope} in {article.id}",
+                )
+                for other_scope in ("public", "parent", "admin"):
+                    if other_scope != only_scope:
+                        self.assertFalse(
+                            is_quick_action_href_allowed(action.href, other_scope),  # type: ignore[arg-type]
+                            msg=f"Action {action.href} leaked from {only_scope} to {other_scope}",
+                        )
+
+        for spec in PAGE_CONTEXT_SPECS:
+            self.assertEqual(
+                len(spec.scopes),
+                1,
+                msg=f"PageContextSpec {spec.prefix} must belong to strictly one scope",
+            )
+            only_scope = next(iter(spec.scopes))
+            if spec.prefix == "/admin/login":
+                self.assertEqual(spec.actions, ())
+            for action in spec.actions:
+                self.assertTrue(is_quick_action_href_allowed(action.href, only_scope))
+
+        # Cross-scope checks on both nav and quick-action helpers
+        self.assertFalse(is_navigation_href_allowed("/dashboard", "admin"))
+        self.assertFalse(is_quick_action_href_allowed("/login", "admin"))
+        self.assertFalse(is_navigation_href_allowed("/login", "parent"))
+        self.assertFalse(is_quick_action_href_allowed("/admin/books", "parent"))
+        self.assertFalse(is_navigation_href_allowed("/achievements", "public"))
+        self.assertFalse(is_quick_action_href_allowed("/admin/login", "public"))
+
+    def test_sanitize_scoped_path_clamps_cross_role_paths(self) -> None:
+        self.assertEqual(sanitize_scoped_path("/admin/health", "public"), "/")
+        self.assertEqual(sanitize_scoped_path("/dashboard", "public"), "/")
+        self.assertEqual(sanitize_scoped_path("/achievements", "public"), "/")
+        self.assertEqual(sanitize_scoped_path("/admin/login", "public"), "/admin/login")
+        self.assertEqual(sanitize_scoped_path("/login", "public"), "/login")
+
+        self.assertEqual(sanitize_scoped_path("/admin/health", "parent"), "/dashboard")
+        self.assertEqual(sanitize_scoped_path("/admin/login", "parent"), "/dashboard")
+        self.assertEqual(sanitize_scoped_path("/login", "parent"), "/dashboard")
+        self.assertEqual(sanitize_scoped_path("/", "parent"), "/dashboard")
+        self.assertEqual(sanitize_scoped_path("/achievements", "parent"), "/achievements")
+        self.assertEqual(sanitize_scoped_path("/learning-train", "parent"), "/learning-train")
+
+        self.assertEqual(sanitize_scoped_path("/dashboard", "admin"), "/admin")
+        self.assertEqual(sanitize_scoped_path("/books", "admin"), "/admin")
+        self.assertEqual(sanitize_scoped_path("/login", "admin"), "/admin")
+        self.assertEqual(sanitize_scoped_path("/admin/login", "admin"), "/admin")
+        self.assertEqual(
+            sanitize_scoped_path("/admin/books/123/pages/456", "admin"),
+            "/admin/books/123/pages/456",
+        )
+
+    def test_four_way_scope_isolation_and_admin_management_allowance(self) -> None:
+        # 1. other_user blocked across all roles
+        for role in ("public", "parent", "admin"):
+            self.assertEqual(
+                detect_disallowed_scope_request(
+                    "Xem lịch sử đọc và email của người dùng khác",
+                    role_scope=role,  # type: ignore[arg-type]
+                ),
+                "other_user",
+            )
+
+        # 2. admin_area blocked for public and parent
+        for role in ("public", "parent"):
+            self.assertEqual(
+                detect_disallowed_scope_request("Mở /admin/books hoặc Flow 2 giúp tôi", role_scope=role),  # type: ignore[arg-type]
+                "admin_area",
+            )
+
+        # 3. customer_area blocked for admin, while genuine admin management is allowed
+        for msg in (
+            "Mở /dashboard giúp tôi",
+            "Chuyển sang trang khách hàng /books",
+            "Vào đọc sách của phụ huynh/bé ở /reading/s1",
+            "Mở /entertainment/memory-game cho bé",
+            "Mở /achievements và /learning-train",
+        ):
+            self.assertEqual(
+                detect_disallowed_scope_request(msg, role_scope="admin"),
+                "customer_area",
+                msg=f"Expected customer_area block for admin query: {msg}",
+            )
+            res = asyncio.run(
+                self.service.chat(
+                    AssistantChatRequest(message=msg, current_path="/admin", locale="vi"),
+                    role_scope="admin",
+                )
+            )
+            self.assertEqual(res.provider_id, "viread_scope_guard")
+            self.assertIsNone(res.navigation_offer)
+            self.assertTrue(all(a.href.startswith("/admin") for a in res.quick_actions))
+
+        for genuine_admin_msg in (
+            "Quản lý tài khoản phụ huynh ở /admin/parents thế nào?",
+            "Mở /admin/books để duyệt OCR",
+            "Thêm bài hát mới ở /admin/karaoke/new",
+            "Xem tác vụ hệ thống tại /admin/tasks",
+        ):
+            self.assertIsNone(
+                detect_disallowed_scope_request(genuine_admin_msg, role_scope="admin"),
+                msg=f"Genuine admin query falsely blocked: {genuine_admin_msg}",
+            )
+
+        # 4. guest_to_customer_area blocked for public, inviting /login & /register
+        for guest_msg in (
+            "Mở /dashboard giúp tôi",
+            "Vào trang Hồ sơ bé (/children)",
+            "Mở /achievements và /learning-train",
+            "Go to /my-books",
+        ):
+            self.assertEqual(
+                detect_disallowed_scope_request(guest_msg, role_scope="public"),
+                "guest_to_customer_area",
+            )
+            res = asyncio.run(
+                self.service.chat(
+                    AssistantChatRequest(message=guest_msg, current_path="/", locale="vi"),
+                    role_scope="public",
+                )
+            )
+            self.assertEqual(res.provider_id, "viread_scope_guard")
+            self.assertIsNone(res.navigation_offer)
+            self.assertEqual([a.href for a in res.quick_actions], ["/login", "/register"])
+
+        # 5. guest_area blocked for parent (/admin/login) and admin (/login, /register, /forgot-password)
+        self.assertEqual(
+            detect_disallowed_scope_request("Mở /admin/login", role_scope="parent"),
+            "guest_area",
+        )
+        self.assertEqual(
+            detect_disallowed_scope_request("Đi đến /login", role_scope="admin"),
+            "guest_area",
+        )
+        self.assertEqual(
+            detect_disallowed_scope_request("Mở /register", role_scope="admin"),
+            "guest_area",
+        )
+
+    def test_viread_only_domain_guard_blocks_off_topic_before_llm(self) -> None:
+        llm_called = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal llm_called
+            llm_called = True
+            return httpx.Response(500)
+
+        service = _make_service(transport=httpx.MockTransport(handler))
+        off_topic_queries = [
+            "Dự báo thời tiết Hà Nội hôm nay có mưa không?",
+            "Giá vàng SJC và Bitcoin hôm nay bao nhiêu?",
+            "Tỷ số bóng đá Ngoại hạng Anh tối qua?",
+            "Cho mình công thức nấu phở bò ngon",
+            "Giải phương trình bậc 2 và tính tích phân x^2 dx",
+            "Viết code Python sắp xếp mảng quick sort",
+            "Đặt vé máy bay và khách sạn du lịch Đà Nẵng",
+            "Bác sĩ cho hỏi uống thuốc gì khi cảm cúm?",
+        ]
+        for role in ("public", "parent", "admin"):
+            for query in off_topic_queries:
+                self.assertTrue(
+                    detect_off_topic_request(query, role),
+                    msg=f"Expected off-topic detection for: {query}",
+                )
+                res = asyncio.run(
+                    service.chat(
+                        AssistantChatRequest(
+                            message=query,
+                            current_path="/admin" if role == "admin" else ("/dashboard" if role == "parent" else "/"),
+                            locale="vi",
+                            force_llm=True,
+                        ),
+                        role_scope=role,  # type: ignore[arg-type]
+                    )
+                )
+                self.assertEqual(res.provider_id, "viread_domain_guard")
+                self.assertEqual(res.source_tier, "tier_0_kb")
+                self.assertIsNone(res.navigation_offer)
+                self.assertTrue(all(is_quick_action_href_allowed(a.href, role) for a in res.quick_actions))  # type: ignore[arg-type]
+
+        self.assertFalse(llm_called)
+
+        # Genuine ViRead features & greetings must NEVER false-positive
+        for safe_msg in (
+            "Xin chào",
+            "Hello",
+            "Vườn Âm Vị và Huy hiệu ở /achievements hoạt động thế nào?",
+            "Chuyến Tàu Đọc 5 Phút là gì?",
+            "Family StoryWeaver và Đọc đôi Duet Reading dùng sao?",
+            "Khóa PIN phụ huynh 4 chữ số bật ở đâu?",
+            "Memory Game lật thẻ chơi thế nào?",
+            "Duyệt OCR Gemini vs Qwen3-VL và VietOCR trên /admin/books",
+        ):
+            self.assertFalse(
+                detect_off_topic_request(safe_msg, "parent"),
+                msg=f"False-positive off-topic detection on: {safe_msg}",
+            )
+
+    def test_full_parent_and_admin_kb_and_context_coverage(self) -> None:
+        parent_queries = [
+            ("Vườn Âm Vị & Huy hiệu và Hộ chiếu Tem Đọc Sách ở đâu?", "/achievements", "achievements_phoneme_garden"),
+            ("Chuyến Tàu Đọc 5 Phút gồm những toa nào?", "/learning-train", "learning_train_daily_practice"),
+            ("Family StoryWeaver và Huy hiệu Độ đọc Tiếng Việt hoạt động sao?", "/my-books", "family_storyweaver_and_readability"),
+            ("Đọc đôi Duet Reading và WASM ngoại tuyến + đếm ngược tức thì?", "/reading/s1", "duet_reading_wasm_countdown"),
+            ("Tải Chứng nhận cột mốc A4 và bật Khóa PIN 4 chữ số ở đâu?", "/reports", "milestone_certificates_and_parent_pin"),
+            ("Dùng ứng dụng ViRead Android APK thế nào?", "/dashboard", "android_apk_mobile_app"),
+        ]
+        for query, path, expected_id in parent_queries:
+            matches = retrieve_kb_matches(query, role_scope="parent", current_path=path)
+            self.assertTrue(matches, msg=f"No parent KB matches for: {query}")
+            self.assertIn(expected_id, [m.article.id for m in matches])
+
+        # Child-gated offers for /achievements and /learning-train
+        ach_offer = resolve_navigation_offer("Mở Vườn Âm Vị & Huy hiệu", role_scope="parent", current_path="/dashboard")
+        self.assertIsNotNone(ach_offer)
+        assert ach_offer is not None
+        self.assertEqual(ach_offer.href, "/achievements")
+        self.assertTrue(ach_offer.requires_child_selection)
+
+        train_offer = resolve_navigation_offer("Mở Chuyến Tàu Đọc 5 Phút", role_scope="parent", current_path="/dashboard")
+        self.assertIsNotNone(train_offer)
+        assert train_offer is not None
+        self.assertEqual(train_offer.href, "/learning-train")
+        self.assertTrue(train_offer.requires_child_selection)
+
+        admin_queries = [
+            ("Tổng quan khu vực quản trị /admin gồm gì?", "/admin", "admin_overview_workspace"),
+            ("Duyệt OCR đối chiếu Gemini vs Qwen3-VL và VietOCR / Tesseract?", "/admin/books/b1/pages/p1", "admin_books_ocr_review"),
+            ("Quản lý bài hát Karaoke và tài khoản phụ huynh?", "/admin/karaoke", "admin_karaoke_and_parents"),
+            ("Kiểm tra Child Safety GRADE_1_TO_5 ở đâu?", "/admin/metadata-quality", "admin_quality_child_safety"),
+            ("Theo dõi tác vụ hệ thống tại /admin/tasks", "/admin/tasks", "admin_task_center_isolation"),
+            ("Huấn luyện VietOCR Flow 2 và Apps Script Bridge", "/admin/viread-training", "admin_training_health_ops"),
+        ]
+        for query, path, expected_id in admin_queries:
+            matches = retrieve_kb_matches(query, role_scope="admin", current_path=path)
+            self.assertTrue(matches, msg=f"No admin KB matches for: {query}")
+            self.assertIn(expected_id, [m.article.id for m in matches])
+
+        admin_ocr_ctx = self.service.get_context_suggestions(
+            current_path="/admin/books/book-1/pages/page-2",
+            role_scope="admin",
+            locale="vi",
+        )
+        self.assertIn("OCR", admin_ocr_ctx.page_title)
+        self.assertTrue(all(a.href.startswith("/admin") for a in admin_ocr_ctx.quick_actions))
+
+        admin_login_ctx = self.service.get_context_suggestions(
+            current_path="/admin/login",
+            role_scope="public",
+            locale="vi",
+        )
+        self.assertEqual(admin_login_ctx.current_path, "/admin/login")
+        self.assertEqual(admin_login_ctx.quick_actions, [])
+
+    def test_resolve_assistant_actor_fails_closed_when_db_role_missing(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from fastapi.security import HTTPAuthorizationCredentials
+        import app.api.routes.assistant as assistant_routes
+
+        uid = uuid4()
+        req = SimpleNamespace(
+            client=SimpleNamespace(host="127.0.0.1"),
+            app=SimpleNamespace(dependency_overrides={}),
+        )
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="valid-unseeded-token")
+
+        with patch.object(assistant_routes, "get_current_parent_id", return_value=uid):
+            actor = asyncio.run(assistant_routes.resolve_assistant_actor(req, creds))
+        self.assertEqual(actor.role_scope, "public")
+        self.assertEqual(actor.subject_key, "ip:127.0.0.1")
+
+        # Separate admin prompt verified too
+        captured_admin_system = ""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal captured_admin_system
+            body = json.loads(request.content.decode("utf-8"))
+            captured_admin_system = body["systemInstruction"]["parts"][0]["text"]
+            return httpx.Response(
+                200,
+                json={"candidates": [{"content": {"parts": [{"text": "Mở /admin/books để duyệt OCR nhé."}]}}]},
+            )
+
+        admin_service = _make_service(groq_key=None, ollama_enabled=False, transport=httpx.MockTransport(handler))
+        asyncio.run(
+            admin_service.chat(
+                AssistantChatRequest(
+                    message="Cách duyệt OCR?",
+                    current_path="/admin/books",
+                    locale="vi",
+                    force_llm=True,
+                ),
+                role_scope="admin",
+            )
+        )
+        self.assertIn("STRICT ADMIN WORKSPACE ISOLATION RULES", captured_admin_system)
+        self.assertNotIn("CHILD PROFILE GATE", captured_admin_system)
 
 
 if __name__ == "__main__":

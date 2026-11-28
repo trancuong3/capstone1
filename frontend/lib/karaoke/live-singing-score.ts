@@ -416,7 +416,7 @@ export class LiveSingingAttempt {
       !Number.isFinite(fromMs) ||
       !Number.isFinite(toMs) ||
       toMs <= fromMs ||
-      toMs - fromMs > 250 ||
+      toMs - fromMs > 350 ||
       fromMs < this.lastAudioEnd
     )
       return;

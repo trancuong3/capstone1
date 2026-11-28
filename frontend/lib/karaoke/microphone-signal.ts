@@ -56,21 +56,39 @@ export function monitorSingingTrack(
   clock: () => number,
   observe: SignalObserver,
   classifier = new SingingSignalClassifier(),
+  sharedContext?: AudioContext,
 ): () => void {
-  if (typeof AudioContext === "undefined") return () => {};
-  let context: AudioContext | undefined;
+  const ownsContext = !sharedContext || sharedContext.state === "closed";
+  if (ownsContext && typeof AudioContext === "undefined") return () => {};
+  let context: AudioContext | undefined = ownsContext
+    ? undefined
+    : sharedContext;
   let source: MediaStreamAudioSourceNode | undefined;
   let analyser: AnalyserNode | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let closed = false;
+  let readyToSample = false;
+  let sampleNow = (_forceFlush = false) => {
+    void _forceFlush;
+  };
   const stop = () => {
+    if (closed) return;
+    closed = true;
     clearInterval(timer);
+    if (readyToSample) {
+      try {
+        sampleNow(true);
+      } catch {
+        /* Best-effort trailing sample flush during teardown. */
+      }
+    }
     source?.disconnect();
     analyser?.disconnect();
-    if (context && context.state !== "closed")
+    if (ownsContext && context && context.state !== "closed")
       void context.close().catch(() => {});
   };
   try {
-    context = new AudioContext();
+    context ??= new AudioContext();
     source = context.createMediaStreamSource(stream);
     analyser = context.createAnalyser();
     analyser.fftSize = 2048;
@@ -78,15 +96,15 @@ export function monitorSingingTrack(
     const samples = new Float32Array(analyser.fftSize);
     let previousMedia = clock();
     let previousWall = performance.now();
-    void context.resume().catch(() => {});
-    timer = setInterval(() => {
+    sampleNow = (forceFlush = false) => {
+      if (closed && !forceFlush) return;
       const now = performance.now();
       const media = clock();
       const from = previousMedia;
       const wallDelta = now - previousWall;
       previousMedia = media;
       previousWall = now;
-      if (media <= from || media - from > 250 || wallDelta > 200) return;
+      if (media <= from || media - from > 350 || wallDelta > 450) return;
       const track = stream.getAudioTracks()[0];
       let activity: SingingActivity = "uncertain";
       if (
@@ -99,7 +117,12 @@ export function monitorSingingTrack(
         activity = classifier.sample(samples, now);
       }
       observe(from, media, activity);
-    }, 50);
+    };
+    if (context.state !== "running") {
+      void context.resume().catch(() => {});
+    }
+    readyToSample = true;
+    timer = setInterval(() => sampleNow(false), 50);
     return stop;
   } catch {
     stop();

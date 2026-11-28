@@ -113,6 +113,7 @@ class FailOcrJobRequest(BaseModel):
     error_code: str = Field(min_length=1, max_length=72)
     error_message: str | None = Field(default=None, max_length=400)
     retryable: bool = True
+    retry_delay_seconds: int | None = Field(default=None, ge=0, le=600)
     engine_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -253,6 +254,7 @@ async def fail_ocr_job(
         error_message=payload.error_message,
         retryable=payload.retryable,
         engine_diagnostics=payload.engine_diagnostics,
+        retry_delay_seconds=payload.retry_delay_seconds,
     )
 
 

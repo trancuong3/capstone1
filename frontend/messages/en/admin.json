@@ -1293,7 +1293,24 @@
       "rejected": "This page version rejected.",
       "suspendedWithTitle": "Private book \"{title}\" suspended. Owning family cannot read it immediately."
     },
-    "kpiAria": "User books moderation overview"
+    "kpiAria": "User books moderation overview",
+    "subtabHardRadar": "OCR Hard-Sample Radar",
+    "hardRadar": {
+      "heading": "OCR Hard-Sample Radar (Reading Friction -> Flow 2)",
+      "privacyNotice": "Aggregates only public catalog books and Flow 2 opted-in private books with verified training rights (PII-filtered and strictly anonymized).",
+      "loading": "Correlating OCR confidence and reading friction signals…",
+      "loadError": "Could not load OCR Hard-Sample Radar. Please try again.",
+      "totalCandidates": "Prioritized hard-sample words",
+      "catalogCount": "Catalog book words",
+      "consentedPrivateCount": "Consented Flow 2 words",
+      "empty": "No low-confidence OCR words correlated with reading retries yet.",
+      "scopeCatalog": "Public catalog",
+      "scopeConsentedPrivate": "Flow 2 opted-in",
+      "scoreLabel": "Priority {score}/100",
+      "pageLineMeta": "Page {page} · Line {line}",
+      "signalSummary": "OCR confidence: {conf}% · Failed retries: {retries} · Alignment mismatches: {mismatches} · Anonymized sessions: {sessions}",
+      "inspectOcrAction": "Inspect OCR Page"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "Open notebook",
     "colabGuideSuffix": ", then click",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "Task waiting for Colab",
+    "colabGuideSummary": "Click Open Google Colab (1-Click), select Runtime → Change runtime type → T4 GPU → Run all, and enter VIREAD_TRAINING_WORKER_TOKEN to automatically claim and run the job.",
+    "colabGuideNoOauthNote": "No OAuth setup or manual Drive mount needed in Colab; any Google Colab account works.",
+    "openColabBtn": "Open Google Colab (1-Click)",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

@@ -23,6 +23,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
@@ -104,6 +105,7 @@ export function BookCoverStudio({
 }: BookCoverStudioProps) {
   const defaultService = useMemo(() => createBookAssetsService(), []);
   const service = injectedService ?? defaultService;
+  const taskCenter = useOptionalAiTaskCenter();
   const tCommon = useTranslations("common");
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -235,6 +237,10 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(saved);
+      taskCenter?.markTargetAlertsSeen({
+        bookId,
+        jobTypes: ["COVER_GENERATE", "STYLE_BIBLE"],
+      });
       emitStudioTasksChanged({ portal: actorRole });
       clearStagedFile();
       setNotice({
@@ -275,6 +281,10 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(null);
+      taskCenter?.markTargetAlertsSeen({
+        bookId,
+        jobTypes: ["COVER_GENERATE", "STYLE_BIBLE"],
+      });
       emitStudioTasksChanged({ portal: actorRole });
       setNotice({
         tone: "info",
@@ -299,6 +309,21 @@ export function BookCoverStudio({
       const res = await service.generateAiCover(bookId, {
         prompt_hint: aiPromptHint.trim() || null,
       });
+      const includeNextSync =
+        res.status !== "QUEUED" &&
+        res.status !== "WAITING_FOR_QUOTA" &&
+        (typeof document === "undefined" ||
+          document.visibilityState !== "hidden");
+      if (res.job_id) {
+        taskCenter?.markTaskAlertSeen(
+          res.job_id,
+          includeNextSync ? { includeNextSync: true } : undefined,
+        );
+      }
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, jobTypes: ["COVER_GENERATE", "STYLE_BIBLE"] },
+        includeNextSync ? { includeNextSync: true } : undefined,
+      );
       emitStudioTasksChanged({ portal: actorRole });
       if (res.status === "SUCCEEDED" && res.cover) {
         setSummary((prev) =>

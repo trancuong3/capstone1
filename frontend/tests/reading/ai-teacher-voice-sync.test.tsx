@@ -13,18 +13,23 @@ import {
   AppStoreProvider,
 } from "@/components/providers/app-store-provider";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
 import { DifficultWordsScreen } from "@/components/reports/difficult-words-screen";
+import { createSpeechService } from "@/lib/api/speech-service";
 import { BrowserWasmTtsClient } from "@/lib/reading/browser-wasm-tts";
 import {
   applyGlobalTeacherVoiceSelection,
+  getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
   getEffectiveVoiceId,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   hydrateTeacherVoiceFromChildProfile,
   lockSessionVoice,
   resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
   STATIC_LOCAL_VOICES,
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
@@ -125,7 +130,7 @@ vi.mock("@/hooks/use-speech-player", () => ({
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
-      getSession: vi.fn().mockResolvedValue({
+      getSession: async () => ({
         data: {
           session: {
             access_token: "fake-test-jwt-token",
@@ -208,6 +213,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetVoiceEngineStatus();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -1414,6 +1421,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
         },
       } as unknown as ReturnType<typeof reportServicesMod.useReportServices>);
 
+    let unmountPanel: (() => void) | null = null;
     try {
       const bookId = "abababab-abab-4bab-8bab-abababababab";
       const { unmount } = render(
@@ -1446,6 +1454,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
           words={[]}
         />,
       );
+      unmountPanel = unmount;
 
       expect(setCacheContextSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1557,8 +1566,8 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
 
       fetchSpy.mockRestore();
       vi.unstubAllEnvs();
-      unmount();
     } finally {
+      unmountPanel?.();
       delete (speechPlayerMock as { setCacheContext?: unknown })
         .setCacheContext;
       reportSpy.mockRestore();
@@ -2052,5 +2061,601 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     expect(client.isReady("female")).toBe(false);
     client.dispose();
     vi.unstubAllGlobals();
+  });
+
+  it("synchronizes the chosen voice end-to-end across book reading, wrong-word retry, phonics, difficult words, and bidirectional persona until changed again", async () => {
+    const { createSpeechService } = await import("@/lib/api/speech-service");
+    const { setSpeechPreferences } =
+      await import("@/lib/reading/speech-preferences");
+    const { buildPhonicsLesson } = await import("@/lib/reading/phonics-lesson");
+
+    // 1. Bidirectional adaptTextToTeacherPersona (Cô <-> Thầy) preserves collective "thầy cô", fairy-tale roles, and quotes
+    expect(
+      adaptTextToTeacherPersona(
+        "Thầy khen bé đọc chữ “thầy” và câu chuyện về thầy thuốc rất giỏi! Phong cách thầy cô rất ấm áp.",
+        "female",
+      ),
+    ).toBe(
+      "Cô khen bé đọc chữ “thầy” và câu chuyện về thầy thuốc rất giỏi! Phong cách thầy cô rất ấm áp.",
+    );
+    expect(
+      adaptTextToTeacherPersona(
+        "Cô khen bé đọc chữ “cô” và câu chuyện về cô tiên rất giỏi! Phong cách thầy cô rất ấm áp.",
+        "male",
+      ),
+    ).toBe(
+      "Thầy khen bé đọc chữ “cô” và câu chuyện về cô tiên rất giỏi! Phong cách thầy cô rất ấm áp.",
+    );
+
+    // 2. Select Thầy Thái Sơn (Miền Nam, 1.05x) -> must stay locked across Reading, Wrong-Word Retry, Phonics, and Difficult Words
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_south_thai_son",
+      gender: "male",
+      region: "south",
+      speed: 1.05,
+    });
+    lockSessionVoice("reading-session-sync-all");
+
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const capturedRequests: Array<{
+      readonly url: string;
+      readonly body: Record<string, unknown>;
+    }> = [];
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = String(input);
+        const body =
+          init?.body && typeof init.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : {};
+        capturedRequests.push({ url, body });
+        if (url.endsWith("/voice/text-to-speech/phonics")) {
+          return new Response(
+            JSON.stringify({
+              audio_base64: btoa("wav-bytes"),
+              content_type: "audio/mpeg",
+              duration_seconds: 0.4,
+              step_timings: [
+                { id: "s0", index: 0, start: 0, end: 0.1 },
+                { id: "s1", index: 1, start: 0.1, end: 0.2 },
+                { id: "s2", index: 2, start: 0.2, end: 0.3 },
+                { id: "s3", index: 3, start: 0.3, end: 0.4 },
+              ],
+              provider: "local",
+              resolved_voice_id: "local_south_thai_son",
+              region: "south",
+              model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        });
+      });
+
+    try {
+      const speechService = createSpeechService();
+      // Reading coaching prompt
+      await speechService.synthesize("Thầy đọc mẫu cho con nhé.", {
+        cacheScope: "COACHING",
+      });
+      // Wrong-word retry single word sample
+      await speechService.synthesize("mốt", {
+        wordSample: true,
+        cacheScope: "CATALOG",
+      });
+      // Difficult words practice (bypassSessionLock: true)
+      await speechService.synthesize("mốt", {
+        wordSample: true,
+        bypassSessionLock: true,
+        cacheScope: "CATALOG",
+      });
+      // Phonics lesson
+      const lesson = buildPhonicsLesson("mốt");
+      expect(lesson.supported).toBe(true);
+      if (lesson.supported) {
+        await speechService.synthesizePhonics?.(
+          lesson.steps.map((s) => ({
+            id: s.id,
+            spokenText: s.spokenText,
+            pauseAfterMs: s.pauseAfterMs,
+          })),
+          { bypassSessionLock: true, cacheScope: "COACHING" },
+        );
+      }
+
+      expect(capturedRequests).toHaveLength(4);
+      for (const req of capturedRequests) {
+        expect(req.body.voice_id).toBe("local_south_thai_son");
+        expect(req.body.speed).toBe(1.05);
+      }
+
+      // Even when stored voiceId is null with explicit male gender (Northern Male), SpeechService MUST still send local_north_thien_minh!
+      capturedRequests.length = 0;
+      applyGlobalTeacherVoiceSelection({
+        voiceId: "local_north_thien_minh",
+        storedVoiceId: null,
+        gender: "male",
+        region: "north",
+        speed: 0.95,
+      });
+      await speechService.synthesize("Con đọc từ trên màn hình nhé.", {
+        bypassSessionLock: true,
+        cacheScope: "COACHING",
+      });
+      expect(capturedRequests[0]?.body.voice_id).toBe("local_north_thien_minh");
+      expect(capturedRequests[0]?.body.speed).toBe(0.95);
+
+      // Switching back to default Cô Trúc Ly (storedVoiceId: null) in the same ms updates existing session lock immediately!
+      applyGlobalTeacherVoiceSelection({
+        voiceId: "local_north_truc_ly",
+        storedVoiceId: null,
+        gender: "female",
+        region: "north",
+        speed: 0.9,
+      });
+      const relocked = lockSessionVoice("reading-session-sync-all");
+      expect(relocked.voiceId).toBe("local_north_truc_ly");
+      expect(relocked.gender).toBe("female");
+      expect(relocked.speed).toBe(0.9);
+      void setSpeechPreferences;
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("resets preview buttons from 'Dừng nghe thử' back to 'Nghe thử giọng' / 'Nghe thử' immediately when playback finishes (including swallowed onended / SpeechSynthesis onend)", async () => {
+    const user = userEvent.setup();
+
+    // 1. Dashboard AiTeacherVoiceSection: button toggles "Nghe thử giọng" -> "Dừng nghe thử" -> "Nghe thử giọng"
+    let resolvePreview!: () => void;
+    speechPlayerPlayMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePreview = resolve;
+        }),
+    );
+
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePreferencesMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    const { unmount } = render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={CHILD_1} />
+      </AppServicesContext.Provider>,
+    );
+
+    const previewBtn = screen.getByTestId("teacher-voice-preview-btn");
+    expect(previewBtn).toHaveTextContent("Nghe thử giọng");
+
+    await user.click(previewBtn);
+    expect(previewBtn).toHaveTextContent("Dừng nghe thử");
+
+    resolvePreview();
+    await waitFor(() => {
+      expect(previewBtn).toHaveTextContent("Nghe thử giọng");
+    });
+    unmount();
+
+    // 2. ReadingVoiceSettings modal: toggles "Nghe thử" -> "Dừng nghe thử" -> "Nghe thử" when async onPreview resolves
+    let resolveModalPreview!: () => void;
+    const modalPreviewMock = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveModalPreview = resolve;
+        }),
+    );
+    const { unmount: unmountModal } = render(
+      <ReadingVoiceSettings
+        isPreviewing={false}
+        onPreview={modalPreviewMock}
+        onStopPreview={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    const modalBtn = await screen.findByRole("button", { name: "Nghe thử" });
+    await user.click(modalBtn);
+    expect(
+      screen.getByRole("button", { name: "Dừng nghe thử" }),
+    ).toBeInTheDocument();
+
+    resolveModalPreview();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Nghe thử" }),
+      ).toBeInTheDocument();
+    });
+    unmountModal();
+
+    // 3. TtsPlayback: resolves promptly when SpeechSynthesis finishes (speaking: true -> false) WITHOUT firing utterance.onend, and bounds voice_preview timeoutMs to 4500ms
+    vi.useFakeTimers();
+    try {
+      let synthSpeaking = false;
+      const fakeSynth = {
+        get speaking() {
+          return synthSpeaking;
+        },
+        pending: false,
+        paused: false,
+        getVoices: () => [
+          {
+            name: "Microsoft NamMinh Online (Natural) - Vietnamese (Vietnam)",
+            voiceURI: "Microsoft NamMinh Online",
+            lang: "vi-VN",
+            localService: false,
+          } as SpeechSynthesisVoice,
+        ],
+        speak: vi.fn((u: { onstart?: () => void }) => {
+          synthSpeaking = true;
+          u.onstart?.();
+          // Simulate browser finishing audio output at 600ms while swallowing `u.onend`!
+          setTimeout(() => {
+            synthSpeaking = false;
+          }, 600);
+        }),
+        cancel: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+      };
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: fakeSynth,
+      });
+      vi.stubGlobal(
+        "SpeechSynthesisUtterance",
+        class NoEndUtterance {
+          text: string;
+          lang = "";
+          rate = 1;
+          voice: SpeechSynthesisVoice | null = null;
+          onstart: (() => void) | null = null;
+          onend: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          onboundary: (() => void) | null = null;
+          constructor(t: string) {
+            this.text = t;
+          }
+        },
+      );
+
+      const synthMock = vi
+        .fn()
+        .mockRejectedValue(new Error("503 LOCAL_TTS_UNAVAILABLE"));
+      const player = new TtsPlayback(
+        {
+          synthesize: synthMock,
+          transcribe: vi.fn(),
+        } as unknown as SpeechService,
+        {
+          listVoices: vi.fn(),
+          synthesizeTimed: vi.fn(),
+        } as unknown as VoiceStudioService,
+      );
+
+      let completed = false;
+      const playPromise = player
+        .play(
+          "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+          {
+            coaching: true,
+            cacheScope: "COACHING",
+            bypassSessionLock: true,
+            utteranceKind: "voice_preview",
+          },
+        )
+        .then(() => {
+          completed = true;
+        });
+
+      // Healthy/unknown local worker gives uncached ONNX CPU preview 12_000ms (never aborts prematurely at 4.5s)
+      await vi.advanceTimersByTimeAsync(10);
+      expect(synthMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ timeoutMs: 12_000 }),
+      );
+      expect(player.getState()).toBe("playing");
+
+      // Advance past 600ms audio finish + two 150ms watchdog ticks (~950ms total, NOT 7-19s!)
+      await vi.advanceTimersByTimeAsync(1_000);
+      await playPromise;
+      expect(completed).toBe(true);
+      expect(player.getState()).toBe("completed");
+
+      // When health already confirms local worker unavailable, preview bounds timeout to 4_500ms
+      synthMock.mockClear();
+      setCachedVoiceEngineHealth({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          available: false,
+          stt_ready: false,
+          tts_ready: false,
+          tts_error_code: "LOCAL_TTS_UNAVAILABLE",
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
+      const offlinePreview = player.play("Chào con nhé.", {
+        coaching: true,
+        cacheScope: "COACHING",
+        bypassSessionLock: true,
+        utteranceKind: "voice_preview",
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await offlinePreview;
+      expect(synthMock).toHaveBeenCalledWith(
+        "Chào con nhé.",
+        expect.objectContaining({ timeoutMs: 4_500 }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves collective 'cô thầy', 'thầy cô giáo', and 'cô thầy giáo' bidirectionally in adaptTextToTeacherPersona", () => {
+    expect(
+      adaptTextToTeacherPersona(
+        "Em chào thầy cô giáo và cô thầy ở trường ạ. Cô khen con!",
+        "male",
+      ),
+    ).toBe("Em chào thầy cô giáo và cô thầy ở trường ạ. Thầy khen con!");
+
+    expect(
+      adaptTextToTeacherPersona(
+        "Em chào thầy cô giáo và cô thầy giáo ở trường ạ. Thầy khen con!",
+        "female",
+      ),
+    ).toBe("Em chào thầy cô giáo và cô thầy giáo ở trường ạ. Cô khen con!");
+  });
+
+  it("persists pending voiceSwitched across reload and auto-resyncs 409 SESSION_VOICE_LOCKED when resuming a server-locked session after a global Dashboard switch", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // 1. Session locked initially to female voice, then switched globally on Dashboard
+    lockSessionVoice("sess-reload-sync", { voiceId: "local_north_truc_ly" });
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+    });
+
+    // Simulate full browser reload: clear in-memory caches while keeping sessionStorage + localStorage
+    resetVoiceLockAndPolicyForTests();
+    resetSpeechPreferencesCache();
+
+    expect(hasPendingSessionVoiceSwitch("sess-reload-sync")).toBe(true);
+    lockSessionVoice("sess-reload-sync");
+
+    fetchSpy.mockResolvedValueOnce(
+      new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200,
+        headers: {
+          "content-type": "audio/mpeg",
+          "x-resolved-voice-id": "local_north_thien_minh",
+        },
+      }),
+    );
+
+    const speechSvc = createSpeechService();
+    await speechSvc.synthesize("Đến lượt con đọc nhé.", {
+      cacheScope: "COACHING",
+    });
+
+    const firstHeaders = new Headers(
+      (fetchSpy.mock.calls[0]?.[1] as RequestInit)?.headers,
+    );
+    expect(firstHeaders.get("X-Voice-Lock-Update")).toBe("1");
+    // Cleared after 200 OK so subsequent utterances do not resend X-Voice-Lock-Update
+    expect(hasPendingSessionVoiceSwitch("sess-reload-sync")).toBe(false);
+
+    // 2. Cross-tab / server-resumed session that was NOT in sessionStorage when Dashboard switched voice:
+    // Backend returns 409 SESSION_VOICE_LOCKED on first attempt -> service auto-retries once with X-Voice-Lock-Update: 1
+    window.sessionStorage.clear();
+    resetVoiceLockAndPolicyForTests();
+    lockSessionVoice("sess-cross-tab-server");
+    expect(hasPendingSessionVoiceSwitch("sess-cross-tab-server")).toBe(false);
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ detail: { code: "SESSION_VOICE_LOCKED" } }),
+          {
+            status: 409,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([9, 8, 7, 6]), {
+          status: 200,
+          headers: {
+            "content-type": "audio/mpeg",
+            "x-resolved-voice-id": "local_north_thien_minh",
+          },
+        }),
+      );
+
+    await speechSvc.synthesize("Con đọc rất tốt!", {
+      cacheScope: "COACHING",
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    const retryHeaders = new Headers(
+      (fetchSpy.mock.calls[2]?.[1] as RequestInit)?.headers,
+    );
+    expect(retryHeaders.get("X-Voice-Lock-Update")).toBe("1");
+    expect(hasPendingSessionVoiceSwitch("sess-cross-tab-server")).toBe(false);
+  });
+
+  it("strips synthetic game_* and practice_* client session IDs across services and keeps region tabs unlocked in ReadingVoiceSettings", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/text-to-speech/timed")) {
+          return new Response(
+            JSON.stringify({
+              audio_base64: btoa("RIFF"),
+              content_type: "audio/mpeg",
+              duration_seconds: 0.4,
+              words: [{ index: 0, start: 0, end: 0.4 }],
+              resolved_voice_id: "local_north_thien_minh",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        });
+      });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const actualStudioMod = await vi.importActual<
+      typeof import("@/lib/api/voice-studio-service")
+    >("@/lib/api/voice-studio-service");
+    const realStudio = actualStudioMod.createVoiceStudioService();
+    const realSpeech = createSpeechService();
+
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+      modelVersion: "vieneu-v3-turbo-onnx-hybrid-3.8.5",
+    });
+    setVoicePolicyPreferences({
+      modelVersion: "vieneu-v3-turbo-onnx-hybrid-3.8.5",
+    });
+    lockSessionVoice("game_memory_11111111");
+
+    await realSpeech.synthesize("Xin chào.", { cacheScope: "COACHING" });
+    await realStudio.synthesizeTimed(["Xin"]);
+    await realStudio.updateSessionVoiceLock?.({
+      sessionId: "game_memory_11111111",
+      voiceId: "local_south_thai_son",
+    });
+
+    // Neither /text-to-speech nor /text-to-speech/timed sends synthetic game_* session_id,
+    // and updateSessionVoiceLock is a no-op for synthetic client locks
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    for (const call of fetchSpy.mock.calls) {
+      const body = JSON.parse(String((call[1] as RequestInit)?.body ?? "{}"));
+      expect(body.session_id).toBeUndefined();
+    }
+
+    // Inside ReadingVoiceSettings while game_memory_* is active, clicking Miền Nam tab MUST switch voice
+    // and preview before listVoices resolves still honors active male persona
+    let resolveListVoices!: (val: unknown) => void;
+    listVoicesMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveListVoices = resolve;
+      }),
+    );
+    const previewSpy = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ReadingVoiceSettings onPreview={previewSpy} onStopPreview={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    expect(
+      screen.queryByTestId("session-voice-lock-badge"),
+    ).not.toBeInTheDocument();
+
+    // Preview while listVoices is still loading speaks male "thầy trò mình"
+    await user.click(screen.getByRole("button", { name: "Nghe thử" }));
+    await waitFor(() => {
+      expect(previewSpy).toHaveBeenCalledWith(
+        "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+      );
+    });
+
+    resolveListVoices({
+      voices: [...STATIC_LOCAL_VOICES],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: true,
+    });
+    await user.click(await screen.findByRole("button", { name: "Miền Nam" }));
+    await waitFor(() => {
+      expect(getEffectiveVoiceId()).toBe("local_south_thai_son");
+    });
+  });
+
+  it("deduplicates concurrent prefetch and play in TtsPlayback and clears activeSessionLock when ComprehensionQuestion unmounts", async () => {
+    // 1. Concurrent prefetch + play with bypassSessionLock shares 1 single synthesize call
+    let resolveSynth!: (blob: Blob) => void;
+    const synthMock = vi.fn(
+      () =>
+        new Promise<Blob>((resolve) => {
+          resolveSynth = resolve;
+        }),
+    );
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
+      this: HTMLMediaElement,
+    ) {
+      queueMicrotask(() => {
+        this.onended?.(new Event("ended"));
+      });
+      return Promise.resolve();
+    });
+    const player = new TtsPlayback(
+      {
+        synthesize: synthMock,
+        transcribe: vi.fn(),
+      } as unknown as SpeechService,
+      {
+        listVoices: vi.fn(),
+        synthesizeTimed: vi.fn(),
+      } as unknown as VoiceStudioService,
+    );
+
+    const p1 = player.prefetch("Đến lượt con đọc nhé.", {
+      coaching: true,
+      bypassSessionLock: true,
+    });
+    const p2 = player.play("Đến lượt con đọc nhé.", {
+      coaching: true,
+      bypassSessionLock: true,
+    });
+    expect(synthMock).toHaveBeenCalledTimes(1);
+    resolveSynth(new Blob([new Uint8Array([1, 2, 3])], { type: "audio/mpeg" }));
+    await Promise.all([p1, p2]);
+    expect(synthMock).toHaveBeenCalledTimes(1);
+
+    // 2. ComprehensionQuestion unmount clears activeSessionId so lock never leaks to Dashboard/Games
+    const comprehensionServices = {
+      comprehensionService: {
+        getQuestion: vi.fn().mockReturnValue(new Promise(() => {})),
+        submitAnswer: vi.fn(),
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+    const { unmount } = render(
+      <AppServicesContext.Provider value={comprehensionServices}>
+        <ComprehensionQuestion
+          child={CHILD_1}
+          onComplete={vi.fn()}
+          sessionId="quiz-session-leak-test"
+        />
+      </AppServicesContext.Provider>,
+    );
+    expect(getActiveSessionVoiceLock()?.sessionId).toBe(
+      "quiz-session-leak-test",
+    );
+    unmount();
+    expect(getActiveSessionVoiceLock()).toBeNull();
   });
 });

@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "Xem khối chữ OCR trang {page}",
     "closePageOcrBlocksAria": "Đóng khối chữ OCR trang {page}",
     "openPageOcrBlocksAction": "Khối chữ OCR",
-    "closePageOcrBlocksAction": "Đóng khối OCR"
+    "closePageOcrBlocksAction": "Đóng khối OCR",
+    "retryAllFailedAction": "Thử lại tất cả trang lỗi ({count})",
+    "retryingAllFailedButton": "Đang xếp hàng thử lại các trang lỗi…",
+    "retryAllSuccessNotice": "Đã xếp hàng thử lại {count} trang lỗi (giữ nguyên các bước đã hoàn tất trước đó).",
+    "retryAllQueuedOfflineNotice": "Đã lưu yêu cầu thử lại cho {count} trang lỗi vào hàng chờ OCR. Các trang sẽ tự động xử lý khi dịch vụ OCR hoạt động trở lại.",
+    "retryAllPartialQueueFullNotice": "Đã xếp hàng thử lại {retried} trang lỗi; còn {skipped} trang đang tạm dừng vì hàng chờ OCR đầy. Vui lòng thử lại sau {seconds} giây.",
+    "retryAllPartialFailedNotice": "Đã xếp hàng thử lại {retried} trang lỗi; {failed} trang chưa thể xếp hàng lúc này.",
+    "retryAllNoneNotice": "Hiện không còn trang lỗi nào cần thử lại.",
+    "queueFullNotice": "Hàng chờ OCR đang đầy. Vui lòng thử lại sau khoảng {seconds} giây."
   },
   "ocrContribution": {
     "cardAria": "Đóng góp mẫu cải thiện khả năng nhận diện chữ cho {title}",
@@ -576,5 +584,35 @@
     "tooEasy": "Nhẹ nhàng (Lớp {min}–{max})",
     "estimatedGrade": "Ước lượng Lớp {min}–{max}",
     "phonicsScore": "Đánh vần {score}%"
+  },
+  "offlinePack": {
+    "heading": "Đọc ngoại tuyến & Phiếu QR sách giấy",
+    "description": "Lưu trọn bộ trang đã xác minh trên thiết bị để bé đọc khi không có mạng, hoặc in phiếu QR kẹp vào sách giấy.",
+    "readyBadge": "Đã lưu ({count} trang)",
+    "downloadButton": "Tải gói đọc ngoại tuyến",
+    "openOfflineReader": "Đọc ngoại tuyến ngay",
+    "removeButton": "Xóa gói ngoại tuyến",
+    "syncPendingButton": "Đồng bộ ({count})",
+    "stageDownloadingPages": "Đang tải gói trang & âm thanh đọc mẫu…",
+    "stageSavingDevice": "Đang lưu an toàn vào bộ nhớ thiết bị…",
+    "savedNotice": "Đã lưu gói đọc ngoại tuyến ({count} trang) trên thiết bị.",
+    "removedNotice": "Đã xóa gói đọc ngoại tuyến của cuốn sách này.",
+    "downloadError": "Chưa tải được gói đọc ngoại tuyến lúc này. Ba mẹ vui lòng thử lại khi mạng ổn định.",
+    "syncedNotice": "Đã đồng bộ thành công {count} phiên đọc ngoại tuyến.",
+    "syncDeferredNotice": "Mạng chưa ổn định — phiên đọc vẫn được giữ an toàn để tự đồng bộ sau.",
+    "queuedOfflineNotice": "Đã lưu phiên đọc trên thiết bị — ViRead sẽ tự đồng bộ ngay khi có mạng.",
+    "readerHeaderBadge": "Chế độ ngoại tuyến · Trang {page}/{total}",
+    "listenCachedAudio": "Nghe mẫu",
+    "tapWordsHint": "Chạm vào từng tiếng bé vừa đọc đúng để đánh dấu tiến độ ngoại tuyến:",
+    "prevPage": "Trang trước",
+    "nextPage": "Trang tiếp",
+    "finishAndQueueSync": "Hoàn tất & Lưu đồng bộ"
+  },
+  "qrCard": {
+    "openButton": "Phiếu QR in ấn",
+    "modalTitle": "Phiếu QR đọc sách ViRead",
+    "eyebrow": "Phiếu QR kẹp sách giấy",
+    "scanInstruction": "Quét mã QR bằng camera điện thoại để mở thẳng trang đọc của cuốn sách này trên ViRead.",
+    "printButton": "In phiếu QR"
   }
 }

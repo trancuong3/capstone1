@@ -43,4 +43,28 @@ describe("Modal", () => {
     await user.tab({ shift: true });
     expect(continueButton).toHaveFocus();
   });
+
+  it("renders bottom-sheet framing with drag handle and safe-area footer on mobile while preserving sm: desktop dialog classes", () => {
+    render(
+      <Modal
+        footer={<button type="button">Lưu</button>}
+        isOpen
+        onClose={vi.fn()}
+        title="Cài đặt"
+      >
+        <p>Nội dung</p>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Cài đặt" });
+    const backdrop = dialog.parentElement as HTMLElement;
+    const footer = dialog.querySelector<HTMLElement>("[data-modal-footer]");
+
+    expect(backdrop.className).toContain("items-end");
+    expect(backdrop.className).toContain("sm:items-center");
+    expect(dialog.className).toContain("rounded-t-[20px]");
+    expect(dialog.className).toContain("max-h-[88dvh]");
+    expect(dialog.className).toContain("sm:rounded-card");
+    expect(footer?.className).toContain("env(safe-area-inset-bottom)");
+  });
 });

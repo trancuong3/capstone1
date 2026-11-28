@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "查看第 {page} 页 OCR 文本块",
     "closePageOcrBlocksAria": "关闭第 {page} 页 OCR 文本块",
     "openPageOcrBlocksAction": "OCR 文本块",
-    "closePageOcrBlocksAction": "关闭 OCR 块"
+    "closePageOcrBlocksAction": "关闭 OCR 块",
+    "retryAllFailedAction": "重试所有失败页面 ({count})",
+    "retryingAllFailedButton": "正在将失败页面加入重试队列…",
+    "retryAllSuccessNotice": "已将 {count} 个失败页面加入重试队列（已完成的步骤将被保留）。",
+    "retryAllQueuedOfflineNotice": "已将 {count} 个失败页面的重试请求保存至 OCR 队列。OCR 服务恢复后将自动处理。",
+    "retryAllPartialQueueFullNotice": "已将 {retried} 个失败页面加入重试队列；由于 OCR 队列已满，其余 {skipped} 个页面已暂停。请在 {seconds} 秒后重试。",
+    "retryAllPartialFailedNotice": "已将 {retried} 个失败页面加入重试队列；{failed} 个页面暂时无法加入队列。",
+    "retryAllNoneNotice": "当前没有需要重试的失败页面。",
+    "queueFullNotice": "OCR 队列当前已满，请约 {seconds} 秒后再试。"
   },
   "ocrContribution": {
     "cardAria": "为《{title}》贡献样本以提升文字识别",
@@ -576,5 +584,35 @@
     "tooEasy": "轻松热身（约{min}–{max}年级）",
     "estimatedGrade": "预估 {min}–{max}年级",
     "phonicsScore": "拼读适读度 {score}%"
+  },
+  "offlinePack": {
+    "heading": "离线阅读包与可打印二维码卡",
+    "description": "将已核验页面保存到本设备以便无网共读，或打印二维码书签夹入纸质书中。",
+    "readyBadge": "已保存（{count}页）",
+    "downloadButton": "下载离线阅读包",
+    "openOfflineReader": "立即离线阅读",
+    "removeButton": "移除离线包",
+    "syncPendingButton": "同步（{count}）",
+    "stageDownloadingPages": "正在下载已核验页面与示范语音…",
+    "stageSavingDevice": "正在安全保存到本地设备存储…",
+    "savedNotice": "已将离线阅读包（{count}页）保存到本设备。",
+    "removedNotice": "已移除本书的离线阅读包。",
+    "downloadError": "暂时无法下载离线阅读包，请在网络稳定时重试。",
+    "syncedNotice": "已成功同步 {count} 次离线阅读记录。",
+    "syncDeferredNotice": "网络不稳定，离线记录已安全保留并将自动重试同步。",
+    "queuedOfflineNotice": "阅读记录已保存在本地，恢复联网后将自动同步。",
+    "readerHeaderBadge": "离线模式 · 第 {page}/{total} 页",
+    "listenCachedAudio": "听示范",
+    "tapWordsHint": "点击孩子已读准的词语以记录离线学习进度：",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
+    "finishAndQueueSync": "完成并排队同步"
+  },
+  "qrCard": {
+    "openButton": "打印二维码卡",
+    "modalTitle": "ViRead 可打印二维码阅读卡",
+    "eyebrow": "纸质书二维码书签",
+    "scanInstruction": "使用手机相机扫描此二维码，即可在 ViRead 中直接打开本书。",
+    "printButton": "打印二维码卡"
   }
 }

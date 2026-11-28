@@ -13,7 +13,14 @@ import {
   resolveOfflineAssistantReply,
   resolvePageGuide,
 } from "@/lib/assistant/page-guides";
-import { isSafeAssistantNavigationHref } from "@/lib/assistant/route-helpers";
+import {
+  ADMIN_ASSISTANT_NAV_ALLOWLIST,
+  hasMobileBottomNavPath,
+  isSafeAssistantNavigationHref,
+  isSafeAssistantQuickActionHref,
+  PARENT_ASSISTANT_NAV_ALLOWLIST,
+  PUBLIC_ASSISTANT_NAV_ALLOWLIST,
+} from "@/lib/assistant/route-helpers";
 
 vi.mock("@/lib/api/browser-auth", () => ({
   getBrowserAccessToken: vi.fn().mockRejectedValue(new Error("NO_SESSION")),
@@ -454,5 +461,303 @@ describe("assistant-service and bandwidth detection", () => {
     expect(
       prepGuide.actions.some((a) => a.href === "/device-permissions"),
     ).toBe(false);
+  });
+
+  it("keeps public, parent, and admin allowlists 100% disjoint across navigation and quick actions", () => {
+    for (const href of PUBLIC_ASSISTANT_NAV_ALLOWLIST) {
+      expect(PARENT_ASSISTANT_NAV_ALLOWLIST.has(href)).toBe(false);
+      expect(ADMIN_ASSISTANT_NAV_ALLOWLIST.has(href)).toBe(false);
+    }
+    for (const href of PARENT_ASSISTANT_NAV_ALLOWLIST) {
+      expect(PUBLIC_ASSISTANT_NAV_ALLOWLIST.has(href)).toBe(false);
+      expect(ADMIN_ASSISTANT_NAV_ALLOWLIST.has(href)).toBe(false);
+    }
+    expect(PUBLIC_ASSISTANT_NAV_ALLOWLIST.has("/admin/login")).toBe(false);
+    expect(PARENT_ASSISTANT_NAV_ALLOWLIST.has("/achievements")).toBe(true);
+    expect(PARENT_ASSISTANT_NAV_ALLOWLIST.has("/learning-train")).toBe(true);
+    expect(
+      Array.from(ADMIN_ASSISTANT_NAV_ALLOWLIST).every(
+        (href) => href === "/admin" || href.startsWith("/admin/"),
+      ),
+    ).toBe(true);
+
+    // Parent cannot use admin or public auth links in nav or quick actions.
+    expect(
+      isSafeAssistantQuickActionHref("/login", "/dashboard", "parent"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantQuickActionHref("/admin/books", "/dashboard", "parent"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantNavigationHref("/login", "/dashboard", "parent"),
+    ).toBe(false);
+
+    // Admin cannot use parent/customer or public guest auth links.
+    expect(isSafeAssistantNavigationHref("/dashboard", "/admin", "admin")).toBe(
+      false,
+    );
+    expect(isSafeAssistantNavigationHref("/books", "/admin", "admin")).toBe(
+      false,
+    );
+    expect(isSafeAssistantNavigationHref("/login", "/admin", "admin")).toBe(
+      false,
+    );
+    expect(
+      isSafeAssistantQuickActionHref("/dashboard", "/admin/books", "admin"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantQuickActionHref("/register", "/admin/books", "admin"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantQuickActionHref("/admin/login", "/admin/books", "admin"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantNavigationHref("/admin/books", "/admin/health", "admin"),
+    ).toBe(true);
+
+    // Public cannot use parent or admin links.
+    expect(
+      isSafeAssistantQuickActionHref("/dashboard", "/login", "public"),
+    ).toBe(false);
+    expect(
+      isSafeAssistantQuickActionHref("/admin/login", "/login", "public"),
+    ).toBe(false);
+
+    // Mobile bottom nav check for /achievements and /learning-train.
+    expect(hasMobileBottomNavPath("/achievements")).toBe(true);
+    expect(hasMobileBottomNavPath("/learning-train")).toBe(true);
+    expect(hasMobileBottomNavPath("/reading/1")).toBe(false);
+    expect(hasMobileBottomNavPath("/children/new")).toBe(false);
+    expect(hasMobileBottomNavPath("/books")).toBe(false);
+    expect(hasMobileBottomNavPath("/admin/login")).toBe(false);
+  });
+
+  it("filters cross-scope quick_actions and normalizes spoofed role_scope in API responses", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: "Cross-scope payload",
+          source_tier: "tier_1_cloud",
+          provider_id: "gemini_primary",
+          model_id: "gemini-3.5-flash-lite",
+          bandwidth_applied: "high",
+          latency_ms: 25,
+          cached: false,
+          role_scope: "parent",
+          quick_actions: [
+            { label: "Admin Books", href: "/admin/books" },
+            { label: "Parent Dashboard", href: "/dashboard" },
+            { label: "Guest Login", href: "/login" },
+          ],
+          suggested_prompts: [],
+          navigation_offer: {
+            label: "Open Parent Dashboard",
+            href: "/dashboard",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const adminNormalized = await sendAssistantMessage(
+      {
+        message: "Mở kho sách",
+        current_path: "/admin/health",
+        locale: "vi",
+        bandwidth_profile: "high",
+        history: [],
+      },
+      { online: true },
+    );
+
+    expect(adminNormalized.role_scope).toBe("admin");
+    expect(adminNormalized.quick_actions).toEqual([
+      { label: "Admin Books", href: "/admin/books" },
+    ]);
+    expect(adminNormalized.navigation_offer).toBeNull();
+  });
+
+  it("provides contextual guides for new parent/admin routes and enforces 4-way scope + ViRead-only domain guards", () => {
+    // New Parent guides
+    const achievementsGuide = resolvePageGuide("/achievements", "vi");
+    expect(achievementsGuide.title).toBe("Vườn Âm Vị & Huy hiệu");
+    expect(achievementsGuide.actions.map((a) => a.href)).toEqual([
+      "/learning-train",
+      "/reports",
+    ]);
+
+    const trainGuide = resolvePageGuide("/learning-train", "en");
+    expect(trainGuide.title).toBe("5-Minute Reading Train");
+    expect(trainGuide.actions.map((a) => a.href)).toEqual([
+      "/achievements",
+      "/reading-preparation",
+    ]);
+
+    // New Admin guides + /admin/login with zero workspace or parent links
+    for (const adminRoute of [
+      "/admin/books",
+      "/admin/karaoke",
+      "/admin/parents",
+      "/admin/tasks",
+      "/admin/audit-logs",
+    ]) {
+      const guide = resolvePageGuide(adminRoute, "vi");
+      expect(guide.prompts).toHaveLength(3);
+      expect(guide.actions.every((a) => a.href.startsWith("/admin/"))).toBe(
+        true,
+      );
+    }
+    const adminLoginGuide = resolvePageGuide("/admin/login", "vi");
+    expect(adminLoginGuide.actions).toEqual([]);
+
+    // 4-way isolation in offline replies
+    const adminToCustomer = resolveOfflineAssistantReply(
+      "Mở /dashboard cho phụ huynh",
+      "/admin/books",
+      "vi",
+      "high",
+    );
+    expect(adminToCustomer.provider_id).toBe("viread_scope_guard");
+    expect(adminToCustomer.navigation_offer).toBeNull();
+
+    const adminToGuest = resolveOfflineAssistantReply(
+      "Mở trang /login của phụ huynh",
+      "/admin/books",
+      "vi",
+      "high",
+    );
+    expect(adminToGuest.provider_id).toBe("viread_scope_guard");
+    expect(adminToGuest.navigation_offer).toBeNull();
+
+    const adminOtherUser = resolveOfflineAssistantReply(
+      "Xem dữ liệu tài khoản phụ huynh khác",
+      "/admin/parents",
+      "vi",
+      "high",
+    );
+    expect(adminOtherUser.provider_id).toBe("viread_scope_guard");
+    expect(adminOtherUser.navigation_offer).toBeNull();
+
+    const adminParentsQuery = resolveOfflineAssistantReply(
+      "Xem trang quản lý phụ huynh",
+      "/admin/health",
+      "vi",
+      "high",
+    );
+    expect(adminParentsQuery.provider_id).toBe("viread_offline_guide");
+    expect(adminParentsQuery.navigation_offer?.href).toBe("/admin/parents");
+
+    const guestToCustomer = resolveOfflineAssistantReply(
+      "Mở /dashboard xem báo cáo",
+      "/login",
+      "vi",
+      "high",
+    );
+    expect(guestToCustomer.provider_id).toBe("viread_scope_guard");
+    expect(guestToCustomer.navigation_offer).toBeNull();
+    expect(
+      guestToCustomer.quick_actions.every((a) =>
+        PUBLIC_ASSISTANT_NAV_ALLOWLIST.has(a.href),
+      ),
+    ).toBe(true);
+
+    const parentToAdminLogin = resolveOfflineAssistantReply(
+      "Mở /admin/login giúp tôi",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(parentToAdminLogin.provider_id).toBe("viread_scope_guard");
+    expect(parentToAdminLogin.navigation_offer).toBeNull();
+
+    // Deterministic ViRead-only off-topic domain guard
+    for (const offTopicPrompt of [
+      "Thời tiết Hà Nội hôm nay thế nào?",
+      "Giá cổ phiếu và bitcoin hôm nay?",
+      "Giải phương trình bậc 2 giúp tôi",
+      "Viết code Python đọc file CSV",
+      "Cách nấu phở bò ngon",
+      "Kê đơn thuốc trị ho cho bé",
+      "Tư vấn pháp luật lao động",
+    ]) {
+      const refused = resolveOfflineAssistantReply(
+        offTopicPrompt,
+        "/dashboard",
+        "vi",
+        "high",
+      );
+      expect(refused.provider_id).toBe("viread_domain_guard");
+      expect(refused.navigation_offer).toBeNull();
+    }
+
+    // Greetings & missing ViRead feature coverage remain allowed
+    const greeting = resolveOfflineAssistantReply(
+      "Xin chào",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(greeting.provider_id).toBe("viread_offline_guide");
+
+    const phonemeGarden = resolveOfflineAssistantReply(
+      "Mở Vườn Âm Vị và huy hiệu của bé",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(phonemeGarden.provider_id).toBe("viread_offline_guide");
+    expect(phonemeGarden.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/achievements",
+        requires_child_selection: true,
+        scenario_id: "phoneme_garden_achievements",
+      }),
+    );
+
+    const learningTrain = resolveOfflineAssistantReply(
+      "Chuyến Tàu Đọc 5 Phút cho bé",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(learningTrain.navigation_offer).toEqual(
+      expect.objectContaining({
+        href: "/learning-train",
+        requires_child_selection: true,
+        scenario_id: "five_minute_learning_train",
+      }),
+    );
+
+    const storyWeaver = resolveOfflineAssistantReply(
+      "Family StoryWeaver tạo truyện thế nào?",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(storyWeaver.reply).toContain("StoryWeaver");
+
+    const duet = resolveOfflineAssistantReply(
+      "Chế độ đọc đôi Duet Reading là gì?",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(duet.reply).toContain("Duet");
+
+    const wasmTts = resolveOfflineAssistantReply(
+      "WASM offline TTS và giọng cô giáo AI",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(wasmTts.reply).toContain("WASM");
+
+    const pinLock = resolveOfflineAssistantReply(
+      "Mã PIN phụ huynh 4 số khóa gì?",
+      "/dashboard",
+      "vi",
+      "high",
+    );
+    expect(pinLock.reply).toContain("4");
   });
 });

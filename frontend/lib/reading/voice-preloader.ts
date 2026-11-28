@@ -350,7 +350,7 @@ function hasBackendTtsCueWarmupTarget(
 
 async function warmInitialTtsCues(
   options: PreloadReadingVoiceOptions,
-  health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth(),
+  health: VoiceEngineHealthSnapshot | null = getVoiceEngineHealthForRouting(),
 ): Promise<void> {
   if (options.warmTts === false) return;
   warmTtsAbortController?.abort();
@@ -656,11 +656,11 @@ export function preloadReadingVoiceEngines(
 /**
  * Called right before opening the microphone in ReadingScreen / PracticePanel:
  * if Browser WASM STT is the selected engine and is still finishing its preload,
- * waits briefly (bounded by `maxWaitMs`) so the child's first spoken words are
- * NEVER dropped during WASM initialization.
+ * waits briefly (bounded to <= 1_500ms) so the child's first spoken words are
+ * not dropped during WASM initialization without ever stalling the mic start.
  */
 export async function awaitSttReadyBeforeListening(
-  maxWaitMs = 5_000,
+  maxWaitMs = 1_500,
 ): Promise<boolean> {
   if (typeof window === "undefined") return true;
   if (isAndroidNativeSpeechAvailable()) {
@@ -670,8 +670,15 @@ export async function awaitSttReadyBeforeListening(
   const startedAt = Date.now();
   let health = getVoiceEngineHealthForRouting();
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
+  if (
+    !permanentlyUnconfigured &&
+    health?.local.available &&
+    health.local.stt_ready
+  ) {
+    return true;
+  }
   if (!health && !permanentlyUnconfigured && maxWaitMs > 0) {
-    const healthBudgetMs = Math.min(1_500, maxWaitMs);
+    const healthBudgetMs = Math.min(1_200, maxWaitMs);
     health = await new Promise<VoiceEngineHealthSnapshot | null>((resolve) => {
       let settled = false;
       const finish = (snap: VoiceEngineHealthSnapshot | null) => {
@@ -702,7 +709,10 @@ export async function awaitSttReadyBeforeListening(
     return true;
   }
   const pending = wasmInitPromise ?? startWasmSttWarmup();
-  const remainingWaitMs = Math.max(0, maxWaitMs - (Date.now() - startedAt));
+  const remainingWaitMs = Math.min(
+    1_500,
+    Math.max(0, maxWaitMs - (Date.now() - startedAt)),
+  );
   if (remainingWaitMs <= 0) return wasmClient.isReady();
   return new Promise<boolean>((resolve) => {
     let settled = false;

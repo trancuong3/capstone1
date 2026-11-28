@@ -10,8 +10,6 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
-
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-anon-key")
@@ -635,79 +633,89 @@ class AiTeacherVoiceSyncTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
-def test_resolve_local_voice_region_gender_does_not_misclassify_nam_names():
-    from app.services.voice_orchestrator import _resolve_local_voice_region_gender
+    def test_resolve_local_voice_region_gender_does_not_misclassify_nam_names(self) -> None:
+        from app.services.voice_orchestrator import _resolve_local_voice_region_gender
 
-    assert _resolve_local_voice_region_gender("local_north_hoang_nam") == (
-        "north",
-        "female",
-    )
-    assert _resolve_local_voice_region_gender("local_north_thien_minh") == (
-        "north",
-        "male",
-    )
-    assert _resolve_local_voice_region_gender("local_south_thai_son") == (
-        "south",
-        "male",
-    )
-    assert _resolve_local_voice_region_gender("custom_mien_nam_voice") == (
-        "south",
-        "female",
-    )
-
-
-@pytest.mark.asyncio
-async def test_elevenlabs_male_voice_never_silently_falls_back_to_female_default(monkeypatch):
-    import httpx
-    from app.providers.elevenlabs_voice_provider import (
-        DEFAULT_VOICE_ID,
-        ElevenLabsVoiceProvider,
-        VoiceProviderError,
-    )
-
-    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-el-key")
-    monkeypatch.setenv("ELEVENLABS_MALE_VOICE_ID", "male-voice-id-123")
-    called_urls: list[str] = []
-
-    class FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def post(self, url: str, **kwargs):
-            called_urls.append(url)
-            return httpx.Response(status_code=404, json={"detail": {"status": "voice_not_found"}})
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-
-    provider = ElevenLabsVoiceProvider()
-    with pytest.raises(VoiceProviderError):
-        await provider.synthesize(
-            text="Thầy chào con",
-            requested_voice_id="male-voice-id-123",
-            speed=1.0,
-            allow_default_fallback=False,
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_north_hoang_nam"),
+            ("north", "female"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_north_thien_minh"),
+            ("north", "male"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("local_south_thai_son"),
+            ("south", "male"),
+        )
+        self.assertEqual(
+            _resolve_local_voice_region_gender("custom_mien_nam_voice"),
+            ("south", "female"),
         )
 
-    assert len(called_urls) == 1
-    assert "male-voice-id-123" in called_urls[0]
-    assert DEFAULT_VOICE_ID not in "".join(called_urls)
+    async def test_elevenlabs_male_voice_never_silently_falls_back_to_female_default(self) -> None:
+        import httpx
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+            VoiceProviderError,
+        )
 
+        called_urls: list[str] = []
 
-def test_voice_routes_lookup_voice_gender_recognizes_elevenlabs_male_env(monkeypatch):
-    from app.api.routes.voice import lookup_voice_gender
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
 
-    monkeypatch.setenv("ELEVENLABS_MALE_VOICE_ID", "male-env-voice")
-    monkeypatch.setenv("ELEVENLABS_FEMALE_VOICE_ID", "female-env-voice")
-    assert lookup_voice_gender("local_north_thien_minh") == "male"
-    assert lookup_voice_gender("google_vi_vn_wavenet_b") == "male"
-    assert lookup_voice_gender("male-env-voice") == "male"
-    assert lookup_voice_gender("female-env-voice") == "female"
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url: str, **kwargs):
+                called_urls.append(url)
+                return httpx.Response(status_code=404, json={"detail": {"status": "voice_not_found"}})
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "ELEVENLABS_API_KEY": "test-el-key",
+                    "ELEVENLABS_MALE_VOICE_ID": "male-voice-id-123",
+                },
+                clear=False,
+            ),
+            patch.object(httpx, "AsyncClient", FakeAsyncClient),
+            self.assertRaises(VoiceProviderError),
+        ):
+            provider = ElevenLabsVoiceProvider(api_key="test-el-key")
+            await provider.synthesize(
+                text="Thầy chào con",
+                requested_voice_id="male-voice-id-123",
+                speed=1.0,
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(len(called_urls), 1)
+        self.assertIn("male-voice-id-123", called_urls[0])
+        self.assertNotIn(DEFAULT_VOICE_ID, "".join(called_urls))
+
+    def test_voice_routes_lookup_voice_gender_recognizes_elevenlabs_male_env(self) -> None:
+        from app.api.routes.voice import lookup_voice_gender
+
+        with patch.dict(
+            os.environ,
+            {
+                "ELEVENLABS_MALE_VOICE_ID": "male-env-voice",
+                "ELEVENLABS_FEMALE_VOICE_ID": "female-env-voice",
+            },
+            clear=False,
+        ):
+            self.assertEqual(lookup_voice_gender("local_north_thien_minh"), "male")
+            self.assertEqual(lookup_voice_gender("google_vi_vn_wavenet_b"), "male")
+            self.assertEqual(lookup_voice_gender("male-env-voice"), "male")
+            self.assertEqual(lookup_voice_gender("female-env-voice"), "female")
 
 
 class OfflineZeroErrorVoiceRegressionTests(unittest.IsolatedAsyncioTestCase):

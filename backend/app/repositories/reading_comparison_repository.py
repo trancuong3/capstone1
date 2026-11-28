@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from uuid import UUID
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,10 +69,16 @@ class ReadingComparisonRepository:
     async def create(
         self, report: ReadingComparisonReport
     ) -> ReadingComparisonReport:
+        if report.Id is None:
+            report.Id = uuid4()
+        if report.CreatedAt is None:
+            report.CreatedAt = datetime.now(timezone.utc)
         self.db.add(report)
         try:
             await self.db.commit()
-            await self.db.refresh(report)
+            sync_session = getattr(self.db, "sync_session", None)
+            if getattr(sync_session, "expire_on_commit", True):
+                await self.db.refresh(report)
         except Exception:
             await self.db.rollback()
             raise

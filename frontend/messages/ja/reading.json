@@ -322,7 +322,8 @@
     "listenPhonics": "フォニックスを聞く",
     "listeningRetry": "聞いています…",
     "readAgain": "もう一度読む",
-    "stepsAria": "フォニックスのステップ"
+    "stepsAria": "フォニックスのステップ",
+    "autoHideHint": "つづりガイド完了 · 読みやすくするため自動で閉じます…"
   },
   "companion": {
     "teacherFemaleTitle": "AI先生",
@@ -349,7 +350,8 @@
     "phrasePhonicsTitle": "フォニックスのお手本 · フレーズを読んでみよう",
     "quickFixTitle": "褒める · すぐに直せましたね！",
     "phonicsWinTitle": "褒める · フォニックスが上手！",
-    "overcameWordTitle": "やったね · 難しい単語をクリア！"
+    "overcameWordTitle": "やったね · 難しい単語をクリア！",
+    "dismissAria": "先生のメッセージを閉じる"
   },
   "tutor": {
     "title": "この単語はどう読むかな？",
@@ -494,5 +496,12 @@
     "subtitle": "今読んだページから語彙や文づくりを楽しく広げましょう。",
     "pictureCta": "ページの絵を説明する",
     "shooterCta": "ページの文を並べ替える"
+  },
+  "lucBat": {
+    "toggleLabel": "六八詩（6-8調）リズムガイド",
+    "toggleActive": "六八詩リズム表示中",
+    "coupletBadge": "6-8対句 {count}組",
+    "beatGuide": "拍子ガイド 2/2/2（6音句）・ 2/2/2/2（8音句）",
+    "rhymePairLabel": "第6音節の脚韻・腰韻: 「{sixthLuc}」↔「{sixthBat}」"
   }
 }

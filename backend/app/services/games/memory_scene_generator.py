@@ -878,12 +878,90 @@ def get_themes_catalog() -> MemoryThemesCatalogRead:
     )
 
 
-def resolve_theme_key(selection: str, seed: int) -> ThemeKey:
+def resolve_theme_key(selection: str | None, seed: int) -> ThemeKey:
     if selection in THEME_BY_KEY:
         return selection  # type: ignore[return-value]
     digest = hashlib.sha256(f"theme:{seed}".encode("utf-8")).digest()
     idx = int.from_bytes(digest[:4], "big") % len(THEME_KEYS)
     return THEME_KEYS[idx]
+
+
+def recommend_theme_for_words(
+    words: list[str] | None,
+    child_grade: int = 2,
+    seed: int = 0,
+    *,
+    exclude_theme: str | None = None,
+) -> ThemeKey:
+    """Select the Memory Game theme whose sprites or story setting best reinforce difficult words."""
+    candidate_themes = (
+        tuple(t for t in THEMES if t.theme_key != exclude_theme)
+        if exclude_theme in THEME_BY_KEY and len(THEMES) > 1
+        else THEMES
+    )
+    normalized_focus = _normalize_focus_words(words)
+    if not normalized_focus:
+        if exclude_theme in THEME_BY_KEY and len(candidate_themes) > 0:
+            digest = hashlib.sha256(f"theme:{seed}".encode("utf-8")).digest()
+            return candidate_themes[int.from_bytes(digest[:4], "big") % len(candidate_themes)].theme_key
+        return resolve_theme_key("random", seed)
+
+    scored: list[tuple[int, int, ThemeKey]] = []
+    for idx, theme in enumerate(candidate_themes):
+        sprites = SPRITES_BY_THEME[theme.theme_key]
+        sprite_hits = sum(
+            1
+            for fw in normalized_focus
+            if any(_sprite_matches_focus_word(sp, fw) for sp in sprites)
+        )
+        theme_text = unicodedata.normalize(
+            "NFC",
+            f"{theme.name_vi} {theme.description_vi} {theme.badge_vi} {theme.creative_prompt_vi}",
+        ).casefold()
+        theme_hits = sum(
+            1
+            for fw in normalized_focus
+            if f" {unicodedata.normalize('NFC', fw).casefold()} "
+            in f" {' '.join(re.sub(r'[^\\w\\s]', ' ', theme_text, flags=re.UNICODE).split())} "
+        )
+        score = sprite_hits * 2 + theme_hits
+        if score > 0:
+            # Prefer gentle outdoor themes slightly for Grade 1-2 ties, richer exploration for older kids.
+            grade_affinity = 1 if (child_grade <= 2 and idx < 3) or (child_grade >= 3 and idx >= 2) else 0
+            scored.append((score, grade_affinity, theme.theme_key))
+
+    if not scored:
+        if exclude_theme in THEME_BY_KEY and len(candidate_themes) > 0:
+            digest = hashlib.sha256(f"theme:{seed}".encode("utf-8")).digest()
+            return candidate_themes[int.from_bytes(digest[:4], "big") % len(candidate_themes)].theme_key
+        return resolve_theme_key("random", seed)
+
+    top_score = max(item[0] for item in scored)
+    best_candidates = [item for item in scored if item[0] == top_score]
+    top_affinity = max(item[1] for item in best_candidates)
+    final_pool = [item[2] for item in best_candidates if item[1] == top_affinity]
+    if len(final_pool) == 1:
+        return final_pool[0]
+    digest = hashlib.sha256(f"theme-rec:{seed}".encode("utf-8")).digest()
+    return final_pool[int.from_bytes(digest[:4], "big") % len(final_pool)]
+
+
+def _select_scene_focus_words(
+    matched_focus_words: list[str],
+    normalized_focus: tuple[str, ...],
+    *,
+    limit: int = 3,
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for word in [*matched_focus_words, *normalized_focus]:
+        key = unicodedata.normalize("NFC", word).casefold()
+        if key and key not in seen:
+            seen.add(key)
+            ordered.append(word)
+            if len(ordered) >= limit:
+                break
+    return ordered
 
 
 def _normalize_focus_words(focus_words: list[str] | None) -> tuple[str, ...]:
@@ -1161,6 +1239,7 @@ def generate_scene_spec(
     ]
 
     guided_questions = _build_guided_questions(objects)
+    scene_focus_words = _select_scene_focus_words(matched_focus_words, normalized_focus, limit=3)
     matched_lower = {w.casefold() for w in matched_focus_words}
     creative_focus_words = [
         w for w in normalized_focus if w.casefold() not in matched_lower
@@ -1180,6 +1259,7 @@ def generate_scene_spec(
         observation_tips_vi=observation_tips,
         guided_questions_vi=guided_questions,
         creative_prompt_vi=theme.creative_prompt_vi,
+        focus_words=scene_focus_words,
         matched_focus_words=matched_focus_words,
         creative_focus_words=creative_focus_words,
     )

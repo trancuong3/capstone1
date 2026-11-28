@@ -164,7 +164,10 @@
     "childEmptyDesc": "Noch kein Kinderprofil vorhanden. Erstelle eines für eigene Bücher, Stimme und Lernfortschritt!",
     "childCreateBtn": "Kinderprofil erstellen",
     "childPickerPrompt": "Für welches Kind möchtest du diese Seite öffnen?",
-    "quickActionGateIntro": "Vor dem Öffnen von **{label}** prüfen wir kurz das ausgewählte Kinderprofil."
+    "quickActionGateIntro": "Vor dem Öffnen von **{label}** prüfen wir kurz das ausgewählte Kinderprofil.",
+    "scopePublic": "Gästehilfe",
+    "scopeParent": "Elternhilfe",
+    "scopeAdmin": "Admin-Hilfe"
   },
   "taskCenter": {
     "backgroundProcessing": "Hintergrundverarbeitung läuft…",

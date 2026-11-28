@@ -1,10 +1,13 @@
 "use client";
 
 import {
+  BookmarkPlus,
+  BookOpen,
   Camera,
   CheckCircle2,
   Clock3,
   FileImage,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -28,11 +31,18 @@ import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-b
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
+import {
+  InstantScanReadAlongPanel,
+  tokenizeScannedTextToWords,
+} from "@/components/reading/instant-scan-readalong-panel";
+import { SaveScanToMyBooksModal } from "@/components/reading/save-scan-to-my-books-modal";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import {
   cancelScanPageOcrJob,
   enqueueScanPageOcrJob,
@@ -53,9 +63,7 @@ import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
 
 function dispatchTasksChanged(): void {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
-  }
+  emitStudioTasksChanged({ portal: "parent" });
 }
 
 interface BookScannerScreenProps {
@@ -244,6 +252,7 @@ type LocalOcrScanState =
   | {
       readonly status: "succeeded";
       readonly fileName: string;
+      readonly file: File | null;
       readonly wasOptimized: boolean;
       readonly result: LocalOcrPageScanDTO;
     }
@@ -258,7 +267,7 @@ type LocalOcrScanState =
     };
 
 export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
-  const { formatNumber, formatTime } = useI18n();
+  const { formatNumber, formatTime, t: tRoot } = useI18n();
   const authRuntime = useAuthRuntime();
   const actorUserId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
@@ -266,6 +275,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const tc = useTranslations("child");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const taskCenter = useOptionalAiTaskCenter();
+  const taskCenterRef = useRef(taskCenter);
+  useEffect(() => {
+    taskCenterRef.current = taskCenter;
+  }, [taskCenter]);
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const [cameraStarted, setCameraStarted] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
@@ -277,6 +291,57 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   >([]);
   const [queuedJobsPage, setQueuedJobsPage] = useState(1);
   const [checkingQueueNow, setCheckingQueueNow] = useState(false);
+  const [scanActionUi, setScanActionUi] = useState<{
+    readonly scanJobId: string | null;
+    readonly editedOcrText: string | null;
+    readonly isEditingOcrText: boolean;
+    readonly isInstantReadAlongOpen: boolean;
+    readonly isSaveScanModalOpen: boolean;
+  }>({
+    scanJobId: null,
+    editedOcrText: null,
+    isEditingOcrText: false,
+    isInstantReadAlongOpen: false,
+    isSaveScanModalOpen: false,
+  });
+
+  const succeededScanJobId =
+    ocrState.status === "succeeded" ? ocrState.result.scan_job_id : null;
+  const activeScanUi =
+    scanActionUi.scanJobId === succeededScanJobId
+      ? scanActionUi
+      : {
+          scanJobId: succeededScanJobId,
+          editedOcrText: null,
+          isEditingOcrText: false,
+          isInstantReadAlongOpen: false,
+          isSaveScanModalOpen: false,
+        };
+  const updateScanActionUi = useCallback(
+    (
+      patch: Partial<{
+        readonly editedOcrText: string | null;
+        readonly isEditingOcrText: boolean;
+        readonly isInstantReadAlongOpen: boolean;
+        readonly isSaveScanModalOpen: boolean;
+      }>,
+    ) => {
+      setScanActionUi((prev) => {
+        const base =
+          prev.scanJobId === succeededScanJobId
+            ? prev
+            : {
+                scanJobId: succeededScanJobId,
+                editedOcrText: null,
+                isEditingOcrText: false,
+                isInstantReadAlongOpen: false,
+                isSaveScanModalOpen: false,
+              };
+        return { ...base, ...patch };
+      });
+    },
+    [succeededScanJobId],
+  );
 
   const queuedJobsRef = useRef<readonly LocalOcrPageScanJobDTO[]>([]);
   useEffect(() => {
@@ -363,6 +428,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       let currentJob = initialJob;
       let onlineAttempts = 0;
       let offlineAttempts = 0;
+      let prevStatus = initialJob.status;
+      let prevWorkerPhase = initialJob.worker_phase ?? null;
+      let prevQueuePosition = initialJob.queue_position ?? null;
+      let lastQueuedListRefreshAt = Date.now();
+      const QUEUED_LIST_REFRESH_INTERVAL_MS = 30_000;
 
       while (true) {
         if (
@@ -381,11 +451,20 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(actorUserId, null);
+          if (
+            typeof document === "undefined" ||
+            document.visibilityState !== "hidden"
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(currentJob.job_id, {
+              includeNextSync: true,
+            });
+          }
           dispatchTasksChanged();
           void refreshQueuedJobs();
           setOcrState({
             status: "succeeded",
             fileName: resolvedFileName,
+            file,
             wasOptimized,
             result: currentJob.result,
           });
@@ -399,6 +478,14 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(actorUserId, null);
+          if (
+            typeof document === "undefined" ||
+            document.visibilityState !== "hidden"
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(currentJob.job_id, {
+              includeNextSync: true,
+            });
+          }
           dispatchTasksChanged();
           const remaining = queuedJobsRef.current.filter(
             (item) => item.job_id !== currentJob.job_id,
@@ -487,12 +574,39 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         let transientFailures = 0;
         while (true) {
           try {
-            currentJob = await getScanPageOcrJob(
+            const nextJob = await getScanPageOcrJob(
               currentJob.job_id,
               controller.signal,
             );
             setCheckingQueueNow(false);
-            void refreshQueuedJobs();
+
+            const nextQueuePos = nextJob.queue_position ?? null;
+            const nextPhase = nextJob.worker_phase ?? null;
+            const statusChanged = nextJob.status !== prevStatus;
+            const queueAdvanced =
+              typeof nextQueuePos === "number" &&
+              (prevQueuePosition === null || nextQueuePos < prevQueuePosition);
+            const phaseOrStatusChanged =
+              statusChanged || nextPhase !== prevWorkerPhase;
+
+            if (queueAdvanced || phaseOrStatusChanged) {
+              onlineAttempts = 0;
+            }
+            prevStatus = nextJob.status;
+            prevWorkerPhase = nextPhase;
+            prevQueuePosition = nextQueuePos;
+            currentJob = nextJob;
+
+            const nowMs = Date.now();
+            if (
+              isActiveScanJobStatus(nextJob.status) &&
+              (statusChanged ||
+                nowMs - lastQueuedListRefreshAt >=
+                  QUEUED_LIST_REFRESH_INTERVAL_MS)
+            ) {
+              lastQueuedListRefreshAt = nowMs;
+              void refreshQueuedJobs();
+            }
             break;
           } catch (pollErr) {
             if (
@@ -654,9 +768,19 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           if (!active || restoreController.signal.aborted) return;
           if (savedJob.status === "SUCCEEDED" && savedJob.result) {
             writeStoredScanJobId(actorUserId, null);
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(savedJob.job_id, {
+                includeNextSync: true,
+              });
+            }
+            dispatchTasksChanged();
             setOcrState({
               status: "succeeded",
               fileName: savedJob.file_name || "book-page.jpg",
+              file: null,
               wasOptimized: false,
               result: savedJob.result,
             });
@@ -665,6 +789,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             savedJob.status === "CANCELLED"
           ) {
             writeStoredScanJobId(actorUserId, null);
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(savedJob.job_id, {
+                includeNextSync: true,
+              });
+            }
+            dispatchTasksChanged();
           }
         }
       } catch {
@@ -807,6 +940,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           setOcrState({
             status: "succeeded",
             fileName: uploadFile.name,
+            file: uploadFile,
             wasOptimized,
             result,
           });
@@ -878,6 +1012,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         (item) => item.job_id !== jobId,
       );
       setQueuedJobs(remaining);
+      taskCenterRef.current?.markTaskAlertSeen(jobId);
       void cancelScanPageOcrJob(jobId)
         .catch(() => undefined)
         .finally(() => {
@@ -917,6 +1052,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         (item) => item.job_id !== jobIdToCancel,
       );
       setQueuedJobs(remaining);
+      taskCenterRef.current?.markTaskAlertSeen(jobIdToCancel);
       void cancelScanPageOcrJob(jobIdToCancel)
         .catch(() => undefined)
         .finally(() => {
@@ -1470,69 +1606,237 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           className="flex flex-col gap-4 rounded-card border border-emerald-200 bg-white p-4 shadow-sm sm:p-6"
           data-testid="local-ocr-result"
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <CheckCircle2
-                aria-hidden="true"
-                className="mt-0.5 size-6 shrink-0 text-emerald-600"
-              />
-              <div>
-                <h2 className="text-lg font-extrabold text-ink">
-                  {t("scanner.resultTitle")}
-                </h2>
-                <p className="mt-1 text-sm text-muted">
-                  {ocrState.result.message}
-                </p>
-              </div>
-            </div>
-            <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
-              {t("scanner.wordCountSummary", {
-                count: formatNumber(ocrState.result.word_count),
-              })}
-            </span>
-          </div>
+          {(() => {
+            const {
+              editedOcrText,
+              isEditingOcrText,
+              isInstantReadAlongOpen,
+              isSaveScanModalOpen,
+            } = activeScanUi;
+            const effectiveOcrText =
+              editedOcrText !== null ? editedOcrText : ocrState.result.ocr_text;
+            const isUnmatchedWithText =
+              !ocrState.result.matched &&
+              Boolean(
+                effectiveOcrText.trim() || ocrState.result.ocr_text.trim(),
+              );
+            const isOcrTextEdited =
+              editedOcrText !== null &&
+              editedOcrText.trim() !== ocrState.result.ocr_text.trim();
+            const displayWordCount = isOcrTextEdited
+              ? tokenizeScannedTextToWords(effectiveOcrText).length
+              : ocrState.result.word_count;
 
-          <div
-            className="viread-learning-content max-h-60 overflow-y-auto rounded-2xl border border-border bg-cream p-4 text-base leading-relaxed whitespace-pre-wrap text-ink"
-            data-testid="local-ocr-text"
-            dir="ltr"
-            lang="vi"
-          >
-            {ocrState.result.ocr_text}
-          </div>
+            return (
+              <>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2
+                      aria-hidden="true"
+                      className="mt-0.5 size-6 shrink-0 text-emerald-600"
+                    />
+                    <div>
+                      <h2 className="text-lg font-extrabold text-ink">
+                        {t("scanner.resultTitle")}
+                      </h2>
+                      <p className="mt-1 text-sm text-muted">
+                        {ocrState.result.message}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isOcrTextEdited ? (
+                      <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-950">
+                        {tRoot("scanInstant.editedBadge")}
+                      </span>
+                    ) : null}
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+                      {t("scanner.wordCountSummary", {
+                        count: formatNumber(displayWordCount),
+                      })}
+                    </span>
+                  </div>
+                </div>
 
-          <div className="flex flex-wrap gap-3">
-            {ocrState.result.matched &&
-            ocrState.result.matched_book_id &&
-            ocrState.result.matched_page ? (
-              <Button
-                className="min-h-14 w-full sm:w-auto"
-                onClick={() =>
-                  handleBookPageDetected(
-                    ocrState.result.matched_book_id!,
-                    ocrState.result.matched_page!,
-                    ocrState.result.match_confidence,
-                  )
-                }
-              >
-                {t("scanner.openMatchedPage", {
-                  page: formatNumber(ocrState.result.matched_page.page_number),
-                })}
-              </Button>
-            ) : (
-              <ButtonLink className="min-h-14 w-full sm:w-auto" href="/books">
-                {t("scanner.openLibraryForReading")}
-              </ButtonLink>
-            )}
-            <Button
-              className="min-h-14 w-full sm:w-auto"
-              onClick={() => fileInputRef.current?.click()}
-              variant="secondary"
-            >
-              <FileImage aria-hidden="true" className="size-5" />
-              {t("scanner.scanAnotherImage")}
-            </Button>
-          </div>
+                {isUnmatchedWithText ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200/80 bg-sky/45 px-3.5 py-2.5 text-xs text-ink">
+                    <span data-testid="scanner-auto-ocr-calm-notice">
+                      {tRoot("scanInstant.autoOcrCalmNotice")}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {isOcrTextEdited ? (
+                        <button
+                          className="font-semibold text-primary underline hover:text-primary-hover"
+                          data-testid="scanner-reset-ocr-text-btn"
+                          onClick={() =>
+                            updateScanActionUi({ editedOcrText: null })
+                          }
+                          type="button"
+                        >
+                          {tRoot("scanInstant.quickEditReset")}
+                        </button>
+                      ) : null}
+                      <button
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border bg-white px-3 font-bold text-ink hover:bg-canvas"
+                        data-testid="scanner-quick-edit-ocr-btn"
+                        onClick={() =>
+                          updateScanActionUi({
+                            isEditingOcrText: !isEditingOcrText,
+                          })
+                        }
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" className="size-3.5" />
+                        {isEditingOcrText
+                          ? tRoot("scanInstant.quickEditDone")
+                          : tRoot("scanInstant.quickEditToggle")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {isEditingOcrText && isUnmatchedWithText ? (
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      className="sr-only"
+                      htmlFor="scanner-inline-ocr-editor"
+                    >
+                      {tRoot("scanInstant.quickEditLabel")}
+                    </label>
+                    <textarea
+                      className="viread-learning-content min-h-32 w-full rounded-2xl border border-primary/40 bg-cream p-4 text-base leading-relaxed text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      data-testid="scanner-inline-ocr-textarea"
+                      dir="ltr"
+                      id="scanner-inline-ocr-editor"
+                      lang="vi"
+                      onChange={(event) =>
+                        updateScanActionUi({
+                          editedOcrText: event.target.value,
+                        })
+                      }
+                      placeholder={tRoot("scanInstant.quickEditPlaceholder")}
+                      value={effectiveOcrText}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="viread-learning-content max-h-60 overflow-y-auto rounded-2xl border border-border bg-cream p-4 text-base leading-relaxed whitespace-pre-wrap text-ink"
+                    data-testid="local-ocr-text"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {effectiveOcrText}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-3">
+                  {ocrState.result.matched &&
+                  ocrState.result.matched_book_id &&
+                  ocrState.result.matched_page ? (
+                    <Button
+                      className="min-h-14 w-full sm:w-auto"
+                      onClick={() =>
+                        handleBookPageDetected(
+                          ocrState.result.matched_book_id!,
+                          ocrState.result.matched_page!,
+                          ocrState.result.match_confidence,
+                        )
+                      }
+                    >
+                      {t("scanner.openMatchedPage", {
+                        page: formatNumber(
+                          ocrState.result.matched_page.page_number,
+                        ),
+                      })}
+                    </Button>
+                  ) : isUnmatchedWithText ? (
+                    <>
+                      <Button
+                        className="min-h-14 w-full sm:w-auto"
+                        data-testid="instant-scan-readalong-cta"
+                        disabled={!effectiveOcrText.trim()}
+                        onClick={() =>
+                          updateScanActionUi({
+                            isEditingOcrText: false,
+                            isInstantReadAlongOpen: true,
+                          })
+                        }
+                        variant="primary"
+                      >
+                        <BookOpen aria-hidden="true" className="size-5" />
+                        {tRoot("scanInstant.readNowCta")}
+                      </Button>
+                      <Button
+                        className="min-h-14 w-full sm:w-auto"
+                        data-testid="save-scan-to-my-books-cta"
+                        disabled={!effectiveOcrText.trim()}
+                        onClick={() =>
+                          updateScanActionUi({ isSaveScanModalOpen: true })
+                        }
+                        variant="secondary"
+                      >
+                        <BookmarkPlus aria-hidden="true" className="size-5" />
+                        {tRoot("scanInstant.saveToMyBooksCta")}
+                      </Button>
+                      <ButtonLink
+                        className="min-h-14 w-full sm:w-auto"
+                        href="/books"
+                        variant="secondary"
+                      >
+                        {t("scanner.openLibraryForReading")}
+                      </ButtonLink>
+                    </>
+                  ) : (
+                    <ButtonLink
+                      className="min-h-14 w-full sm:w-auto"
+                      href="/books"
+                    >
+                      {t("scanner.openLibraryForReading")}
+                    </ButtonLink>
+                  )}
+                  <Button
+                    className="min-h-14 w-full sm:w-auto"
+                    onClick={() => fileInputRef.current?.click()}
+                    variant="secondary"
+                  >
+                    <FileImage aria-hidden="true" className="size-5" />
+                    {t("scanner.scanAnotherImage")}
+                  </Button>
+                </div>
+
+                {isUnmatchedWithText && isInstantReadAlongOpen ? (
+                  <InstantScanReadAlongPanel
+                    child={child}
+                    isTextEdited={isOcrTextEdited}
+                    ocrText={effectiveOcrText}
+                    onChangeOcrText={(next) =>
+                      updateScanActionUi({ editedOcrText: next })
+                    }
+                    onClose={() =>
+                      updateScanActionUi({ isInstantReadAlongOpen: false })
+                    }
+                    onResetOcrText={() =>
+                      updateScanActionUi({ editedOcrText: null })
+                    }
+                  />
+                ) : null}
+
+                {isUnmatchedWithText ? (
+                  <SaveScanToMyBooksModal
+                    defaultGrade={child.grade}
+                    file={ocrState.file}
+                    fileName={ocrState.fileName}
+                    ocrText={effectiveOcrText}
+                    ocrWords={ocrState.result.words}
+                    onClose={() =>
+                      updateScanActionUi({ isSaveScanModalOpen: false })
+                    }
+                    open={isSaveScanModalOpen}
+                  />
+                ) : null}
+              </>
+            );
+          })()}
         </section>
       ) : null}
 

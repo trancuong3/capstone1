@@ -265,29 +265,42 @@ async def delete_viread_training_job(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a terminal queue entry while retaining its dataset and run artifacts."""
+    """Delete a terminal or unleased queued entry while retaining its dataset and run artifacts."""
     service = VireadOcrTrainingService(db)
     await service._admin(actor_id)
-    local_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-    protected_statuses = [
-        "FALLBACK_QUEUED_COLAB",
+    active_running_statuses = [
         "COLAB_RUNNING",
-        "WAITING_FOR_DATA",
-        "WAITING_FOR_COLAB_WORKER",
+        "LOCAL_RUNNING",
         "COLAB_SUBMITTING",
         "COLAB_SUBMITTED",
         "COLAB_EXECUTING",
     ]
-    if local_enabled:
-        protected_statuses.extend(["QUEUED", "LOCAL_RUNNING"])
+    unleased_queued_statuses = [
+        "WAITING_FOR_COLAB_WORKER",
+        "FALLBACK_QUEUED_COLAB",
+        "WAITING_FOR_DATA",
+        "QUEUED",
+    ]
     result = await db.execute(text("""
         DELETE FROM public.viread_ocr_training_jobs
         WHERE id=:job_id
-          AND NOT (status = ANY(CAST(:protected_statuses AS text[])))
+          AND (
+              (
+                  status = ANY(CAST(:unleased_queued_statuses AS text[]))
+                  AND worker_id IS NULL
+                  AND run_id IS NULL
+              )
+              OR (
+                  NOT (status = ANY(CAST(:active_running_statuses AS text[])))
+                  AND NOT (status = ANY(CAST(:unleased_queued_statuses AS text[])))
+              )
+          )
         RETURNING id
-    """), {"job_id": job_id, "protected_statuses": protected_statuses})
+    """), {
+        "job_id": job_id,
+        "active_running_statuses": active_running_statuses,
+        "unleased_queued_statuses": unleased_queued_statuses,
+    })
     deleted_id = result.scalar_one_or_none()
     if deleted_id is None:
         exists = await db.execute(text(
@@ -297,7 +310,7 @@ async def delete_viread_training_job(
         await db.rollback()
         if current_status is None:
             raise HTTPException(status_code=404, detail="Training job was not found")
-        raise HTTPException(status_code=409, detail="A queued or running training job cannot be deleted")
+        raise HTTPException(status_code=409, detail="An active or leased training job cannot be deleted")
     await db.commit()
     return {"job_id": deleted_id, "deleted": True}
 
@@ -1190,6 +1203,18 @@ async def stream_viread_colab_job_artifact(
                 JOIN public.viread_ocr_training_runs pr ON pr.id = pc.run_id
                 WHERE pr.checkpoint_sha256 = :parent_sha
                   AND pc.storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_dataset_versions dv,
+                jsonb_array_elements(
+                    CASE
+                        WHEN jsonb_typeof(dv.provenance->'pack_shards') = 'array'
+                        THEN dv.provenance->'pack_shards'
+                        ELSE '[]'::jsonb
+                    END
+                ) AS shard
+                WHERE dv.id IN (CAST(:dataset_id AS uuid), CAST(:locked_id AS uuid))
+                  AND shard->>'storage_ref' = :ref
             )
         ) AS is_authorized
     """, {

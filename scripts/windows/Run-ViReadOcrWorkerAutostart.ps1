@@ -7,7 +7,7 @@
     - Supports -RespectStopSentinel for periodic Task Scheduler watchdog runs while clearing pre-session stale sentinels on logon.
     - Dynamically loads VIREAD_OCR_BACKEND_URL (fallback VIREAD_BACKEND_URL) and VIREAD_OCR_WORKER_TOKEN from F:\c1\tools\viread-workers.env (UTF-8 BOM safe).
     - Prioritizes CUDA .venv Python and validates ocr_worker\worker.py presence before selecting repoRoot.
-    - Manages .venv child process trees, BelowNormal priority propagation, port 8020 orphan cleanup, and 30s health watchdog.
+    - Manages .venv child process trees, configurable process priority propagation (default Normal), port 8020 orphan cleanup, and proxy-free 30s health watchdog.
     - Strips DB/Supabase secrets from the child worker environment and never logs secret values.
 #>
 
@@ -19,15 +19,21 @@ param(
     [string]$BindHost = "127.0.0.1",
     [int]$BindPort = 8020,
     [int]$CpuThreads = 2,
+    [string]$ProcessPriority = "Normal",
     [int]$BootNetworkWaitSeconds = 90,
     [int]$StartupGraceSeconds = 240,
     [int]$HealthProbeIntervalSeconds = 30,
+    [int]$HealthProbeTimeoutSeconds = 15,
     [int]$UnhealthyThreshold = 3,
+    [int]$UnreachableThreshold = 6,
+    [int]$MaxStartingChecks = 10,
     [switch]$RespectStopSentinel
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$HasExplicitProcessPriority = $PSBoundParameters.ContainsKey("ProcessPriority")
 
 $LogsDir = Join-Path $RuntimeDir "logs"
 $StateFile = Join-Path $RuntimeDir "autostart-state.json"
@@ -57,6 +63,24 @@ function Write-SupervisorLog {
         Add-Content -LiteralPath $SupervisorLog -Value "$ts [$Level] [pid=$PID] $Message" -Encoding UTF8
     } catch {
         # Best-effort logging only
+    }
+}
+
+function Invoke-RotateLogIfOversized {
+    param(
+        [string]$LogPath,
+        [long]$MaxBytes = 10485760
+    )
+    try {
+        if (Test-Path -LiteralPath $LogPath) {
+            $item = Get-Item -LiteralPath $LogPath -ErrorAction SilentlyContinue
+            if ($null -ne $item -and $item.Length -gt $MaxBytes) {
+                $backup = "$LogPath.1"
+                Move-Item -LiteralPath $LogPath -Destination $backup -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        # Best-effort log rotation only
     }
 }
 
@@ -211,25 +235,121 @@ function Resolve-RepoRoot {
     throw "No valid ViRead repository root containing 'ocr_worker\worker.py' found among candidates: $($candidates -join ', ')"
 }
 
+function Resolve-ProcessPriority {
+    param(
+        [hashtable]$EnvMap,
+        [string]$DefaultPriority = "Normal",
+        [bool]$ExplicitOverride = $false
+    )
+    $raw = $DefaultPriority
+    if (-not $ExplicitOverride -and $null -ne $EnvMap -and $EnvMap.ContainsKey("VIREAD_OCR_PROCESS_PRIORITY")) {
+        $envVal = ([string]$EnvMap["VIREAD_OCR_PROCESS_PRIORITY"]).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($envVal)) {
+            $raw = $envVal
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return "Normal"
+    }
+    switch ($raw.Trim().ToLowerInvariant()) {
+        "idle"         { return "Idle" }
+        "belownormal"  { return "BelowNormal" }
+        "below_normal" { return "BelowNormal" }
+        "below-normal" { return "BelowNormal" }
+        "normal"       { return "Normal" }
+        "abovenormal"  { return "AboveNormal" }
+        "above_normal" { return "AboveNormal" }
+        "above-normal" { return "AboveNormal" }
+        "high"         { return "High" }
+        default {
+            Write-SupervisorLog "Invalid process priority '$raw'; falling back to 'Normal'." "WARN"
+            return "Normal"
+        }
+    }
+}
+
+function ConvertFrom-HealthProbeObject {
+    param([object]$Resp)
+    $isReady = ($null -ne $Resp -and $null -ne $Resp.PSObject.Properties["ready"] -and $Resp.ready -eq $true)
+    $statusVal = if ($null -ne $Resp -and $null -ne $Resp.PSObject.Properties["status"] -and $null -ne $Resp.status) { [string]$Resp.status } else { "unknown" }
+    $workerStatusVal = if ($null -ne $Resp -and $null -ne $Resp.PSObject.Properties["worker_status"] -and $null -ne $Resp.worker_status) { [string]$Resp.worker_status } else { "unknown" }
+    $lastErrVal = if ($null -ne $Resp -and $null -ne $Resp.PSObject.Properties["last_error"] -and $null -ne $Resp.last_error) { [string]$Resp.last_error } else { "" }
+    return @{
+        reachable    = $true
+        ready        = $isReady
+        status       = $statusVal
+        workerStatus = $workerStatusVal
+        lastError    = $lastErrVal
+    }
+}
+
 function Invoke-LocalOcrHealthProbe {
     param(
         [string]$TargetHost,
         [int]$TargetPort,
-        [int]$TimeoutSec = 5
+        [int]$TimeoutSec = 15
     )
+    $httpResp = $null
+    $stream = $null
+    $reader = $null
     try {
         $url = "http://${TargetHost}:${TargetPort}/health"
-        $resp = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec $TimeoutSec -ErrorAction Stop
-        $isReady = ($null -ne $resp -and $null -ne $resp.PSObject.Properties["ready"] -and $resp.ready -eq $true)
-        $statusVal = if ($null -ne $resp -and $null -ne $resp.PSObject.Properties["status"] -and $null -ne $resp.status) { [string]$resp.status } else { "unknown" }
-        $workerStatusVal = if ($null -ne $resp -and $null -ne $resp.PSObject.Properties["worker_status"] -and $null -ne $resp.worker_status) { [string]$resp.worker_status } else { "unknown" }
-        $lastErrVal = if ($null -ne $resp -and $null -ne $resp.PSObject.Properties["last_error"] -and $null -ne $resp.last_error) { [string]$resp.last_error } else { "" }
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        $req.Method = "GET"
+        $req.Proxy = $null
+        $req.Timeout = $TimeoutSec * 1000
+        $req.ReadWriteTimeout = $TimeoutSec * 1000
+        $req.KeepAlive = $false
+        $req.Accept = "application/json"
+
+        $httpResp = $req.GetResponse()
+        $stream = $httpResp.GetResponseStream()
+        if ($null -eq $stream) {
+            throw "Empty response stream from $url"
+        }
+        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+        $body = $reader.ReadToEnd()
+        if ([string]::IsNullOrWhiteSpace($body)) {
+            throw "Empty response body from $url"
+        }
+        $resp = $body | ConvertFrom-Json
+        return (ConvertFrom-HealthProbeObject -Resp $resp)
+    } catch [System.Net.WebException] {
+        $errMsg = $_.Exception.Message
+        $errResp = $_.Exception.Response
+        if ($null -ne $errResp) {
+            $errStream = $null
+            $errReader = $null
+            try {
+                $errStream = $errResp.GetResponseStream()
+                if ($null -ne $errStream) {
+                    $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
+                    $errBody = $errReader.ReadToEnd()
+                    if (-not [string]::IsNullOrWhiteSpace($errBody)) {
+                        $errObj = $errBody | ConvertFrom-Json
+                        if ($null -ne $errObj -and (
+                                $null -ne $errObj.PSObject.Properties["ready"] -or
+                                $null -ne $errObj.PSObject.Properties["status"] -or
+                                $null -ne $errObj.PSObject.Properties["worker_status"]
+                            )) {
+                            return (ConvertFrom-HealthProbeObject -Resp $errObj)
+                        }
+                    }
+                }
+            } catch {
+                # Fall through to unreachable response below
+            } finally {
+                if ($null -ne $errReader) { try { $errReader.Dispose() } catch {} }
+                if ($null -ne $errStream) { try { $errStream.Dispose() } catch {} }
+                try { $errResp.Close() } catch {}
+            }
+        }
         return @{
-            reachable    = $true
-            ready        = $isReady
-            status       = $statusVal
-            workerStatus = $workerStatusVal
-            lastError    = $lastErrVal
+            reachable    = $false
+            ready        = $false
+            status       = "unreachable"
+            workerStatus = "unreachable"
+            lastError    = $errMsg
         }
     } catch {
         return @{
@@ -239,15 +359,20 @@ function Invoke-LocalOcrHealthProbe {
             workerStatus = "unreachable"
             lastError    = $_.Exception.Message
         }
+    } finally {
+        if ($null -ne $reader) { try { $reader.Dispose() } catch {} }
+        if ($null -ne $stream) { try { $stream.Dispose() } catch {} }
+        if ($null -ne $httpResp) { try { $httpResp.Close() } catch {} }
     }
 }
 
 function Test-LocalOcrHealthy {
     param(
         [string]$TargetHost,
-        [int]$TargetPort
+        [int]$TargetPort,
+        [int]$TimeoutSec = 15
     )
-    $probe = Invoke-LocalOcrHealthProbe -TargetHost $TargetHost -TargetPort $TargetPort -TimeoutSec 3
+    $probe = Invoke-LocalOcrHealthProbe -TargetHost $TargetHost -TargetPort $TargetPort -TimeoutSec $TimeoutSec
     return [bool]$probe["ready"]
 }
 
@@ -331,7 +456,7 @@ function Stop-ProcessTreeSafe {
 function Set-ProcessTreePriority {
     param(
         [int]$RootPid,
-        [string]$PriorityClass = "BelowNormal"
+        [string]$PriorityClass = "Normal"
     )
     if ($RootPid -le 0 -or $RootPid -eq $PID) { return }
     try {
@@ -449,6 +574,7 @@ try {
 
     $initialEnv = Read-DotEnvFile -Path $EnvFile
     $initialPythonExe = Resolve-PythonExe -EnvMap $initialEnv -ExplicitPython $PythonExe
+    $initialPriority = Resolve-ProcessPriority -EnvMap $initialEnv -DefaultPriority $ProcessPriority -ExplicitOverride $HasExplicitProcessPriority
     $initialRepoRoot = $null
     try {
         $initialRepoRoot = Resolve-RepoRoot -EnvMap $initialEnv
@@ -458,7 +584,7 @@ try {
     $initialBackendUrl = Resolve-BackendUrlFromEnvMap -EnvMap $initialEnv
     $initialBackendHost = Get-BackendHostFromUrl -Url $initialBackendUrl
 
-    Write-SupervisorLog "Supervisor started (host=$BindHost port=$BindPort cpuThreads=$CpuThreads python='$initialPythonExe' repoRoot='$initialRepoRoot')."
+    Write-SupervisorLog "Supervisor started (host=$BindHost port=$BindPort cpuThreads=$CpuThreads priority=$initialPriority healthTimeout=${HealthProbeTimeoutSeconds}s degradedThreshold=$UnhealthyThreshold unreachableThreshold=$UnreachableThreshold maxStartingChecks=$MaxStartingChecks python='$initialPythonExe' repoRoot='$initialRepoRoot')."
 
     $state = @{
         supervisorPid       = $PID
@@ -466,7 +592,7 @@ try {
         listenPid           = $null
         host                = $BindHost
         port                = $BindPort
-        priorityClass       = "BelowNormal"
+        priorityClass       = $initialPriority
         cpuThreads          = $CpuThreads
         quietStandby        = $false
         repoRoot            = $initialRepoRoot
@@ -537,8 +663,9 @@ try {
         $heartbeatVal = if ($envMap.ContainsKey("VIREAD_OCR_HEARTBEAT_SECONDS") -and -not [string]::IsNullOrWhiteSpace([string]$envMap["VIREAD_OCR_HEARTBEAT_SECONDS"])) {
             ([string]$envMap["VIREAD_OCR_HEARTBEAT_SECONDS"]).Trim()
         } else {
-            "25"
+            "15"
         }
+        $effectivePriority = Resolve-ProcessPriority -EnvMap $envMap -DefaultPriority $ProcessPriority -ExplicitOverride $HasExplicitProcessPriority
 
         if ([string]::IsNullOrWhiteSpace($backendUrl) -or [string]::IsNullOrWhiteSpace($workerToken)) {
             Write-SupervisorLog "Missing VIREAD_OCR_BACKEND_URL/VIREAD_BACKEND_URL or VIREAD_OCR_WORKER_TOKEN in '$EnvFile' (backendConfigured=$(-not [string]::IsNullOrWhiteSpace($backendUrl)), tokenConfigured=$(-not [string]::IsNullOrWhiteSpace($workerToken))). Retrying in ${backoffSeconds}s." "ERROR"
@@ -574,12 +701,15 @@ try {
         }
 
         # Apply required worker environment variables.
+        # Pin OMP_NUM_THREADS and OPENBLAS_NUM_THREADS to 1 for PaddlePaddle CPU OpenBLAS safety
+        # while keeping VIREAD_OCR_CPU_THREADS=$CpuThreads for PyTorch.
         $env:LMDB_FORCE_CPYTHON = "1"
-        $env:OMP_NUM_THREADS = "$CpuThreads"
-        $env:OPENBLAS_NUM_THREADS = "$CpuThreads"
+        $env:OMP_NUM_THREADS = "1"
+        $env:OPENBLAS_NUM_THREADS = "1"
         $env:MKL_NUM_THREADS = "$CpuThreads"
         $env:NUMEXPR_NUM_THREADS = "$CpuThreads"
         $env:VIREAD_OCR_CPU_THREADS = "$CpuThreads"
+        $env:VIREAD_OCR_PROCESS_PRIORITY = $effectivePriority
         $env:VIREAD_OCR_WORKER_HOST = $BindHost
         $env:VIREAD_OCR_WORKER_PORT = "$BindPort"
         $env:VIREAD_OCR_QUIET_STANDBY = $quietStandbyRaw
@@ -600,8 +730,10 @@ try {
         $launchStart = Get-Date
         $proc = $null
         try {
+            Invoke-RotateLogIfOversized -LogPath $StdoutLog -MaxBytes 10485760
+            Invoke-RotateLogIfOversized -LogPath $StderrLog -MaxBytes 10485760
             $argList = @("-m", "ocr_worker.worker", "--host", $BindHost, "--port", "$BindPort")
-            Write-SupervisorLog "Starting OCR worker (repoRoot='$repoRoot', python='$effectivePythonExe', backendHost='$backendHost', quietStandby=$quietStandbyRaw, restartCount=$restartCount)."
+            Write-SupervisorLog "Starting OCR worker (repoRoot='$repoRoot', python='$effectivePythonExe', backendHost='$backendHost', priority=$effectivePriority, heartbeatSeconds=$heartbeatVal, quietStandby=$quietStandbyRaw, restartCount=$restartCount)."
             $proc = Start-Process `
                 -FilePath $effectivePythonExe `
                 -ArgumentList $argList `
@@ -611,10 +743,11 @@ try {
                 -RedirectStandardError $StderrLog `
                 -PassThru
 
-            Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass "BelowNormal"
+            Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass $effectivePriority
 
             $state["workerPid"] = $proc.Id
             $state["listenPid"] = $null
+            $state["priorityClass"] = $effectivePriority
             $state["repoRoot"] = $repoRoot
             $state["pythonExe"] = $effectivePythonExe
             $state["quietStandby"] = ($quietStandbyRaw -in @("1", "true", "yes", "on"))
@@ -626,11 +759,15 @@ try {
             $state["workerStartedAt"] = $launchStart.ToUniversalTime().ToString("o")
             Write-StateFile -State $state
 
-            Write-SupervisorLog "OCR worker launched with PID=$($proc.Id) (PriorityClass=BelowNormal)."
+            Write-SupervisorLog "OCR worker launched with PID=$($proc.Id) (PriorityClass=$effectivePriority)."
 
             $priorityAppliedAfter5s = $false
             $priorityAppliedOnceBound = $false
-            $consecutiveUnhealthyChecks = 0
+            $consecutiveDegradedChecks = 0
+            $consecutiveUnreachableChecks = 0
+            $consecutiveStartingChecks = 0
+            $lastStartingCpuSeconds = -1.0
+            $maxStartingAbsoluteSeconds = 1500.0
             $nextHealthProbeAt = $launchStart.AddSeconds($StartupGraceSeconds)
 
             while (-not $proc.HasExited) {
@@ -645,7 +782,7 @@ try {
                 $elapsedSec = ($now - $launchStart).TotalSeconds
 
                 if ((-not $priorityAppliedAfter5s) -and $elapsedSec -ge 5.0) {
-                    Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass "BelowNormal"
+                    Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass $effectivePriority
                     $priorityAppliedAfter5s = $true
                 }
 
@@ -653,8 +790,8 @@ try {
                     $listenConns = @(Get-NetTCPConnection -LocalPort $BindPort -State Listen -ErrorAction SilentlyContinue)
                     if ($listenConns.Count -gt 0) {
                         $listenPidVal = [int]$listenConns[0].OwningProcess
-                        Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass "BelowNormal"
-                        Set-ProcessTreePriority -RootPid $listenPidVal -PriorityClass "BelowNormal"
+                        Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass $effectivePriority
+                        Set-ProcessTreePriority -RootPid $listenPidVal -PriorityClass $effectivePriority
                         $state["listenPid"] = $listenPidVal
                         Write-StateFile -State $state
                         $priorityAppliedOnceBound = $true
@@ -662,29 +799,84 @@ try {
                 }
 
                 if ($now -ge $nextHealthProbeAt) {
-                    $nextHealthProbeAt = $now.AddSeconds($HealthProbeIntervalSeconds)
-                    $probe = Invoke-LocalOcrHealthProbe -TargetHost $BindHost -TargetPort $BindPort -TimeoutSec 5
-                    if ([bool]$probe["ready"]) {
-                        if ($consecutiveUnhealthyChecks -gt 0) {
-                            Write-SupervisorLog "OCR worker PID=$($proc.Id) recovered health (ready=true)."
+                    $probe = Invoke-LocalOcrHealthProbe -TargetHost $BindHost -TargetPort $BindPort -TimeoutSec $HealthProbeTimeoutSeconds
+                    $nextHealthProbeAt = (Get-Date).AddSeconds($HealthProbeIntervalSeconds)
+                    $pReachable = [bool]$probe["reachable"]
+                    $pReady = [bool]$probe["ready"]
+                    $pStatus = [string]$probe["status"]
+                    $pWorkerStatus = [string]$probe["workerStatus"]
+                    $pLastError = [string]$probe["lastError"]
+
+                    if ($pReady) {
+                        if ($consecutiveDegradedChecks -gt 0 -or $consecutiveUnreachableChecks -gt 0 -or $consecutiveStartingChecks -gt 0) {
+                            Write-SupervisorLog "OCR worker PID=$($proc.Id) recovered health (ready=true, prevDegraded=$consecutiveDegradedChecks, prevUnreachable=$consecutiveUnreachableChecks, prevStarting=$consecutiveStartingChecks)."
                         }
-                        $consecutiveUnhealthyChecks = 0
+                        $consecutiveDegradedChecks = 0
+                        $consecutiveUnreachableChecks = 0
+                        $consecutiveStartingChecks = 0
                         if (-not $priorityAppliedOnceBound) {
-                            Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass "BelowNormal"
+                            Set-ProcessTreePriority -RootPid $proc.Id -PriorityClass $effectivePriority
                             $priorityAppliedOnceBound = $true
                         }
-                    } else {
-                        $consecutiveUnhealthyChecks++
-                        $pStatus = [string]$probe["status"]
-                        $pWorkerStatus = [string]$probe["workerStatus"]
-                        $pLastError = [string]$probe["lastError"]
-                        if ($consecutiveUnhealthyChecks -ge $UnhealthyThreshold) {
-                            Write-SupervisorLog "Health watchdog triggered after $consecutiveUnhealthyChecks consecutive non-ready checks (${HealthProbeIntervalSeconds}s interval) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating worker process tree for restart." "ERROR"
+                    } elseif ($pReachable -and $pWorkerStatus -eq "STARTING") {
+                        $consecutiveUnreachableChecks = 0
+                        $treeCpuSeconds = 0.0
+                        try {
+                            $treePids = New-Object System.Collections.Generic.HashSet[int]
+                            [void]$treePids.Add([int]$proc.Id)
+                            if ($null -ne $state["listenPid"] -and [int]$state["listenPid"] -gt 0) {
+                                [void]$treePids.Add([int]$state["listenPid"])
+                            }
+                            $childProcs = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue)
+                            foreach ($cp in $childProcs) { [void]$treePids.Add([int]$cp.ProcessId) }
+                            foreach ($tp in $treePids) {
+                                $pObj = Get-Process -Id $tp -ErrorAction SilentlyContinue
+                                if ($null -ne $pObj -and $null -ne $pObj.CPU) {
+                                    $treeCpuSeconds += [double]$pObj.CPU
+                                }
+                            }
+                        } catch {
+                            $treeCpuSeconds = -1.0
+                        }
+                        $cpuAdvanced = ($lastStartingCpuSeconds -ge 0.0 -and $treeCpuSeconds -ge 0.0 -and ($treeCpuSeconds - $lastStartingCpuSeconds) -ge 0.25)
+                        if ($treeCpuSeconds -ge 0.0) {
+                            $lastStartingCpuSeconds = $treeCpuSeconds
+                        }
+                        if ($cpuAdvanced -and $elapsedSec -lt $maxStartingAbsoluteSeconds) {
+                            $consecutiveStartingChecks = 0
+                            Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is actively loading models under load (cpu=$([Math]::Round($treeCpuSeconds, 1))s, elapsed=$([Math]::Round($elapsedSec, 0))s); skipping restart." "INFO"
+                        } else {
+                            $consecutiveStartingChecks++
+                            if ($consecutiveStartingChecks -ge $MaxStartingChecks -or $elapsedSec -ge $maxStartingAbsoluteSeconds) {
+                                Write-SupervisorLog "Health watchdog triggered (reason=starting_timeout) after $consecutiveStartingChecks/$MaxStartingChecks stalled STARTING checks (cpu=$([Math]::Round($treeCpuSeconds, 1))s, elapsed=$([Math]::Round($elapsedSec, 0))s) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating deadlocked worker process tree for restart." "ERROR"
+                                Stop-ProcessTreeSafe -TargetPid $proc.Id
+                                [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
+                                break
+                            } else {
+                                Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is warming up ($consecutiveStartingChecks/$MaxStartingChecks stalled checks, cpu=$([Math]::Round($treeCpuSeconds, 1))s, status='$pStatus', worker_status='$pWorkerStatus'); skipping degraded increment (degraded=$consecutiveDegradedChecks/$UnhealthyThreshold, unreachable=0/$UnreachableThreshold)." "INFO"
+                            }
+                        }
+                    } elseif ($pReachable) {
+                        $consecutiveUnreachableChecks = 0
+                        $consecutiveStartingChecks = 0
+                        $consecutiveDegradedChecks++
+                        if ($consecutiveDegradedChecks -ge $UnhealthyThreshold) {
+                            Write-SupervisorLog "Health watchdog triggered (reason=degraded) after $consecutiveDegradedChecks/$UnhealthyThreshold consecutive degraded checks (${HealthProbeIntervalSeconds}s interval, ${HealthProbeTimeoutSeconds}s timeout) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating worker process tree for restart." "ERROR"
                             Stop-ProcessTreeSafe -TargetPid $proc.Id
                             [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
                             break
                         } else {
-                            Write-SupervisorLog "Health watchdog check $consecutiveUnhealthyChecks/$UnhealthyThreshold not ready for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'." "WARN"
+                            Write-SupervisorLog "Health watchdog check (reason=degraded) $consecutiveDegradedChecks/$UnhealthyThreshold for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'." "WARN"
+                        }
+                    } else {
+                        $consecutiveUnreachableChecks++
+                        if ($consecutiveUnreachableChecks -ge $UnreachableThreshold) {
+                            Write-SupervisorLog "Health watchdog triggered (reason=unreachable) after $consecutiveUnreachableChecks/$UnreachableThreshold consecutive unreachable checks (${HealthProbeIntervalSeconds}s interval, ${HealthProbeTimeoutSeconds}s timeout) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating worker process tree for restart." "ERROR"
+                            Stop-ProcessTreeSafe -TargetPid $proc.Id
+                            [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
+                            break
+                        } else {
+                            Write-SupervisorLog "Health watchdog check (reason=unreachable) $consecutiveUnreachableChecks/$UnreachableThreshold for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'." "WARN"
                         }
                     }
                 }

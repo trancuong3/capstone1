@@ -126,6 +126,33 @@ def _is_flow2_profile(profile: str | None) -> bool:
     return str(profile or "") in {"FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"}
 
 
+def _collect_unique_pack_shards(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        prov = row.get("provenance")
+        if isinstance(prov, str):
+            try:
+                prov = json.loads(prov)
+            except Exception:
+                prov = None
+        if not isinstance(prov, dict):
+            continue
+        shard = prov.get("pack_shard")
+        if not isinstance(shard, dict):
+            continue
+        storage_ref = str(shard.get("storage_ref") or "").strip()
+        if not storage_ref:
+            continue
+        shard_sha = str(shard.get("sha256") or "").strip().lower()
+        key = (storage_ref, shard_sha)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(dict(shard))
+    return unique
+
+
 def _storage_http_error(exc: TrainingStorageError) -> HTTPException:
     return HTTPException(status_code=exc.http_status or 503, detail=f"{exc.code}: {exc}")
 
@@ -1688,7 +1715,9 @@ class VireadOcrTrainingService:
                     status_code=422,
                     detail="Verified holdout image format is unsupported for Locked Test",
                 )
-            if use_drive:
+            if use_drive and is_gdrive_ref(row["image_storage_path"]) and _sha(digest):
+                object_path = str(row["image_storage_path"]).strip()
+            elif use_drive:
                 try:
                     stored = await asyncio.to_thread(
                         router.put,
@@ -1816,17 +1845,23 @@ class VireadOcrTrainingService:
             await self.repo.commit()
             return latest_readiness
 
+        pack_shards = _collect_unique_pack_shards(selected)
+        locked_provenance: dict[str, Any] = {
+            "auto_created": True,
+            "policy": "verified_holdout_excluding_all_train_validation_and_prior_locked_test",
+            "minimum_samples": MIN_LOCKED_PAIRS,
+            "minimum_groups": MIN_LOCKED_GROUPS,
+            "eligible_source_flows": ["FLOW1_VERIFIED", "FLOW2_EXTERNAL"],
+        }
+        if pack_shards:
+            locked_provenance["pack_shards"] = pack_shards
         imported = await self.register_dataset(
             actor_id,
             DatasetImport(
                 source_flow="LOCKED_TEST",
                 samples=locked_samples,
                 split_seed="viread-locked-test-admin-verified-v1",
-                provenance={"auto_created": True,
-                            "policy": "verified_holdout_excluding_all_train_validation_and_prior_locked_test",
-                            "minimum_samples": MIN_LOCKED_PAIRS,
-                            "minimum_groups": MIN_LOCKED_GROUPS,
-                            "eligible_source_flows": ["FLOW1_VERIFIED", "FLOW2_EXTERNAL"]},
+                provenance=locked_provenance,
             ),
             commit=False,
             preverified_storage_refs=preverified_refs,
@@ -1850,13 +1885,15 @@ class VireadOcrTrainingService:
             SELECT sample.id::text AS sample_id,
                    COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
                    sample.split, sample.image_storage_path, sample.image_sha256, sample.label,
-                   sample.source_page_id, sample.source_revision_id, sample.provenance
+                   sample.source_page_id, sample.source_revision_id, sample.provenance,
+                   COALESCE(to_jsonb(sample)->>'sync_status', 'SYNCED') AS sync_status
             FROM public.viread_ocr_samples sample
             LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
             LEFT JOIN public.books book ON book.id=page.bookid
             WHERE sample.source_flow='FLOW1_VERIFIED'
               AND sample.split IN ('train','validation') AND sample.dataset_version_id IS NULL
               AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+              AND COALESCE(to_jsonb(sample)->>'sync_status', 'SYNCED') = 'SYNCED'
               AND sample.provenance->>'verified_by_admin' = 'true'
               AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
               AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
@@ -1889,13 +1926,14 @@ class VireadOcrTrainingService:
               )
             ORDER BY group_id, sample.created_at, sample.id
         """)
-        # Defense-in-depth Python filter: never admit AI-only auto-verified rows into Flow 2 datasets.
+        # Defense-in-depth Python filter: never admit AI-only auto-verified or unsynced rows into Flow 2 datasets.
         source_rows = [
             row for row in source_rows
             if isinstance(row.get("provenance"), dict)
             and row["provenance"].get("verified_by_admin") is True
             and not row["provenance"].get("ai_review_required")
             and str(row["provenance"].get("verification_source") or "admin") == "admin"
+            and str(row.get("sync_status") or "SYNCED") == "SYNCED"
         ]
         # Recheck #3: for any parent-contributed sample, re-verify live consent, active book/page,
         # and active revision right before snapshotting into a new manifest.
@@ -2178,6 +2216,15 @@ class VireadOcrTrainingService:
                 await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
                 await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
 
+            pack_shards = _collect_unique_pack_shards(source_rows)
+            dataset_provenance: dict[str, Any] = {
+                "snapshot": "admin_verified_outbox",
+                "storage_provider": manifest_provider,
+                "drive_file_id": manifest_drive_id,
+                "split_manifests": split_manifests,
+            }
+            if pack_shards:
+                dataset_provenance["pack_shards"] = pack_shards
             dataset = await self.repo.one("""
                 INSERT INTO public.viread_ocr_dataset_versions
                     (source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test,
@@ -2188,12 +2235,7 @@ class VireadOcrTrainingService:
                 RETURNING id, manifest_storage_path
             """, {"version_sha": version_sha, "manifest_path": manifest_path,
                   "sample_count": len(source_rows),
-                  "provenance": json.dumps({
-                      "snapshot": "admin_verified_outbox",
-                      "storage_provider": manifest_provider,
-                      "drive_file_id": manifest_drive_id,
-                      "split_manifests": split_manifests,
-                  })})
+                  "provenance": json.dumps(dataset_provenance)})
             if manifest_provider == StorageProvider.GOOGLE_DRIVE.value and dataset:
                 await self._exec_optional_column_update("""
                     UPDATE public.viread_ocr_dataset_versions
@@ -2335,11 +2377,12 @@ class VireadOcrTrainingService:
     ) -> dict[str, Any]:
         await self._admin(actor_id)
         dataset = await self.repo.one("""
-            SELECT id, source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
+            SELECT id, source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path, provenance
             FROM public.viread_ocr_dataset_versions WHERE id=:id
         """, {"id": dataset_id})
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset version not found")
+        dataset = dict(dataset)
         items = await self.repo.all("""
             SELECT COALESCE(sample.source_annotation_id, sample.id::text) AS sample_id,
                    sample.source_annotation_id, sample.source_flow,
@@ -2365,6 +2408,29 @@ class VireadOcrTrainingService:
             else StorageProvider.SUPABASE_LEGACY.value
         )
         dataset["drive_file_id"] = drive_file_id_from_reference(dataset["manifest_storage_path"])
+        raw_prov = dataset.get("provenance")
+        if isinstance(raw_prov, str):
+            try:
+                raw_prov = json.loads(raw_prov)
+            except Exception:
+                raw_prov = None
+        if isinstance(raw_prov, dict) and isinstance(raw_prov.get("pack_shards"), list) and raw_prov["pack_shards"]:
+            signed_shards: list[dict[str, Any]] = []
+            for shard in raw_prov["pack_shards"]:
+                if not isinstance(shard, dict) or not shard.get("storage_ref"):
+                    continue
+                shard_copy = dict(shard)
+                download_url = await self._artifact_download_url_async(
+                    str(shard_copy["storage_ref"]),
+                    expected_sha256=shard_copy.get("sha256"),
+                    job_id=job_id,
+                    worker_id=worker_id,
+                )
+                if download_url:
+                    shard_copy["download_url"] = download_url
+                signed_shards.append(shard_copy)
+            if signed_shards:
+                dataset["pack_shards"] = signed_shards
         for item in items:
             item["image_url"] = await self._artifact_download_url_async(
                 item["image_storage_path"],

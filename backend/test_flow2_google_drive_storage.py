@@ -1480,6 +1480,7 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
     def test_put_dedup_stream_selftest_resume_and_connect_with_owner_pinning(self):
         import asyncio
         import tempfile
+        from types import SimpleNamespace
         from app.services.training_storage.google_drive_desktop_store import (
             DRIVE_DESKTOP_SYNC_SCOPE,
             GoogleDriveDesktopStore,
@@ -1491,6 +1492,11 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
         )
 
         invalidate_sync_google_drive_store_cache()
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             my_drive = Path(tmpdir) / "My Drive"
             my_drive.mkdir()
@@ -1501,7 +1507,10 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
                 "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
                 "VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS": str(tmpdir),
             }
-            with patch.dict(os.environ, env, clear=False):
+            with patch.dict(os.environ, env, clear=False), patch(
+                "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+                return_value=fake_disk_usage,
+            ):
                 # Wrong owner email rejected with 403
                 svc_bad = VireadDriveConnectionService(MagicMock())
                 svc_bad.repo = MagicMock()
@@ -1675,6 +1684,505 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
         self.assertFalse(payload["advanced_drive_enabled"])
         self.assertEqual(payload["delete_mode"], "trash_fallback")
         self.assertTrue(payload["warnings"])
+
+
+class TestVpackAndPackShardFlow2Support(unittest.TestCase):
+    VALID_URL = "https://script.google.com/macros/s/AKfycbzViReadFlow2BridgeDeployment0123456789/exec"
+    SECRET = "s" * 48
+
+    @staticmethod
+    def _build_tar_bytes(entries: list[tuple[str, bytes]]) -> bytes:
+        import io as _io
+        import tarfile as _tarfile
+
+        buf = _io.BytesIO()
+        with _tarfile.open(fileobj=buf, mode="w") as tf:
+            for name, content in entries:
+                info = _tarfile.TarInfo(name=name)
+                info.size = len(content)
+                tf.addfile(info, _io.BytesIO(content))
+        return buf.getvalue()
+
+    def test_vpack_reference_helpers_and_validation(self):
+        from app.services.training_storage import (
+            VPACK_FILE_ID_PREFIX,
+            build_vpack_storage_ref,
+            parse_vpack_drive_file_id,
+            parse_vpack_ref,
+        )
+
+        self.assertEqual(VPACK_FILE_ID_PREFIX, "vpack--")
+        pack_id = "drv_pack_with--dashes_" + ("x" * 35)
+        member_sha = "a" * 64
+        ref = build_vpack_storage_ref(pack_id, member_sha.upper())
+        self.assertEqual(ref, f"gdrive://vpack--{pack_id}--{member_sha}")
+        self.assertEqual(parse_vpack_drive_file_id(f"vpack--{pack_id}--{member_sha}"), (pack_id, member_sha))
+        self.assertEqual(parse_vpack_ref(ref), (pack_id, member_sha))
+
+        parsed = parse_artifact_ref(ref)
+        self.assertEqual(parsed.provider, StorageProvider.GOOGLE_DRIVE)
+        self.assertEqual(parsed.drive_file_id, f"vpack--{pack_id}--{member_sha}")
+
+        self.assertIsNone(parse_vpack_drive_file_id("regular_drive_id_12345"))
+        self.assertIsNone(parse_vpack_drive_file_id("vpack--missing_separator"))
+        self.assertIsNone(parse_vpack_drive_file_id(f"vpack--short--{member_sha}"))
+        self.assertIsNone(parse_vpack_drive_file_id(f"vpack--{pack_id}--{'A' * 64}"))
+        self.assertIsNone(parse_vpack_drive_file_id(f"vpack--vpack--{pack_id}--{member_sha}"))
+        self.assertIsNone(parse_vpack_ref("ocr-training/legacy/file.png"))
+        with self.assertRaises(ValueError):
+            parse_artifact_ref("gdrive://vpack--short--" + member_sha)
+        with self.assertRaises(ValueError):
+            build_vpack_storage_ref(f"vpack--{pack_id}--{member_sha}", member_sha)
+
+    def test_apps_script_vpack_resolution_lru_cache_and_corruption_checks(self):
+        from app.services.training_storage import (
+            GoogleAppsScriptDriveStore,
+            build_vpack_storage_ref,
+        )
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        session = server.make_session()
+        raw_post = session.post
+        get_file_calls: list[str] = []
+
+        def _spied_post(*args, **kwargs):
+            env = kwargs.get("json") or {}
+            if env.get("action") == "get_file":
+                payload = json.loads(env.get("payload_json") or "{}")
+                get_file_calls.append(str(payload.get("file_id") or ""))
+            return raw_post(*args, **kwargs)
+
+        session.post = _spied_post
+        store = GoogleAppsScriptDriveStore(
+            web_app_url=self.VALID_URL,
+            bridge_secret=self.SECRET,
+            session=session,
+            chunk_bytes=64 * 1024,
+            sleep_fn=lambda _s: None,
+        )
+
+        # Create 5 tar packs to test LRU capacity = 4
+        pack_refs: list[tuple[str, str, bytes]] = []
+        for idx in range(5):
+            raw_a = b"\x89PNG\r\n\x1a\n" + f"crop-{idx}-a".encode("utf-8")
+            sha_a = hashlib.sha256(raw_a).hexdigest()
+            raw_b = f"raw-crop-{idx}-b".encode("utf-8")
+            sha_b = hashlib.sha256(raw_b).hexdigest()
+            tar_bytes = self._build_tar_bytes([(f"{sha_a}.png", raw_a), (sha_b, raw_b)])
+            stored_pack = store.put(
+                f"verified-samples/pack-{idx:02d}.tar",
+                tar_bytes,
+                content_type="application/x-tar",
+                expected_sha256=hashlib.sha256(tar_bytes).hexdigest(),
+            )
+            pack_refs.append((stored_pack.drive_file_id, sha_a, raw_a))
+
+        # Test get_metadata, exists, open_stream, open_stream_with_metadata, get on pack 0
+        p0_id, p0_sha, p0_bytes = pack_refs[0]
+        vref0 = build_vpack_storage_ref(p0_id, p0_sha)
+        get_file_calls.clear()
+        meta0 = store.get_metadata(vref0)
+        self.assertEqual(meta0.size_bytes, len(p0_bytes))
+        self.assertEqual(meta0.sha256, p0_sha)
+        self.assertEqual(meta0.content_type, "image/png")
+        self.assertTrue(store.exists(vref0))
+        self.assertEqual(store.get(vref0, expected_sha256=p0_sha), p0_bytes)
+        self.assertEqual(b"".join(store.open_stream(vref0, expected_sha256=p0_sha)), p0_bytes)
+        sm_meta, sm_iter = store.open_stream_with_metadata(vref0, expected_sha256=p0_sha)
+        self.assertEqual(sm_meta.size_bytes, len(p0_bytes))
+        self.assertEqual(b"".join(sm_iter), p0_bytes)
+        # Only 1 get_file call for all operations on pack 0!
+        self.assertEqual(get_file_calls, [p0_id])
+
+        # Missing member returns exists=False and raises DriveNotFoundError
+        missing_ref = build_vpack_storage_ref(p0_id, "f" * 64)
+        self.assertFalse(store.exists(missing_ref))
+        with self.assertRaises(DriveNotFoundError):
+            store.get(missing_ref)
+
+        # Populate packs 1, 2, 3 (total 4 cached); touch pack 0 again to promote it; then load pack 4 -> evicts pack 1!
+        for idx in (1, 2, 3):
+            pid, sha, raw = pack_refs[idx]
+            self.assertEqual(store.get(build_vpack_storage_ref(pid, sha)), raw)
+        # Touch pack 0 (still cached, 0 bridge calls)
+        before_touch = len(get_file_calls)
+        self.assertEqual(store.get(vref0), p0_bytes)
+        self.assertEqual(len(get_file_calls), before_touch)
+        # Load pack 4 -> capacity 4 evicts pack 1 (LRU), keeps pack 0
+        p4_id, p4_sha, p4_bytes = pack_refs[4]
+        self.assertEqual(store.get(build_vpack_storage_ref(p4_id, p4_sha)), p4_bytes)
+        before_recheck = len(get_file_calls)
+        self.assertEqual(store.get(vref0), p0_bytes)
+        self.assertEqual(len(get_file_calls), before_recheck)
+        # Pack 1 was evicted, so fetching it performs 1 bridge get_file call
+        p1_id, p1_sha, p1_bytes = pack_refs[1]
+        self.assertEqual(store.get(build_vpack_storage_ref(p1_id, p1_sha)), p1_bytes)
+        self.assertEqual(get_file_calls[-1], p1_id)
+
+        # Corrupted member bytes inside tar -> raises DriveIntegrityError
+        bad_bytes = b"corrupted-member-payload"
+        claimed_sha = "b" * 64
+        bad_tar = self._build_tar_bytes([(f"{claimed_sha}.png", bad_bytes)])
+        stored_bad = store.put(
+            "verified-samples/corrupt-pack.tar",
+            bad_tar,
+            content_type="application/x-tar",
+            expected_sha256=hashlib.sha256(bad_tar).hexdigest(),
+        )
+        with self.assertRaises(DriveIntegrityError):
+            store.get(build_vpack_storage_ref(stored_bad.drive_file_id, claimed_sha))
+
+        # Public & trashed pack checks
+        server.files[p0_id]["is_public"] = True
+        store._vpack_cache.clear()
+        with self.assertRaises(DrivePermissionError):
+            store.get(vref0)
+        server.files[p0_id]["is_public"] = False
+        server.files[p0_id]["trashed"] = True
+        with self.assertRaises(DriveNotFoundError):
+            store.get(vref0)
+
+    def test_sync_status_filter_locked_test_reuse_pack_shards_and_route_auth_and_delete(self):
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from io import BytesIO
+        from PIL import Image
+        from app.services import viread_ocr_training_service as training_svc
+        from app.services.training_storage.google_drive_desktop_store import GoogleDriveDesktopStore
+
+        actor_id = uuid4()
+        dataset_id = uuid4()
+        locked_id = uuid4()
+        job_id = uuid4()
+        worker_id = "colab-worker-pack"
+
+        async def _run():
+            # 1. admin_verified_manifest filters sync_status='SYNCED' and propagates pack_shards without changing version_sha256
+            with tempfile.TemporaryDirectory() as tmp:
+                store = GoogleDriveDesktopStore(root_dir=tmp)
+                router = TrainingArtifactStoreRouter(
+                    drive_store_factory=lambda: store,
+                    write_provider=StorageProvider.GOOGLE_DRIVE,
+                )
+
+                def _make_png(seed: int) -> bytes:
+                    im = Image.new("RGB", (240, 48), (255, 255, 255))
+                    for x in range(8, 228, 12):
+                        im.paste((seed * 10 % 120, 15, 15), (x, 8, x + 3, 40))
+                    b = BytesIO()
+                    im.save(b, format="PNG")
+                    return b.getvalue()
+
+                b1 = _make_png(1)
+                b2 = _make_png(2)
+                s1_sha = hashlib.sha256(b1).hexdigest()
+                s2_sha = hashlib.sha256(b2).hexdigest()
+                ref1 = store.put(f"verified-samples/g1/{s1_sha}.png", b1, content_type="image/png", expected_sha256=s1_sha).reference
+                ref2 = store.put(f"verified-samples/g2/{s2_sha}.png", b2, content_type="image/png", expected_sha256=s2_sha).reference
+                pack_shard_meta = {"storage_ref": "gdrive://drv_pack_shard_001", "sha256": "c" * 64, "shard_index": 0}
+
+                captured_sql: list[str] = []
+                inserted_dataset_prov: list[dict] = []
+
+                class _ManifestRepo:
+                    async def execute(self, sql, params=None):
+                        captured_sql.append(" ".join(str(sql).split()))
+                        return MagicMock(rowcount=1)
+
+                    async def all(self, sql, params=None):
+                        sql_norm = " ".join(str(sql).split())
+                        captured_sql.append(sql_norm)
+                        if "FROM public.viread_ocr_samples sample" in sql_norm:
+                            return [
+                                {
+                                    "sample_id": str(uuid4()),
+                                    "group_id": "g1",
+                                    "split": "train",
+                                    "image_storage_path": ref1,
+                                    "image_sha256": s1_sha,
+                                    "label": "Con mèo trèo cây cau",
+                                    "source_page_id": None,
+                                    "source_revision_id": None,
+                                    "sync_status": "SYNCED",
+                                    "provenance": {"verified_by_admin": True, "verification_source": "admin", "pack_shard": pack_shard_meta},
+                                },
+                                {
+                                    "sample_id": str(uuid4()),
+                                    "group_id": "g2",
+                                    "split": "validation",
+                                    "image_storage_path": ref2,
+                                    "image_sha256": s2_sha,
+                                    "label": "Chú gà trống gáy sáng",
+                                    "source_page_id": None,
+                                    "source_revision_id": None,
+                                    "sync_status": "PENDING_PACK",
+                                    "provenance": {"verified_by_admin": True, "verification_source": "admin", "pack_shard": {"storage_ref": "gdrive://drv_unsynced", "sha256": "d" * 64}},
+                                },
+                            ]
+                        return [
+                            {
+                                "sample_id": "1",
+                                "group_id": "g1",
+                                "split": "train",
+                                "image_storage_path": ref1,
+                                "image_sha256": s1_sha,
+                                "label": "Con mèo trèo cây cau",
+                                "source_revision_id": None,
+                            }
+                        ]
+
+                    async def one(self, sql, params=None):
+                        sql_norm = " ".join(str(sql).split())
+                        captured_sql.append(sql_norm)
+                        if "INSERT INTO public.viread_ocr_dataset_versions" in sql_norm:
+                            inserted_dataset_prov.append(json.loads(params["provenance"]))
+                            return {"id": dataset_id, "manifest_storage_path": params["manifest_path"]}
+                        if "SELECT count(*)::integer AS total" in sql_norm:
+                            return {"total": 1}
+                        return None
+
+                    async def commit(self):
+                        return None
+
+                    async def rollback(self):
+                        return None
+
+                svc = training_svc.VireadOcrTrainingService(MagicMock())
+                svc.repo = _ManifestRepo()
+                svc._admin = AsyncMock()
+                svc._artifact_router = AsyncMock(return_value=router)
+                with patch.object(training_svc, "ensure_database_capacity", new=AsyncMock(return_value={})):
+                    manifest_res = await svc.admin_verified_manifest(actor_id, limit=20, offset=0)
+
+                self.assertEqual(manifest_res["total"], 1)
+                self.assertTrue(any("COALESCE(to_jsonb(sample)->>'sync_status', 'SYNCED') = 'SYNCED'" in s for s in captured_sql))
+                self.assertEqual(inserted_dataset_prov[0]["pack_shards"], [pack_shard_meta])
+
+                # 2. ensure_locked_test reuses gdrive:// refs without per-crop router.put and propagates pack_shards
+                put_calls: list[str] = []
+                orig_put = router.put
+
+                def _spy_put(lpath, data, **kwargs):
+                    put_calls.append(lpath)
+                    return orig_put(lpath, data, **kwargs)
+
+                router.put = _spy_put
+                holdout_rows = [
+                    {
+                        "sample_id": str(uuid4()),
+                        "source_flow": "FLOW1_VERIFIED",
+                        "group_id": "holdout-g1",
+                        "image_storage_path": ref1,
+                        "image_sha256": s1_sha,
+                        "label": "Con mèo trèo cây cau",
+                        "source_page_id": None,
+                        "source_revision_id": None,
+                        "provenance": {"verified_by_admin": True, "verification_source": "admin", "pack_shard": pack_shard_meta},
+                    },
+                    {
+                        "sample_id": str(uuid4()),
+                        "source_flow": "FLOW1_VERIFIED",
+                        "group_id": "holdout-g2",
+                        "image_storage_path": ref2,
+                        "image_sha256": s2_sha,
+                        "label": "Chú gà trống gáy sáng",
+                        "source_page_id": None,
+                        "source_revision_id": None,
+                        "provenance": {"verified_by_admin": True, "verification_source": "admin", "pack_shard": pack_shard_meta},
+                    },
+                ]
+                locked_prov: list[dict] = []
+
+                class _LockedRepo:
+                    async def execute(self, sql, params=None):
+                        return MagicMock(rowcount=1)
+
+                    async def one(self, sql, params=None):
+                        sql_norm = " ".join(str(sql).split())
+                        if "WITH verified_holdout AS" in sql_norm:
+                            return {"sample_count": 2, "group_count": 2}
+                        if "INSERT INTO public.viread_ocr_dataset_versions" in sql_norm:
+                            locked_prov.append(json.loads(params["provenance"]))
+                            return {
+                                "id": locked_id,
+                                "source_flow": "LOCKED_TEST",
+                                "version_sha256": params["version_sha"],
+                                "manifest_storage_path": params["storage_path"],
+                                "sample_count": 2,
+                                "is_locked_test": True,
+                            }
+                        if "INSERT INTO public.viread_ocr_evaluation_cohorts" in sql_norm:
+                            return {"id": uuid4(), "evaluation_type": "PRODUCTION", "manifest_sha256": params["manifest_sha"], "sample_count": 2, "group_count": 2}
+                        return None
+
+                    async def all(self, sql, params=None):
+                        return list(holdout_rows)
+
+                    async def commit(self):
+                        return None
+
+                    async def rollback(self):
+                        return None
+
+                svc_locked = training_svc.VireadOcrTrainingService(MagicMock())
+                svc_locked.repo = _LockedRepo()
+                svc_locked._admin = AsyncMock()
+                svc_locked._artifact_router = AsyncMock(return_value=router)
+                with (
+                    patch.object(training_svc, "MIN_LOCKED_PAIRS", 2),
+                    patch.object(training_svc, "MIN_LOCKED_GROUPS", 2),
+                    patch.object(training_svc, "ensure_database_capacity", new=AsyncMock(return_value={})),
+                ):
+                    locked_res = await svc_locked.ensure_locked_test(actor_id)
+                self.assertEqual(locked_res["status"], "READY")
+                self.assertEqual(len(put_calls), 1)
+                self.assertTrue(put_calls[0].startswith("locked-tests/manifests/"))
+                self.assertEqual(locked_prov[0]["pack_shards"], [pack_shard_meta])
+
+            # 3. dataset_samples attaches signed download_url to dataset["pack_shards"]
+            class _SamplesRepo:
+                async def one(self, sql, params=None):
+                    return {
+                        "id": dataset_id,
+                        "source_flow": "FLOW1_VERIFIED",
+                        "version_sha256": "e" * 64,
+                        "sample_count": 1,
+                        "is_locked_test": False,
+                        "manifest_storage_path": "gdrive://drv_manifest_001",
+                        "provenance": {"pack_shards": [pack_shard_meta]},
+                    }
+
+                async def all(self, sql, params=None):
+                    return [
+                        {
+                            "sample_id": "s1",
+                            "source_annotation_id": "s1",
+                            "source_flow": "FLOW1_VERIFIED",
+                            "group_id": "g1",
+                            "split": "train",
+                            "image_storage_path": "gdrive://vpack--drv_pack_shard_001--" + ("a" * 64),
+                            "image_sha256": "a" * 64,
+                            "label": "Con mèo",
+                        }
+                    ]
+
+            with patch.dict(os.environ, {"VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY": "k" * 48}):
+                svc_samples = training_svc.VireadOcrTrainingService(MagicMock())
+                svc_samples.repo = _SamplesRepo()
+                svc_samples._admin = AsyncMock()
+                ds_out = await svc_samples.dataset_samples(
+                    actor_id, dataset_id, limit=10, offset=0, job_id=job_id, worker_id=worker_id
+                )
+                self.assertIn("pack_shards", ds_out["dataset"])
+                self.assertEqual(len(ds_out["dataset"]["pack_shards"]), 1)
+                self.assertIn("/artifact-stream?", ds_out["dataset"]["pack_shards"][0]["download_url"])
+
+                # 4. stream_viread_colab_job_artifact SQL authorizes pack_shards storage_ref
+                seen_auth_sql: list[str] = []
+
+                class _PackAuthRepo:
+                    async def one(self, sql, params=None):
+                        if "FROM public.viread_ocr_training_jobs" in sql:
+                            return {
+                                "id": job_id,
+                                "target": "COLAB",
+                                "status": "COLAB_RUNNING",
+                                "worker_id": worker_id,
+                                "lease_expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+                                "dataset_version_id": dataset_id,
+                                "locked_test_version_id": locked_id,
+                                "parent_checkpoint_sha256": "a" * 64,
+                                "run_id": None,
+                            }
+                        seen_auth_sql.append(" ".join(str(sql).split()))
+                        return {"is_authorized": True}
+
+                pack_tok = sign_worker_artifact_token(
+                    job_id=str(job_id),
+                    worker_id=worker_id,
+                    reference=pack_shard_meta["storage_ref"],
+                    expected_sha256=pack_shard_meta["sha256"],
+                )
+                from app.services.training_storage.base import ArtifactMetadata
+                ok_meta = ArtifactMetadata(
+                    provider=StorageProvider.GOOGLE_DRIVE,
+                    reference=pack_shard_meta["storage_ref"],
+                    name="pack-0.tar",
+                    size_bytes=5,
+                    sha256=pack_shard_meta["sha256"],
+                    content_type="application/x-tar",
+                    trashed=False,
+                    is_public=False,
+                    drive_file_id="drv_pack_shard_001",
+                )
+                ok_router = MagicMock()
+                ok_router.open_stream_with_metadata.return_value = (ok_meta, iter([b"12345"]))
+                ok_drive_svc = MagicMock()
+                ok_drive_svc.build_artifact_router = AsyncMock(return_value=ok_router)
+                fake_db = MagicMock()
+                fake_db.rollback = AsyncMock()
+                fake_db.commit = AsyncMock()
+                with (
+                    patch.object(admin_viread_training, "VireadOcrTrainingService", return_value=MagicMock(repo=_PackAuthRepo())),
+                    patch.object(admin_viread_training, "VireadDriveConnectionService", return_value=ok_drive_svc),
+                ):
+                    resp = await admin_viread_training.stream_viread_colab_job_artifact(
+                        job_id=job_id, worker_id=worker_id, token=pack_tok, _worker=None, db=fake_db
+                    )
+                self.assertEqual(resp.headers.get("content-length"), "5")
+                self.assertIn("jsonb_array_elements", seen_auth_sql[0])
+                self.assertIn("pack_shards", seen_auth_sql[0])
+                self.assertIn("shard->>'storage_ref' = :ref", seen_auth_sql[0])
+
+            # 5. delete_viread_training_job allows unleased queued jobs and blocks leased/running with 409
+            for st in ("WAITING_FOR_COLAB_WORKER", "FALLBACK_QUEUED_COLAB", "WAITING_FOR_DATA", "QUEUED"):
+                exec_calls: list[tuple[str, dict]] = []
+
+                class _DeleteOkDb:
+                    async def execute(self, stmt, params=None):
+                        exec_calls.append((" ".join(str(stmt).split()), dict(params or {})))
+                        return MagicMock(scalar_one_or_none=MagicMock(return_value=job_id))
+
+                    async def commit(self):
+                        return None
+
+                    async def rollback(self):
+                        return None
+
+                with patch.object(admin_viread_training.VireadOcrTrainingService, "_admin", new=AsyncMock()):
+                    del_res = await admin_viread_training.delete_viread_training_job(
+                        job_id=job_id, actor_id=actor_id, db=_DeleteOkDb()
+                    )
+                self.assertEqual(del_res, {"job_id": job_id, "deleted": True})
+                del_sql, del_params = exec_calls[0]
+                self.assertIn("worker_id IS NULL", del_sql)
+                self.assertIn("run_id IS NULL", del_sql)
+                self.assertIn(st, del_params["unleased_queued_statuses"])
+
+            class _DeleteConflictDb:
+                def __init__(self):
+                    self.step = 0
+
+                async def execute(self, stmt, params=None):
+                    self.step += 1
+                    if self.step == 1:
+                        return MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+                    return MagicMock(scalar_one_or_none=MagicMock(return_value="COLAB_RUNNING"))
+
+                async def commit(self):
+                    return None
+
+                async def rollback(self):
+                    return None
+
+            with patch.object(admin_viread_training.VireadOcrTrainingService, "_admin", new=AsyncMock()):
+                with self.assertRaises(HTTPException) as conflict_err:
+                    await admin_viread_training.delete_viread_training_job(
+                        job_id=job_id, actor_id=actor_id, db=_DeleteConflictDb()
+                    )
+                self.assertEqual(conflict_err.exception.status_code, 409)
+
+        asyncio.run(_run())
 
 
 if __name__ == "__main__":

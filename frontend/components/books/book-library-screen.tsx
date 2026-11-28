@@ -264,7 +264,7 @@ export function BookLibraryScreen() {
   }
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 pt-0 pb-24 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader
         child={child}
         fullBleedDesktop
@@ -284,26 +284,26 @@ export function BookLibraryScreen() {
         </StatusMessage>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5 sm:pb-6">
-          <div className="flex flex-col gap-2">
-            <h1 className="book-title min-w-0 break-words text-2xl text-ink sm:text-4xl lg:text-5xl">
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 sm:gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-2.5 border-b border-border pb-3 sm:gap-4 sm:pb-6">
+          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-start sm:gap-2">
+            <h1 className="book-title min-w-0 truncate text-xl text-ink sm:whitespace-normal sm:break-words sm:text-4xl lg:text-5xl">
               {child
                 ? t("catalog.familyBooksTitle", { alias: child.alias })
                 : t("catalog.familyBooksDefaultTitle")}
             </h1>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <ButtonLink
                 href="/my-books"
                 variant="secondary"
-                className="min-h-12 w-auto px-4 text-sm"
+                className="min-h-10! w-auto gap-1.5 px-3! py-1.5! text-xs! sm:min-h-12! sm:gap-2 sm:px-4! sm:py-2! sm:text-sm!"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
                 {t("catalog.myBooksLink")}
               </ButtonLink>
             </div>
           </div>
-          <div className="w-full sm:max-w-sm">
+          <div className="w-full sm:max-w-sm [&_input]:h-12 [&_input]:pt-5 [&_input]:pb-1.5 [&_input]:text-sm [&_label]:top-1.5 [&_label]:text-[11px] sm:[&_input]:h-[72px] sm:[&_input]:pt-8 sm:[&_input]:pb-3 sm:[&_input]:text-body sm:[&_label]:top-3 sm:[&_label]:text-sm">
             <TextField
               aria-label={t("catalog.searchAria")}
               label={t("catalog.searchLabel")}
@@ -317,7 +317,7 @@ export function BookLibraryScreen() {
 
         <fieldset className="min-w-0">
           <legend className="sr-only">{t("catalog.gradeFilterLegend")}</legend>
-          <div className="flex flex-wrap gap-2">
+          <div className="no-scrollbar -mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-0.5 sm:mx-0 sm:flex-wrap sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -325,10 +325,10 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-control px-4 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "flex min-h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-12 sm:rounded-control sm:border-0 sm:px-4 sm:text-label",
                     isSelected
-                      ? "bg-sky text-primary-hover"
-                      : "bg-white text-ink hover:bg-sky",
+                      ? "border-primary/30 bg-sky text-primary-hover"
+                      : "border-border bg-white text-ink hover:bg-sky",
                   )}
                   key={grade ?? "all"}
                   onClick={() => {
@@ -352,14 +352,14 @@ export function BookLibraryScreen() {
           <div
             aria-busy="true"
             aria-label={t("catalog.loadingAria")}
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-3 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
               {t("catalog.loadingText")}
             </span>
             {[0, 1, 2, 3].map((item) => (
               <Skeleton
-                className="h-[432px] w-full rounded-card sm:w-64"
+                className="h-[126px] w-full rounded-card sm:h-[432px] sm:w-64"
                 key={item}
               />
             ))}
@@ -438,7 +438,7 @@ export function BookLibraryScreen() {
               );
               return (
                 <>
-                  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
                     {visibleBooks.map((book) => (
                       <BookCard
                         book={book}

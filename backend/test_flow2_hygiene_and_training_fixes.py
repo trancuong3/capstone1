@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unicodedata
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -238,7 +239,15 @@ class Flow2HygieneAndTrainingFixesTests(unittest.TestCase):
         self.assertEqual(all_splits, {"train", "validation"})
 
     def test_drive_desktop_store_blocks_production_and_cleans_resume_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+            return_value=fake_disk_usage,
+        ):
             store = GoogleDriveDesktopStore(root_dir=tmp)
             with patch.dict(os.environ, {"RENDER": "true"}):
                 with self.assertRaises(DriveNotConnectedError):
@@ -317,7 +326,15 @@ class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestC
         from app.services.training_storage.base import StorageProvider
         from app.services.training_storage.router import TrainingArtifactStoreRouter
 
-        with tempfile.TemporaryDirectory() as tmp:
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+            return_value=fake_disk_usage,
+        ):
             store = GoogleDriveDesktopStore(root_dir=tmp)
             router = TrainingArtifactStoreRouter(
                 drive_store_factory=lambda: store,
@@ -325,6 +342,7 @@ class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestC
             )
 
             events: list[str] = []
+            put_paths: list[str] = []
             get_calls = 0
             orig_get = router.get
             orig_put = router.put
@@ -336,6 +354,7 @@ class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestC
                 return orig_get(ref, **kwargs)
 
             def spied_put(logical_path, data, **kwargs):
+                put_paths.append(logical_path)
                 events.append(f"router.put:{logical_path.split('/', 1)[0]}")
                 return orig_put(logical_path, data, **kwargs)
 
@@ -455,7 +474,10 @@ class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestC
             # Read txn MUST be released before Drive I/O, and advisory lock ONLY acquired afterward
             self.assertIn("rollback", events)
             self.assertLess(events.index("rollback"), events.index("router.get"))
-            self.assertLess(events.index("router.put:locked-tests"), events.index("lock"))
+            self.assertLess(events.index("router.get"), events.index("lock"))
+            # Zero per-crop locked-tests/production/ uploads: router.put runs only once for locked-tests/manifests/
+            self.assertEqual(len(put_paths), 1)
+            self.assertTrue(put_paths[0].startswith("locked-tests/manifests/"))
             # Each source image downloaded ONLY ONCE (register_dataset skipped 3rd-pass re-read)
             self.assertEqual(get_calls, 2)
 

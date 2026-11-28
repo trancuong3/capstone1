@@ -1293,7 +1293,24 @@
       "rejected": "此页面版本已被拒绝。",
       "suspendedWithTitle": "私有图书“{title}”已暂停。拥有该书的家庭无法立即阅读。"
     },
-    "kpiAria": "用户图书审核队列概览"
+    "kpiAria": "用户图书审核队列概览",
+    "subtabHardRadar": "OCR 难例雷达",
+    "hardRadar": {
+      "heading": "OCR 难例雷达（朗读卡顿关联 → Flow 2）",
+      "privacyNotice": "仅汇总公共书库与已开启 Flow 2 授权的私享书（严格过滤隐私信息并完全匿名化）。",
+      "loading": "正在关联分析 OCR 置信度与朗读重试信号…",
+      "loadError": "无法加载 OCR 难例雷达，请重试。",
+      "totalCandidates": "优先核查词条总数",
+      "catalogCount": "公共书库词条",
+      "consentedPrivateCount": "Flow 2 已授权词条",
+      "empty": "暂无低置信度 OCR 与朗读卡顿重叠的样本。",
+      "scopeCatalog": "公共书库",
+      "scopeConsentedPrivate": "Flow 2 已授权",
+      "scoreLabel": "优先级 {score}/100",
+      "pageLineMeta": "第 {page} 页 · 第 {line} 行",
+      "signalSummary": "OCR 置信度：{conf}% · 重试未通过：{retries} · 对齐偏差：{mismatches} · 匿名会话：{sessions}",
+      "inspectOcrAction": "查看 OCR 页面"
+    }
   },
   "flow2": {
     "filters": {
@@ -2229,6 +2246,10 @@
     "colabGuidePrefix": "打开笔记本",
     "colabGuideSuffix": "，然后点击",
     "colabGuideTitle": "Training Server Guide",
+    "colabWaitingBadge": "有任务正在等待 Colab",
+    "colabGuideSummary": "点击“打开 Google Colab（一键启动）”，选择 Runtime → Change runtime type → T4 GPU → Run all，并输入 VIREAD_TRAINING_WORKER_TOKEN，即可自动领取并运行任务。",
+    "colabGuideNoOauthNote": "无需在 Colab 中配置 OAuth 或手动挂载 Drive；任意 Google Colab 账号均可使用。",
+    "openColabBtn": "打开 Google Colab（一键启动）",
     "driveUnavailableDesc": "Cloud storage status is not configured yet.",
     "driveUnavailableTitle": "Cloud storage not configured",
     "errors": {

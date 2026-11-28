@@ -8,6 +8,7 @@ import re
 import sys
 import threading
 import time
+import weakref
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -95,6 +96,7 @@ from app.jobs.admin_ai_workflow_worker import (
     shutdown_scheduled_admin_ai_workflows,
 )
 from app.services.global_tasks_service import shutdown_scheduled_smart_studio_tasks
+from app.services.cron_dispatch_service import shutdown_cron_post_ocr_drain_tasks
 from app.services.remote_ocr_wakeup import shutdown_remote_ocr_wakeup_tasks
 from app.jobs.parent_book_submission_worker import run_worker as run_parent_book_submission_worker
 from app.jobs.parent_email_dispatcher_worker import run_worker as run_parent_email_dispatcher_worker
@@ -284,10 +286,76 @@ async def _shutdown_subprocess(
                 pass
 
 
+async def _run_startup_recovery_once() -> None:
+    """Non-blocking one-shot recovery after startup DB probe succeeds."""
+    try:
+        from app.jobs import admin_ai_workflow_worker
+        from app.services.ocr_inference_job_service import (
+            OcrInferenceJobService,
+            reconcile_orphaned_parent_submissions,
+        )
+
+        try:
+            async with AsyncSessionLocal() as db:
+                svc = OcrInferenceJobService(db)
+                reap_fn = getattr(svc, "reap_expired_leases", None)
+                if callable(reap_fn):
+                    await asyncio.wait_for(reap_fn(), timeout=6.0)
+                    await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="startup_recovery_reap_leases_failed",
+                stage="lifespan_startup",
+                database_error_type=type(exc).__name__,
+            )
+
+        try:
+            await asyncio.wait_for(
+                reconcile_orphaned_parent_submissions(limit=20),
+                timeout=6.0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="startup_recovery_reconcile_parent_failed",
+                stage="lifespan_startup",
+                database_error_type=type(exc).__name__,
+            )
+
+        try:
+            admin_ai_workflow_worker.schedule_admin_ai_workflow(source="startup_recovery")
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="startup_recovery_admin_ai_kick_failed",
+                stage="lifespan_startup",
+                database_error_type=type(exc).__name__,
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="startup_recovery_failed",
+            stage="lifespan_startup",
+            database_error_type=type(exc).__name__,
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
     startup_db_probe_task: asyncio.Task[object] | None = None
+    startup_recovery_task: asyncio.Task[object] | None = None
     if APP_ENVIRONMENT != "test":
         app_diag_logger = logging.getLogger("app")
         if app_diag_logger.level == logging.NOTSET:
@@ -300,6 +368,7 @@ async def lifespan(_app: FastAPI):
             app_diag_logger.addHandler(diag_handler)
 
         async def _run_startup_db_probe() -> None:
+            nonlocal startup_recovery_task
             try:
                 db_probe = await probe_database_connection(
                     timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
@@ -322,6 +391,9 @@ async def lifespan(_app: FastAPI):
                 )
                 if db_probe["ok"]:
                     await _prewarm_tts_public_voice_ids_nonfatal(timeout=6.0)
+                    startup_recovery_task = asyncio.create_task(
+                        _run_startup_recovery_once(), name="startup_ocr_recovery"
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -557,9 +629,12 @@ async def lifespan(_app: FastAPI):
         stop_smart_studio_worker.set()
         if startup_db_probe_task is not None and not startup_db_probe_task.done():
             startup_db_probe_task.cancel()
+        if startup_recovery_task is not None and not startup_recovery_task.done():
+            startup_recovery_task.cancel()
 
         worker_tasks = (
             startup_db_probe_task,
+            startup_recovery_task,
             local_voice_bootstrap_task,
             smart_studio_worker_task,
             viread_outbox_task,
@@ -575,6 +650,7 @@ async def lifespan(_app: FastAPI):
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
                 shutdown_post_ocr_tasks(),
+                shutdown_cron_post_ocr_drain_tasks(),
                 shutdown_remote_ocr_wakeup_tasks(),
                 shutdown_scheduled_admin_ai_workflows(),
                 shutdown_scheduled_book_quality_scans(),
@@ -583,6 +659,11 @@ async def lifespan(_app: FastAPI):
                 shutdown_scheduled_smart_studio_tasks(),
                 _shutdown_worker_task(
                     startup_db_probe_task,
+                    asyncio.Event(),
+                    timeout=1.0,
+                ),
+                _shutdown_worker_task(
+                    startup_recovery_task,
                     asyncio.Event(),
                     timeout=1.0,
                 ),
@@ -973,9 +1054,22 @@ app.add_middleware(
 )
 
 _HEALTH_PROBE_CACHE_TTL_SECONDS = 20.0
+_HEALTH_PROBE_DEGRADED_CACHE_TTL_SECONDS = 5.0
 _HEALTH_PROBE_CACHE: (
     tuple[float, tuple[object, ...], dict[str, object], dict[str, object]] | None
 ) = None
+_HEALTH_PROBE_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _health_probe_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _HEALTH_PROBE_LOCKS.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _HEALTH_PROBE_LOCKS[loop] = lock
+    return lock
 
 
 def clear_health_probe_cache() -> None:
@@ -1130,42 +1224,65 @@ async def get_health(
         db_probe = dict(cached[2])
         ocr_payload = dict(cached[3])
     else:
-        # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
-        db_probe_res, ocr_payload = await asyncio.gather(
-            probe_database_connection(timeout=max(6.0, ocr_timeout)),
-            _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
-            return_exceptions=True,
-        )
-        if isinstance(db_probe_res, BaseException):
-            db_probe = {
-                "ok": False,
-                "dns_resolved": False,
-                "ssl_enabled": False,
-                "pool_class": type(engine.pool).__name__,
-                "pooler_mode": "unknown",
-                "latency_ms": 0,
-            }
-        else:
-            db_probe = db_probe_res
-        if isinstance(ocr_payload, BaseException):
-            ocr_payload = {
-                "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
-                "ready": False,
-                "engines": {},
-                "workers": [],
-                "queue": {},
-                "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
-                "probe_degraded": True,
-            }
-        if db_probe.get("ok") is True and not ocr_payload.get("probe_degraded"):
-            _HEALTH_PROBE_CACHE = (
-                time.monotonic() + _HEALTH_PROBE_CACHE_TTL_SECONDS,
-                cache_key,
-                dict(db_probe),
-                dict(ocr_payload),
-            )
-        else:
-            _HEALTH_PROBE_CACHE = None
+        # Singleflight per event loop prevents concurrent /health bursts from
+        # exhausting the 8 DB concurrency permits during cold boot or degraded periods.
+        async with _health_probe_lock():
+            now = time.monotonic()
+            cached = _HEALTH_PROBE_CACHE
+            if (
+                probe_mode != "fresh"
+                and cached is not None
+                and now < cached[0]
+                and cached[1] == cache_key
+            ):
+                db_probe = dict(cached[2])
+                ocr_payload = dict(cached[3])
+            else:
+                # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
+                db_probe_res, ocr_payload = await asyncio.gather(
+                    probe_database_connection(timeout=max(6.0, ocr_timeout)),
+                    _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+                    return_exceptions=True,
+                )
+                if isinstance(db_probe_res, BaseException):
+                    db_probe = {
+                        "ok": False,
+                        "dns_resolved": False,
+                        "ssl_enabled": False,
+                        "pool_class": type(engine.pool).__name__,
+                        "pooler_mode": "unknown",
+                        "latency_ms": 0,
+                    }
+                else:
+                    db_probe = db_probe_res
+                if isinstance(ocr_payload, BaseException):
+                    ocr_payload = {
+                        "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
+                        "ready": False,
+                        "engines": {},
+                        "workers": [],
+                        "queue": {},
+                        "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+                        "probe_degraded": True,
+                    }
+                if db_probe.get("ok") is True and not ocr_payload.get("probe_degraded"):
+                    _HEALTH_PROBE_CACHE = (
+                        time.monotonic() + _HEALTH_PROBE_CACHE_TTL_SECONDS,
+                        cache_key,
+                        dict(db_probe),
+                        dict(ocr_payload),
+                    )
+                elif db_probe.get("ok") is True and ocr_payload.get("probe_degraded"):
+                    # 5-second negative cache prevents degraded OCR probe storms from
+                    # holding DB permits under concurrent /health polling.
+                    _HEALTH_PROBE_CACHE = (
+                        time.monotonic() + _HEALTH_PROBE_DEGRADED_CACHE_TTL_SECONDS,
+                        cache_key,
+                        dict(db_probe),
+                        dict(ocr_payload),
+                    )
+                else:
+                    _HEALTH_PROBE_CACHE = None
 
     if _is_production_runtime():
         ocr_minimal: dict[str, object] = {

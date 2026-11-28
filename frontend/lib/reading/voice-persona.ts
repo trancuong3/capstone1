@@ -123,31 +123,69 @@ export function getTeacherPersonaForVoice(
 const QUOTED_SPAN_RE = /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
 
 const NON_TEACHER_CO_FOLLOWERS =
-  "(?!\\s+(?:bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
+  "(?!\\s+(?:thầy|Thầy|THẦY|bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
 
-const CO_GIAO_CAP_RE = new RegExp(`(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`, "gu");
-const CO_GIAO_LOW_RE = new RegExp(`(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`, "gu");
+const NON_TEACHER_THAY_FOLLOWERS =
+  "(?!\\s+(?:cô|Cô|CÔ|thuốc|bói|đồ|tu|cúng|lang|pháp|phù\\s+thủy|địa|chùa)(?=$|[^\\p{L}]))";
+
+const CO_GIAO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)Cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const CO_GIAO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
 const CO_CAP_RE = new RegExp(
-  `(^|[^\\p{L}])Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
   "gu",
 );
 const CO_LOW_RE = new RegExp(
-  `(^|[^\\p{L}])cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  `(^|[^\\p{L}])(?<!(?:thầy|Thầy|THẦY)\\s+)cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  "gu",
+);
+
+const THAY_GIAO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)Thầy giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const THAY_GIAO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)thầy giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const THAY_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)Thầy(?=$|[^\\p{L}])${NON_TEACHER_THAY_FOLLOWERS}`,
+  "gu",
+);
+const THAY_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])(?<!(?:cô|Cô|CÔ)\\s+)thầy(?=$|[^\\p{L}])${NON_TEACHER_THAY_FOLLOWERS}`,
   "gu",
 );
 
 /**
- * Safely converts Vietnamese teacher self-reference ("cô" / "Cô" / "Cô giáo")
- * to ("thầy" / "Thầy" / "Thầy giáo") when a male voice is active, without
- * altering quoted book/story text or unrelated words like "con", "cô bé",
- * "cô gái", "cô tiên", "cô tấm", "công", "cố", "cổ", "cơ".
+ * Safely converts Vietnamese teacher self-reference bidirectionally between
+ * ("cô" / "Cô" / "Cô giáo") and ("thầy" / "Thầy" / "Thầy giáo") to match the
+ * active teacher gender, without altering quoted book/story text, collective
+ * "thầy cô", or non-teacher terms ("cô bé", "cô tiên", "thầy thuốc", etc.).
  */
 export function adaptTextToTeacherPersona(
   text: string,
   gender: VoiceGender,
 ): string {
-  if (gender !== "male" || !text) return text;
+  if (!text) return text;
   const parts = text.split(QUOTED_SPAN_RE);
+  if (gender === "female") {
+    return parts
+      .map((segment, index) => {
+        if (index % 2 === 1) return segment;
+        return segment
+          .replace(THAY_GIAO_CAP_RE, "$1Cô giáo")
+          .replace(THAY_GIAO_LOW_RE, "$1cô giáo")
+          .replace(THAY_CAP_RE, "$1Cô")
+          .replace(THAY_LOW_RE, "$1cô");
+      })
+      .join("");
+  }
   return parts
     .map((segment, index) => {
       // Odd indices are captured quoted spans (e.g. “cô”, "cô giáo") -> NEVER alter book/story quotes.
