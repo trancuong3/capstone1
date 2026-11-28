@@ -57,6 +57,7 @@ DEFAULT_CRON_TOTAL_BUDGET_SECONDS = 50.0
 DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS = 6.0
 REMINDERS_ALERTS_TIMEOUT_SECONDS = 20.0
 ENGAGEMENT_TIMEOUT_SECONDS = 12.0
+TRAINING_MAINTENANCE_TIMEOUT_SECONDS = 12.0
 HEARTBEAT_PERSIST_TIMEOUT_SECONDS = 5.0
 DEFAULT_SWEEP_MAX_ITEMS = 5
 DEFAULT_ORPHAN_RECONCILE_LIMIT = 20
@@ -803,7 +804,7 @@ async def run_scheduled_cron_dispatch(
                 )
 
         # 8. Lightweight Flow 2 OCR training maintenance (lease expiry + Colab poll/dispatch, zero PyTorch)
-        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        budget = _remaining_budget(deadline, TRAINING_MAINTENANCE_TIMEOUT_SECONDS)
         if budget > 0.25:
             try:
                 ocr_training_maintenance_ran, training_items = await asyncio.wait_for(

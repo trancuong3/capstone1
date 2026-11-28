@@ -1387,6 +1387,7 @@ class OcrOutboxAndTrainingMaintenanceTests(unittest.IsolatedAsyncioTestCase):
                 res = await viread_ocr_training_auto_worker.run_maintenance_once()
 
             self.assertEqual(res, {"ok": True, "colab_activity": False})
+            self.assertGreaterEqual(cron_svc.TRAINING_MAINTENANCE_TIMEOUT_SECONDS, 12.0)
             expire_mock.assert_awaited_once()
             colab_mock.assert_awaited_once()
             self.assertIsNotNone(

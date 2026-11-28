@@ -825,6 +825,131 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("COALESCE(metadata->>'resume_pruned', 'false') NOT IN ('true', '1')", job_sql)
 
+    async def test_prune_flow2_drive_artifacts_once_idle_fast_path_skips_protection_scans(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import MagicMock
+        from sqlalchemy import text as sa_text
+        from app.jobs import viread_ocr_training_auto_worker as worker
+        from test_cron_and_worker_heartbeats import _make_sqlite_session_factory
+
+        engine, raw_factory = _make_sqlite_session_factory(
+            "CREATE TABLE viread_ocr_drive_connections (connection_key TEXT PRIMARY KEY, status TEXT NOT NULL)",
+            "CREATE TABLE viread_ocr_active_model (singleton INTEGER PRIMARY KEY, checkpoint_sha256 TEXT, storage_path TEXT)",
+            "CREATE TABLE viread_ocr_model_decisions (id TEXT PRIMARY KEY, action TEXT, previous_checkpoint_sha256 TEXT, previous_storage_path TEXT, candidate_checkpoint_sha256 TEXT, candidate_storage_path TEXT, created_at TIMESTAMP)",
+            "CREATE TABLE viread_ocr_training_runs (id TEXT PRIMARY KEY, status TEXT, checkpoint_sha256 TEXT, checkpoint_storage_path TEXT, checkpoint_drive_file_id TEXT, metadata TEXT, created_at TIMESTAMP)",
+            "CREATE TABLE viread_ocr_checkpoint_chunks (run_id TEXT, chunk_index INTEGER, storage_path TEXT, PRIMARY KEY (run_id, chunk_index))",
+            "CREATE TABLE viread_ocr_training_jobs (id TEXT PRIMARY KEY, status TEXT, run_id TEXT, metadata TEXT, updated_at TIMESTAMP)",
+        )
+        executed_sqls: list[str] = []
+
+        class _CountingSessionWrapper:
+            def __init__(self, inner):
+                self._inner = inner
+                self.bind = getattr(inner, "bind", None)
+
+            async def __aenter__(self):
+                await self._inner.__aenter__()
+                return self
+
+            async def __aexit__(self, *args):
+                return await self._inner.__aexit__(*args)
+
+            async def execute(self, stmt, *args, **kwargs):
+                executed_sqls.append(str(stmt))
+                return await self._inner.execute(stmt, *args, **kwargs)
+
+            async def rollback(self):
+                return await self._inner.rollback()
+
+            async def commit(self):
+                return await self._inner.commit()
+
+        def counting_factory():
+            return _CountingSessionWrapper(raw_factory())
+
+        try:
+            now = datetime.now(timezone.utc)
+            recent_ts = now - timedelta(days=1)
+            old_ts = now - timedelta(days=20)
+
+            with engine.begin() as conn:
+                conn.execute(sa_text(
+                    "INSERT INTO viread_ocr_drive_connections (connection_key, status) VALUES ('flow2_primary', 'CONNECTED')"
+                ))
+                conn.execute(sa_text(
+                    "INSERT INTO viread_ocr_training_runs (id, status, checkpoint_sha256, checkpoint_storage_path, checkpoint_drive_file_id, metadata, created_at) "
+                    "VALUES ('run-recent', 'CANDIDATE', 'sha_r', 'gdrive://drv_recent', 'fid_r', '{}', :cts)"
+                ), {"cts": recent_ts})
+                conn.execute(sa_text(
+                    "INSERT INTO viread_ocr_training_jobs (id, status, run_id, metadata, updated_at) "
+                    "VALUES ('job-recent', 'FAILED', NULL, '{}', :uts)"
+                ), {"uts": recent_ts})
+
+            # 1. Idle DB: 1 storage-detection query + 1 combined preflight SELECT (skips all protection scans)
+            with patch.object(worker, "AsyncSessionLocal", side_effect=counting_factory):
+                res_idle = await worker._prune_flow2_drive_artifacts_once(deadline_seconds=5.0)
+
+            self.assertEqual(res_idle, {"pruned_runs": 0, "pruned_resume_jobs": 0})
+            self.assertEqual(len(executed_sqls), 2, f"Expected 2 queries on idle DB, got {executed_sqls}")
+            joined_idle = "\n".join(executed_sqls)
+            self.assertNotIn("FROM viread_ocr_active_model", joined_idle)
+            self.assertNotIn("FROM viread_ocr_model_decisions", joined_idle)
+
+            # 2. Only expired terminal job (no expired runs) -> skips all 6 run-protection/chunk scans
+            with engine.begin() as conn:
+                conn.execute(sa_text(
+                    "INSERT INTO viread_ocr_training_jobs (id, status, run_id, metadata, updated_at) "
+                    "VALUES ('job-expired-only', 'FAILED', NULL, '{}', :uts)"
+                ), {"uts": old_ts})
+
+            executed_sqls.clear()
+            deleted_resume: list[tuple[str, str]] = []
+            fake_store = MagicMock()
+            fake_store.list_resume_files.return_value = [{"name": "resume-manifest.json", "drive_file_id": "drv_rm"}]
+            fake_store.delete_resume_file.side_effect = lambda jid, name: deleted_resume.append((jid, name)) or True
+            fake_router = MagicMock()
+            fake_router.google_drive_store = fake_store
+            fake_drive_svc = MagicMock()
+            fake_drive_svc.build_artifact_router = AsyncMock(return_value=fake_router)
+
+            with (
+                patch.object(worker, "AsyncSessionLocal", side_effect=counting_factory),
+                patch.object(worker, "VireadDriveConnectionService", return_value=fake_drive_svc),
+            ):
+                res_jobs_only = await worker._prune_flow2_drive_artifacts_once(deadline_seconds=5.0)
+
+            self.assertEqual(res_jobs_only, {"pruned_runs": 0, "pruned_resume_jobs": 1})
+            self.assertEqual(deleted_resume, [("job-expired-only", "resume-manifest.json")])
+            joined_jobs_only = "\n".join(executed_sqls)
+            self.assertNotIn("FROM viread_ocr_active_model", joined_jobs_only)
+            self.assertNotIn("FROM viread_ocr_model_decisions", joined_jobs_only)
+        finally:
+            engine.dispose()
+
+    async def test_run_maintenance_once_absorbs_prune_timeout_and_still_succeeds(self):
+        from app.jobs import viread_ocr_training_auto_worker as worker
+        from app.services.worker_telemetry import clear_worker_telemetry, get_worker_telemetry
+
+        clear_worker_telemetry()
+        try:
+            with (
+                patch.object(worker, "_expire_exhausted_jobs", new=AsyncMock()),
+                patch.object(worker, "_dispatch_or_poll_colab_once", new=AsyncMock(return_value=False)),
+                patch.object(
+                    worker,
+                    "_prune_flow2_drive_artifacts_once",
+                    new=AsyncMock(side_effect=TimeoutError("simulated prune timeout")),
+                ),
+            ):
+                res = await worker.run_maintenance_once(persist_heartbeat=False)
+
+            self.assertEqual(res, {"ok": True, "colab_activity": False})
+            telemetry = get_worker_telemetry("viread_ocr_training")
+            self.assertIsNone(telemetry.get("last_error"))
+            self.assertIsNotNone(telemetry.get("last_success_at"))
+        finally:
+            clear_worker_telemetry()
+
 
 if __name__ == "__main__":
     unittest.main()
