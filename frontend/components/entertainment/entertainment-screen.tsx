@@ -519,7 +519,10 @@ export function EntertainmentScreen({
           <p className="text-sm leading-6 text-muted">
             {primaryRec?.reason_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {primaryRec.reason_vi}
+                {adaptTextToTeacherPersona(
+                  primaryRec.reason_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultRecommendationReason")

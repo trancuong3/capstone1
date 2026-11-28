@@ -44,6 +44,9 @@ export interface VoiceEngineHealthSnapshot {
     readonly configured: boolean;
     readonly stt_configured: boolean;
     readonly tts_configured: boolean;
+    readonly stt_cooldown?: boolean;
+    readonly tts_cooldown?: boolean;
+    readonly error_code?: string | null;
     readonly model_id?: string | null;
     readonly voice_id?: string | null;
   };
@@ -84,6 +87,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 }
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -277,6 +281,27 @@ export function getFreshVoiceEngineHealth(
   return cachedHealth;
 }
 
+/**
+ * Returns fresh voice health, or retains a confirmed `LOCAL_VOICE_UNCONFIGURED`
+ * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
+ * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
+ */
+export function getVoiceEngineHealthForRouting(
+  maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
+): VoiceEngineHealthSnapshot | null {
+  const fresh = getFreshVoiceEngineHealth(maxAgeMs);
+  if (fresh) return fresh;
+  if (
+    cachedHealth &&
+    cachedHealthFetchedAt > 0 &&
+    isHostedLocalVoiceUnconfigured(cachedHealth) &&
+    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+  ) {
+    return cachedHealth;
+  }
+  return null;
+}
+
 export function setCachedVoiceEngineHealth(
   health: VoiceEngineHealthSnapshot | null,
   fetchedAt = Date.now(),
@@ -349,6 +374,10 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
     const rec = raw as Record<string, unknown>;
     const localRaw = rec.local as Record<string, unknown> | undefined;
     const googleRaw = rec.google as Record<string, unknown> | undefined;
+    const elevenlabsRaw =
+      rec.elevenlabs && typeof rec.elevenlabs === "object"
+        ? (rec.elevenlabs as Record<string, unknown>)
+        : undefined;
     if (!localRaw || !googleRaw) return null;
 
     const snapshot: VoiceEngineHealthSnapshot = {
@@ -391,6 +420,38 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
         stt_cooldown: Boolean(googleRaw.stt_cooldown),
         tts_cooldown: Boolean(googleRaw.tts_cooldown),
       },
+      ...(elevenlabsRaw
+        ? {
+            elevenlabs: {
+              configured: Boolean(elevenlabsRaw.configured),
+              stt_configured: Boolean(elevenlabsRaw.stt_configured),
+              tts_configured: Boolean(elevenlabsRaw.tts_configured),
+              ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
+                ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.tts_cooldown === "boolean"
+                ? { tts_cooldown: elevenlabsRaw.tts_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.error_code === "string" ||
+              elevenlabsRaw.error_code === null
+                ? {
+                    error_code:
+                      typeof elevenlabsRaw.error_code === "string"
+                        ? elevenlabsRaw.error_code
+                        : null,
+                  }
+                : {}),
+              model_id:
+                typeof elevenlabsRaw.model_id === "string"
+                  ? elevenlabsRaw.model_id
+                  : null,
+              voice_id:
+                typeof elevenlabsRaw.voice_id === "string"
+                  ? elevenlabsRaw.voice_id
+                  : null,
+            },
+          }
+        : {}),
     };
     setCachedVoiceEngineHealth(snapshot);
     return snapshot;

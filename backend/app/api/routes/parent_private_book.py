@@ -85,9 +85,12 @@ async def list_my_private_books(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    ready_only = ready_only if isinstance(ready_only, bool) else False
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     items = await ParentPrivateBookService(db).list_books(actor_id, ready_only=ready_only)
-    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
-    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    safe_offset = offset if offset > 0 else 0
+    safe_limit = limit if limit is not None and limit > 0 else None
     if safe_offset == 0 and safe_limit is None:
         return items
     return items[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
@@ -104,6 +107,10 @@ async def list_my_private_books_paged(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    ready_only = ready_only if isinstance(ready_only, bool) else False
+    search = search if isinstance(search, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 9
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await ParentPrivateBookService(db).list_books_paged(
         actor_id,
         ready_only=ready_only,
@@ -188,6 +195,8 @@ async def replace_my_private_book_page_file(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    source_type = source_type if isinstance(source_type, str) else None
+    source_note = source_note if isinstance(source_note, str) else None
     try:
         return await ParentPrivateBookService(db).replace_committed_page_file(
             actor_id,
@@ -240,6 +249,15 @@ async def submit_my_private_book_pages(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    source_type = (
+        source_type if isinstance(source_type, str) else "OWNED_PHYSICAL_BOOK"
+    )
+    source_note = source_note if isinstance(source_note, str) else None
+    target_page_number = (
+        target_page_number
+        if isinstance(target_page_number, int) and not isinstance(target_page_number, bool)
+        else None
+    )
     try:
         return await ParentPrivateBookService(db).submit_pages(
             actor_id,
@@ -330,6 +348,8 @@ async def replace_my_submission_file(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    source_type = source_type if isinstance(source_type, str) else None
+    source_note = source_note if isinstance(source_note, str) else None
     try:
         return await ParentPrivateBookService(db).replace_submission_file(
             actor_id,
@@ -444,6 +464,7 @@ async def get_my_private_page_image(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    revision_id = revision_id if isinstance(revision_id, (UUID, str)) else None
     data, media_type = await ParentPrivateBookService(db).read_owner_page_image(
         actor_id, book_id, page_id, revision_id=revision_id
     )
@@ -491,6 +512,10 @@ async def list_admin_user_books_queue(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    queue_status = queue_status if isinstance(queue_status, str) else None
+    search = search if isinstance(search, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await ParentPrivateBookService(db).admin_list_user_books(
         actor_id,
         status_filter=queue_status,
@@ -621,6 +646,10 @@ async def list_admin_flow2_candidates(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    candidate_status = candidate_status if isinstance(candidate_status, str) else None
+    book_id = book_id if isinstance(book_id, (UUID, str)) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 25
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await ParentFlow2ContributionService(db).admin_list_candidates(
         actor_id,
         status_filter=candidate_status,

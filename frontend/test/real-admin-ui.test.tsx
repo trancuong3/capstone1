@@ -1750,6 +1750,71 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(healthCallCount).toBe(1);
     expect(abortedCount).toBe(0);
   });
+
+  it("orders parent_email_dispatcher inside cloud workers ahead of parent_email_delivery", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).endsWith("/system/admin/health")) {
+        return Promise.resolve(
+          Response.json({
+            overall_status: "HEALTHY",
+            checked_at: timestamp,
+            services: [
+              {
+                id: "parent_email_delivery",
+                label: "Parent Email Delivery",
+                status: "HEALTHY",
+                detail_status: "scheduled",
+                operational_state: "Scheduled",
+                checked_at: timestamp,
+                safe_message: "Email relay ready",
+                service_group: "workers",
+                execution_mode: "cron_scheduled",
+                criticality: "core",
+              },
+              {
+                id: "parent_email_dispatcher",
+                label: "Parent Email Dispatcher",
+                status: "HEALTHY",
+                detail_status: "scheduled",
+                operational_state: "Scheduled",
+                checked_at: timestamp,
+                safe_message: "Dispatcher ready",
+                service_group: "workers",
+                execution_mode: "cron_scheduled",
+                criticality: "core",
+              },
+            ],
+            audio_cache: null,
+            audio_cache_error: null,
+          }),
+        );
+      }
+      return Promise.resolve(Response.json({}));
+    });
+
+    render(
+      <AdminServicesProvider>
+        <AdminHealthScreen />
+      </AdminServicesProvider>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Parent Email Dispatcher" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Parent Email Delivery" }),
+      ).toBeInTheDocument();
+    });
+
+    const headings = screen
+      .getAllByRole("heading")
+      .map((el) => el.textContent ?? "");
+    const dispatcherIdx = headings.indexOf("Parent Email Dispatcher");
+    const deliveryIdx = headings.indexOf("Parent Email Delivery");
+    expect(dispatcherIdx).toBeGreaterThanOrEqual(0);
+    expect(deliveryIdx).toBeGreaterThan(dispatcherIdx);
+  });
 });
 
 vi.mock("next/navigation", async (importOriginal) => {

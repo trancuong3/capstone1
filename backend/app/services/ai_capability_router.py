@@ -1594,15 +1594,36 @@ class AiCapabilityRouter:
         }
 
 
+_SHARED_CIRCUIT_BREAKER_LOCK = threading.Lock()
+_SHARED_CIRCUIT_BREAKER: CircuitBreakerRegistry | None = None
+
 _DEFAULT_ROUTER_LOCK = threading.Lock()
 _DEFAULT_ROUTER: AiCapabilityRouter | None = None
+
+
+def get_shared_ai_circuit_breaker() -> CircuitBreakerRegistry:
+    global _SHARED_CIRCUIT_BREAKER
+    with _SHARED_CIRCUIT_BREAKER_LOCK:
+        if _SHARED_CIRCUIT_BREAKER is None:
+            _SHARED_CIRCUIT_BREAKER = CircuitBreakerRegistry()
+        return _SHARED_CIRCUIT_BREAKER
+
+
+def reset_shared_ai_circuit_breaker() -> None:
+    global _SHARED_CIRCUIT_BREAKER
+    with _SHARED_CIRCUIT_BREAKER_LOCK:
+        if _SHARED_CIRCUIT_BREAKER is not None:
+            _SHARED_CIRCUIT_BREAKER.reset()
+        _SHARED_CIRCUIT_BREAKER = None
 
 
 def get_default_ai_router() -> AiCapabilityRouter:
     global _DEFAULT_ROUTER
     with _DEFAULT_ROUTER_LOCK:
         if _DEFAULT_ROUTER is None:
-            _DEFAULT_ROUTER = AiCapabilityRouter()
+            _DEFAULT_ROUTER = AiCapabilityRouter(
+                circuit_breaker=get_shared_ai_circuit_breaker()
+            )
         return _DEFAULT_ROUTER
 
 
@@ -1610,3 +1631,4 @@ def reset_default_ai_router() -> None:
     global _DEFAULT_ROUTER
     with _DEFAULT_ROUTER_LOCK:
         _DEFAULT_ROUTER = None
+    reset_shared_ai_circuit_breaker()

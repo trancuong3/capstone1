@@ -66,7 +66,7 @@ export interface LocaleMetadata {
 
 /**
  * Extensible locale registry. Published locales have verified 100% key coverage
- * (`5,136/5,136`) and pass `i18n:check --strict` with zero errors.
+ * (`6,186/6,186`) and pass `i18n:check --strict` with zero errors.
  * Unfinished locales remain `status: "incomplete", published: false`.
  */
 export const LOCALE_REGISTRY: readonly LocaleMetadata[] = [

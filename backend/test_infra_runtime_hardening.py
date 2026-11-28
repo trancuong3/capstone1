@@ -51,6 +51,7 @@ class DatabaseTransactionPoolerConfigTests(unittest.TestCase):
         )
         base_env.pop("DATABASE_FORCE_NULL_POOL", None)
         base_env.pop("DATABASE_POOL_PRE_PING", None)
+        base_env.pop("DATABASE_CONCURRENCY_LIMIT", None)
 
         check_bounded = (
             f"import sys; sys.path.insert(0, {str(BACKEND_ROOT)!r});"
@@ -59,7 +60,8 @@ class DatabaseTransactionPoolerConfigTests(unittest.TestCase):
             "pool = session.engine.pool;"
             "assert isinstance(pool, AsyncAdaptedQueuePool), type(pool);"
             "assert pool.size() == 4, pool.size();"
-            "assert pool._max_overflow == 4, pool._max_overflow;"
+            "assert pool._max_overflow == 12, pool._max_overflow;"
+            "assert pool.size() + pool._max_overflow == session.DATABASE_CONCURRENCY_LIMIT;"
             "assert pool._timeout >= 10.0, pool._timeout;"
             "assert pool._recycle == 180, pool._recycle;"
             "assert pool._pre_ping is False, pool._pre_ping;"

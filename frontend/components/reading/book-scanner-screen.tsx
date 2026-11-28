@@ -96,18 +96,15 @@ const MAX_ONLINE_POLL_ATTEMPTS = 120;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 const QUEUED_JOBS_PAGE_SIZE = 5;
 
-function formatQueuedTimeLabel(iso: string | null | undefined): string | null {
+function formatQueuedTimeLabel(
+  iso: string | null | undefined,
+  formatTime: ReturnType<typeof useI18n>["formatTime"],
+): string | null {
   if (!iso) return null;
   const parsed = Date.parse(iso);
   if (!Number.isFinite(parsed)) return null;
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(parsed));
-  } catch {
-    return null;
-  }
+  const formatted = formatTime(new Date(parsed), { fallback: "" });
+  return formatted || null;
 }
 
 function isActiveScanJobStatus(
@@ -261,7 +258,7 @@ type LocalOcrScanState =
     };
 
 export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
-  const { formatNumber } = useI18n();
+  const { formatNumber, formatTime } = useI18n();
   const authRuntime = useAuthRuntime();
   const actorUserId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
@@ -1268,10 +1265,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                       })}
                     </span>
                   ) : null}
-                  {formatQueuedTimeLabel(ocrState.createdAt) ? (
+                  {formatQueuedTimeLabel(ocrState.createdAt, formatTime) ? (
                     <span data-testid="ocr-queue-created-at">
                       {t("scanner.savedAtLabel", {
-                        time: formatQueuedTimeLabel(ocrState.createdAt)!,
+                        time: formatQueuedTimeLabel(
+                          ocrState.createdAt,
+                          formatTime,
+                        )!,
                       })}
                     </span>
                   ) : null}
@@ -1382,36 +1382,37 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             ) : null}
           </div>
           <ul className="space-y-1.5">
-            {visibleListedQueuedJobs.map((item) => (
-              <li
-                className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-white/90 px-3 py-2 text-xs"
-                key={item.job_id}
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="font-semibold text-ink">
-                    {item.file_name || "book-page.jpg"}
-                  </span>
-                  {item.queue_position ? (
-                    <span className="ms-2 text-muted">
-                      #{formatNumber(item.queue_position)}
-                    </span>
-                  ) : null}
-                  {formatQueuedTimeLabel(item.created_at) ? (
-                    <span className="ms-2 text-muted">
-                      · {formatQueuedTimeLabel(item.created_at)}
-                    </span>
-                  ) : null}
-                </div>
-                <button
-                  className="inline-flex min-h-8 items-center gap-1 rounded-control border border-border px-2.5 font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
-                  onClick={() => handleCancelSpecificQueuedJob(item.job_id)}
-                  type="button"
+            {visibleListedQueuedJobs.map((item) => {
+              const qTime = formatQueuedTimeLabel(item.created_at, formatTime);
+              return (
+                <li
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-white/90 px-3 py-2 text-xs"
+                  key={item.job_id}
                 >
-                  <X aria-hidden="true" className="size-3.5" />
-                  {t("scanner.cancelQueuedTask")}
-                </button>
-              </li>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <span className="font-semibold text-ink">
+                      {item.file_name || "book-page.jpg"}
+                    </span>
+                    {item.queue_position ? (
+                      <span className="ms-2 text-muted">
+                        #{formatNumber(item.queue_position)}
+                      </span>
+                    ) : null}
+                    {qTime ? (
+                      <span className="ms-2 text-muted">· {qTime}</span>
+                    ) : null}
+                  </div>
+                  <button
+                    className="inline-flex min-h-8 items-center gap-1 rounded-control border border-border px-2.5 font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                    onClick={() => handleCancelSpecificQueuedJob(item.job_id)}
+                    type="button"
+                  >
+                    <X aria-hidden="true" className="size-3.5" />
+                    {t("scanner.cancelQueuedTask")}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           <PaginationBar
             compact

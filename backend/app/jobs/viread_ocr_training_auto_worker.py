@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
 import shutil
 import sys
 import tempfile
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -36,6 +39,38 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 20
 LEASE_SECONDS = 900
 MAX_ATTEMPTS = 3
+DEFAULT_FLOW2_CANDIDATE_RETENTION_DAYS = 14
+DEFAULT_FLOW2_KEEP_LATEST_CANDIDATES = 3
+DEFAULT_FLOW2_RESUME_RETENTION_DAYS = 7
+DEFAULT_FLOW2_PRUNE_BATCH_LIMIT = 2
+
+_FLOW2_PRUNE_REQUIRED_TABLES: tuple[str, ...] = (
+    "viread_ocr_training_runs",
+    "viread_ocr_checkpoint_chunks",
+    "viread_ocr_training_jobs",
+    "viread_ocr_active_model",
+    "viread_ocr_model_decisions",
+    "viread_ocr_drive_connections",
+)
+_UNRESOLVED_JOB_STATUSES: tuple[str, ...] = (
+    "QUEUED",
+    "LOCAL_RUNNING",
+    "FALLBACK_QUEUED_COLAB",
+    "COLAB_RUNNING",
+    "WAITING_FOR_DATA",
+    "WAITING_FOR_COLAB_WORKER",
+    "COLAB_SUBMITTING",
+    "COLAB_SUBMITTED",
+    "COLAB_EXECUTING",
+    "BLOCKED_CONFIGURATION",
+    "BLOCKED",
+    "CANDIDATE",
+)
+_TERMINAL_RESUME_JOB_STATUSES: tuple[str, ...] = (
+    "FAILED",
+    "CANCELLED",
+    "QUALITY_GATE_REJECTED",
+)
 
 
 async def _download_training_object(
@@ -1600,6 +1635,461 @@ async def _pipeline_change_token() -> tuple[Any, ...]:
         )
 
 
+def _flow2_candidate_retention_days() -> int:
+    raw = (os.getenv("VIREAD_FLOW2_CANDIDATE_RETENTION_DAYS") or "").strip()
+    try:
+        return max(3, int(raw)) if raw else DEFAULT_FLOW2_CANDIDATE_RETENTION_DAYS
+    except ValueError:
+        return DEFAULT_FLOW2_CANDIDATE_RETENTION_DAYS
+
+
+def _flow2_keep_latest_candidates() -> int:
+    raw = (os.getenv("VIREAD_FLOW2_KEEP_LATEST_CANDIDATES") or "").strip()
+    try:
+        return max(1, int(raw)) if raw else DEFAULT_FLOW2_KEEP_LATEST_CANDIDATES
+    except ValueError:
+        return DEFAULT_FLOW2_KEEP_LATEST_CANDIDATES
+
+
+def _flow2_resume_retention_days() -> int:
+    raw = (os.getenv("VIREAD_FLOW2_RESUME_RETENTION_DAYS") or "").strip()
+    try:
+        return max(1, int(raw)) if raw else DEFAULT_FLOW2_RESUME_RETENTION_DAYS
+    except ValueError:
+        return DEFAULT_FLOW2_RESUME_RETENTION_DAYS
+
+
+def _parse_metadata_dict(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
+def _flow2_run_not_pruned_sql(alias: str, dialect_name: str) -> str:
+    if dialect_name == "sqlite":
+        return (
+            f"CASE WHEN json_valid({alias}.metadata) "
+            f"THEN COALESCE(CAST(json_extract({alias}.metadata, '$.drive_artifacts_pruned') AS TEXT), '0') "
+            f"ELSE '0' END NOT IN ('1', 'true')"
+        )
+    return f"COALESCE({alias}.metadata->>'drive_artifacts_pruned', 'false') NOT IN ('true', '1')"
+
+
+async def _detect_flow2_prune_storage(db: Any) -> tuple[bool, str, str]:
+    """Return (ready, table_prefix, dialect_name) safely for Postgres, SQLite, or mocks."""
+    if not inspect.iscoroutinefunction(getattr(db, "execute", None)):
+        return False, "public.", "unknown"
+    dialect_name = "postgresql"
+    try:
+        bind = db.get_bind() if callable(getattr(db, "get_bind", None)) else getattr(db, "bind", None)
+        dialect_name = str(getattr(getattr(bind, "dialect", None), "name", "postgresql") or "postgresql").lower()
+    except Exception:
+        dialect_name = "postgresql"
+
+    if dialect_name == "sqlite":
+        try:
+            res = await db.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ("
+                    + ", ".join(f"'{t}'" for t in _FLOW2_PRUNE_REQUIRED_TABLES)
+                    + ")"
+                )
+            )
+            found = {str(row[0]) for row in res.fetchall()}
+            return set(_FLOW2_PRUNE_REQUIRED_TABLES).issubset(found), "", "sqlite"
+        except Exception:
+            return False, "", "sqlite"
+
+    try:
+        checks = ", ".join(f"to_regclass('public.{t}') IS NOT NULL AS has_{t}" for t in _FLOW2_PRUNE_REQUIRED_TABLES)
+        res = await db.execute(text(f"SELECT {checks}"))
+        row = res.mappings().first()
+        if not row:
+            return False, "public.", dialect_name
+        ready = all(bool(row.get(f"has_{t}")) for t in _FLOW2_PRUNE_REQUIRED_TABLES)
+        return ready, "public.", dialect_name
+    except Exception:
+        return False, "public.", dialect_name
+
+
+async def _prune_flow2_drive_artifacts_once(*, deadline_seconds: float = 2.5) -> dict[str, int]:
+    """Bounded, non-fatal cron pruning of expired Flow 2 Drive candidate & resume artifacts."""
+    deadline = time.monotonic() + max(0.2, float(deadline_seconds))
+    pruned_runs = 0
+    pruned_resume_jobs = 0
+
+    async with AsyncSessionLocal() as db:
+        ready, pfx, dialect_name = await _detect_flow2_prune_storage(db)
+        if not ready:
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        now_utc = datetime.now(timezone.utc)
+        candidate_cutoff = now_utc - timedelta(days=_flow2_candidate_retention_days())
+        resume_cutoff = now_utc - timedelta(days=_flow2_resume_retention_days())
+        preflight_run_not_pruned_sql = _flow2_run_not_pruned_sql("pr", dialect_name)
+        run_not_pruned_sql = _flow2_run_not_pruned_sql("r", dialect_name)
+        if dialect_name == "sqlite":
+            job_not_pruned_sql = (
+                "CASE WHEN json_valid(metadata) "
+                "THEN COALESCE(CAST(json_extract(metadata, '$.resume_pruned') AS TEXT), '0') "
+                "ELSE '0' END NOT IN ('1', 'true')"
+            )
+        else:
+            job_not_pruned_sql = "COALESCE(metadata->>'resume_pruned', 'false') NOT IN ('true', '1')"
+        terminal_sql = ", ".join(f"'{s}'" for s in _TERMINAL_RESUME_JOB_STATUSES)
+
+        try:
+            conn_res = await db.execute(
+                text(
+                    f"SELECT "
+                    f"(SELECT status FROM {pfx}viread_ocr_drive_connections "
+                    f" WHERE connection_key = 'flow2_primary' LIMIT 1) AS status, "
+                    f"EXISTS ("
+                    f"  SELECT 1 FROM {pfx}viread_ocr_training_runs pr "
+                    f"  WHERE pr.created_at < :candidate_cutoff "
+                    f"    AND (pr.checkpoint_storage_path LIKE 'gdrive://%' "
+                    f"         OR EXISTS (SELECT 1 FROM {pfx}viread_ocr_checkpoint_chunks pc "
+                    f"                    WHERE pc.run_id = pr.id AND pc.storage_path LIKE 'gdrive://%')) "
+                    f"    AND {preflight_run_not_pruned_sql}"
+                    f") AS has_expired_runs, "
+                    f"EXISTS ("
+                    f"  SELECT 1 FROM {pfx}viread_ocr_training_jobs "
+                    f"  WHERE status IN ({terminal_sql}) AND updated_at < :resume_cutoff AND {job_not_pruned_sql}"
+                    f") AS has_expired_jobs"
+                ),
+                {"candidate_cutoff": candidate_cutoff, "resume_cutoff": resume_cutoff},
+            )
+            conn_row = conn_res.mappings().first()
+        except Exception:
+            await db.rollback()
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        if not conn_row or str(conn_row.get("status") or "").upper() != "CONNECTED":
+            await db.rollback()
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        has_expired_runs = bool(conn_row.get("has_expired_runs", True))
+        has_expired_jobs = bool(conn_row.get("has_expired_jobs", True))
+        if not has_expired_runs and not has_expired_jobs:
+            await db.rollback()
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        protected_shas: set[str] = set()
+        protected_refs: set[str] = set()
+        protected_run_ids: set[str] = set()
+        run_ref_owners: dict[str, set[str]] = {}
+        chunks_by_run: dict[str, list[str]] = {}
+        page_limit = 50
+        max_scan_rows = 1000
+        expired_runs: list[dict[str, Any]] = []
+        expired_jobs: list[dict[str, Any]] = []
+
+        if has_expired_runs:
+            # 1. Active model protection
+            active_res = await db.execute(
+                text(f"SELECT checkpoint_sha256, storage_path FROM {pfx}viread_ocr_active_model WHERE singleton = TRUE")
+            )
+            for row in active_res.mappings().all():
+                if row.get("checkpoint_sha256"):
+                    protected_shas.add(str(row["checkpoint_sha256"]))
+                if row.get("storage_path") and is_gdrive_ref(str(row["storage_path"])):
+                    protected_refs.add(str(row["storage_path"]))
+
+            # 2. Latest APPROVE decision protection (supports 1-click rollback)
+            decision_res = await db.execute(
+                text(
+                    f"SELECT previous_checkpoint_sha256, previous_storage_path, "
+                    f"candidate_checkpoint_sha256, candidate_storage_path "
+                    f"FROM {pfx}viread_ocr_model_decisions "
+                    f"WHERE action = 'APPROVE' ORDER BY created_at DESC LIMIT 1"
+                )
+            )
+            for row in decision_res.mappings().all():
+                for sha_col in ("previous_checkpoint_sha256", "candidate_checkpoint_sha256"):
+                    if row.get(sha_col):
+                        protected_shas.add(str(row[sha_col]))
+                for path_col in ("previous_storage_path", "candidate_storage_path"):
+                    if row.get(path_col) and is_gdrive_ref(str(row[path_col])):
+                        protected_refs.add(str(row[path_col]))
+
+            # 3. Keep latest N candidate/benchmarked runs
+            keep_latest = _flow2_keep_latest_candidates()
+            latest_res = await db.execute(
+                text(
+                    f"SELECT id, checkpoint_sha256, checkpoint_storage_path "
+                    f"FROM {pfx}viread_ocr_training_runs "
+                    f"WHERE status IN ('CANDIDATE', 'BENCHMARKED') "
+                    f"ORDER BY created_at DESC LIMIT :keep_latest"
+                ),
+                {"keep_latest": keep_latest},
+            )
+            for row in latest_res.mappings().all():
+                if row.get("id") is not None:
+                    protected_run_ids.add(str(row["id"]))
+                if row.get("checkpoint_sha256"):
+                    protected_shas.add(str(row["checkpoint_sha256"]))
+                if row.get("checkpoint_storage_path") and is_gdrive_ref(str(row["checkpoint_storage_path"])):
+                    protected_refs.add(str(row["checkpoint_storage_path"]))
+
+            # 4. Protect runs referenced by any active/unresolved training job
+            unresolved_sql = ", ".join(f"'{s}'" for s in _UNRESOLVED_JOB_STATUSES)
+            unresolved_res = await db.execute(
+                text(
+                    f"SELECT run_id FROM {pfx}viread_ocr_training_jobs "
+                    f"WHERE status IN ({unresolved_sql}) AND run_id IS NOT NULL"
+                )
+            )
+            for row in unresolved_res.mappings().all():
+                if row.get("run_id") is not None:
+                    protected_run_ids.add(str(row["run_id"]))
+
+            # Collect all gdrive refs per run so shared deduplicated objects are never deleted while still referenced
+            all_run_rows_res = await db.execute(
+                text(
+                    f"SELECT id, checkpoint_storage_path FROM {pfx}viread_ocr_training_runs "
+                    f"WHERE checkpoint_storage_path IS NOT NULL"
+                )
+            )
+            for row in all_run_rows_res.mappings().all():
+                ref = str(row.get("checkpoint_storage_path") or "")
+                if is_gdrive_ref(ref):
+                    run_ref_owners.setdefault(ref, set()).add(str(row["id"]))
+
+            all_chunk_rows_res = await db.execute(
+                text(f"SELECT run_id, storage_path FROM {pfx}viread_ocr_checkpoint_chunks")
+            )
+            for row in all_chunk_rows_res.mappings().all():
+                rid = str(row["run_id"])
+                ref = str(row.get("storage_path") or "")
+                if is_gdrive_ref(ref):
+                    chunks_by_run.setdefault(rid, []).append(ref)
+                    run_ref_owners.setdefault(ref, set()).add(rid)
+
+            run_where_clauses = [
+                "r.created_at < :cutoff",
+                (
+                    "(r.checkpoint_storage_path LIKE 'gdrive://%' "
+                    f"OR EXISTS (SELECT 1 FROM {pfx}viread_ocr_checkpoint_chunks c "
+                    "WHERE c.run_id = r.id AND c.storage_path LIKE 'gdrive://%'))"
+                ),
+                run_not_pruned_sql,
+            ]
+            run_params: dict[str, Any] = {"cutoff": candidate_cutoff}
+            if protected_run_ids and len(protected_run_ids) <= 200:
+                prot_id_keys = []
+                for idx, prot_rid in enumerate(sorted(protected_run_ids)):
+                    key = f"prot_id_{idx}"
+                    prot_id_keys.append(f":{key}")
+                    run_params[key] = prot_rid
+                run_where_clauses.append(f"CAST(r.id AS TEXT) NOT IN ({', '.join(prot_id_keys)})")
+            if protected_shas and len(protected_shas) <= 200:
+                prot_sha_keys = []
+                for idx, prot_sha in enumerate(sorted(protected_shas)):
+                    key = f"prot_sha_{idx}"
+                    prot_sha_keys.append(f":{key}")
+                    run_params[key] = prot_sha
+                run_where_clauses.append(
+                    f"(r.checkpoint_sha256 IS NULL OR r.checkpoint_sha256 NOT IN ({', '.join(prot_sha_keys)}))"
+                )
+
+            run_where_sql = " AND ".join(run_where_clauses)
+            run_offset = 0
+            while (
+                len(expired_runs) < DEFAULT_FLOW2_PRUNE_BATCH_LIMIT
+                and run_offset < max_scan_rows
+                and time.monotonic() < deadline
+            ):
+                runs_res = await db.execute(
+                    text(
+                        f"SELECT r.id, r.checkpoint_sha256, r.checkpoint_storage_path, r.metadata "
+                        f"FROM {pfx}viread_ocr_training_runs r "
+                        f"WHERE {run_where_sql} "
+                        f"ORDER BY r.created_at ASC, r.id ASC LIMIT :page_limit OFFSET :page_offset"
+                    ),
+                    {**run_params, "page_limit": page_limit, "page_offset": run_offset},
+                )
+                run_rows = runs_res.mappings().all()
+                if not run_rows:
+                    break
+                for row in run_rows:
+                    rid = str(row["id"])
+                    if rid in protected_run_ids:
+                        continue
+                    sha = str(row.get("checkpoint_sha256") or "")
+                    if sha and sha in protected_shas:
+                        continue
+                    meta = _parse_metadata_dict(row.get("metadata"))
+                    if meta.get("drive_artifacts_pruned") is True:
+                        continue
+                    ckpt_path = str(row.get("checkpoint_storage_path") or "")
+                    chunk_paths = chunks_by_run.get(rid, [])
+                    refs_to_prune = [
+                        ref
+                        for ref in ([ckpt_path] if is_gdrive_ref(ckpt_path) else []) + chunk_paths
+                        if ref not in protected_refs
+                    ]
+                    if not refs_to_prune:
+                        continue
+                    expired_runs.append(
+                        {
+                            "id": row["id"],
+                            "rid": rid,
+                            "refs": list(dict.fromkeys(refs_to_prune)),
+                            "metadata": meta,
+                        }
+                    )
+                    if len(expired_runs) >= DEFAULT_FLOW2_PRUNE_BATCH_LIMIT:
+                        break
+                if len(run_rows) < page_limit:
+                    break
+                run_offset += page_limit
+
+        if has_expired_jobs:
+            job_offset = 0
+            while (
+                len(expired_jobs) < DEFAULT_FLOW2_PRUNE_BATCH_LIMIT
+                and job_offset < max_scan_rows
+                and time.monotonic() < deadline
+            ):
+                jobs_res = await db.execute(
+                    text(
+                        f"SELECT id, metadata FROM {pfx}viread_ocr_training_jobs "
+                        f"WHERE status IN ({terminal_sql}) AND updated_at < :cutoff AND {job_not_pruned_sql} "
+                        f"ORDER BY updated_at ASC, id ASC LIMIT :page_limit OFFSET :page_offset"
+                    ),
+                    {"cutoff": resume_cutoff, "page_limit": page_limit, "page_offset": job_offset},
+                )
+                job_rows = jobs_res.mappings().all()
+                if not job_rows:
+                    break
+                for row in job_rows:
+                    meta = _parse_metadata_dict(row.get("metadata"))
+                    if meta.get("resume_pruned") is True:
+                        continue
+                    expired_jobs.append({"id": row["id"], "jid": str(row["id"]), "metadata": meta})
+                    if len(expired_jobs) >= DEFAULT_FLOW2_PRUNE_BATCH_LIMIT:
+                        break
+                if len(job_rows) < page_limit:
+                    break
+                job_offset += page_limit
+
+        if not expired_runs and not expired_jobs:
+            await db.rollback()
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        # Release DB transaction cleanly before external Drive RPCs.
+        await db.rollback()
+
+        if time.monotonic() >= deadline:
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        try:
+            router = await VireadDriveConnectionService(db).build_artifact_router()
+            await db.rollback()
+        except Exception as exc:
+            await db.rollback()
+            logger.debug("Flow 2 Drive prune skipped (router unavailable): %s", exc)
+            return {"pruned_runs": 0, "pruned_resume_jobs": 0}
+
+        json_cast = ":metadata_json" if dialect_name == "sqlite" else "CAST(:metadata_json AS jsonb)"
+
+        for run_item in expired_runs:
+            if time.monotonic() >= deadline:
+                break
+            rid = run_item["rid"]
+            all_completed = True
+            for ref in run_item["refs"]:
+                if time.monotonic() >= deadline:
+                    all_completed = False
+                    break
+                other_owners = {owner for owner in run_ref_owners.get(ref, set()) if owner != rid}
+                is_still_ref = (ref in protected_refs) or bool(other_owners)
+                try:
+                    await asyncio.to_thread(
+                        router.delete_if_unreferenced,
+                        ref,
+                        is_referenced_check=lambda _r, ref_flag=is_still_ref: ref_flag,
+                    )
+                    run_ref_owners.get(ref, set()).discard(rid)
+                except Exception as exc:
+                    logger.debug("Flow 2 Drive candidate ref prune deferred for %s: %s", rid, exc)
+                    all_completed = False
+                    break
+            if all_completed:
+                new_meta = dict(run_item["metadata"])
+                new_meta["drive_artifacts_pruned"] = True
+                new_meta["drive_artifacts_pruned_at"] = now_utc.isoformat()
+                await db.execute(
+                    text(
+                        f"UPDATE {pfx}viread_ocr_training_runs "
+                        f"SET checkpoint_storage_path = NULL, "
+                        f"    checkpoint_drive_file_id = NULL, "
+                        f"    metadata = {json_cast} "
+                        f"WHERE id = :run_id"
+                    ),
+                    {"metadata_json": json.dumps(new_meta), "run_id": run_item["id"]},
+                )
+                await db.execute(
+                    text(
+                        f"DELETE FROM {pfx}viread_ocr_checkpoint_chunks "
+                        f"WHERE run_id = :run_id AND storage_path LIKE 'gdrive://%'"
+                    ),
+                    {"run_id": run_item["id"]},
+                )
+                await db.commit()
+                pruned_runs += 1
+
+        drive_store = getattr(router, "google_drive_store", None)
+        list_resume_fn = getattr(drive_store, "list_resume_files", None)
+        delete_resume_fn = getattr(drive_store, "delete_resume_file", None)
+        if callable(list_resume_fn) and callable(delete_resume_fn):
+            for job_item in expired_jobs:
+                if time.monotonic() >= deadline:
+                    break
+                jid = job_item["jid"]
+                try:
+                    files = await asyncio.to_thread(list_resume_fn, jid)
+                except Exception as exc:
+                    logger.debug("Flow 2 resume list skipped for %s: %s", jid, exc)
+                    continue
+                all_deleted = True
+                for entry in files or []:
+                    if time.monotonic() >= deadline:
+                        all_deleted = False
+                        break
+                    name = entry.get("name") if isinstance(entry, dict) else None
+                    if not name:
+                        continue
+                    try:
+                        await asyncio.to_thread(delete_resume_fn, jid, str(name))
+                    except Exception as exc:
+                        logger.debug("Flow 2 resume file delete skipped for %s/%s: %s", jid, name, exc)
+                        all_deleted = False
+                        break
+                if all_deleted:
+                    new_meta = dict(job_item["metadata"])
+                    new_meta["resume_pruned"] = True
+                    new_meta["resume_pruned_at"] = now_utc.isoformat()
+                    await db.execute(
+                        text(
+                            f"UPDATE {pfx}viread_ocr_training_jobs "
+                            f"SET metadata = {json_cast} "
+                            f"WHERE id = :job_id"
+                        ),
+                        {"metadata_json": json.dumps(new_meta), "job_id": job_item["id"]},
+                    )
+                    await db.commit()
+                    pruned_resume_jobs += 1
+
+    return {"pruned_runs": pruned_runs, "pruned_resume_jobs": pruned_resume_jobs}
+
+
 async def run_maintenance_once(
     *,
     source: str = "cron",
@@ -1614,6 +2104,15 @@ async def run_maintenance_once(
     try:
         await _expire_exhausted_jobs()
         colab_activity = bool(await _dispatch_or_poll_colab_once())
+        try:
+            await asyncio.wait_for(
+                _prune_flow2_drive_artifacts_once(deadline_seconds=2.5),
+                timeout=3.5,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as prune_exc:
+            logger.debug("Flow 2 Drive maintenance prune skipped: %s", prune_exc)
         record_worker_success("viread_ocr_training")
         if persist_heartbeat:
             await persist_worker_heartbeat_with_factory(

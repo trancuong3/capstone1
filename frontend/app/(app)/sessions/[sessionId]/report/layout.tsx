@@ -22,5 +22,5 @@ export default function SessionReportLayout({
 }: {
   readonly children: ReactNode;
 }) {
-  return <>{children}</>;
+  return children;
 }

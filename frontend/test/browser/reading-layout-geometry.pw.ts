@@ -158,6 +158,8 @@ async function installLongReadingSession(
     };
   } = {},
 ) {
+  await page.goto("about:blank");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await installApiFixture(page);
 
   const built =
@@ -648,6 +650,8 @@ async function installLongReadingSession(
     { disableAutoMicPulse: Boolean(options.disableAutoMicPulse) },
   );
 
+  voice503Counts.tts = 0;
+  voice503Counts.stt = 0;
   await page.goto(
     `/reading/${ids.session}?state=${options.initialState ?? "reading"}`,
   );
@@ -1113,6 +1117,8 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
         ).__geomSpeech.spoken(),
       ),
     ).toEqual([]);
+    // Local TTS is unavailable, so preload fails closed without probing
+    // /voice/text-to-speech or triggering STT / online fallback.
     expect(voice503Counts.tts).toBe(0);
     expect(voice503Counts.stt).toBe(0);
   });

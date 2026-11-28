@@ -18,6 +18,7 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import {
   DEFAULT_USER_CACHE_TTL_MS,
   PERSISTENT_USER_CACHE_MAX_STALE_MS,
@@ -132,6 +133,7 @@ export function DifficultWordsScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    void preloadReadingVoiceEngines();
     return () => {
       mountedRef.current = false;
       loadRequestIdRef.current += 1;

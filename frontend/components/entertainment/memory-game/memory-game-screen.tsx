@@ -27,6 +27,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -42,7 +43,28 @@ import {
   type MemoryGameService,
 } from "@/lib/api/memory-game-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { createSpeechService } from "@/lib/api/speech-service";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import { EchoGuard } from "@/lib/reading/echo-guard";
+import {
+  isInjectedTestSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+} from "@/lib/reading/local-segment-speech-recognition";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
+import {
+  lockSessionVoice,
+  releaseSessionVoiceLock,
+} from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type {
   MatchedFactDTO,
@@ -68,6 +90,7 @@ interface BrowserSpeechRecognitionAlternative {
 interface BrowserSpeechRecognitionResult {
   readonly isFinal: boolean;
   readonly length: number;
+  readonly onsetAt?: number | null;
   readonly [index: number]: BrowserSpeechRecognitionAlternative;
 }
 
@@ -189,8 +212,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
-  const speechPlayer = useSpeechPlayer();
+  const memoryVoiceSessionId = childId
+    ? `game_memory_${childId}`
+    : "game_memory";
   const teacherPersona = useTeacherPersona();
+  const speechService = useMemo(() => createSpeechService(), []);
+  const echoGuard = useMemo(() => new EchoGuard(), []);
+  const speechPlayer = useSpeechPlayer();
+  const speechPlayerRef = useRef(speechPlayer);
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
   const { reducedMotion, calmSound, toggleCalmSound } =
     useEntertainmentPreferences();
 
@@ -286,8 +318,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const [isSpeakingPrompt, setIsSpeakingPrompt] = useState(false);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isSpeakingPromptRef = useRef(false);
-  const speakGenRef = useRef(0);
-  const speechPlayerRef = useRef(speechPlayer);
+  const ttsGenerationRef = useRef(0);
+  const micGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const ttsCooldownUntilRef = useRef<number>(0);
   const micArmTimeoutRef = useRef<number | null>(null);
   const peekIntervalRef = useRef<number | null>(null);
@@ -296,7 +329,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     speechPlayerRef.current = speechPlayer;
   }, [speechPlayer]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    lockSessionVoice(memoryVoiceSessionId);
+    void preloadReadingVoiceEngines();
+    return () => {
+      mountedRef.current = false;
+      releaseSessionVoiceLock(memoryVoiceSessionId);
+    };
+  }, [memoryVoiceSessionId]);
+
   const stopMicCapture = useCallback(() => {
+    micGenerationRef.current += 1;
     if (micArmTimeoutRef.current !== null) {
       window.clearTimeout(micArmTimeoutRef.current);
       micArmTimeoutRef.current = null;
@@ -322,10 +366,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   }, []);
 
   const stopAllTts = useCallback(() => {
-    speakGenRef.current += 1;
-    const player = speechPlayerRef.current;
-    const wasSpeaking = isSpeakingPromptRef.current || player.isPlaying;
-    player.stop();
+    ttsGenerationRef.current += 1;
+    const currentPlayer = speechPlayerRef.current;
+    const wasSpeaking = isSpeakingPromptRef.current || currentPlayer.isPlaying;
+    currentPlayer.stop();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
@@ -351,28 +395,66 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const speakVietnamesePrompt = useCallback(
     (text: string) => {
       if (!calmSound) return;
-      const adapted = adaptTextToTeacherPersona(text, teacherPersona.gender);
-      if (!adapted.trim()) return;
+      const adaptedText = adaptTextToTeacherPersona(
+        text,
+        teacherPersona.gender,
+      );
+      if (!adaptedText.trim()) return;
       // Anti-self-capture invariant: ALWAYS abort active mic BEFORE speaking TTS!
       stopMicCapture();
       stopAllTts();
-      const generation = speakGenRef.current;
+      const generation = ++ttsGenerationRef.current;
+      const playbackId = `memory-tts-${generation}`;
       isSpeakingPromptRef.current = true;
       setIsSpeakingPrompt(true);
+      echoGuard.playbackStarted(playbackId, adaptedText, performance.now());
 
       const finishSpeak = () => {
-        if (speakGenRef.current !== generation) return;
+        echoGuard.playbackEnded(playbackId, performance.now());
+        if (ttsGenerationRef.current !== generation) return;
         isSpeakingPromptRef.current = false;
-        setIsSpeakingPrompt(false);
+        if (mountedRef.current) {
+          setIsSpeakingPrompt(false);
+        }
         ttsCooldownUntilRef.current = Date.now() + TTS_MIC_COOLDOWN_MS;
       };
 
       void speechPlayerRef.current
-        .play(adapted, { utteranceKind: "game_prompt" })
-        .catch(() => undefined)
-        .finally(finishSpeak);
+        .play(adaptedText, {
+          coaching: true,
+          utteranceKind: "game_prompt",
+        })
+        .then(finishSpeak)
+        .catch(() => {
+          if (!mountedRef.current || ttsGenerationRef.current !== generation) {
+            echoGuard.playbackEnded(playbackId, performance.now());
+            return;
+          }
+          // Last-resort fallback only if TtsPlayback (Offline -> Cloud -> Android/Browser)
+          // could not speak (e.g., browser exposes speechSynthesis without getVoices()).
+          if (
+            typeof window !== "undefined" &&
+            "speechSynthesis" in window &&
+            typeof window.SpeechSynthesisUtterance === "function"
+          ) {
+            try {
+              const utterance = new window.SpeechSynthesisUtterance(
+                adaptedText,
+              );
+              utterance.lang = "vi-VN";
+              utterance.rate = getSpeechPreferences().speed;
+              utterance.onend = finishSpeak;
+              utterance.onerror = finishSpeak;
+              window.speechSynthesis.speak(utterance);
+              return;
+            } catch {
+              // Fall through to finishSpeak cleanly.
+            }
+          }
+          finishSpeak();
+        });
     },
-    [calmSound, stopAllTts, stopMicCapture, teacherPersona.gender],
+    [calmSound, echoGuard, stopAllTts, stopMicCapture, teacherPersona.gender],
   );
 
   const startVoiceCapture = useCallback(
@@ -385,13 +467,28 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       // Anti-self-capture invariant: ALWAYS cancel TTS BEFORE arming microphone!
       stopAllTts();
 
-      const SpeechRecognition = getSpeechRecognitionCtor();
+      const rawCtor = getSpeechRecognitionCtor();
+      const SpeechRecognition =
+        typeof window !== "undefined"
+          ? ((resolveLocalFirstSpeechRecognitionConstructor(
+              window as unknown as Parameters<
+                typeof resolveLocalFirstSpeechRecognitionConstructor
+              >[0],
+              speechService,
+              () => ({ sessionId: memoryVoiceSessionId }),
+            ) as SpeechRecognitionCtor | undefined) ?? null)
+          : null;
       if (!SpeechRecognition) {
         setVoiceNotice(t("memoryGame.voiceUnsupported"));
         return;
       }
 
-      const beginCapture = () => {
+      const captureGen = ++micGenerationRef.current;
+
+      const startRecognizerNow = () => {
+        if (!mountedRef.current || micGenerationRef.current !== captureGen) {
+          return;
+        }
         micArmTimeoutRef.current = null;
         setActionError(null);
         setVoiceNotice(t("memoryGame.voiceListening"));
@@ -401,10 +498,35 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           recognition.continuous = true;
           recognition.interimResults = true;
           recognition.onresult = (event) => {
+            if (
+              !mountedRef.current ||
+              micGenerationRef.current !== captureGen ||
+              isSpeakingPromptRef.current
+            ) {
+              return;
+            }
             const pieces: string[] = [];
             for (let i = 0; i < event.results.length; i += 1) {
-              const part = event.results[i]?.[0]?.transcript?.trim();
-              if (part) pieces.push(part);
+              const item = event.results[i];
+              const part = item?.[0]?.transcript?.trim();
+              if (!part) continue;
+              if (item.isFinal) {
+                const onsetAt =
+                  typeof item.onsetAt === "number" &&
+                  Number.isFinite(item.onsetAt)
+                    ? item.onsetAt
+                    : null;
+                if (
+                  !echoGuard.evaluate({
+                    text: part,
+                    receivedAt: performance.now(),
+                    onsetAt,
+                  }).accept
+                ) {
+                  continue;
+                }
+              }
+              pieces.push(part);
             }
             const transcript = pieces.join(" ").trim();
             if (!transcript) return;
@@ -437,6 +559,26 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         }
       };
 
+      const beginCapture = () => {
+        const freshHealth = getFreshVoiceEngineHealth();
+        const localSttReady = Boolean(
+          freshHealth?.local.available && freshHealth.local.stt_ready,
+        );
+        const needsWasmWarmup =
+          !isAndroidNativeSpeechAvailable() &&
+          !isInjectedTestSpeechRecognition(rawCtor) &&
+          !localSttReady &&
+          detectBrowserWasmSttSupport().supported &&
+          !getBrowserWasmSttClient().isReady();
+        if (needsWasmWarmup) {
+          void awaitSttReadyBeforeListening(4_000)
+            .catch(() => false)
+            .then(() => startRecognizerNow());
+          return;
+        }
+        startRecognizerNow();
+      };
+
       const remainingCooldown = ttsCooldownUntilRef.current - Date.now();
       if (remainingCooldown > 0 && remainingCooldown <= TTS_MIC_COOLDOWN_MS) {
         // Brief guard against acoustic echo right after TTS stops
@@ -447,7 +589,15 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         beginCapture();
       }
     },
-    [isListeningVoice, stopAllTts, stopMicCapture, t],
+    [
+      echoGuard,
+      isListeningVoice,
+      memoryVoiceSessionId,
+      speechService,
+      stopAllTts,
+      stopMicCapture,
+      t,
+    ],
   );
 
   // Stop mic, TTS, and peek timers cleanly on backgrounding / unmount
@@ -867,6 +1017,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <p className="text-body text-muted">{t("memoryGame.lead")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ReadingVoiceSettings
+            disabled={isListeningVoice}
+            fallbackNotice={speechPlayer.fallbackNotice}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={(sample) => {
+              stopMicCapture();
+              stopAllTts();
+              return speechPlayer.play(sample, { bypassSessionLock: true });
+            }}
+            onStopPreview={stopAllTts}
+          />
           <Button
             aria-pressed={!calmSound}
             className="min-h-11"

@@ -497,7 +497,20 @@
     "retriedQueuedOfflineNotice": "재시도 요청을 OCR 대기열에 저장했습니다. OCR이 다시 열리면 자동으로 처리됩니다.",
     "replacedPageImageQueuedOfflineNotice": "{page}페이지 이미지를 교체하여 OCR 대기열에 추가했습니다. OCR이 다시 열리면 자동으로 재검사됩니다.",
     "replacedSubmissionImageQueuedOfflineNotice": "새 이미지를 교체하여 OCR 대기열에 추가했습니다. OCR이 다시 열리면 자동으로 재검사됩니다.",
-    "toolCheckPassedNotice": "이 페이지는 안전 검사를 통과했습니다."
+    "toolCheckPassedNotice": "이 페이지는 안전 검사를 통과했습니다.",
+    "toolScopeCloudAi": "보안 클라우드 AI 서비스를 통한 맞춤법 교정 및 아동 안전성 검사",
+    "taskCenterLink": "작업 센터",
+    "changeCoverAction": "표지 변경",
+    "closeCoverStudio": "표지 설정 닫기",
+    "uploadPrivacyTransparency": "개인정보 투명성 안내: 개인 도서는 가족 계정 내에서만 표시되며, 업로드된 페이지 텍스트는 자동 맞춤법 및 아동 안전성 검사(서버 설정에 따라 로컬 모델 또는 보안 클라우드 AI 서비스 사용)를 거치며 기본적으로 OCR 학습에 사용되지 않습니다.",
+    "openPageIllustrationAria": "{page}페이지 삽화 열기",
+    "closePageIllustrationAria": "{page}페이지 삽화 닫기",
+    "pageIllustrationAction": "페이지 삽화",
+    "closePageIllustrationAction": "삽화 닫기",
+    "openPageOcrBlocksAria": "{page}페이지 OCR 텍스트 블록 보기",
+    "closePageOcrBlocksAria": "{page}페이지 OCR 텍스트 블록 닫기",
+    "openPageOcrBlocksAction": "OCR 텍스트 블록",
+    "closePageOcrBlocksAction": "OCR 블록 닫기"
   },
   "ocrContribution": {
     "cardAria": "{title}의 글자 인식 개선을 위한 샘플 기여",

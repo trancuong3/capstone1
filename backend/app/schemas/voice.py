@@ -172,3 +172,87 @@ class SessionVoiceLockRead(BaseModel):
     voice_id: str
     provider: Literal["local", "google"]
     locked: bool = True
+
+
+class PhonicsAnalyzeRequest(BaseModel):
+    """Request AI-assisted Grade-1 Vietnamese phonics breakdown for a word/phrase."""
+
+    text: str = Field(min_length=1, max_length=80)
+    context_phrase: str | None = Field(default=None, max_length=160)
+
+    @field_validator("text")
+    @classmethod
+    def normalize_word(cls, value: str) -> str:
+        normalized = unicodedata.normalize("NFC", value).strip()
+        if not normalized:
+            raise ValueError("text must not be blank")
+        return normalized
+
+    @field_validator("context_phrase")
+    @classmethod
+    def normalize_context_phrase(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = unicodedata.normalize("NFC", value).strip()
+        return normalized or None
+
+
+class PhonicsAnalyzeOnsetRead(BaseModel):
+    written: str
+    spoken: str
+
+
+class PhonicsAnalyzeRhymeRead(BaseModel):
+    written: str
+    untoned: str
+    nucleus: str
+    coda: str
+    spoken: str
+
+
+class PhonicsAnalyzeToneRead(BaseModel):
+    key: Literal["ngang", "sac", "huyen", "hoi", "nga", "nang"]
+    label: str
+    spoken: str | None = None
+
+
+class PhonicsAnalyzeStepRead(BaseModel):
+    id: str
+    index: int = Field(ge=0)
+    kind: Literal[
+        "rhyme_build",
+        "onset_blend",
+        "tone_blend",
+        "whole_syllable",
+        "context_phrase",
+    ]
+    display_text: str
+    spoken_text: str
+    highlight_part: Literal[
+        "rhyme",
+        "onset_and_rhyme",
+        "tone_and_syllable",
+        "whole_syllable",
+        "context",
+    ]
+    highlight_start: int = Field(ge=0)
+    highlight_end: int = Field(ge=0)
+    pause_after_ms: int = Field(default=420, ge=150, le=1500)
+
+
+class PhonicsAnalyzeResponse(BaseModel):
+    supported: bool
+    source: Literal["rules", "ai", "none"] = "none"
+    raw_text: str
+    clean_phrase: str
+    syllables: list[str] = Field(default_factory=list)
+    focus_syllable_index: int = 0
+    focus_syllable: str = ""
+    focus_range_start: int = 0
+    focus_range_end: int = 0
+    onset: PhonicsAnalyzeOnsetRead | None = None
+    rhyme: PhonicsAnalyzeRhymeRead | None = None
+    tone: PhonicsAnalyzeToneRead | None = None
+    steps: list[PhonicsAnalyzeStepRead] = Field(default_factory=list)
+    message: str = "Chưa có mẫu đánh vần"
+    can_play_whole_word: bool = True

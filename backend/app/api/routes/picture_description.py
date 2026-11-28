@@ -81,12 +81,23 @@ async def create_picture_session(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_sample_key = sample_key if isinstance(sample_key, str) else None
+    resolved_book_page_id = book_page_id if isinstance(book_page_id, UUID) else None
+    resolved_mode: TeachingMode = (
+        teaching_mode if isinstance(teaching_mode, str) else "OBSERVE"
+    )
+    resolved_target_words = target_words if isinstance(target_words, str) else None
+    resolved_refresh = refresh_ai_guide if isinstance(refresh_ai_guide, bool) else False
+    resolved_image = (
+        image if image is not None and not isinstance(image, bool) and hasattr(image, "read") else None
+    )
+
     upload_bytes: bytes | None = None
-    if image is not None:
+    if resolved_image is not None:
         try:
-            upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+            upload_bytes = await resolved_image.read(MAX_UPLOAD_BYTES + 1)
         finally:
-            await image.close()
+            await resolved_image.close()
         if len(upload_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -100,12 +111,12 @@ async def create_picture_session(
         actor_id,
         child_id=child_id,
         source_type=source_type,
-        sample_key=sample_key,
-        book_page_id=book_page_id,
+        sample_key=resolved_sample_key,
+        book_page_id=resolved_book_page_id,
         upload_bytes=upload_bytes,
-        teaching_mode=teaching_mode,
-        target_words=_parse_target_words_form(target_words),
-        refresh_ai_guide=refresh_ai_guide,
+        teaching_mode=resolved_mode,
+        target_words=_parse_target_words_form(resolved_target_words),
+        refresh_ai_guide=resolved_refresh,
         teacher_gender=safe_teacher_gender,
     )
 

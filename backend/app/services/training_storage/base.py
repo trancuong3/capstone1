@@ -165,6 +165,9 @@ class StorageHealthStatus:
     quota: StorageQuotaStatus | None = None
     error_code: str | None = None
     detail: str | None = None
+    advanced_drive_enabled: bool | None = None
+    delete_mode: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
 
 class TrainingArtifactStore(ABC):

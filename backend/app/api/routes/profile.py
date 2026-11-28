@@ -836,6 +836,9 @@ async def get_admin_parent_directory(
     db: AsyncSession = Depends(get_db),
 ):
     """List parent profiles for authenticated Admin users only."""
+    search = search if isinstance(search, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     service = AdminParentService(AdminParentRepository(db))
     try:
         result = await service.list_parents(

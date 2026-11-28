@@ -497,7 +497,20 @@
     "retriedQueuedOfflineNotice": "已將重試請求儲存至 OCR 佇列。OCR 服務恢復後將自動處理此頁面。",
     "replacedPageImageQueuedOfflineNotice": "已替換第 {page} 頁圖片並加入 OCR 佇列。OCR 服務恢復後將自動重新檢查。",
     "replacedSubmissionImageQueuedOfflineNotice": "已替換新圖片並加入 OCR 佇列。OCR 服務恢復後將自動重新檢查。",
-    "toolCheckPassedNotice": "此頁面已通過安全檢查。"
+    "toolCheckPassedNotice": "此頁面已通過安全檢查。",
+    "toolScopeCloudAi": "透過安全雲端 AI 服務進行拼寫校對與兒童安全檢查",
+    "taskCenterLink": "任務中心",
+    "changeCoverAction": "更換封面",
+    "closeCoverStudio": "關閉封面設定",
+    "uploadPrivacyTransparency": "隱私透明說明：私享繪本僅在您的家庭帳戶內可見；上傳的書頁文字會自動進行拼寫與兒童安全檢查（依伺服器設定使用本地模型或安全雲端 AI 服務），預設不用於 OCR 模型訓練。",
+    "openPageIllustrationAria": "開啟第 {page} 頁插圖",
+    "closePageIllustrationAria": "關閉第 {page} 頁插圖",
+    "pageIllustrationAction": "書頁插圖",
+    "closePageIllustrationAction": "關閉插圖",
+    "openPageOcrBlocksAria": "檢視第 {page} 頁 OCR 文字區塊",
+    "closePageOcrBlocksAria": "關閉第 {page} 頁 OCR 文字區塊",
+    "openPageOcrBlocksAction": "OCR 文字區塊",
+    "closePageOcrBlocksAction": "關閉 OCR 區塊"
   },
   "ocrContribution": {
     "cardAria": "為《{title}》貢獻樣本以提升文字辨識",

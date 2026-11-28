@@ -65,7 +65,7 @@ PRIORITY_RETRY = 60
 
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_MAX_ATTEMPTS = 3
-DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 45
+DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 75
 ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 OCR_PIPELINE_VERSION = "hybrid_ocr_v2"
 ADMIN_JOB_KINDS = (
@@ -456,7 +456,13 @@ def _is_transient_post_ocr_error(exc: Exception) -> bool:
     if isinstance(exc, OcrConfigurationError):
         return False
     code = str(getattr(exc, "code", "") or "").upper()
-    if code == "NO_AI_PROVIDER_CONFIGURED":
+    if code in {
+        "NO_AI_PROVIDER_CONFIGURED",
+        "ALL_PROVIDERS_SKIPPED",
+        "PROVIDER_AUTHENTICATION",
+        "MODEL_UNAVAILABLE",
+        "INVALID_AI_CONFIGURATION",
+    }:
         return False
     status_code = getattr(exc, "status_code", None)
     if code in _TRANSIENT_POST_OCR_ERROR_CODES:

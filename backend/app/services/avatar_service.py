@@ -30,7 +30,7 @@ SUPPORTED_FORMATS = {
 
 
 class AvatarFileValidationError(Exception):
-    def __init__(self, message: str, http_status: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
+    def __init__(self, message: str, http_status: int = status.HTTP_422_UNPROCESSABLE_CONTENT):
         super().__init__(message)
         self.http_status = http_status
 

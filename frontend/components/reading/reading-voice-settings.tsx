@@ -30,7 +30,9 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   applyGlobalTeacherVoiceSelection,
+  clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
+  getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
@@ -61,6 +63,7 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -273,6 +276,9 @@ export function ReadingVoiceSettings({
             sessionId: activeLock.sessionId,
             voiceId: updatedLock.voiceId,
           })
+          .then(() => {
+            clearPendingSessionVoiceSwitch(activeLock.sessionId);
+          })
           .catch(() => undefined);
       }
     },
@@ -433,7 +439,8 @@ export function ReadingVoiceSettings({
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice of the same gender
+    // If Google TTS was disabled while a Google voice was chosen, downgrade
+    // cleanly to the matching region+gender local voice (treating default as null).
     const currentVoiceId = getSpeechPreferences().voiceId;
     if (
       currentVoiceId?.startsWith("google_") &&
@@ -441,16 +448,24 @@ export function ReadingVoiceSettings({
         !updated.allowGoogleTtsFallback)
     ) {
       const preservedGender = resolveVoiceGender(currentVoiceId);
-      const fallbackLocal = getDefaultVoiceIdForRegionAndGender(
+      const preservedRegion = inferRegionFromVoiceId(
+        currentVoiceId,
         updated.region,
+      );
+      const localFallbackId = getDefaultLocalVoiceIdForRegionAndGender(
+        preservedRegion,
         preservedGender,
       );
+      const defaultVoice =
+        loadState.status === "ready"
+          ? loadState.data.default_voice_id
+          : "local_north_truc_ly";
       applyGlobalTeacherVoiceSelection({
-        voiceId: fallbackLocal,
+        voiceId: localFallbackId,
         storedVoiceId:
-          fallbackLocal === "local_north_truc_ly" ? null : fallbackLocal,
+          localFallbackId === defaultVoice ? null : localFallbackId,
         gender: preservedGender,
-        region: updated.region,
+        region: preservedRegion,
         childId: selectedChildId,
         persistToBackend:
           selectedChildId &&
@@ -603,7 +618,10 @@ export function ReadingVoiceSettings({
               <Button
                 className="w-auto!"
                 size="compact"
-                onClick={() => change({ voiceId: null })}
+                onClick={() => {
+                  setVoicePolicyPreferences({ region: "north" });
+                  change({ voiceId: null });
+                }}
                 variant="quiet"
               >
                 {t("settings.useDefaultVoice")}
@@ -681,7 +699,7 @@ export function ReadingVoiceSettings({
         onClose={close}
         title={`${t("settings.modalTitle")} · ${teacherPersona.title}`}
       >
-        <div className="space-y-4">
+        <div className="space-y-4 pb-4">
           <div
             aria-label={t("settings.teacherPersonaAria")}
             className="grid grid-cols-2 gap-2"
@@ -739,7 +757,9 @@ export function ReadingVoiceSettings({
                 ? t("settings.localOnlyMode")
                 : t("settings.localWithGoogleMode")}
             </div>
-            {activeSessionLock || !isBrowserOnline ? (
+            {activeSessionLock ||
+            !isBrowserOnline ||
+            isAndroidNativeSpeechAvailable() ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
                 {activeSessionLock ? (
                   <span
@@ -747,6 +767,14 @@ export function ReadingVoiceSettings({
                     className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"
                   >
                     {t("settings.sessionLockedBadge")}
+                  </span>
+                ) : null}
+                {isAndroidNativeSpeechAvailable() ? (
+                  <span
+                    data-testid="android-native-speech-badge"
+                    className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-900"
+                  >
+                    Android TTS/STT (vi-VN)
                   </span>
                 ) : null}
                 {!isBrowserOnline ? (

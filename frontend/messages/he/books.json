@@ -497,7 +497,20 @@
     "retriedQueuedOfflineNotice": "בקשת הניסיון החוזר נשמרה בתור OCR. העמוד יעובד אוטומטית עם חזרת השירות.",
     "replacedPageImageQueuedOfflineNotice": "תמונת עמוד {page} הוחלפה ונוספה לתור OCR. הבדיקה תתחדש אוטומטית עם חזרת שירות ה-OCR.",
     "replacedSubmissionImageQueuedOfflineNotice": "התמונה הוחלפה ונוספה לתור OCR. הבדיקה תתחדש אוטומטית עם חזרת שירות ה-OCR.",
-    "toolCheckPassedNotice": "הדף עבר את בדיקת הבטיחות בהצלחה."
+    "toolCheckPassedNotice": "הדף עבר את בדיקת הבטיחות בהצלחה.",
+    "toolScopeCloudAi": "בדיקת איות ובטיחות ילדים באמצעות שירות בינה מלאכותית מאובטח בענן",
+    "taskCenterLink": "מרכז המשימות",
+    "changeCoverAction": "החלפת כריכה",
+    "closeCoverStudio": "סגירת עורך הכריכה",
+    "uploadPrivacyTransparency": "שקיפות פרטיות: ספרים פרטיים גלויים רק בחשבון המשפחתי שלכם; טקסט העמודים שמועלים עובר בדיקת איות ובטיחות ילדים אוטומטית (באמצעות מודל מקומי או שירות בינה מלאכותית מאובטח בענן בהתאם להגדרת השרת) ואינו משמש כברירת מחדל לאימון OCR.",
+    "openPageIllustrationAria": "פתיחת איור לעמוד {page}",
+    "closePageIllustrationAria": "סגירת איור לעמוד {page}",
+    "pageIllustrationAction": "איור עמוד",
+    "closePageIllustrationAction": "סגירת איור",
+    "openPageOcrBlocksAria": "הצגת בלוקי טקסט OCR לעמוד {page}",
+    "closePageOcrBlocksAria": "סגירת בלוקי טקסט OCR לעמוד {page}",
+    "openPageOcrBlocksAction": "בלוקי OCR",
+    "closePageOcrBlocksAction": "סגירת בלוקי OCR"
   },
   "ocrContribution": {
     "cardAria": "תרומת דוגמאות לשיפור זיהוי הטקסט עבור {title}",
