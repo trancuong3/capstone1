@@ -63,6 +63,7 @@ class PictureSampleItem(BaseModel):
     theme: str
     description: str
     image_url: str
+    matched_difficult_words: list[str] = Field(default_factory=list)
 
 
 class PictureBookPageItem(BaseModel):
@@ -71,6 +72,7 @@ class PictureBookPageItem(BaseModel):
     page_id: UUID
     page_number: int = Field(..., ge=1)
     image_url: str
+    matched_difficult_words: list[str] = Field(default_factory=list)
     has_verified_illustration: bool = False
     page_kind: str | None = None
     ocr_excerpt: str | None = None
@@ -79,6 +81,9 @@ class PictureBookPageItem(BaseModel):
 class PictureCatalogRead(BaseModel):
     samples: list[PictureSampleItem]
     book_pages: list[PictureBookPageItem]
+    focus_difficult_words: list[str] = Field(default_factory=list)
+    recommended_sample_key: str | None = None
+    recommended_book_page_id: UUID | None = None
 
 
 class PictureGuideRead(BaseModel):
@@ -121,6 +126,7 @@ class PictureAttemptRead(BaseModel):
     evaluation_source: EvaluationSource = "AI"
     provider_tier: ProviderTier | None = None
     feedback: PictureEvaluationFeedbackRead
+    practiced_difficult_words: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -140,6 +146,7 @@ class PictureSessionRead(BaseModel):
     attempts_count: int = Field(..., ge=0)
     teaching_mode: TeachingMode = "OBSERVE"
     target_words: list[str] = Field(default_factory=list)
+    target_vocabulary: list[str] = Field(default_factory=list)
     provider_tier: ProviderTier | None = None
     guide: PictureGuideRead
     attempts: list[PictureAttemptRead] = Field(default_factory=list)
@@ -189,3 +196,4 @@ class PictureEvaluateRequest(BaseModel):
 class PictureEvaluateResponse(BaseModel):
     session: PictureSessionRead
     latest_attempt: PictureAttemptRead
+    practiced_difficult_words: list[str] = Field(default_factory=list)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import inspect
 from typing import Iterable
 from uuid import UUID
 
@@ -16,6 +17,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
+from app.services.child_difficult_word_feed import (
+    MIN_REINFORCEMENT_SCORE_NORMALIZED,
+    DifficultWordTarget,
+)
+from app.services.difficult_words_service import normalize_vietnamese_practice_word
 from app.schemas.adaptive_learning import (
     AdaptiveProfileRead,
     CrossGameRecommendationRead,
@@ -248,6 +254,7 @@ def compute_adaptive_difficulty(
 def compute_spaced_difficult_words(
     word_attempts: list,
     *,
+    feed_targets: list[DifficultWordTarget] | None = None,
     now: datetime | None = None,
     limit: int = 8,
 ) -> list[SpacedDifficultWordRead]:
@@ -259,8 +266,12 @@ def compute_spaced_difficult_words(
 
     ref_now = now or datetime.now(timezone.utc)
     grouped: dict[str, dict] = {}
+    attempts_by_norm: dict[str, list[tuple[datetime, int, str]]] = defaultdict(list)
+
     for row in word_attempts:
-        norm = getattr(row, "NormalizedWord", None) or ""
+        norm = normalize_vietnamese_practice_word(
+            getattr(row, "NormalizedWord", None) or getattr(row, "DisplayText", None) or ""
+        )
         display = getattr(row, "DisplayText", None) or norm
         if not norm:
             continue
@@ -272,6 +283,10 @@ def compute_spaced_difficult_words(
                 "correct": 0,
                 "incorrect": 0,
                 "last_at": None,
+                "from_reading": False,
+                "heard_as": None,
+                "feed_priority": 0.0,
+                "reinforced_count": 0,
                 "rows": [],
             },
         )
@@ -283,8 +298,76 @@ def compute_spaced_difficult_words(
         elif status_val in ("INCORRECT", "UNCERTAIN"):
             bucket["incorrect"] += 1
         ts = getattr(row, "CompletedAt", None) or getattr(row, "CreatedAt", None)
-        if ts is not None and (bucket["last_at"] is None or ts > bucket["last_at"]):
-            bucket["last_at"] = ts
+        if ts is not None:
+            aware_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            if status_val in ("CORRECT", "INCORRECT", "UNCERTAIN"):
+                attempt_num = int(getattr(row, "AttemptNumber", 0) or 0)
+                attempts_by_norm[norm].append((aware_ts, attempt_num, str(status_val)))
+            if bucket["last_at"] is None or aware_ts > (
+                bucket["last_at"] if bucket["last_at"].tzinfo else bucket["last_at"].replace(tzinfo=timezone.utc)
+            ):
+                bucket["last_at"] = ts
+
+    # When live feed_targets is supplied, exclude mastered words (2 most recent valid == CORRECT)
+    # and merge real reading errors (ReadingComparisonReport + ReadingEvent) into spaced review.
+    feed_norms: set[str] = set()
+    if feed_targets is not None:
+        for norm, att_list in attempts_by_norm.items():
+            att_list.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            recent_two = [item[2] for item in att_list[:2]]
+            if len(recent_two) >= 2 and all(s == "CORRECT" for s in recent_two):
+                grouped.pop(norm, None)
+
+        for target in feed_targets:
+            norm = normalize_vietnamese_practice_word(target.normalized_word or target.word)
+            if not norm:
+                continue
+            feed_norms.add(norm)
+            reading_errors = (
+                int(target.reading_error_count)
+                if target.reading_error_count is not None
+                else int(target.error_count)
+            )
+            practice_errors = int(getattr(target, "practice_error_count", 0) or 0)
+            has_reading_evidence = reading_errors > 0
+            existing = grouped.get(norm)
+            if existing is None:
+                grouped[norm] = {
+                    "display_text": target.word,
+                    "attempts": 0,
+                    "correct": 0,
+                    "incorrect": int(target.error_count),
+                    "last_at": target.last_seen_at,
+                    "from_reading": has_reading_evidence,
+                    "heard_as": target.heard_as,
+                    "feed_priority": float(target.priority_score),
+                    "reinforced_count": int(target.reinforced_count),
+                    "rows": [],
+                }
+            else:
+                if has_reading_evidence:
+                    existing["from_reading"] = True
+                existing["heard_as"] = existing["heard_as"] or target.heard_as
+                existing["feed_priority"] = max(existing["feed_priority"], float(target.priority_score))
+                if target.reading_error_count is not None:
+                    existing["incorrect"] = max(existing["incorrect"], practice_errors) + reading_errors
+                else:
+                    existing["incorrect"] += reading_errors
+                existing["reinforced_count"] = max(
+                    existing["reinforced_count"], int(target.reinforced_count)
+                )
+                if target.last_seen_at is not None:
+                    cur_last = existing["last_at"]
+                    cur_aware = (
+                        cur_last if cur_last.tzinfo else cur_last.replace(tzinfo=timezone.utc)
+                    ) if cur_last is not None else None
+                    t_aware = (
+                        target.last_seen_at
+                        if target.last_seen_at.tzinfo
+                        else target.last_seen_at.replace(tzinfo=timezone.utc)
+                    )
+                    if cur_aware is None or t_aware > cur_aware:
+                        existing["last_at"] = target.last_seen_at
 
     ranked: list[SpacedDifficultWordRead] = []
     game_cycle: tuple[GameKey, ...] = (
@@ -307,14 +390,38 @@ def compute_spaced_difficult_words(
 
         # Target spaced interval grows with mastered repetitions: 1d -> 3d -> 7d.
         target_interval = 1 if correct == 0 else (3 if correct == 1 else 7)
-        is_due = bool(not mastered or days_since is None or days_since >= target_interval)
-        due_bonus = 1.5 if is_due else 0.5
-        error_weight = 1.0 + incorrect * 0.8 - correct * 0.35
+        is_new_reading_error = bool(info.get("from_reading")) and correct == 0
+        is_due = bool(
+            is_new_reading_error
+            or not mastered
+            or days_since is None
+            or days_since >= target_interval
+        )
+        due_bonus = (
+            1.5
+            if (is_new_reading_error or days_since is None or days_since >= target_interval)
+            else 0.5
+        )
+        error_weight = (
+            1.0
+            + incorrect * 0.8
+            - correct * 0.35
+            + float(info.get("feed_priority", 0.0)) * 0.3
+        )
         priority = round(max(0.1, error_weight * due_bonus), 2)
 
         phonics_cat, phonics_label = classify_vietnamese_phonics_category(info["display_text"])
         recommended_game = game_cycle[idx % len(game_cycle)]
-        if incorrect > correct:
+        heard_as = info.get("heard_as")
+        if heard_as:
+            reason_vi = (
+                f'Khi đọc sách bé từng đọc nhầm thành "{heard_as}"; ôn nhẹ qua trò chơi giúp bé nhớ ngay.'
+            )
+        elif info.get("from_reading") and incorrect > correct:
+            reason_vi = (
+                f"Bé vừa gặp khó ở từ này ({phonics_label}) khi đọc sách; nên ôn nhẹ trong câu ngắn."
+            )
+        elif incorrect > correct:
             reason_vi = f"Bé từng gặp khó ở từ này ({phonics_label}); nên ôn nhẹ qua trò chơi."
         elif not mastered and correct == 1:
             reason_vi = "Bé đã nói đúng 1 lần trong góc Giải trí; thử dùng thêm 1 lần nữa để làm chủ nhé!"
@@ -638,6 +745,18 @@ class AdaptiveLearningService:
             "MEMORY_GAME": memory_count,
         }
 
+        def _difficulty_slug(level: int) -> str:
+            if level <= 2:
+                return "easy"
+            if level == 3:
+                return "medium"
+            return "challenge"
+
+        shooter_mode = "FILL_BLANK" if (child_grade >= 3 or focus_words) else "WORD_ORDER"
+        shooter_diff = plan_map["SENTENCE_SHOOTER"].recommended_difficulty
+        memory_mode = "FREE_RECALL" if child_grade >= 3 else "GUIDED_RECALL"
+        pic_mode = "VOCABULARY" if focus_words else ("STORY" if child_grade >= 3 else "OBSERVE")
+
         recs = [
             CrossGameRecommendationRead(
                 game_key="SENTENCE_SHOOTER",
@@ -648,10 +767,14 @@ class AdaptiveLearningService:
                     if focus_words
                     else "Luyện xếp trật tự từ và điền từ vào chỗ trống siêu vui."
                 ),
-                suggested_mode="FILL_BLANK" if child_grade >= 3 else "WORD_ORDER",
-                suggested_difficulty=plan_map["SENTENCE_SHOOTER"].recommended_difficulty,
+                suggested_mode=shooter_mode,
+                suggested_difficulty=shooter_diff,
                 target_words=focus_words,
                 href="/entertainment/sentence-shooter",
+                quick_play_href=(
+                    f"/entertainment/sentence-shooter?autoplay=1&mode={shooter_mode}"
+                    f"&difficulty={_difficulty_slug(shooter_diff)}"
+                ),
                 priority=1 if focus_words else (2 + counts["SENTENCE_SHOOTER"]),
             ),
             CrossGameRecommendationRead(
@@ -659,10 +782,11 @@ class AdaptiveLearningService:
                 zone_title_vi="Khám phá trí nhớ",
                 game_title_vi="Bé nhớ được gì?",
                 reason_vi="Quan sát tranh tiếng Việt rực rỡ, rèn trí nhớ hình ảnh và kể tiếp câu chuyện sáng tạo.",
-                suggested_mode="FREE_RECALL" if child_grade >= 3 else "GUIDED_RECALL",
+                suggested_mode=memory_mode,
                 suggested_difficulty=plan_map["MEMORY_GAME"].recommended_difficulty,
                 target_words=focus_words[:2],
                 href="/entertainment/memory-game",
+                quick_play_href=f"/entertainment/memory-game?autoplay=1&recall_mode={memory_mode}",
                 priority=1 if counts["MEMORY_GAME"] == 0 else (2 + counts["MEMORY_GAME"]),
             ),
             CrossGameRecommendationRead(
@@ -670,10 +794,11 @@ class AdaptiveLearningService:
                 zone_title_vi="Thế giới kể chuyện",
                 game_title_vi=f"Kể chuyện qua tranh cùng {teacher_label}",
                 reason_vi=f"Luyện quan sát tranh và mở rộng câu văn cùng {teacher_label} dịu dàng.",
-                suggested_mode="STORY" if child_grade >= 3 else "OBSERVE",
+                suggested_mode=pic_mode,
                 suggested_difficulty=plan_map["PICTURE_DESCRIPTION"].recommended_difficulty,
                 target_words=focus_words[:2],
                 href="/entertainment/picture-description",
+                quick_play_href=f"/entertainment/picture-description?autoplay=1&mode={pic_mode}",
                 priority=2 + counts["PICTURE_DESCRIPTION"],
             ),
             CrossGameRecommendationRead(
@@ -689,6 +814,7 @@ class AdaptiveLearningService:
                 suggested_difficulty=plan_map["KARAOKE"].recommended_difficulty,
                 target_words=focus_words[:3],
                 href="/karaoke",
+                quick_play_href="/karaoke?autoplay=1",
                 priority=2 + counts["KARAOKE"],
             ),
         ]
@@ -698,6 +824,21 @@ class AdaptiveLearningService:
             r.model_copy(update={"priority": idx + 1})
             for idx, r in enumerate(recs)
         ]
+
+    async def _load_feed_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 12,
+    ) -> list[DifficultWordTarget] | None:
+        fn = getattr(self.repository, "list_difficult_word_targets", None)
+        if not callable(fn):
+            return None
+        res = fn(child_id, parent_id, limit=limit)
+        if inspect.isawaitable(res):
+            return await res
+        return None
 
     async def get_adaptive_profile(
         self,
@@ -711,6 +852,7 @@ class AdaptiveLearningService:
         resolved_gender = self._resolve_teacher_gender(child, teacher_gender)
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=90)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=90)
+        feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
         picture_sessions = await self.repository.list_picture_sessions(child_id, window_days=window_days)
         shooter_sessions = await self.repository.list_shooter_sessions(child_id, window_days=window_days)
         karaoke_sessions = await self.repository.list_karaoke_sessions(child_id, window_days=window_days)
@@ -726,7 +868,10 @@ class AdaptiveLearningService:
         )
         skills = self._build_skill_mastery(by_skill)
         plans = self._build_difficulty_plans(child.Grade, by_skill)
-        spaced_words = compute_spaced_difficult_words(word_attempts)
+        spaced_words = compute_spaced_difficult_words(
+            word_attempts,
+            feed_targets=feed_targets,
+        )
         recommendations = self._build_recommendations(
             child.Grade,
             plans,
@@ -835,6 +980,7 @@ class AdaptiveLearningService:
         teacher_label = "Thầy giáo AI" if resolved_gender == "male" else "Cô giáo AI"
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=window_days)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=window_days)
+        feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
         picture_sessions = await self.repository.list_picture_sessions(child_id, window_days=window_days)
         shooter_sessions = await self.repository.list_shooter_sessions(child_id, window_days=window_days)
         karaoke_sessions = await self.repository.list_karaoke_sessions(child_id, window_days=window_days)
@@ -849,7 +995,34 @@ class AdaptiveLearningService:
             word_attempts,
         )
         skills = self._build_skill_mastery(by_skill)
-        spaced_words = compute_spaced_difficult_words(word_attempts, limit=10)
+        spaced_words = compute_spaced_difficult_words(
+            word_attempts,
+            feed_targets=feed_targets,
+            limit=10,
+        )
+
+        reinforced_norms: set[str] = set()
+        for row in explicit_rows:
+            if getattr(row, "SkillKey", None) == "difficult_word_mastery":
+                score_raw = float(getattr(row, "ScoreNormalized", 0.0) or 0.0)
+                if score_raw > 1.0:
+                    score_raw = score_raw / 100.0
+                if score_raw < MIN_REINFORCEMENT_SCORE_NORMALIZED:
+                    continue
+                for word in getattr(row, "PracticeWords", None) or []:
+                    norm = normalize_vietnamese_practice_word(word)
+                    if norm:
+                        reinforced_norms.add(norm)
+        for target in feed_targets or []:
+            if target.reinforced_count > 0:
+                reinforced_norms.add(target.normalized_word)
+        for att in word_attempts:
+            if getattr(att, "AssessmentStatus", None) == "CORRECT":
+                norm = normalize_vietnamese_practice_word(
+                    getattr(att, "NormalizedWord", None) or getattr(att, "DisplayText", None) or ""
+                )
+                if norm:
+                    reinforced_norms.add(norm)
 
         pic_scores = [s.BestScore * 10 for s in picture_sessions if s.AttemptsCount > 0]
         shoot_scores = [
@@ -980,6 +1153,7 @@ class AdaptiveLearningService:
             module_activities=module_activities,
             karaoke_weak_segments=weak_segments,
             home_support_tips_vi=tips[:4],
+            reading_misread_words_reinforced=len(reinforced_norms),
             generated_at=datetime.now(timezone.utc),
         )
 

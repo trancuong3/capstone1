@@ -85,6 +85,7 @@ class CrossGameRecommendationRead(BaseModel):
     suggested_difficulty: int = Field(ge=1, le=5)
     target_words: list[str] = Field(default_factory=list)
     href: str
+    quick_play_href: str | None = None
     priority: int = Field(ge=1, le=10)
 
 
@@ -147,6 +148,7 @@ class ParentEntertainmentAnalyticsRead(BaseModel):
     module_activities: list[ModuleActivitySummaryRead]
     karaoke_weak_segments: list[KaraokeWeakSegmentSummaryRead]
     home_support_tips_vi: list[str]
+    reading_misread_words_reinforced: int = Field(default=0, ge=0)
     generated_at: datetime
 
 

@@ -111,6 +111,13 @@
     "readFullSentence": "Hear full sentence",
     "practicedDifficultWordsRound": "Words just practiced:",
     "practicedDifficultWordsSummary": "Focus words practiced:",
+    "quickStartHeading": "Ready for your child",
+    "startNowButton": "Start now",
+    "autoStartingStatus": "Opening a matched game for your child…",
+    "autoAdvanceCountdown": "Next sentence in {seconds}s",
+    "stopAutoAdvance": "Stop auto",
+    "autoPlayFlowToggleOn": "Auto-play",
+    "autoPlayFlowToggleOff": "Auto-play (Off)",
     "magicQuest": {
       "deckBadge": "✨ Instant · Auto-clears after play",
       "deckTitle": "Owl's 60-Second Magic Word Scroll",
@@ -290,6 +297,19 @@
       "svgTitle": "{theme} illustration"
     },
     "mobileLabel": "Memory Corner",
+    "quickPlayDifficultCta": "Play now (Practice hard words)",
+    "quickPlayDifficultHint": "Automatically picks the best scene and timer for Grade {grade}.",
+    "focusWordsReviewLabel": "Words to review:",
+    "autoPlayFlowOn": "Auto-play",
+    "autoPlayFlowOff": "Auto-play (Off)",
+    "observeAutoCue": "Look closely at the colors and positions of objects in the picture!",
+    "autoRecallFallbackNotice": "Tap Speak answer or type the details you remember.",
+    "autoSubmitCountdown": "Sending in {seconds}s",
+    "sendNowButton": "Send now",
+    "switchToTextButton": "Type text",
+    "turnOffAutoButton": "Turn off auto",
+    "playNewRoundNowButton": "Play new round now",
+    "practicedWordsRevealPrefix": "Reviewed words:",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

@@ -1196,3 +1196,125 @@ class SentenceShooterV4LearningModesTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(saved, 0)
         self.assertGreaterEqual(db.rollbacks, 2)
+
+
+class SentenceShooterV41DifficultWordTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_books_auto_select_and_fill_blank_prioritize_difficult_words(self):
+        book_a_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        book_b_id = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        book_a = SimpleNamespace(
+            Id=book_a_id,
+            Name="Sách A",
+            Title="Chú mèo con",
+            Author="Tác giả A",
+            MinGrade=1,
+            MaxGrade=5,
+            LifecycleStatus="ACTIVE",
+        )
+        book_b = SimpleNamespace(
+            Id=book_b_id,
+            Name="Sách B",
+            Title="Vườn hoa hướng dương",
+            Author="Tác giả B",
+            MinGrade=1,
+            MaxGrade=5,
+            LifecycleStatus="ACTIVE",
+        )
+        text_a = "Mèo con ngủ trưa trên ghế gỗ êm ái."
+        text_b = "Bông hoa hướng dương nở vàng rực ngoài vườn."
+
+        def _build_rows(book, text):
+            page = SimpleNamespace(Id=uuid4(), BookId=book.Id, PageNumber=1)
+            revision = SimpleNamespace(
+                Id=uuid4(),
+                PageId=page.Id,
+                VerificationStatus="VERIFIED",
+                VerifiedText=text,
+            )
+            return [
+                (
+                    book,
+                    page,
+                    revision,
+                    SimpleNamespace(
+                        Id=uuid4(),
+                        WordIndex=idx,
+                        LineIndex=0,
+                        Text=tok,
+                        NormalizedText=normalize_token(tok),
+                    ),
+                )
+                for idx, tok in enumerate(text.split())
+            ]
+
+        rows_a = _build_rows(book_a, text_a)
+        rows_b = _build_rows(book_b, text_b)
+
+        class MultiBookRepo(FakeSentenceShooterRepository):
+            def __init__(self):
+                super().__init__()
+                self.books_map = {book_a_id: book_a, book_b_id: book_b}
+                self.all_rows = [*rows_a, *rows_b]
+                self.evidence_records = []
+
+            async def verified_word_rows(self, grade, book_id=None):
+                if book_id is not None:
+                    return [r for r in self.all_rows if r[0].Id == book_id]
+                return list(self.all_rows) if 1 <= grade <= 5 else []
+
+            async def book(self, book_id):
+                return self.books_map.get(book_id)
+
+            async def book_for_session(self, book_id):
+                return self.books_map.get(book_id)
+
+            async def active_difficult_words(self, _child_id, _parent_id=None, *, limit=12):
+                return ["hướng dương"][:limit]
+
+            async def recent_reading_book_ids(self, _child_id, _parent_id=None, *, limit=12):
+                return [book_b_id][:limit]
+
+            async def record_learning_evidence(self, entries):
+                self.evidence_records.extend(entries)
+                return len(entries)
+
+        repo = MultiBookRepo()
+        service = SentenceShooterService(repo)
+
+        books = await service.list_books(PARENT_ID, CHILD_ID, "medium", total_rounds=1)
+        self.assertEqual([b.id for b in books], [book_b_id, book_a_id])
+        self.assertEqual(books[0].matched_difficult_words, ["hướng dương"])
+        self.assertEqual(books[1].matched_difficult_words, [])
+
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=None,
+                auto_select_book=True,
+                difficulty="medium",
+                total_rounds=1,
+                learning_mode="FILL_BLANK",
+            ),
+        )
+        self.assertEqual(session.book.id, book_b_id)
+        self.assertEqual(session.practiced_difficult_words, ["hướng dương"])
+
+        game_round = repo.rounds_by_session[0]
+        expected_ids = {UUID(tok) for tok in game_round.ExpectedTokenIds}
+        expected_tokens = [tok for tok in session.round.tokens if tok.id in expected_ids]
+        expected_norms = {normalize_token(tok.text) for tok in expected_tokens}
+        self.assertTrue({"hướng", "dương"}.issubset(expected_norms))
+        self.assertTrue(all(tok.is_difficult_word for tok in expected_tokens if normalize_token(tok.text) in {"hướng", "dương"}))
+
+        for idx, tok_id in enumerate(game_round.ExpectedTokenIds):
+            await service.shoot(
+                PARENT_ID,
+                session.session_id,
+                game_round.Id,
+                UUID(tok_id),
+                uuid4(),
+                client_shot_id=f"v41-shot-{idx}",
+            )
+        skills = [entry["skill_key"] for entry in repo.evidence_records]
+        self.assertIn("difficult_word_mastery", skills)

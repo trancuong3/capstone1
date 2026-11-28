@@ -125,6 +125,7 @@ const sceneSpecSchema = z.object({
   guided_questions_vi: z.array(z.string()),
   creative_prompt_vi: z.string(),
   matched_focus_words: z.array(z.string()),
+  focus_words: z.array(z.string()).optional(),
   creative_focus_words: z.array(z.string()).optional(),
 });
 
@@ -160,6 +161,8 @@ const themesCatalogSchema = z.object({
     }),
   ),
   total_sprites: z.number().int().min(1),
+  focus_difficult_words: z.array(z.string()).optional(),
+  recommended_theme_key: themeKeySchema.nullish(),
 });
 
 const matchedFactSchema = z.object({
@@ -201,6 +204,8 @@ const evaluationSchema = z.object({
   creative_followup_vi: z.string(),
   support_summary_vi: z.string().nullable(),
   used_focus_words: z.array(z.string()),
+  practiced_difficult_words: z.array(z.string()).optional(),
+  focus_word_feedback_vi: z.string().nullish(),
   ai_provider: z.string(),
 });
 
@@ -238,6 +243,7 @@ const sessionSchema = z.object({
   stars: z.number().int().min(0).max(3),
   attempts_count: z.number().int().min(0),
   scene_spec: sceneSpecSchema,
+  focus_words: z.array(z.string()).optional(),
   attempts: z.array(attemptSchema),
   created_at: z.string(),
   updated_at: z.string(),
@@ -312,7 +318,10 @@ export interface SubmitMemoryAttemptInput {
 }
 
 export interface MemoryGameService {
-  getThemes(signal?: AbortSignal): Promise<MemoryThemesCatalogDTO>;
+  getThemes(
+    signal?: AbortSignal,
+    childId?: string,
+  ): Promise<MemoryThemesCatalogDTO>;
   createSession(
     input: CreateMemorySessionInput,
     signal?: AbortSignal,
@@ -366,9 +375,13 @@ async function withRequestTimeout<T>(
 
 export function createMemoryGameService(): MemoryGameService {
   return {
-    getThemes: (signal) =>
+    getThemes: (signal, childId) =>
       withRequestTimeout(signal, (requestSignal) =>
-        requestApi(`${basePath}/themes`, themesCatalogSchema, requestSignal),
+        requestApi(
+          `${basePath}/themes${childId ? apiQuery({ child_id: childId }) : ""}`,
+          themesCatalogSchema,
+          requestSignal,
+        ),
       ),
     createSession: (input, signal) =>
       withRequestTimeout(signal, (requestSignal) =>

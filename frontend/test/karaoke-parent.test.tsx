@@ -29,8 +29,14 @@ import {
 } from "@/test/karaoke-fixtures";
 import type { KaraokePlayback } from "@/lib/api/karaoke-service";
 
-const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
+const { replace, searchParams } = vi.hoisted(() => ({
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  useSearchParams: () => searchParams,
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
@@ -374,7 +380,13 @@ describe("parent karaoke library with real guards and HTTP adapters", () => {
     );
     fireEvent.error(screen.getByRole("img"));
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByRole("link")).toHaveTextContent(card.title);
+    expect(
+      screen.getByRole("link", { name: `Hát bài ${card.title}` }),
+    ).toHaveTextContent(card.title);
+    expect(screen.getByRole("link", { name: "Hát ngay" })).toHaveAttribute(
+      "href",
+      `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+    );
   });
 });
 

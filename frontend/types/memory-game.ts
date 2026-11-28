@@ -85,6 +85,7 @@ export interface SceneSpecDTO {
   readonly guided_questions_vi: readonly string[];
   readonly creative_prompt_vi: string;
   readonly matched_focus_words: readonly string[];
+  readonly focus_words?: readonly string[];
   readonly creative_focus_words?: readonly string[];
 }
 
@@ -120,6 +121,8 @@ export interface MemoryThemesCatalogDTO {
   readonly timer_options: readonly MemoryTimerOptionDTO[];
   readonly grade_recommendations: readonly MemoryGradeRecommendationDTO[];
   readonly total_sprites: number;
+  readonly focus_difficult_words?: readonly string[];
+  readonly recommended_theme_key?: MemoryThemeKey | null;
 }
 
 export interface MatchedFactDTO {
@@ -161,6 +164,8 @@ export interface MemoryEvaluationDTO {
   readonly creative_followup_vi: string;
   readonly support_summary_vi: string | null;
   readonly used_focus_words: readonly string[];
+  readonly practiced_difficult_words?: readonly string[];
+  readonly focus_word_feedback_vi?: string | null;
   readonly ai_provider: string;
 }
 
@@ -198,6 +203,7 @@ export interface MemorySessionDTO {
   readonly stars: number;
   readonly attempts_count: number;
   readonly scene_spec: SceneSpecDTO;
+  readonly focus_words?: readonly string[];
   readonly attempts: readonly MemoryAttemptDTO[];
   readonly created_at: string;
   readonly updated_at: string;

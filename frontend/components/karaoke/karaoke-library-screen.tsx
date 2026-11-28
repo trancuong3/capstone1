@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Drum, Music2, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { KaraokeChildBoundary } from "@/components/karaoke/karaoke-child-boundary";
 import { useKaraokeService } from "@/components/karaoke/karaoke-services-provider";
 import { MagicRhythmChantPanel } from "@/components/karaoke/magic-rhythm-chant-panel";
@@ -17,20 +18,28 @@ import {
   karaokeParentErrorMessage,
   type KaraokeCatalog,
 } from "@/lib/api/karaoke-service";
+import { resolveAutoPlayFlag } from "@/lib/entertainment/autopilot";
 import type { ChildProfileDTO } from "@/types/child";
 
 export interface KaraokeLibraryScreenProps {
+  readonly autoPlay?: boolean;
   readonly initialMode?: "magic-chant";
 }
 
 export function KaraokeLibraryScreen({
+  autoPlay,
   initialMode,
 }: KaraokeLibraryScreenProps = {}) {
+  const { autoPlayFlow } = useEntertainmentPreferences();
+  const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
+  const shouldAutoLaunch = autoPlayRequested && autoPlayFlow;
+
   return (
     <KaraokeChildBoundary>
       {(child) => (
         <Library
           key={`${child.id}:${child.grade}`}
+          autoPlay={shouldAutoLaunch}
           child={child}
           initialMode={initialMode}
         />
@@ -40,9 +49,11 @@ export function KaraokeLibraryScreen({
 }
 function Library({
   child,
+  autoPlay,
   initialMode,
 }: {
   child: ChildProfileDTO;
+  autoPlay: boolean;
   initialMode?: "magic-chant";
 }) {
   const t = useTranslations("entertainment");
@@ -198,6 +209,7 @@ function Library({
       </form>
       <Catalog
         key={`${query.search}:${query.offset}:${query.refresh}`}
+        autoPlay={autoPlay}
         childId={child.id}
         query={query}
         onOpenMagicChant={() => setIsMagicChantOpen(true)}
@@ -208,12 +220,14 @@ function Library({
   );
 }
 function Catalog({
+  autoPlay,
   childId,
   query,
   onOpenMagicChant,
   onRetry,
   onPage,
 }: {
+  autoPlay: boolean;
   childId: string;
   query: { search: string; offset: number };
   onOpenMagicChant: () => void;
@@ -221,7 +235,9 @@ function Catalog({
   onPage: (offset: number) => void;
 }) {
   const t = useTranslations("entertainment");
+  const router = useRouter();
   const service = useKaraokeService();
+  const redirectedRef = useRef(false);
   const [launchQuery] = useState(() => {
     if (typeof window === "undefined") return "";
     try {
@@ -264,10 +280,36 @@ function Catalog({
       });
     return () => controller.abort();
   }, [childId, service, query.search, query.offset]);
-  if (state.status === "loading")
+
+  const autoLaunchSong =
+    autoPlay &&
+    query.search === "" &&
+    query.offset === 0 &&
+    state.status === "ready" &&
+    state.data.items.length > 0
+      ? state.data.items[0]
+      : null;
+
+  useEffect(() => {
+    if (!autoLaunchSong || redirectedRef.current) return;
+    redirectedRef.current = true;
+    router.replace(
+      `/karaoke/${autoLaunchSong.song_id}?version=${autoLaunchSong.version_id}&autoplay=1&scored=1`,
+    );
+  }, [autoLaunchSong, router]);
+
+  if (state.status === "loading" || autoLaunchSong)
     return (
-      <p className="rounded-card bg-sky p-6" role="status">
-        {t("karaoke.library.loading")}
+      <p
+        className="rounded-card bg-sky p-6"
+        data-testid={
+          autoLaunchSong ? "karaoke-autoplay-redirecting" : undefined
+        }
+        role="status"
+      >
+        {autoLaunchSong
+          ? t("karaoke.stage.autoplayPreparing")
+          : t("karaoke.library.loading")}
       </p>
     );
   if (state.status === "error")
@@ -284,18 +326,31 @@ function Catalog({
       </StatusMessage>
     );
   const data = state.data;
+  const hasDifficultMatches = data.items.some((song) =>
+    song.matched_difficult_words?.some((word) => word.trim().length > 0),
+  );
   return (
     <>
       {data.items.length ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {data.items.map((song) => (
-            <SongCard
-              key={`${song.song_id}:${song.version_id}`}
-              launchQuery={launchQuery}
-              song={song}
-            />
-          ))}
-        </div>
+        <>
+          {hasDifficultMatches && (
+            <p
+              data-testid="karaoke-difficult-words-boost-hint"
+              className="rounded-control border border-amber-200 bg-amber-50/80 px-4 py-2.5 text-sm font-semibold text-amber-950"
+            >
+              {t("karaoke.library.difficultWordsBoostHint")}
+            </p>
+          )}
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {data.items.map((song) => (
+              <SongCard
+                key={`${song.song_id}:${song.version_id}`}
+                launchQuery={launchQuery}
+                song={song}
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <div className="flex flex-col items-center gap-3">
           <EmptyState

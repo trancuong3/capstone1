@@ -111,6 +111,13 @@
     "readFullSentence": "Escuchar oración completa",
     "practicedDifficultWordsRound": "Palabras recién practicadas:",
     "practicedDifficultWordsSummary": "Palabras difíciles practicadas:",
+    "quickStartHeading": "Listo para tu hijo",
+    "startNowButton": "Empezar ahora",
+    "autoStartingStatus": "Abriendo un juego ideal para tu hijo…",
+    "autoAdvanceCountdown": "Siguiente frase en {seconds}s",
+    "stopAutoAdvance": "Detener auto",
+    "autoPlayFlowToggleOn": "Juego automático",
+    "autoPlayFlowToggleOff": "Juego automático (No)",
     "magicQuest": {
       "deckBadge": "✨ Instantáneo · Se borra al jugar",
       "deckTitle": "Pergamino Mágico de 60 Segundos del Búho",
@@ -290,6 +297,19 @@
       "svgTitle": "Ilustración {theme}"
     },
     "mobileLabel": "Rincón de memoria",
+    "quickPlayDifficultCta": "Jugar ahora (Repasar palabras difíciles)",
+    "quickPlayDifficultHint": "Elige automáticamente la mejor escena y tiempo para {grade}.º grado.",
+    "focusWordsReviewLabel": "Palabras para repasar:",
+    "autoPlayFlowOn": "Juego automático",
+    "autoPlayFlowOff": "Juego automático (No)",
+    "observeAutoCue": "¡Observa bien los colores y la ubicación de los objetos en el dibujo!",
+    "autoRecallFallbackNotice": "Toca Responder por voz o escribe los detalles que recuerdes.",
+    "autoSubmitCountdown": "Se envía en {seconds}s",
+    "sendNowButton": "Enviar ahora",
+    "switchToTextButton": "Escribir texto",
+    "turnOffAutoButton": "Desactivar auto",
+    "playNewRoundNowButton": "Jugar nueva ronda ahora",
+    "practicedWordsRevealPrefix": "Palabras repasadas:",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

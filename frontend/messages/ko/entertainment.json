@@ -27,7 +27,7 @@
     "defaultGreeting": "안녕! 오늘은 그림 이야기, 문장 만들기, 노래, 기억력 게임 중 무엇을 해볼까?",
     "defaultRecommendationReason": "모든 활동이 읽고 있는 책과 부드럽게 연결되어 부담 없이 단어를 오래 기억할 수 있어요.",
     "focusDifficultWordsLabel": "가볍게 복습 중인 단어:",
-    "playSuggestedCta": "추천 놀이 시작하기",
+    "playSuggestedCta": "부엉이와 바로 놀기",
     "onboardingRegionAria": "놀이 학습 영역 시작 안내",
     "onboardingCounter": "빠른 안내 ({current}/{total})",
     "onboardingStep1Title": "1. 좋아하는 놀이 코너를 골라요",
@@ -58,6 +58,11 @@
     "breakReminderTitle": "건강한 눈 휴식:",
     "defaultBreakReminder": "한 번에 10~15분 정도가 눈에 편안하고 자연스럽게 배우기에 알맞아요.",
     "recommendationLoadError": "지금은 학습 추천을 불러올 수 없습니다.",
+    "autoPlayFlowOn": "자동 진행",
+    "autoPlayFlowOff": "자동 진행 (끔)",
+    "quickPlayCta": "빠른 시작",
+    "quickPlayCardAria": "빠른 시작: {title}",
+    "misreadWordsChipTitle": "복습할 낱말:",
     "magicQuestCta": "✨ 60초 마법 단어 퀘스트 (지금 복습)",
     "magicQuestNoBookHint": "맞는 책이 아직 없나요? ViRead 부엉이가 플레이 후 바로 사라지는 60초 마법 이야기를 엮어줘요!",
     "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
@@ -95,7 +100,10 @@
       "coverAlt": "{title} 커버 아트",
       "songInfo": "노래 정보",
       "gradeRange": "학년 {min}–{max}",
-      "singSongAction": "{title} 부르기"
+      "singSongAction": "{title} 부르기",
+      "reviewDifficultWordsLabel": "연습할 낱말:",
+      "singNowAction": "바로 부르기",
+      "difficultWordsBoostHint": "아이가 연습 중인 낱말이 포함된 노래가 먼저 표시됩니다."
     },
     "playerScreen": {
       "backToLibrary": "노래 라이브러리로 돌아가기",
@@ -253,8 +261,12 @@
         "weakestSegmentTitle": "추가 연습 추천 구간 · {number}번째 줄",
         "retrySegmentSlow": "이 구간 다시 연습 (0.85x)",
         "segmentReportSummary": "구간별 리포트 ({count}줄)",
-        "segmentLineHeader": "{number}줄 ({start}–{end})"
-      }
+        "segmentLineHeader": "{number}줄 ({start}–{end})",
+        "practiceWeakestNow": "가장 약한 소절 바로 연습 (0.85×)"
+      },
+      "autoplayPreparing": "노래를 자동으로 준비하는 중…",
+      "autoplayTapToStart": "한 번 눌러 음악 시작하기",
+      "autoplayTapHint": "음악과 마이크를 켜려면 화면을 한 번 가볍게 눌러 주세요."
     },
     "score": {
       "regionAria": "가사 정확도",
@@ -585,6 +597,18 @@
       "action": "무엇을 하고 있나요?",
       "where": "어디 / 무슨 색인가요?"
     },
+    "practicingWordsBadge": "복습 중인 낱말",
+    "cardDifficultWordsTag": "연습할 낱말: {words}",
+    "matchedDifficultWordBanner": "연습한 낱말: {words}",
+    "autoPlayOn": "자동 진행",
+    "autoPlayOff": "자동 진행 (끔)",
+    "quickPlayAutopilotBtn": "바로 놀기 (그림 자동 선택)",
+    "openingAutopilotPrompt": "이 그림을 보고 무엇이 보이는지 이야기해 줄래요?",
+    "autoMicBlockedFallback": "마이크로 말하기를 눌러 이야기를 들려주세요!",
+    "autoSubmitCountdown": "{seconds}초 후 자동 제출",
+    "submitNowAction": "바로 보내기",
+    "pauseAutoAction": "자동 일시 정지",
+    "autoPausedNotice": "자동 제출이 일시 정지되었어요 — 이야기를 마친 뒤 보내기를 눌러 주세요.",
     "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
     "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",

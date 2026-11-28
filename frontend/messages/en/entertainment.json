@@ -27,9 +27,7 @@
     "defaultGreeting": "Hello little reader! Would you like to tell a picture story, build sentences, sing along, or play a memory game today?",
     "defaultRecommendationReason": "Every activity gently connects with the books you are reading so you remember words longer without any pressure.",
     "focusDifficultWordsLabel": "Words you're gently reviewing:",
-    "playSuggestedCta": "Play suggested game",
-    "magicQuestCta": "✨ 60s Magic Word Quest (Review now)",
-    "magicQuestNoBookHint": "No matching book yet? ViRead Owl weaves a 60-second magic story that clears right after play!",
+    "playSuggestedCta": "Play with Owl now",
     "onboardingRegionAria": "Getting started guide for Play & Learn",
     "onboardingCounter": "Quick guide ({current}/{total})",
     "onboardingStep1Title": "1. Pick a zone you like",
@@ -60,6 +58,13 @@
     "breakReminderTitle": "Healthy eye break:",
     "defaultBreakReminder": "About 10–15 minutes per session keeps young eyes healthy and learning effortless.",
     "recommendationLoadError": "Could not load learning recommendations right now.",
+    "autoPlayFlowOn": "Auto-play",
+    "autoPlayFlowOff": "Auto-play (Off)",
+    "quickPlayCta": "Quick play",
+    "quickPlayCardAria": "Quick play: {title}",
+    "misreadWordsChipTitle": "Words to review:",
+    "magicQuestCta": "✨ 60s Magic Word Quest (Review now)",
+    "magicQuestNoBookHint": "No matching book yet? ViRead Owl weaves a 60-second magic story that clears right after play!",
     "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
   },
   "karaoke": {
@@ -95,7 +100,10 @@
       "coverAlt": "Cover art for {title}",
       "songInfo": "Song Info",
       "gradeRange": "Grade {min}–{max}",
-      "singSongAction": "Sing {title}"
+      "singSongAction": "Sing {title}",
+      "reviewDifficultWordsLabel": "Words to practice:",
+      "singNowAction": "Sing now",
+      "difficultWordsBoostHint": "Songs with words your child is practicing appear first."
     },
     "playerScreen": {
       "backToLibrary": "Back to song library",
@@ -253,8 +261,12 @@
         "weakestSegmentTitle": "Segment to practice · Line {number}",
         "retrySegmentSlow": "Practice this segment (0.85x)",
         "segmentReportSummary": "Segment report ({count} lines)",
-        "segmentLineHeader": "Line {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "Line {number} ({start}–{end})",
+        "practiceWeakestNow": "Practice weakest line now (0.85×)"
+      },
+      "autoplayPreparing": "Getting the song ready automatically…",
+      "autoplayTapToStart": "Tap once to start music",
+      "autoplayTapHint": "Your browser needs one quick tap to turn on music and the microphone."
     },
     "score": {
       "regionAria": "Lyrics accuracy",
@@ -585,6 +597,18 @@
       "action": "What are they doing?",
       "where": "Where & what color?"
     },
+    "practicingWordsBadge": "Words you're practicing",
+    "cardDifficultWordsTag": "Words to practice: {words}",
+    "matchedDifficultWordBanner": "Words reviewed: {words}",
+    "autoPlayOn": "Auto-play",
+    "autoPlayOff": "Auto-play (Off)",
+    "quickPlayAutopilotBtn": "Play now (Auto-pick review picture)",
+    "openingAutopilotPrompt": "Look at this picture and tell me what you see!",
+    "autoMicBlockedFallback": "Tap Speak with Microphone to tell your story!",
+    "autoSubmitCountdown": "Sending in {seconds}s",
+    "submitNowAction": "Send now",
+    "pauseAutoAction": "Pause auto",
+    "autoPausedNotice": "Auto-send paused — tap Send when you finish your story.",
     "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
     "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",

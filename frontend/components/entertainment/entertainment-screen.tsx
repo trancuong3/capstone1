@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Mic,
   Music2,
+  Play,
   Sparkles,
   Volume2,
   VolumeX,
@@ -56,6 +57,7 @@ import {
   type VocabularyNotebookListDTO,
   type VocabularyNotebookService,
 } from "@/lib/api/vocabulary-notebook-service";
+import { appendAutoplayParam } from "@/lib/entertainment/autopilot";
 import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
@@ -268,10 +270,11 @@ export function EntertainmentScreen({
   const {
     reducedMotion,
     calmSound,
+    autoPlayFlow,
     autopilotEnabled,
     toggleReducedMotion,
     toggleCalmSound,
-    toggleAutopilot,
+    toggleAutoPlayFlow,
   } = useEntertainmentPreferences();
 
   useEffect(() => {
@@ -663,6 +666,7 @@ export function EntertainmentScreen({
         "activity-library mx-auto flex w-full max-w-[1140px] flex-col gap-5 pb-8",
         reducedMotion && "motion-reduce",
       )}
+      data-auto-play-flow={autoPlayFlow ? "true" : "false"}
       data-autopilot={autopilotEnabled ? "true" : "false"}
       data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
@@ -708,19 +712,17 @@ export function EntertainmentScreen({
           ) : null}
 
           <Button
-            aria-pressed={autopilotEnabled}
+            aria-pressed={autoPlayFlow}
             className="min-h-12 px-4"
             data-testid="hub-autopilot-toggle"
             fullWidth={false}
-            onClick={toggleAutopilot}
+            onClick={toggleAutoPlayFlow}
             size="compact"
             type="button"
-            variant={autopilotEnabled ? "secondary" : "quiet"}
+            variant={autoPlayFlow ? "secondary" : "quiet"}
           >
             <Mic aria-hidden="true" className="size-4" />
-            {autopilotEnabled
-              ? t("hub.autopilotActive", undefined, "Tự động rảnh tay: Bật")
-              : t("hub.autopilotOff", undefined, "Tự động rảnh tay: Tắt")}
+            {autoPlayFlow ? t("hub.autoPlayFlowOn") : t("hub.autoPlayFlowOff")}
           </Button>
           <Button
             aria-pressed={!calmSound}
@@ -801,167 +803,187 @@ export function EntertainmentScreen({
       </header>
 
       {/* Mascot Guide & Gentle Adaptive Recommendation */}
-      <div className="flex flex-col gap-4 rounded-card border border-amber-200 bg-gradient-to-r from-amber-50/90 via-cream to-sky/60 p-5 sm:flex-row sm:items-center sm:p-6">
-        <ViReadMascot reducedMotion={reducedMotion} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-amber-800 shadow-xs">
-              <Sparkles aria-hidden="true" className="size-3.5" />
-              {t("hub.mascotBadge")}
-            </span>
-            {profileBadgeAlias && profileBadgeGrade !== null ? (
-              <span
-                className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted"
-                data-testid="hub-active-child-badge"
-              >
-                {t("hub.childProfileBadge", {
-                  alias: profileBadgeAlias,
-                  grade: profileBadgeGrade,
-                })}
+      <div className="flex flex-col gap-4 rounded-card border border-amber-200 bg-gradient-to-r from-amber-50/90 via-cream to-sky/60 p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <ViReadMascot reducedMotion={reducedMotion} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-amber-800 shadow-xs">
+                <Sparkles aria-hidden="true" className="size-3.5" />
+                {t("hub.mascotBadge")}
               </span>
+              {profileBadgeAlias && profileBadgeGrade !== null ? (
+                <span
+                  className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted"
+                  data-testid="hub-active-child-badge"
+                >
+                  {t("hub.childProfileBadge", {
+                    alias: profileBadgeAlias,
+                    grade: profileBadgeGrade,
+                  })}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-lg font-extrabold text-ink">
+              {recommendations?.mascot_greeting_vi ? (
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {adaptTextToTeacherPersona(
+                    recommendations.mascot_greeting_vi,
+                    teacherPersona.gender,
+                  )}
+                </span>
+              ) : (
+                t("hub.defaultGreeting")
+              )}
+            </p>
+            <p className="text-sm leading-6 text-muted">
+              {primaryRec?.reason_vi ? (
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {adaptTextToTeacherPersona(
+                    primaryRec.reason_vi,
+                    teacherPersona.gender,
+                  )}
+                </span>
+              ) : (
+                t("hub.defaultRecommendationReason")
+              )}
+            </p>
+            {isLoadingRecommendations ? (
+              <div className="pt-1">
+                <AiProgressBar
+                  active
+                  label={
+                    recommendationsProgress.stageLabel ??
+                    tCommon("aiProgress.loadingRecommendations")
+                  }
+                  percent={recommendationsProgress.percent}
+                  size="compact"
+                  testId="entertainment-recommendations-progress"
+                />
+              </div>
             ) : null}
           </div>
-          <p className="text-lg font-extrabold text-ink">
-            {recommendations?.mascot_greeting_vi ? (
-              <span className="viread-learning-content" dir="ltr" lang="vi">
-                {adaptTextToTeacherPersona(
-                  recommendations.mascot_greeting_vi,
-                  teacherPersona.gender,
-                )}
-              </span>
-            ) : (
-              t("hub.defaultGreeting")
-            )}
-          </p>
-          <p className="text-sm leading-6 text-muted">
-            {primaryRec?.reason_vi ? (
-              <span className="viread-learning-content" dir="ltr" lang="vi">
-                {adaptTextToTeacherPersona(
-                  primaryRec.reason_vi,
-                  teacherPersona.gender,
-                )}
-              </span>
-            ) : (
-              t("hub.defaultRecommendationReason")
-            )}
-          </p>
-          {isLoadingRecommendations ? (
-            <div className="pt-1">
-              <AiProgressBar
-                active
-                label={
-                  recommendationsProgress.stageLabel ??
-                  tCommon("aiProgress.loadingRecommendations")
-                }
-                percent={recommendationsProgress.percent}
-                size="compact"
-                testId="entertainment-recommendations-progress"
-              />
-            </div>
-          ) : null}
-          {recommendations?.focus_difficult_words.length ? (
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-xs font-bold text-ink">
-                {t(
-                  "hub.todayChallengeWordsLabel",
-                  undefined,
-                  t("hub.focusDifficultWordsLabel"),
-                )}
-              </span>
-              {recommendations.focus_difficult_words.map((word) => (
-                <button
-                  aria-label={`Nghe mẫu từ ${word}`}
-                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 transition hover:border-amber-500 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                  data-testid={`hub-focus-word-${word}`}
-                  key={word}
-                  onClick={() => handleSpeakFocusWord(word)}
-                  type="button"
-                >
-                  <Volume2
-                    aria-hidden="true"
-                    className="size-3.5 text-amber-700"
-                  />
-                  <span className="viread-learning-content" dir="ltr" lang="vi">
-                    {word}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {notebookBonusWords.length > 0 ? (
-            <div
-              className="flex flex-wrap items-center gap-2 pt-1"
-              data-testid="hub-notebook-bonus-words"
-            >
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900">
-                <BookHeart aria-hidden="true" className="size-3.5" />
-                {tGlossary("bonusStoryWordsLabel")}
-              </span>
-              {notebookBonusWords.map((word) => (
-                <button
-                  aria-label={`Nghe từ yêu thích ${word}`}
-                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50/90 px-3 py-1 text-xs font-bold text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                  data-testid={`hub-notebook-word-${word}`}
-                  key={word}
-                  onClick={() => handleSpeakFocusWord(word)}
-                  type="button"
-                >
-                  <Volume2
-                    aria-hidden="true"
-                    className="size-3.5 text-emerald-700"
-                  />
-                  <span className="viread-learning-content" dir="ltr" lang="vi">
-                    {word}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
-        {primaryRec || dueFocusWords.length > 0 ? (
-          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto">
-            {dueFocusWords.length > 0 ? (
-              <ButtonLink
-                className="min-h-12 w-full sm:w-auto"
-                data-testid="hub-magic-quest-cta"
-                href={magicQuestHref}
-                size="compact"
-                variant={primaryRec ? "secondary" : "primary"}
+        {(recommendations?.focus_difficult_words.length ?? 0) > 0 ||
+        notebookBonusWords.length > 0 ||
+        primaryRec ||
+        dueFocusWords.length > 0 ? (
+          <div className="flex flex-col gap-3 border-t border-amber-200/70 pt-3">
+            {recommendations?.focus_difficult_words.length ? (
+              <div
+                className="flex flex-wrap items-center gap-2"
+                data-testid="hub-misread-word-chips"
               >
-                {t("hub.magicQuestCta")}{" "}
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-4"
-                />
-              </ButtonLink>
+                <span className="text-xs font-bold text-ink">
+                  {t("hub.misreadWordsChipTitle")}
+                </span>
+                {recommendations.focus_difficult_words.map((word) => (
+                  <button
+                    aria-label={`Nghe mẫu từ ${word}`}
+                    className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 shadow-2xs transition hover:border-amber-500 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    data-testid={`hub-focus-word-${word}`}
+                    key={word}
+                    onClick={() => handleSpeakFocusWord(word)}
+                    type="button"
+                  >
+                    <Volume2
+                      aria-hidden="true"
+                      className="size-3.5 text-amber-700"
+                    />
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {word}
+                    </span>
+                  </button>
+                ))}
+              </div>
             ) : null}
-            {autopilotEnabled && autopilotHref ? (
-              <ButtonLink
-                className="min-h-12 w-full sm:w-auto"
-                data-testid="hub-autopilot-cta"
-                href={autopilotHref}
-                size="compact"
+            {notebookBonusWords.length > 0 ? (
+              <div
+                className="flex flex-wrap items-center gap-2"
+                data-testid="hub-notebook-bonus-words"
               >
-                {t("hub.autopilotLaunchCta", undefined, "Vào học vui ngay")}{" "}
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-4"
-                />
-              </ButtonLink>
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900">
+                  <BookHeart aria-hidden="true" className="size-3.5" />
+                  {tGlossary("bonusStoryWordsLabel")}
+                </span>
+                {notebookBonusWords.map((word) => (
+                  <button
+                    aria-label={`Nghe từ yêu thích ${word}`}
+                    className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50/90 px-3 py-1 text-xs font-bold text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    data-testid={`hub-notebook-word-${word}`}
+                    key={word}
+                    onClick={() => handleSpeakFocusWord(word)}
+                    type="button"
+                  >
+                    <Volume2
+                      aria-hidden="true"
+                      className="size-3.5 text-emerald-700"
+                    />
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {word}
+                    </span>
+                  </button>
+                ))}
+              </div>
             ) : null}
-            {primaryRec ? (
-              <ButtonLink
-                className="min-h-12 w-full sm:w-auto"
-                href={primaryRec.href}
-                size="compact"
-                variant={autopilotEnabled ? "secondary" : "primary"}
-              >
-                {t("hub.playSuggestedCta")}{" "}
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-4"
-                />
-              </ButtonLink>
+            {primaryRec || dueFocusWords.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {dueFocusWords.length > 0 ? (
+                  <ButtonLink
+                    className="min-h-12 w-full sm:w-auto"
+                    data-testid="hub-magic-quest-cta"
+                    href={magicQuestHref}
+                    size="compact"
+                    variant={primaryRec ? "secondary" : "primary"}
+                  >
+                    {t("hub.magicQuestCta")}{" "}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="viread-rtl-flip size-4"
+                    />
+                  </ButtonLink>
+                ) : null}
+                {primaryRec ? (
+                  <ButtonLink
+                    className="min-h-12 w-full sm:w-auto"
+                    data-testid="hub-owl-quick-play"
+                    href={
+                      primaryRec.quick_play_href ??
+                      appendAutoplayParam(primaryRec.href)
+                    }
+                    size="compact"
+                  >
+                    {t("hub.playSuggestedCta")}{" "}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="viread-rtl-flip size-4"
+                    />
+                  </ButtonLink>
+                ) : null}
+                {autopilotEnabled && autopilotHref ? (
+                  <ButtonLink
+                    className="min-h-12 w-full sm:w-auto"
+                    data-testid="hub-autopilot-cta"
+                    href={autopilotHref}
+                    size="compact"
+                    variant="secondary"
+                  >
+                    {t("hub.autopilotLaunchCta", undefined, "Vào học vui ngay")}{" "}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="viread-rtl-flip size-4"
+                    />
+                  </ButtonLink>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -1005,68 +1027,6 @@ export function EntertainmentScreen({
           </Button>
         </aside>
       ) : null}
-
-      {/* Interactive First-Visit Onboarding (Calm, Zero Dark Patterns) */}
-      {showOnboarding ? (
-        <aside
-          aria-label={t("hub.onboardingRegionAria")}
-          className="rounded-card border border-primary/25 bg-white p-5 shadow-xs sm:p-6"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
-                {t("hub.onboardingCounter", {
-                  current: onboardingStep + 1,
-                  total: ONBOARDING_STEP_KEYS.length,
-                })}
-              </p>
-              <h2 className="mt-1 text-xl font-extrabold text-ink">
-                {t(activeStep.titleKey)}
-              </h2>
-              <p className="mt-1 text-body text-muted">
-                {adaptTextToTeacherPersona(
-                  t(activeStep.bodyKey),
-                  teacherPersona.gender,
-                )}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {onboardingStep < ONBOARDING_STEP_KEYS.length - 1 ? (
-                <Button
-                  className="min-h-12"
-                  fullWidth={false}
-                  onClick={() => setOnboardingStep((s) => s + 1)}
-                  size="compact"
-                  type="button"
-                >
-                  {t("hub.onboardingNext")}
-                </Button>
-              ) : (
-                <Button
-                  className="min-h-12"
-                  fullWidth={false}
-                  onClick={finishOnboarding}
-                  size="compact"
-                  type="button"
-                >
-                  {t("hub.onboardingDone")}
-                </Button>
-              )}
-              <Button
-                className="min-h-12"
-                fullWidth={false}
-                onClick={finishOnboarding}
-                size="compact"
-                type="button"
-                variant="quiet"
-              >
-                {t("hub.onboardingClose")}
-              </Button>
-            </div>
-          </div>
-        </aside>
-      ) : null}
-
       {/* 4 Child-First Play & Learn Zones */}
       <div className="grid items-stretch gap-5 md:grid-cols-2">
         {/* Zone 1: Storytelling */}
@@ -1108,14 +1068,37 @@ export function EntertainmentScreen({
               </span>
             </p>
           ) : null}
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href={pictureCardHref}
-            size="compact"
-          >
-            {t("hub.pictureCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.pictureTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-picture-description"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("PICTURE_DESCRIPTION")
+                  ?.quick_play_href ??
+                "/entertainment/picture-description?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href={pictureCardHref}
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.pictureCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 2: Word Adventure */}
@@ -1157,14 +1140,36 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.shooterDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href={shooterCardHref}
-            size="compact"
-          >
-            {t("hub.shooterCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.shooterTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-sentence-shooter"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("SENTENCE_SHOOTER")?.quick_play_href ??
+                "/entertainment/sentence-shooter?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href={shooterCardHref}
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.shooterCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 3: Music Stage */}
@@ -1221,17 +1226,36 @@ export function EntertainmentScreen({
                 />
               </ButtonLink>
             ) : null}
-            <ButtonLink
-              className="min-h-12"
-              href={karaokeCardHref}
-              size="compact"
-            >
-              {t("hub.karaokeCta")}{" "}
-              <ArrowRight
-                aria-hidden="true"
-                className="viread-rtl-flip size-4"
-              />
-            </ButtonLink>
+            <div className="flex flex-wrap gap-2">
+              <ButtonLink
+                aria-label={t("hub.quickPlayCardAria", {
+                  title: t("hub.karaokeTitle"),
+                })}
+                className="min-h-12 shrink-0"
+                data-testid="quick-play-karaoke"
+                fullWidth={false}
+                href={
+                  recommendationByGame.get("KARAOKE")?.quick_play_href ??
+                  "/karaoke?autoplay=1"
+                }
+                size="compact"
+              >
+                <Play aria-hidden="true" className="size-4" />
+                {t("hub.quickPlayCta")}
+              </ButtonLink>
+              <ButtonLink
+                className="min-h-12 flex-1"
+                href={karaokeCardHref}
+                size="compact"
+                variant="secondary"
+              >
+                {t("hub.karaokeCta")}{" "}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-4"
+                />
+              </ButtonLink>
+            </div>
           </div>
         </article>
 
@@ -1259,16 +1283,99 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.memoryDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href={memoryCardHref}
-            size="compact"
-          >
-            {t("hub.memoryCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.memoryTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-memory-game"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("MEMORY_GAME")?.quick_play_href ??
+                "/entertainment/memory-game?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href={memoryCardHref}
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.memoryCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
       </div>
+
+      {/* Non-blocking Dismissible Onboarding Strip (never blocks quick-play) */}
+      {showOnboarding ? (
+        <aside
+          aria-label={t("hub.onboardingRegionAria")}
+          className="rounded-card border border-primary/25 bg-white px-4 py-3.5 shadow-xs sm:px-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
+                {t("hub.onboardingCounter", {
+                  current: onboardingStep + 1,
+                  total: ONBOARDING_STEP_KEYS.length,
+                })}
+              </p>
+              <h2 className="mt-0.5 text-lg font-extrabold text-ink">
+                {t(activeStep.titleKey)}
+              </h2>
+              <p className="mt-0.5 text-sm text-muted">
+                {adaptTextToTeacherPersona(
+                  t(activeStep.bodyKey),
+                  teacherPersona.gender,
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {onboardingStep < ONBOARDING_STEP_KEYS.length - 1 ? (
+                <Button
+                  className="min-h-11"
+                  fullWidth={false}
+                  onClick={() => setOnboardingStep((s) => s + 1)}
+                  size="compact"
+                  type="button"
+                >
+                  {t("hub.onboardingNext")}
+                </Button>
+              ) : (
+                <Button
+                  className="min-h-11"
+                  fullWidth={false}
+                  onClick={finishOnboarding}
+                  size="compact"
+                  type="button"
+                >
+                  {t("hub.onboardingDone")}
+                </Button>
+              )}
+              <Button
+                className="min-h-11"
+                fullWidth={false}
+                onClick={finishOnboarding}
+                size="compact"
+                type="button"
+                variant="quiet"
+              >
+                {t("hub.onboardingClose")}
+              </Button>
+            </div>
+          </div>
+        </aside>
+      ) : null}
 
       {activeChildId ? (
         <>

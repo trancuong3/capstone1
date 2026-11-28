@@ -177,6 +177,7 @@ class KaraokeMicSession {
   private emptyRestarts = 0;
   private transientNativeErrors = 0;
   private stopSignal: (() => void) | null = null;
+  private signalContext: AudioContext | null = null;
   private signalClassifier = new SingingSignalClassifier();
   private musicalMonitor: BrowserMusicalMonitor | null = null;
   private sessionAnalyzer: MusicalDspAnalyzer | null = null;
@@ -272,6 +273,21 @@ class KaraokeMicSession {
     }
     this.musicalMonitor.stop();
     this.musicalMonitor = null;
+  }
+
+  private ensureSignalContext(): AudioContext | undefined {
+    if (typeof AudioContext === "undefined") return undefined;
+    try {
+      if (!this.signalContext || this.signalContext.state === "closed") {
+        this.signalContext = new AudioContext();
+      }
+      if (this.signalContext.state !== "running") {
+        void this.signalContext.resume().catch(() => {});
+      }
+      return this.signalContext;
+    } catch {
+      return undefined;
+    }
   }
 
   private stopVocalRecorderForReplay() {
@@ -382,6 +398,10 @@ class KaraokeMicSession {
       }
       this.companionStream = null;
     }
+    if (this.signalContext && this.signalContext.state !== "closed") {
+      void this.signalContext.close().catch(() => {});
+    }
+    this.signalContext = null;
     if (!this.stream) return;
     for (const track of this.stream.getTracks()) {
       track.onended = null;
@@ -586,6 +606,7 @@ class KaraokeMicSession {
         if (errorName(error) !== "InvalidStateError") throw error;
         this.trackInput = true;
         this.release(false);
+        this.ensureSignalContext();
         this.update("armed");
         this.acknowledge(true);
       }
@@ -606,6 +627,8 @@ class KaraokeMicSession {
     this.sliceClock = setInterval(() => {
       if (this.recognition !== recognition || this.getTime() < boundary) return;
       clearInterval(this.sliceClock);
+      this.stopSignal?.();
+      this.stopSignal = null;
       windows.freeze();
       this.drainingSlice = true;
       this.timer = setTimeout(() => {
@@ -708,6 +731,7 @@ class KaraokeMicSession {
         if (probe) {
           // Discard this entire cycle, including speech delivered after countdown.
           this.release(true);
+          this.ensureSignalContext();
           this.update("armed");
           this.acknowledge(true);
         } else {
@@ -732,6 +756,7 @@ class KaraokeMicSession {
                 }
               },
               this.signalClassifier,
+              this.ensureSignalContext(),
             );
             this.startVocalMonitorOnStream(this.stream);
           }
@@ -783,6 +808,10 @@ class KaraokeMicSession {
         if (this.recognition !== recognition) return;
         const deliberate = this.drainingSlice;
         const finishing = this.snapshot.status === "finishing";
+        if (!probe && capturing && !deliberate && !finishing) {
+          this.stopSignal?.();
+          this.stopSignal = null;
+        }
         if (
           !probe &&
           capturing &&
@@ -951,6 +980,8 @@ class KaraokeMicSession {
       this.complete();
       return;
     }
+    this.stopSignal?.();
+    this.stopSignal = null;
     this.update("finishing");
     this.windows?.freeze();
     clearInterval(this.sliceClock);

@@ -111,6 +111,13 @@
     "readFullSentence": "Ganzen Satz anhören",
     "practicedDifficultWordsRound": "Gerade geübte Wörter:",
     "practicedDifficultWordsSummary": "Geübte schwierige Wörter:",
+    "quickStartHeading": "Bereit für dein Kind",
+    "startNowButton": "Jetzt starten",
+    "autoStartingStatus": "Passendes Spiel wird geöffnet…",
+    "autoAdvanceCountdown": "Nächster Satz in {seconds}s",
+    "stopAutoAdvance": "Automatik stoppen",
+    "autoPlayFlowToggleOn": "Automatik-Modus",
+    "autoPlayFlowToggleOff": "Automatik-Modus (Aus)",
     "magicQuest": {
       "deckBadge": "✨ Sofort · Wird nach dem Spiel gelöscht",
       "deckTitle": "60-Sekunden-Zauberwort-Schriftrolle der Eule",
@@ -290,6 +297,19 @@
       "svgTitle": "Illustration {theme}"
     },
     "mobileLabel": "Erinnerungsecke",
+    "quickPlayDifficultCta": "Jetzt spielen (Schwere Wörter üben)",
+    "quickPlayDifficultHint": "Wählt automatisch das beste Bild und die passende Zeit für Klasse {grade}.",
+    "focusWordsReviewLabel": "Wörter zum Üben:",
+    "autoPlayFlowOn": "Automatik-Modus",
+    "autoPlayFlowOff": "Automatik-Modus (Aus)",
+    "observeAutoCue": "Schau dir Farben und Positionen der Dinge im Bild genau an!",
+    "autoRecallFallbackNotice": "Tippe auf Antwort sprechen oder schreibe auf, woran du dich erinnerst.",
+    "autoSubmitCountdown": "Wird in {seconds}s gesendet",
+    "sendNowButton": "Jetzt senden",
+    "switchToTextButton": "Text tippen",
+    "turnOffAutoButton": "Automatik aus",
+    "playNewRoundNowButton": "Neue Runde sofort spielen",
+    "practicedWordsRevealPrefix": "Geübte Wörter:",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }
