@@ -834,8 +834,7 @@ export async function requestApi<T>(
       const attemptController = new AbortController();
       let timedOut = false;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const onParentAbort = () =>
-        attemptController.abort(fetchSignal?.reason);
+      const onParentAbort = () => attemptController.abort(fetchSignal?.reason);
       fetchSignal?.addEventListener("abort", onParentAbort, { once: true });
 
       let response: Response | null = null;
