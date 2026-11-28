@@ -43,6 +43,7 @@ const crossGameRecommendationSchema = z.object({
   suggested_difficulty: z.number().int(),
   target_words: z.array(z.string()).default([]),
   href: z.string(),
+  quick_play_href: z.string().nullish(),
   priority: z.number().int(),
 });
 
@@ -116,6 +117,7 @@ const parentEntertainmentAnalyticsSchema = z.object({
   module_activities: z.array(moduleActivitySummarySchema),
   karaoke_weak_segments: z.array(karaokeWeakSegmentSummarySchema),
   home_support_tips_vi: z.array(z.string()),
+  reading_misread_words_reinforced: z.number().int().min(0).optional(),
   generated_at: z.string(),
 });
 

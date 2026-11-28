@@ -40,7 +40,6 @@ export default async function Page({ searchParams }: KaraokePageProps = {}) {
   const query = searchParams ? await searchParams : undefined;
   const initialMode =
     firstValue(query?.mode) === "magic-chant" ? "magic-chant" : undefined;
-  const autoPlay =
-    firstValue(query?.autoplay) === "1" || firstValue(query?.autopilot) === "1";
+  const autoPlay = firstValue(query?.autoplay) === "1";
   return <KaraokeLibraryScreen autoPlay={autoPlay} initialMode={initialMode} />;
 }

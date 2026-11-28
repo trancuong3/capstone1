@@ -32,7 +32,22 @@ export function KaraokeLibraryScreen({
 }: KaraokeLibraryScreenProps = {}) {
   const { autoPlayFlow } = useEntertainmentPreferences();
   const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
-  const shouldAutoLaunch = autoPlayRequested && autoPlayFlow;
+  const [hasUrlMagicChantMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        new URLSearchParams(window.location.search).get("mode") ===
+        "magic-chant"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const shouldAutoLaunch =
+    autoPlayRequested &&
+    autoPlayFlow &&
+    initialMode !== "magic-chant" &&
+    !hasUrlMagicChantMode;
 
   return (
     <KaraokeChildBoundary>
@@ -293,10 +308,11 @@ function Catalog({
   useEffect(() => {
     if (!autoLaunchSong || redirectedRef.current) return;
     redirectedRef.current = true;
+    const extraQuery = launchQuery ? `&${launchQuery}` : "";
     router.replace(
-      `/karaoke/${autoLaunchSong.song_id}?version=${autoLaunchSong.version_id}&autoplay=1&scored=1`,
+      `/karaoke/${autoLaunchSong.song_id}?version=${autoLaunchSong.version_id}&autoplay=1&scored=1${extraQuery}`,
     );
-  }, [autoLaunchSong, router]);
+  }, [autoLaunchSong, launchQuery, router]);
 
   if (state.status === "loading" || autoLaunchSong)
     return (
