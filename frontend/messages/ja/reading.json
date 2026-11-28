@@ -174,6 +174,15 @@
       "no_device": "デバイスにマイクが見つかりません。マイクを接続して、もう一度お試しください。",
       "device_busy": "マイクが他のアプリで使用中です。そのアプリを閉じて、もう一度お試しください。",
       "error": "マイクを確認できません。HTTPSまたはlocalhostを使用して、もう一度お試しください。"
+    },
+    "warmupStory": {
+      "spacedEyebrow": "間隔反復ワード復習（1・3・7日）",
+      "starterEyebrow": "読書前のやさしいウォームアップ",
+      "title": "ウォームアップ・ショートストーリー",
+      "listenStory": "お話を聞く",
+      "stopListen": "停止",
+      "refreshStory": "新しいお話にする",
+      "focusWordsLabel": "今日ちりばめた言葉"
     }
   },
   "ready": {

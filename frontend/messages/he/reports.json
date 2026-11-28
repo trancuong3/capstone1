@@ -143,7 +143,11 @@
       "recommendedWordsTitle": "מילים מומלצות לתרגול נוסף ({days} ימים)",
       "heardAsCount": "הילד/ה קורא/ת לעיתים קרובות כ-\"{heardAs}\" ({times} פעמים)",
       "recordedCount": "תועד {times} פעמים",
-      "heardAsInline": "(נקרא כ-\"{heardAs}\")"
+      "heardAsInline": "(נקרא כ-\"{heardAs}\")",
+      "phonologyTitle": "טונים וצלילים המופיעים לתרגול חוזר בקריאה",
+      "phonologyDisclaimer": "מסוכם ממפגשי קריאה אחרונים לחימום קצר (אינו אבחון רפואי).",
+      "openMinimalPairSandbox": "תרגול זוגות 60 שניות",
+      "phonologySessionsBadge": "{sessions} מפגשים"
     },
     "firstPassSummary": {
       "regionAria": "תוצאות ניסיון ראשון ותרגול",
@@ -656,7 +660,8 @@
       "favorited": "הוספת למועדפים",
       "wantToRead": "רוצה לקרוא",
       "savedToRead": "נשמר לרשימת הקריאה"
-    }
+    },
+    "androidReminderBody": "הגיע זמן הקריאה עם {alias} ב-ViRead!"
   },
   "entertainmentSummary": {
     "loading": "מסכם את התקדמות הלמידה במשחק של {childName}…",

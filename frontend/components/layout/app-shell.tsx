@@ -7,17 +7,21 @@ import {
   ChevronDown,
   Gamepad2,
   LayoutDashboard,
+  Lock,
+  ShieldCheck,
   UsersRound,
   Volume2,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -31,11 +35,24 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
 import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
+import {
+  ParentPinModal,
+  type ParentPinModalMode,
+} from "@/components/security/parent-pin-modal";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import { createFamilyPedagogyService } from "@/lib/api/family-pedagogy-service";
+import { clearAndroidScheduledReminders } from "@/lib/reading/native-reminder-bridge";
+import {
+  clearChildModeLockForUser,
+  isChildModeLockedForUser,
+  isParentProtectedRoute,
+  setChildModeLockedForUser,
+  subscribeChildModeLock,
+} from "@/lib/security/child-mode-lock";
 import {
   broadcastActorSwitch,
   clearGlobalTasksMemoryCache,
@@ -337,6 +354,8 @@ export function AppShell({ children }: AppShellProps) {
     if (prevId !== undefined && prevId !== user?.id) {
       resetApiReadCacheForActorSwitch();
       clearUserCache(prevId);
+      clearChildModeLockForUser(prevId);
+      void clearAndroidScheduledReminders();
       clearStoredScanJobIds(user?.id ?? null);
       if (!user?.id) {
         clearUserCache();
@@ -346,8 +365,70 @@ export function AppShell({ children }: AppShellProps) {
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
 
+  const familyPedagogyService = useMemo(
+    () => createFamilyPedagogyService(),
+    [],
+  );
+  const [pinState, setPinState] = useState<{
+    readonly userId: string;
+    readonly hasPin: boolean;
+  } | null>(null);
+  const hasParentPin = Boolean(
+    userId && pinState?.userId === userId && pinState.hasPin,
+  );
+  const [pinModalMode, setPinModalMode] = useState<ParentPinModalMode | null>(
+    null,
+  );
+  const getLockSnapshot = useCallback(
+    () => isChildModeLockedForUser(userId),
+    [userId],
+  );
+  const isChildModeLocked = useSyncExternalStore(
+    subscribeChildModeLock,
+    getLockSnapshot,
+    () => false,
+  );
+  const isProtectedByChildLock =
+    isChildModeLocked && isParentProtectedRoute(pathname);
+
+  useEffect(() => {
+    if (!userId) return;
+    let mounted = true;
+    const targetUserId = userId;
+    familyPedagogyService
+      .getPinStatus()
+      .then((statusRes) => {
+        if (!mounted) return;
+        setPinState({ userId: targetUserId, hasPin: statusRes.has_pin });
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, [familyPedagogyService, userId]);
+
+  const handleChildModeToggle = useCallback(() => {
+    if (!userId) return;
+    if (isChildModeLocked) {
+      setPinModalMode("unlock");
+      return;
+    }
+    if (hasParentPin) {
+      setChildModeLockedForUser(userId, true);
+      if (isParentProtectedRoute(pathname)) {
+        router.push("/dashboard");
+      }
+      return;
+    }
+    setPinModalMode("setup");
+  }, [hasParentPin, isChildModeLocked, pathname, router, userId]);
+
   async function handleSignOut() {
     if (isSigningOut) return;
+    if (isChildModeLocked) {
+      setPinModalMode("unlock");
+      return;
+    }
 
     setHasSignOutError(false);
     setIsSigningOut(true);
@@ -355,6 +436,8 @@ export function AppShell({ children }: AppShellProps) {
     try {
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
+      clearChildModeLockForUser(userId);
+      void clearAndroidScheduledReminders();
       clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
       clearUserCache();
@@ -600,7 +683,44 @@ export function AppShell({ children }: AppShellProps) {
                 <span className="flex-1" />
               )}
 
-              {!isChildOnboarding ? (
+              {!isChildOnboarding && userId ? (
+                <button
+                  aria-pressed={isChildModeLocked}
+                  className={cn(
+                    "inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isChildModeLocked
+                      ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+                      : "border-border bg-canvas/80 text-ink hover:bg-sky/60",
+                  )}
+                  data-testid="child-mode-lock-toggle"
+                  onClick={handleChildModeToggle}
+                  title={
+                    isChildModeLocked
+                      ? t("parent.childModePin.lockedTooltip")
+                      : t("parent.childModePin.unlockedTooltip")
+                  }
+                  type="button"
+                >
+                  {isChildModeLocked ? (
+                    <Lock
+                      aria-hidden="true"
+                      className="size-3.5 text-emerald-700"
+                    />
+                  ) : (
+                    <ShieldCheck
+                      aria-hidden="true"
+                      className="size-3.5 text-primary"
+                    />
+                  )}
+                  <span className="hidden sm:inline">
+                    {isChildModeLocked
+                      ? t("parent.childModePin.lockedPill")
+                      : t("parent.childModePin.unlockedPill")}
+                  </span>
+                </button>
+              ) : null}
+
+              {!isChildOnboarding && !isChildModeLocked ? (
                 <GlobalTaskCenter
                   hideOnPaths={["/children/new"]}
                   variant="drawer-only"
@@ -651,9 +771,76 @@ export function AppShell({ children }: AppShellProps) {
           )}
         >
           <ButtonSizeContext.Provider value="compact">
-            {children}
+            {isProtectedByChildLock ? (
+              <section
+                className="mx-auto my-8 max-w-md space-y-4 rounded-card border border-primary/25 bg-cream p-6 text-center shadow-2xs"
+                data-testid="child-mode-route-guard"
+              >
+                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-white text-primary shadow-2xs">
+                  <Lock aria-hidden="true" className="size-6" />
+                </div>
+                <h1 className="text-xl font-extrabold text-ink">
+                  {t("parent.childModePin.routeGuardTitle")}
+                </h1>
+                <p className="text-sm text-muted">
+                  {t("parent.childModePin.routeGuardDesc")}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <button
+                    className="inline-flex min-h-10 items-center justify-center rounded-control border border-border bg-white px-4 py-2 text-sm font-bold text-ink hover:bg-sky/50"
+                    onClick={() => router.push("/dashboard")}
+                    type="button"
+                  >
+                    {t("parent.childModePin.backToChildDesk")}
+                  </button>
+                  <button
+                    className="inline-flex min-h-10 items-center justify-center rounded-control bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover"
+                    data-testid="child-mode-guard-unlock-btn"
+                    onClick={() => setPinModalMode("unlock")}
+                    type="button"
+                  >
+                    {t("parent.childModePin.unlockButton")}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              children
+            )}
           </ButtonSizeContext.Provider>
         </main>
+
+        <ParentPinModal
+          hasExistingPin={hasParentPin}
+          isOpen={pinModalMode !== null || isProtectedByChildLock}
+          mode={isProtectedByChildLock ? "unlock" : (pinModalMode ?? "setup")}
+          onClose={() => {
+            setPinModalMode(null);
+            if (isProtectedByChildLock) {
+              router.push("/dashboard");
+            }
+          }}
+          onPinConfigured={() => {
+            if (userId) {
+              setPinState({ userId, hasPin: true });
+            }
+            setChildModeLockedForUser(userId, true);
+            setPinModalMode(null);
+            if (isParentProtectedRoute(pathname)) {
+              router.push("/dashboard");
+            }
+          }}
+          onPinRemoved={() => {
+            if (userId) {
+              setPinState({ userId, hasPin: false });
+            }
+            setChildModeLockedForUser(userId, false);
+            setPinModalMode(null);
+          }}
+          onPinVerified={() => {
+            setChildModeLockedForUser(userId, false);
+            setPinModalMode(null);
+          }}
+        />
 
         <SiteFooter className="hidden lg:block" variant="parent" />
 

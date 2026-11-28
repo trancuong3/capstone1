@@ -21,6 +21,7 @@ import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
+import { ReadingPassportPanel } from "@/components/dashboard/reading-passport-panel";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
@@ -468,6 +469,14 @@ export function SessionComplete({
             )}
           </div>
         )}
+
+        <ReadingPassportPanel
+          allowParentRecording={false}
+          childAlias={child.alias}
+          childId={child.id}
+          collapsible
+          defaultExpanded={false}
+        />
 
         <ButtonLink className="mx-auto max-w-[360px]" href={rereadHref}>
           <BookOpen aria-hidden="true" className="size-5" />

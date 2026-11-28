@@ -16,7 +16,9 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
+import { MinimalPairSandbox } from "@/components/reading/minimal-pair-sandbox";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { WarmupMicroStoryCard } from "@/components/reading/warmup-micro-story-card";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
@@ -615,6 +617,14 @@ export function ReadingPreparationScreen({
           ) : null}
         </div>
       </article>
+
+      <WarmupMicroStoryCard bookId={data.book.id} childId={data.child.id} />
+
+      <MinimalPairSandbox
+        childAlias={data.child.alias}
+        childId={data.child.id}
+        compact
+      />
 
       <section
         aria-labelledby="microphone-check-title"

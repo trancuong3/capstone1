@@ -5,6 +5,7 @@ import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   EntertainmentRecommendationsDTO,
   ParentEntertainmentAnalyticsDTO,
+  WarmupMicroStoryDTO,
 } from "@/types/adaptive-learning";
 
 function unauthorizedError(): ServiceError {
@@ -50,6 +51,10 @@ export interface AdaptiveLearningService {
     childId: string,
     windowDays?: number,
   ): Promise<ParentEntertainmentAnalyticsDTO>;
+  getWarmupStory(
+    childId: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<WarmupMicroStoryDTO>;
 }
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
@@ -65,6 +70,12 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
     getParentAnalytics(childId: string, windowDays = 30) {
       return fetchJson<ParentEntertainmentAnalyticsDTO>(
         `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}`,
+      );
+    },
+    getWarmupStory(childId: string, options?: { readonly refresh?: boolean }) {
+      const suffix = options?.refresh ? "?refresh=true" : "";
+      return fetchJson<WarmupMicroStoryDTO>(
+        `/learning/children/${encodeURIComponent(childId)}/warmup-story${suffix}`,
       );
     },
   };

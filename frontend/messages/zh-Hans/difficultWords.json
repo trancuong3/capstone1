@@ -172,5 +172,25 @@
   "runtime": {
     "practiceOpened": "已为词语“{word}”开启第 #{attempt} 次练习。",
     "unknownBookSource": "尚未指定书籍来源"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "60秒语音热身",
+    "title": "最小对立词工坊与声调镜",
+    "subtitle": "帮助 {alias} 听辨并练习容易混淆的声调、声母与韵尾。",
+    "openButton": "打开60秒工坊",
+    "collapseButton": "收起",
+    "unavailableHint": "暂时无法加载最小对立词练习，请稍后重试。",
+    "pairCounter": "词组 {current}/{total}",
+    "listenWord": "试听",
+    "speakWord": "跟读",
+    "listening": "正在聆听...",
+    "spokenMatch": "太棒了！目标词发音清晰准确！",
+    "spokenContrast": "听起来接近“{heard}”——先听示范再慢速读一遍吧！",
+    "spokenRetry": "还没听清楚，请靠近麦克风慢速再读一次！",
+    "earChallengeButton": "听音辨词",
+    "earCorrect": "答对啦！耳力真敏锐！",
+    "earRetry": "差一点点，再听一次试试看！",
+    "nextPairButton": "下一组",
+    "nonClinicalDisclaimer": "基于自动语音识别的阅读辅助练习建议（非医学或言语治疗诊断）。"
   }
 }

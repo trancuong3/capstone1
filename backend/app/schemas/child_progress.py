@@ -82,6 +82,46 @@ class DifficultWordStatRead(BaseModel):
     heard_as: str | None = None
 
 
+class ConfusionExampleRead(BaseModel):
+    expected_word: str
+    spoken_word: str
+    occurrences: int = Field(ge=1)
+
+
+class MinimalPairExerciseRead(BaseModel):
+    pattern_key: str | None = None
+    word_a: str
+    word_b: str
+    target_word: str
+    contrast_word: str
+    hint_vi: str
+    origin: Literal["CHILD_HISTORY", "CURATED_GRADE1"] = "CURATED_GRADE1"
+
+
+class PhonologicalPatternRead(BaseModel):
+    pattern_key: str
+    category: Literal["TONE", "ONSET", "CODA"]
+    unit_a: str
+    unit_b: str
+    title_vi: str
+    summary_vi: str
+    occurrences: int = Field(ge=1)
+    distinct_sessions: int = Field(ge=1)
+    examples: list[ConfusionExampleRead] = Field(default_factory=list)
+    minimal_pairs: list[MinimalPairExerciseRead] = Field(default_factory=list)
+
+
+class PhonologySandboxRead(BaseModel):
+    child_id: UUID
+    days: int = Field(ge=7, le=90)
+    is_diagnostic: bool = False
+    disclaimer_vi: str
+    has_recurring_patterns: bool = False
+    patterns: list[PhonologicalPatternRead] = Field(default_factory=list)
+    recommended_pairs: list[MinimalPairExerciseRead] = Field(default_factory=list)
+    duration_seconds: int = Field(default=60, ge=30, le=180)
+
+
 class WeaknessRead(BaseModel):
     area: str
     detail: str
@@ -116,5 +156,6 @@ class ChildProgressAssessmentRead(BaseModel):
     metrics: ProgressMetricsRead
     weekly: list[WeeklyPointRead]
     difficult_words: list[DifficultWordStatRead]
+    phonological_patterns: list[PhonologicalPatternRead] = Field(default_factory=list)
     assessment: AssessmentTextRead
     ai_cached: bool

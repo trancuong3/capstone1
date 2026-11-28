@@ -16,8 +16,10 @@ from app.schemas.adaptive_learning import (
     ParentEntertainmentAnalyticsRead,
     SkillEvidenceCreate,
     SkillEvidenceRead,
+    WarmupMicroStoryRead,
 )
 from app.services.adaptive_learning_service import AdaptiveLearningService
+from app.services.warmup_micro_story_service import WarmupMicroStoryService
 
 router = APIRouter()
 
@@ -77,3 +79,21 @@ async def record_child_skill_evidence(
     db: AsyncSession = Depends(get_db),
 ) -> SkillEvidenceRead:
     return await _service(db).record_evidence(child_id, parent_id, payload)
+
+
+@router.get(
+    "/children/{child_id}/warmup-story",
+    response_model=WarmupMicroStoryRead,
+)
+async def get_child_warmup_micro_story(
+    child_id: UUID,
+    refresh: bool = Query(default=False),
+    parent_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> WarmupMicroStoryRead:
+    safe_refresh = refresh if isinstance(refresh, bool) else False
+    return await WarmupMicroStoryService(db).get_or_create_warmup_story(
+        child_id,
+        parent_id,
+        refresh=safe_refresh,
+    )

@@ -174,6 +174,15 @@
       "no_device": "Kein Mikrofon am Gerät gefunden. Bitte schließe ein Mikrofon an und versuche es erneut.",
       "device_busy": "Das Mikrofon wird von einer anderen App verwendet. Bitte schließe diese App und versuche es erneut.",
       "error": "Mikrofon kann nicht überprüft werden. Bitte verwende HTTPS oder localhost und versuche es erneut."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "Zeitversetzte Wortwiederholung (1-3-7 Tage)",
+      "starterEyebrow": "Sanftes Lese-Aufwärmen",
+      "title": "Kurze Aufwärm-Geschichte",
+      "listenStory": "Geschichte anhören",
+      "stopListen": "Stopp",
+      "refreshStory": "Aufwärm-Geschichte erneuern",
+      "focusWordsLabel": "Eingebaute Übungswörter"
     }
   },
   "ready": {

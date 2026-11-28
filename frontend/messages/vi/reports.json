@@ -143,7 +143,11 @@
       "recommendedWordsTitle": "Từ gợi ý luyện thêm ({days} ngày)",
       "heardAsCount": "Bé thường đọc thành “{heardAs}” ({times} lần)",
       "recordedCount": "Ghi nhận {times} lần",
-      "heardAsInline": "(đọc thành “{heardAs}”)"
+      "heardAsInline": "(đọc thành “{heardAs}”)",
+      "phonologyTitle": "Âm & thanh điệu bé hay gặp thử thách khi luyện đọc",
+      "phonologyDisclaimer": "Tổng hợp từ các phiên đọc gần đây để gợi ý khởi động nhẹ nhàng (không phải chẩn đoán y khoa).",
+      "openMinimalPairSandbox": "Luyện cặp từ 60s",
+      "phonologySessionsBadge": "{sessions} buổi đọc"
     },
     "firstPassSummary": {
       "regionAria": "Kết quả lượt đầu và luyện lại",
@@ -656,7 +660,8 @@
       "favorited": "Đã yêu thích",
       "wantToRead": "Muốn đọc",
       "savedToRead": "Đã lưu đọc"
-    }
+    },
+    "androidReminderBody": "Đến giờ đọc sách cùng {alias} trên ViRead rồi!"
   },
   "entertainmentSummary": {
     "loading": "Đang tổng hợp tiến độ Học mà Chơi cho {childName}…",

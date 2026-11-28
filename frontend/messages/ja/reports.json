@@ -143,7 +143,11 @@
       "recommendedWordsTitle": "練習用のおすすめ単語 ({days}日間)",
       "heardAsCount": "「{heardAs}」と読むことが多いです ({times}回)",
       "recordedCount": "{times}回記録",
-      "heardAsInline": "(「{heardAs}」と読みました)"
+      "heardAsInline": "(「{heardAs}」と読みました)",
+      "phonologyTitle": "読書中につまずきやすい声調と音のパターン",
+      "phonologyDisclaimer": "最近の読書記録からまとめたウォームアップ提案です（医療診断ではありません）。",
+      "openMinimalPairSandbox": "60秒ペア練習",
+      "phonologySessionsBadge": "{sessions}回のセッション"
     },
     "firstPassSummary": {
       "regionAria": "初回と練習の結果",
@@ -656,7 +660,8 @@
       "favorited": "お気に入り",
       "wantToRead": "読みたい",
       "savedToRead": "読書リストに保存"
-    }
+    },
+    "androidReminderBody": "ViReadで{alias}と一緒に本を読む時間です！"
   },
   "entertainmentSummary": {
     "loading": "{childName} のあそび学習の記録をまとめています…",

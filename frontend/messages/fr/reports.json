@@ -143,7 +143,11 @@
       "recommendedWordsTitle": "Mots suggérés pour l'entraînement ({days} jours)",
       "heardAsCount": "L'enfant lit souvent « {heardAs} » ({times} fois)",
       "recordedCount": "Enregistré {times} fois",
-      "heardAsInline": "(lu comme « {heardAs} »)"
+      "heardAsInline": "(lu comme « {heardAs} »)",
+      "phonologyTitle": "Tons et sons souvent travaillés en lecture",
+      "phonologyDisclaimer": "Regroupé depuis les séances récentes pour un échauffement doux (non médical).",
+      "openMinimalPairSandbox": "Paires minimales 60s",
+      "phonologySessionsBadge": "{sessions} séances"
     },
     "firstPassSummary": {
       "regionAria": "Résultats de la première tentative et de l'entraînement",
@@ -656,7 +660,8 @@
       "favorited": "Ajouté aux favoris",
       "wantToRead": "À lire",
       "savedToRead": "Enregistré dans la liste de lecture"
-    }
+    },
+    "androidReminderBody": "C'est l'heure de lire avec {alias} sur ViRead !"
   },
   "entertainmentSummary": {
     "loading": "Synthèse des progrès ludiques de {childName} en cours…",

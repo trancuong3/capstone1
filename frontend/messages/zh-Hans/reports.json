@@ -143,7 +143,11 @@
       "recommendedWordsTitle": "建议练习词汇（{days} 天）",
       "heardAsCount": "孩子常读成“{heardAs}”（{times} 次）",
       "recordedCount": "记录 {times} 次",
-      "heardAsInline": "（读成“{heardAs}”）"
+      "heardAsInline": "（读成“{heardAs}”）",
+      "phonologyTitle": "朗读中常需巩固的声调与音节对比",
+      "phonologyDisclaimer": "根据近期朗读记录汇总的轻松热身建议（非医学诊断）。",
+      "openMinimalPairSandbox": "60秒对立词练习",
+      "phonologySessionsBadge": "{sessions} 次朗读"
     },
     "firstPassSummary": {
       "regionAria": "首次尝试与练习结果",
@@ -656,7 +660,8 @@
       "favorited": "已收藏",
       "wantToRead": "想读",
       "savedToRead": "已保存至阅读列表"
-    }
+    },
+    "androidReminderBody": "到时间和 {alias} 一起在 ViRead 读书啦！"
   },
   "entertainmentSummary": {
     "loading": "正在汇总 {childName} 的趣味学习进度…",

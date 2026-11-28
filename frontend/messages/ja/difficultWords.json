@@ -172,5 +172,25 @@
   "runtime": {
     "practiceOpened": "「{word}」の練習 #{attempt} を開始しました。",
     "unknownBookSource": "書籍の出典が未指定です。"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "60秒の発音ウォームアップ",
+    "title": "ミニマルペア練習と声調ミラー",
+    "subtitle": "{alias}が間違えやすい声調や頭子音・末子音を聞き分けて練習します。",
+    "openButton": "60秒練習を開く",
+    "collapseButton": "閉じる",
+    "unavailableHint": "現在ミニマルペア練習を読み込めませんでした。後でもう一度お試しください。",
+    "pairCounter": "ペア {current}/{total}",
+    "listenWord": "聞く",
+    "speakWord": "読んでみる",
+    "listening": "聞き取り中...",
+    "spokenMatch": "すばらしい！目標の言葉をはっきり発音できました！",
+    "spokenContrast": "「{heard}」に近く聞こえました。お手本を聞いてゆっくり読んでみましょう！",
+    "spokenRetry": "はっきり聞き取れませんでした。マイクに近づいてゆっくり発音してね！",
+    "earChallengeButton": "聞き分けクイズ",
+    "earCorrect": "大正解！よく聞き取れました！",
+    "earRetry": "おしい！もう一度聞いてみよう！",
+    "nextPairButton": "次のペア",
+    "nonClinicalDisclaimer": "音声認識に基づく読書練習のヒントです（医療診断や言語聴覚療法の評価ではありません）。"
   }
 }

@@ -24,10 +24,16 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { VerifiedBookPicker } from "./verified-book-picker";
 import { useBookService } from "@/hooks/use-book-service";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { conflictMessage } from "@/lib/api/reading-management-messages";
+import {
+  isAndroidNativeReminderAvailable,
+  requestAndroidReminderPermission,
+  syncRemindersToAndroidShell,
+} from "@/lib/reading/native-reminder-bridge";
 import {
   GoalInsights,
   PlanInsights,
@@ -95,6 +101,7 @@ interface Props {
 export function ReadingManagementScreen({ requestedChildId }: Props) {
   const { formatTime } = useI18n();
   const t = useTranslations("reports");
+  const authRuntime = useAuthRuntime();
   const childService = useChildService();
   const bookService = useBookService();
   const service = useReadingManagementService();
@@ -352,6 +359,40 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     reloadKey,
     selectedChild?.grade,
     service,
+    t,
+  ]);
+
+  const parentUserId =
+    authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? "";
+  const selectedChildAlias = selectedChild?.alias ?? "";
+
+  useEffect(() => {
+    if (
+      !parentUserId ||
+      loadedRequestKey !== currentRequestKey ||
+      !isAndroidNativeReminderAvailable()
+    ) {
+      return;
+    }
+    void syncRemindersToAndroidShell({
+      userId: parentUserId,
+      childAlias: selectedChildAlias,
+      reminders,
+      titleText: "ViRead",
+      bodyText: t("readingManagement.androidReminderBody", {
+        alias: selectedChildAlias,
+      }),
+    }).then((ack) => {
+      if (ack?.status === "SYNCED_PERMISSION_NEEDED") {
+        void requestAndroidReminderPermission();
+      }
+    });
+  }, [
+    currentRequestKey,
+    loadedRequestKey,
+    parentUserId,
+    reminders,
+    selectedChildAlias,
     t,
   ]);
 
