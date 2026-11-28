@@ -338,7 +338,7 @@ class ParentPrivateBookSummaryRead(BaseModel):
     ready_to_add_count: int = 0
     readable_for_children: bool = False
     has_held_multipage_batch: bool = False
-    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để huấn luyện OCR."
+    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để đóng góp dữ liệu cải thiện nhận diện chữ."
     ocr_contribution: "ParentOcrContributionStateRead | None" = None
     created_at: datetime
 

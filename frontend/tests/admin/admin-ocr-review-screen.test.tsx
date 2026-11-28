@@ -14,6 +14,8 @@ import {
   type AdminAiWorkflowDTO,
 } from "@/lib/api/ocr-review-service";
 import type { AdminPageRevisionDetailDTO } from "@/types/admin";
+import type { AdminServices } from "@/components/providers/admin-services-provider";
+import type { AdminOcrJobDTO } from "@/lib/api/admin-page-service";
 import {
   ADMIN_BOOK_ID,
   ADMIN_PAGE_ID,
@@ -157,7 +159,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         ocr_confidence: 0.8,
         ocr_score_source: "tesseract_raw_word_score_v1",
       }),
-    ).toContain("Điểm thô Tesseract: 80/100 · raw recognition score");
+    ).toContain("Độ tin cậy nhận diện: 80/100");
     expect(
       getOcrScoreLabel({
         ...word,
@@ -228,7 +230,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "green",
     );
     expect(getWordReviewLabel("engine_agreement", consensus)).toContain(
-      "Hai OCR đồng thuận · chưa đối chiếu reference",
+      "Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu",
     );
     expect(getWordReviewColorGroup("engine_agreement")).toBe("yellow");
 
@@ -264,7 +266,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "border-red-600",
     );
     expect(getWordReviewLabel("needs_review", mismatch)).toBe(
-      "Sai so với reference đã xác minh",
+      "Sai so với văn bản đã xác minh",
     );
     expect(getWordReviewColorGroup("verified", mismatch)).toBe("red");
     expect(
@@ -282,7 +284,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "border-red-600",
     );
     expect(getWordReviewLabel("verified", mismatch)).toBe(
-      "Sai so với reference đã xác minh",
+      "Sai so với văn bản đã xác minh",
     );
     expect(getWordReviewColorGroup("confirmed_mismatch")).toBe("yellow");
     expect(
@@ -448,37 +450,18 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
-    const evidence = screen.getByRole("region", {
-      name: "Bằng chứng OCR từ 1",
-    });
-    expect(within(evidence).getByText(/PaddleOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText(/VietOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText("Alignment: match")).toBeInTheDocument();
     expect(
-      within(evidence).getByText(
-        "PaddleOCR dòng: 81/100 · điểm thô · không phải xác suất đúng",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        /Not calibrated · chưa có calibration evidence/,
-      ),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "Bằng chứng OCR từ 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/PaddleOCR:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/VietOCR:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tesseract:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/OCR source token:/)).not.toBeInTheDocument();
 
     const pageText = screen.getByLabelText("Nội dung trang");
     await user.clear(pageText);
     await user.type(pageText, "Ta");
 
-    expect(within(evidence).getByText(/PaddleOCR: on ·/)).toBeInTheDocument();
-    expect(within(evidence).getByText(/VietOCR: on ·/)).toBeInTheDocument();
-    expect(
-      within(evidence).getByText("OCR source token: on"),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        /Evidence engine thuộc token OCR ban đầu “on”/,
-      ),
-    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Từ 1: Ta\./ })).toHaveClass(
       "border-amber-600",
     );
@@ -533,29 +516,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
-    const evidence = screen.getByRole("region", {
-      name: "Bằng chứng OCR từ 1",
-    });
     expect(
-      within(evidence).getByText(
-        "PaddleOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "VietOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "PaddleOCR dòng gốc (không phải token căn chỉnh): công chúa",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(evidence).getByText(
-        "VietOCR dòng gốc (không phải token căn chỉnh): công chú",
-      ),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "Bằng chứng OCR từ 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Từ 1: công\./ })).toHaveClass(
+      "border-amber-600",
+    );
   });
 
   it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {
@@ -636,10 +602,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: đừng\. Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
     });
     const highPaddleScore = screen.getByRole("button", {
-      name: /Từ 2: chàng\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
+      name: /Từ 2: chàng\. Kết quả nhận diện chưa thống nhất · cần kiểm tra thêm/,
     });
     const vietOcrSelected = screen.getByRole("button", {
-      name: /Từ 3: mới\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
+      name: /Từ 3: mới\. Kết quả nhận diện chưa thống nhất · cần kiểm tra thêm/,
     });
 
     expect(accentDifference).toHaveClass("border-amber-600");
@@ -717,7 +683,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
     expect(
-      await screen.findByText(/Không thể chạy lại OCR/),
+      await screen.findByText(/Không thể chạy lại nhận diện chữ/),
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
@@ -840,7 +806,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const mismatch = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Sai so với reference đã xác minh/,
+      name: /Từ 1: Cao\. Sai so với văn bản đã xác minh/,
     });
     const needsReview = screen.getByRole("button", {
       name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
@@ -852,7 +818,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 4: Chưa rõ\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
     });
     const engineAgreement = screen.getByRole("button", {
-      name: /Từ 5: Khớp\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 5: Khớp\. Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu/,
     });
     expect(mismatch).toHaveClass("border-red-600");
     expect(needsReview).toHaveClass("border-amber-600");
@@ -862,8 +828,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/2\s*Xanh · evidence tốt/);
-    expect(stats).toHaveTextContent(/1\s*Đỏ · reference xác nhận sai/);
+    expect(stats).toHaveTextContent(/2\s*Xanh · độ tin cậy tốt/);
+    expect(stats).toHaveTextContent(/1\s*Đỏ · đã xác nhận sai/);
     expect(stats).toHaveTextContent(/2\s*Vàng · cần kiểm tra/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
@@ -1021,18 +987,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     expect(wordButtons).toHaveLength(20);
     expect(
-      screen.getByRole("button", { name: /Từ 1: từ1\. Hai OCR đồng thuận/ }),
+      screen.getByRole("button", {
+        name: /Từ 1: từ1\. Hai lượt nhận diện đồng thuận/,
+      }),
     ).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ }),
     ).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 12: từ12\. Sai so với reference/,
+        name: /Từ 12: từ12\. Sai so với văn bản đã xác minh/,
       }),
     ).toHaveClass("border-red-600");
     expect(
-      screen.getByRole("button", { name: /Từ 14: từ14\. Hai OCR bất đồng/ }),
+      screen.getByRole("button", {
+        name: /Từ 14: từ14\. Kết quả nhận diện chưa thống nhất/,
+      }),
     ).toHaveClass("border-amber-600");
     expect(screen.getByRole("button", { name: /^Từ 17: từ17\./ })).toHaveClass(
       "border-amber-600",
@@ -1083,7 +1053,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 1: Nội\. Hai lượt nhận diện đồng thuận · chưa đối chiếu bản mẫu/,
     });
     expect(matchedWord).toHaveClass("border-green-600");
     expect(screen.getByRole("button", { name: "Cần xem (0)" })).toHaveAttribute(
@@ -1141,13 +1111,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Bounding box từ OCR: 3 từ/,
     });
     const high = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 95\/100 · raw recognition score/,
+      name: /Từ 1: Cao\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 95\/100/,
     });
     const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 62\/100 · raw recognition score/,
+      name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 62\/100/,
     });
     const low = screen.getByRole("button", {
-      name: /Từ 3: Thấp\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Điểm thô Tesseract: 27\/100 · raw recognition score/,
+      name: /Từ 3: Thấp\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh.*Độ tin cậy nhận diện: 27\/100/,
     });
     expect(overlay).toContainElement(high);
     expect(high).toHaveClass("border-amber-600");
@@ -1407,7 +1377,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     ).toEqual(originalBoxes);
     expect(
-      screen.getByText(/Đã ghi nhận 1 gợi ý được Admin chấp nhận/),
+      screen.getByText(/Đã ghi nhận 1 gợi ý được chấp nhận/),
     ).toBeInTheDocument();
   });
 
@@ -1463,7 +1433,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     expect(
-      (await screen.findAllByText(/Đã xác minh revision/)).length,
+      (await screen.findAllByText(/Đã xác minh bản chữ/)).length,
     ).toBeGreaterThan(0);
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
@@ -1648,7 +1618,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(screen.getByRole("button", { name: /Dừng theo dõi/ }));
 
     expect(
-      await screen.findByText(/Workflow bền vững tiếp tục ở Backend/),
+      await screen.findByText(
+        /Quy trình kiểm tra vẫn tiếp tục xử lý ở hệ thống/,
+      ),
     ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
@@ -1746,7 +1718,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.createDraft).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
+        "Bản nháp từ phiên bản này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
       ),
     ).toBeInTheDocument();
   });
@@ -1822,6 +1794,151 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       /Admin đã xác nhận ảnh an toàn/i,
     );
     expect(verifyButton).not.toBeDisabled();
+  });
+
+  it("shows pre-action OcrServiceStatusBanner when OCR worker is offline and supports Check Now + Cancel on queued banner", async () => {
+    const baseServices = createAdminServiceFixture();
+    const jobId = "91000000-0000-4000-8000-000000000001";
+    const updatedRevision: AdminPageRevisionDetailDTO = {
+      ...adminR2Fixture,
+      page_revision_id: "92000000-0000-4000-8000-000000000002",
+      revision_no: 3,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "Nội dung mới sau OCR.",
+    };
+    let queuedJobComplete = false;
+    const cancelOcrJob = vi.fn(async (id: string) => ({
+      id,
+      job_kind: "ADMIN_PAGE_REPROCESS",
+      status: "CANCELLED" as const,
+    }));
+    const listOcrJobs = vi.fn<() => Promise<readonly AdminOcrJobDTO[]>>(
+      async () => [],
+    );
+    const services: AdminServices = {
+      ...baseServices,
+      pages: {
+        ...baseServices.pages,
+        listOcrJobs,
+        cancelOcrJob,
+      },
+    };
+
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: { mode: "remote_worker", ready: false },
+        });
+      }
+      if (url.pathname === `/books/admin/ocr-jobs/${jobId}`) {
+        return Response.json({
+          id: jobId,
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: queuedJobComplete ? "SUCCEEDED" : "QUEUED",
+          book_id: ADMIN_BOOK_ID,
+          page_id: ADMIN_PAGE_ID,
+          revision_id: queuedJobComplete
+            ? updatedRevision.page_revision_id
+            : null,
+          worker_online: queuedJobComplete,
+        });
+      }
+      return Response.json({}, { status: 404 });
+    });
+    const prevApiUrl = process.env.NEXT_PUBLIC_API_URL;
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000";
+    vi.stubGlobal("fetch", fetchStub);
+
+    try {
+      const user = userEvent.setup();
+      // 1. Pre-action banner visible when no queued job exists yet
+      const firstView = render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      expect(
+        await screen.findByTestId("admin-ocr-worker-offline-banner"),
+      ).toHaveTextContent(/Dịch vụ xử lý OCR hiện đang ngoại tuyến/i);
+      firstView.unmount();
+
+      // 2. When a queued job is active, banner shows Kiểm tra lại ngay & Hủy yêu cầu chờ
+      listOcrJobs.mockResolvedValue([
+        {
+          id: jobId,
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: "QUEUED",
+          book_id: ADMIN_BOOK_ID,
+          page_id: ADMIN_PAGE_ID,
+          worker_online: false,
+        },
+      ]);
+      const secondView = render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      expect(
+        await screen.findByTestId("admin-review-ocr-queued-banner"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("admin-review-check-ocr-now"),
+      ).toHaveTextContent(/Kiểm tra lại ngay/i);
+      expect(
+        screen.getByTestId("admin-review-cancel-ocr-job"),
+      ).toHaveTextContent(/Hủy yêu cầu chờ/i);
+
+      await user.click(screen.getByTestId("admin-review-cancel-ocr-job"));
+      expect(cancelOcrJob).toHaveBeenCalledWith(jobId);
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("admin-review-ocr-queued-banner"),
+        ).not.toBeInTheDocument();
+      });
+      secondView.unmount();
+
+      // 3. Immediate poll ("Kiểm tra lại ngay") picks up SUCCEEDED revision
+      queuedJobComplete = true;
+      baseServices.ocr.getRevision.mockResolvedValue(updatedRevision);
+      baseServices.pages.getImage.mockResolvedValue({
+        page_id: ADMIN_PAGE_ID,
+        page_revision_id: updatedRevision.page_revision_id,
+        page_number: 1,
+        preview_url: "https://example.com/p1-r3.png",
+        width: 600,
+        height: 800,
+      });
+      render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      await user.click(await screen.findByTestId("admin-review-check-ocr-now"));
+      expect(
+        await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+      ).toBeInTheDocument();
+    } finally {
+      if (prevApiUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_API_URL;
+      } else {
+        process.env.NEXT_PUBLIC_API_URL = prevApiUrl;
+      }
+      vi.unstubAllGlobals();
+    }
   });
 });
 

@@ -37,23 +37,32 @@ def deliver(body, timestamp, signature):
     username = os.environ.get("SMTP_USERNAME", "").strip()
     password = os.environ.get("SMTP_APP_PASSWORD", "").replace(" ", "").strip()
     sender = parseaddr(os.environ.get("SMTP_FROM_EMAIL") or username)[1]
-    if not username or not password or not sender:
+    sender_local, sender_sep, sender_domain = sender.partition("@")
+    if (
+        not username
+        or not password
+        or not (sender_local and sender_sep and sender_domain and "." in sender_domain)
+    ):
         return 503, {"code": "SMTP_NOT_CONFIGURED"}
     try:
         message = BytesParser(policy=policy.default).parsebytes(body)
+        from_addrs = getaddresses(message.get_all("From", []))
         recipients = getaddresses(message.get_all("To", []))
+        recipient_addr = recipients[0][1] if len(recipients) == 1 else ""
+        rec_local, rec_sep, rec_domain = recipient_addr.partition("@")
         # One verified parent per delivery. Backend owns verification, limits and dedupe.
         if (
             len(message.get_all("From", [])) != 1
             or len(message.get_all("To", [])) != 1
-            or parseaddr(str(message["From"]))[1].lower() != sender.lower()
+            or len(from_addrs) != 1
+            or from_addrs[0][1].lower() != sender.lower()
             or len(recipients) != 1
-            or "@" not in recipients[0][1]
+            or not (rec_local and rec_sep and rec_domain and "." in rec_domain)
             or message.get_all("Cc") or message.get_all("Bcc")
             or any(name.lower().startswith("resent-") for name in message.keys())
         ):
             return 422, {"code": "MESSAGE_ENVELOPE_INVALID"}
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, LookupError, IndexError):
         return 422, {"code": "MESSAGE_INVALID"}
     # Gmail's TLS submission endpoint is fixed: callers cannot supply an SMTP host.
     try:

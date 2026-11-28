@@ -745,6 +745,7 @@ class TestOcrWorkerFixes(unittest.TestCase):
         import app.services as app_services_pkg
 
         with (
+            patch.dict(os.environ, {}, clear=False),
             patch("ocr_worker.service.import_ml_modules_safe_order", return_value=(fake_torch, fake_paddle)),
             patch("ocr_worker.service.install_zero_db_config_shim"),
             patch.dict(sys.modules, {"app.services.ocr_engine": fake_ocr_engine}),

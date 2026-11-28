@@ -268,7 +268,13 @@ def get_picture_ai_config() -> PictureDescriptionAiConfig:
 
     extra_models = _extra_models_env(primary, fallback)
     ollama_url, url_valid = _resolve_ollama_url()
-    ollama_enabled = _bool_env("PICTURE_DESC_OLLAMA_ENABLED", True) and url_valid
+    if _secret("PICTURE_DESC_OLLAMA_ENABLED") is None:
+        from app.services.ocr_ai.config import OcrCorrectionConfig
+
+        default_ollama_enabled = OcrCorrectionConfig.local_ollama_enabled()
+    else:
+        default_ollama_enabled = True
+    ollama_enabled = _bool_env("PICTURE_DESC_OLLAMA_ENABLED", default_ollama_enabled) and url_valid
     base_num_predict = _int_env(
         ("PICTURE_DESC_OLLAMA_NUM_PREDICT", "LOCAL_OCR_NUM_PREDICT"),
         DEFAULT_OLLAMA_NUM_PREDICT,

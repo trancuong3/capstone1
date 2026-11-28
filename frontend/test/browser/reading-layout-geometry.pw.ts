@@ -120,6 +120,42 @@ async function installLongReadingSession(
     withReferenceImage?: boolean;
     initialState?: "reading" | "microphone-denied" | "reconnecting";
     voiceStatusUnavailable?: boolean;
+    disableMediaRecorder?: boolean;
+    disableAutoMicPulse?: boolean;
+    illustrationUrl?: string | null;
+    illustrationTextFree?: boolean;
+    initialPageIndex?: number;
+    pagesOverride?: Array<{
+      page_id: string;
+      page_revision_id: string;
+      page_number: number;
+      words: WordSpec[];
+      text: string;
+      illustration_url?: string | null;
+      illustration_text_free?: boolean;
+    }>;
+    practiceState?: {
+      pages: Array<{
+        page_id: string;
+        page_revision_id: string;
+        page_number: number;
+        transcript: string;
+        initial_assessment: Array<{
+          word_id: string;
+          word_index: number;
+          text: string;
+          status: "CORRECT" | "MISPRONUNCIATION" | "OMISSION" | "UNCERTAIN";
+        }>;
+      }>;
+      words?: Array<{
+        page_id: string;
+        page_revision_id: string;
+        word_id: string;
+        retry_attempt_count: number;
+        incorrect_retry_count: number;
+        resolution_status: "RETRYING" | "SELF_CORRECTED" | "UNRESOLVED";
+      }>;
+    };
   } = {},
 ) {
   await page.goto("about:blank");
@@ -141,36 +177,47 @@ async function installLongReadingSession(
     }),
   );
 
-  const pages = [
-    {
-      page_id: PAGE_1_ID,
-      page_revision_id: PAGE_1_REV,
-      page_number: 1,
-      confidence: 0.98,
-      width: 600,
-      height: 800,
-      image_overlay_safe: false,
-      image_url: options.withReferenceImage
-        ? "http://127.0.0.1:8000/fixture-page.png"
-        : null,
-      text: built.text,
-      words: built.words,
-    },
-    {
-      page_id: PAGE_2_ID,
-      page_revision_id: PAGE_2_REV,
-      page_number: 2,
-      confidence: 0.98,
-      width: 600,
-      height: 800,
-      image_overlay_safe: false,
-      image_url: null,
-      text: "Sang trang hai rồi.",
-      words: page2Words,
-    },
-  ];
+  const pages = options.pagesOverride
+    ? options.pagesOverride.map((p) => ({
+        ...p,
+        confidence: 0.98,
+        width: 600,
+        height: 800,
+        image_overlay_safe: false,
+        image_url: null as string | null,
+      }))
+    : [
+        {
+          page_id: PAGE_1_ID,
+          page_revision_id: PAGE_1_REV,
+          page_number: 1,
+          confidence: 0.98,
+          width: 600,
+          height: 800,
+          image_overlay_safe: false,
+          image_url: options.withReferenceImage
+            ? "http://127.0.0.1:8000/fixture-page.png"
+            : null,
+          illustration_url: options.illustrationUrl ?? null,
+          illustration_text_free: options.illustrationTextFree ?? false,
+          text: built.text,
+          words: built.words,
+        },
+        {
+          page_id: PAGE_2_ID,
+          page_revision_id: PAGE_2_REV,
+          page_number: 2,
+          confidence: 0.98,
+          width: 600,
+          height: 800,
+          image_overlay_safe: false,
+          image_url: null,
+          text: "Sang trang hai rồi.",
+          words: page2Words,
+        },
+      ];
 
-  let currentIndex = 0;
+  let currentIndex = options.initialPageIndex ?? 0;
   const now = "2026-11-24T10:00:00Z";
   const base = `/reading/sessions/${ids.session}`;
   const corsHeaders = {
@@ -189,14 +236,14 @@ async function installLongReadingSession(
   const progress = () => ({
     session_id: ids.session,
     persisted: true,
-    start_page_id: PAGE_1_ID,
-    end_page_id: PAGE_2_ID,
+    start_page_id: pages[0].page_id,
+    end_page_id: pages[pages.length - 1].page_id,
     current_page_id: pages[currentIndex].page_id,
-    start_page_number: 1,
-    end_page_number: 2,
+    start_page_number: pages[0].page_number,
+    end_page_number: pages[pages.length - 1].page_number,
     current_page_number: pages[currentIndex].page_number,
     current_index: currentIndex,
-    total_pages: 2,
+    total_pages: pages.length,
     completed_pages: 0,
     pages: pages.map((p, index) => ({
       page_id: p.page_id,
@@ -265,12 +312,79 @@ async function installLongReadingSession(
       if (idx >= 0) currentIndex = idx;
       return json(route, progress());
     }
+    if (path.startsWith(base + "/pages/") && path.endsWith("/complete")) {
+      return json(route, progress());
+    }
+    if (path === base + "/compare") {
+      return json(route, {
+        session_id: ids.session,
+        page_id: pages[currentIndex].page_id,
+        page_revision_id: pages[currentIndex].page_revision_id,
+        distance: 0,
+        alignment: [],
+        summary: {
+          missing_words: [],
+          extra_words: [],
+          substitutions: [],
+          repeated_count: 0,
+          repeated_words: [],
+          hesitations: [],
+          hesitation_seconds: null,
+        },
+      });
+    }
+    if (path === "/reading/events") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      return json(route, {
+        Id: "99999999-0000-4000-8000-000000000001",
+        SessionId: body.SessionId ?? ids.session,
+        PageId: body.PageId ?? pages[currentIndex].page_id,
+        PageRevisionId:
+          body.PageRevisionId ?? pages[currentIndex].page_revision_id,
+        WordId: body.WordId ?? null,
+        Type: body.Type ?? "WORD_RETRY",
+        StartMs: body.StartMs ?? 0,
+        EndMs: body.EndMs ?? null,
+        Confidence: null,
+        Status: body.Status ?? "CONFIRMED",
+        Metadata: body.Metadata ?? {},
+        CreatedAt: now,
+      });
+    }
+    if (path === base + "/finish") {
+      return json(route, {
+        id: ids.session,
+        child_id: ids.child,
+        book_id: ids.book,
+        state: "FINISHED",
+        started_at: now,
+        ended_at: now,
+        duration_ms: 45_000,
+      });
+    }
     if (path === base + "/practice-state") {
+      const pagesData = options.practiceState?.pages ?? [];
+      const derivedWords =
+        options.practiceState?.words ??
+        pagesData.flatMap((p) =>
+          p.initial_assessment
+            .filter(
+              (w) => w.status === "MISPRONUNCIATION" || w.status === "OMISSION",
+            )
+            .map((w) => ({
+              page_id: p.page_id,
+              page_revision_id: p.page_revision_id,
+              word_id: w.word_id,
+              retry_attempt_count: 0,
+              incorrect_retry_count: 0,
+              resolution_status: "RETRYING" as const,
+            })),
+        );
       return json(route, {
         session_id: ids.session,
         legacy_evidence_present: false,
-        pages: [],
-        words: [],
+        pages: pagesData,
+        words: derivedWords,
       });
     }
     if (path === base + "/completion-summary") {
@@ -278,7 +392,7 @@ async function installLongReadingSession(
         assessment: null,
         duration_minutes: 1,
         pages_explored: 1,
-        selected_range_pages: 2,
+        selected_range_pages: pages.length,
         practiced_words: 10,
         score: 100,
         correct_words: [],
@@ -293,6 +407,15 @@ async function installLongReadingSession(
     }
     return json(route, {}, 404);
   });
+
+  if (options.disableMediaRecorder) {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: undefined,
+      });
+    });
+  }
 
   const voice503Counts = { stt: 0, tts: 0 };
 
@@ -365,162 +488,167 @@ async function installLongReadingSession(
     return json(route, { detail: { code: "LOCAL_STT_UNAVAILABLE" } }, 503);
   });
 
-  await page.addInitScript(() => {
-    type RecInstance = {
-      onresult: ((event: unknown) => void) | null;
-      onend: (() => void) | null;
-      onerror: ((event: unknown) => void) | null;
-      results: Array<{
-        isFinal: boolean;
-        length: number;
-        0: { transcript: string; confidence: number };
-      }>;
-      say: (transcript: string, confidence?: number) => void;
-    };
-    const instances: RecInstance[] = [];
+  await page.addInitScript(
+    ({ disableAutoMicPulse }: { disableAutoMicPulse: boolean }) => {
+      type RecInstance = {
+        onresult: ((event: unknown) => void) | null;
+        onend: (() => void) | null;
+        onerror: ((event: unknown) => void) | null;
+        results: Array<{
+          isFinal: boolean;
+          length: number;
+          0: { transcript: string; confidence: number };
+        }>;
+        say: (transcript: string, confidence?: number) => void;
+      };
+      const instances: RecInstance[] = [];
 
-    class FakeSpeechRecognition {
-      continuous = true;
-      interimResults = true;
-      lang = "vi-VN";
-      maxAlternatives = 1;
-      onresult: ((event: unknown) => void) | null = null;
-      onend: (() => void) | null = null;
-      onerror: ((event: unknown) => void) | null = null;
-      results: Array<{
-        isFinal: boolean;
-        length: number;
-        0: { transcript: string; confidence: number };
-      }> = [];
-      constructor() {
-        instances.push(this);
-      }
-      start() {}
-      abort() {
-        this.onend?.();
-      }
-      stop() {
-        this.onend?.();
-      }
-      say(transcript: string, confidence = 0.95) {
-        this.results.push({
-          isFinal: true,
-          length: 1,
-          0: { transcript, confidence },
-        });
-        this.onresult?.({
-          resultIndex: this.results.length - 1,
-          results: [...this.results],
-        });
-      }
-    }
-
-    Object.defineProperty(window, "SpeechRecognition", {
-      configurable: true,
-      value: FakeSpeechRecognition,
-    });
-    Object.defineProperty(window, "webkitSpeechRecognition", {
-      configurable: true,
-      value: FakeSpeechRecognition,
-    });
-
-    class FakeSpeechSynthesisUtterance {
-      onstart: (() => void) | null = null;
-      onend: (() => void) | null = null;
-
-      constructor(readonly text: string) {}
-    }
-    Object.defineProperty(window, "SpeechSynthesisUtterance", {
-      configurable: true,
-      value: FakeSpeechSynthesisUtterance,
-    });
-    const spokenSamples: string[] = [];
-    const voice = {
-      lang: "vi-VN",
-      name: "Fixture Vietnamese",
-      localService: false,
-      default: true,
-      voiceURI: "fixture-vi",
-    } satisfies SpeechSynthesisVoice;
-    Object.defineProperty(window, "speechSynthesis", {
-      configurable: true,
-      value: {
-        getVoices: () => [voice],
-        speak: (utterance: FakeSpeechSynthesisUtterance) => {
-          spokenSamples.push(utterance.text);
-          queueMicrotask(() => {
-            utterance.onstart?.();
-            utterance.onend?.();
-          });
-        },
-        cancel: () => {},
-        pause: () => {},
-        resume: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      },
-    });
-
-    let activeGainNode: GainNode | null = null;
-    let speechPulseTimer: ReturnType<typeof setTimeout> | null = null;
-    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
-      configurable: true,
-      value: async () => {
-        const ctx = new AudioContext();
-        await ctx.resume();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        activeGainNode = gain;
-        const dest = ctx.createMediaStreamDestination();
-        osc.frequency.value = 220;
-        gain.gain.value = 0.0005;
-        setTimeout(() => {
-          if (activeGainNode === gain) {
-            gain.gain.value = 0.12;
-            setTimeout(() => {
-              if (activeGainNode === gain) gain.gain.value = 0.0005;
-            }, 260);
-          }
-        }, 210);
-        osc.connect(gain);
-        gain.connect(dest);
-        osc.start();
-        const stream = dest.stream;
-        for (const track of stream.getTracks()) {
-          const stop = track.stop.bind(track);
-          track.stop = () => {
-            try {
-              osc.stop();
-              void ctx.close();
-            } catch {
-              // ignore
-            }
-            stop();
-          };
+      class FakeSpeechRecognition {
+        continuous = true;
+        interimResults = true;
+        lang = "vi-VN";
+        maxAlternatives = 1;
+        onresult: ((event: unknown) => void) | null = null;
+        onend: (() => void) | null = null;
+        onerror: ((event: unknown) => void) | null = null;
+        results: Array<{
+          isFinal: boolean;
+          length: number;
+          0: { transcript: string; confidence: number };
+        }> = [];
+        constructor() {
+          instances.push(this);
         }
-        return stream;
-      },
-    });
+        start() {}
+        abort() {
+          this.onend?.();
+        }
+        stop() {
+          this.onend?.();
+        }
+        say(transcript: string, confidence = 0.95) {
+          this.results.push({
+            isFinal: true,
+            length: 1,
+            0: { transcript, confidence },
+          });
+          this.onresult?.({
+            resultIndex: this.results.length - 1,
+            results: [...this.results],
+          });
+        }
+      }
 
-    Object.assign(window, {
-      __geomSpeech: {
-        spoken: () => [...spokenSamples],
-        count: () => instances.length,
-        say: (transcript: string, confidence = 0.95) => {
-          const active = instances[instances.length - 1];
-          if (!active) throw new Error("No active SpeechRecognition");
-          if (activeGainNode) {
-            activeGainNode.gain.value = 0.12;
-            if (speechPulseTimer) clearTimeout(speechPulseTimer);
-            speechPulseTimer = setTimeout(() => {
-              if (activeGainNode) activeGainNode.gain.value = 0.0005;
-            }, 220);
-          }
-          active.say(transcript, confidence);
+      Object.defineProperty(window, "SpeechRecognition", {
+        configurable: true,
+        value: FakeSpeechRecognition,
+      });
+      Object.defineProperty(window, "webkitSpeechRecognition", {
+        configurable: true,
+        value: FakeSpeechRecognition,
+      });
+
+      class FakeSpeechSynthesisUtterance {
+        onstart: (() => void) | null = null;
+        onend: (() => void) | null = null;
+
+        constructor(readonly text: string) {}
+      }
+      Object.defineProperty(window, "SpeechSynthesisUtterance", {
+        configurable: true,
+        value: FakeSpeechSynthesisUtterance,
+      });
+      const spokenSamples: string[] = [];
+      const voice = {
+        lang: "vi-VN",
+        name: "Fixture Vietnamese",
+        localService: false,
+        default: true,
+        voiceURI: "fixture-vi",
+      } satisfies SpeechSynthesisVoice;
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: {
+          getVoices: () => [voice],
+          speak: (utterance: FakeSpeechSynthesisUtterance) => {
+            spokenSamples.push(utterance.text);
+            queueMicrotask(() => {
+              utterance.onstart?.();
+              utterance.onend?.();
+            });
+          },
+          cancel: () => {},
+          pause: () => {},
+          resume: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
         },
-      },
-    });
-  });
+      });
+
+      let activeGainNode: GainNode | null = null;
+      let speechPulseTimer: ReturnType<typeof setTimeout> | null = null;
+      Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+        configurable: true,
+        value: async () => {
+          const ctx = new AudioContext();
+          await ctx.resume();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          activeGainNode = gain;
+          const dest = ctx.createMediaStreamDestination();
+          osc.frequency.value = 220;
+          gain.gain.value = 0.0005;
+          if (!disableAutoMicPulse) {
+            setTimeout(() => {
+              if (activeGainNode === gain) {
+                gain.gain.value = 0.12;
+                setTimeout(() => {
+                  if (activeGainNode === gain) gain.gain.value = 0.0005;
+                }, 260);
+              }
+            }, 210);
+          }
+          osc.connect(gain);
+          gain.connect(dest);
+          osc.start();
+          const stream = dest.stream;
+          for (const track of stream.getTracks()) {
+            const stop = track.stop.bind(track);
+            track.stop = () => {
+              try {
+                osc.stop();
+                void ctx.close();
+              } catch {
+                // ignore
+              }
+              stop();
+            };
+          }
+          return stream;
+        },
+      });
+
+      Object.assign(window, {
+        __geomSpeech: {
+          spoken: () => [...spokenSamples],
+          count: () => instances.length,
+          say: (transcript: string, confidence = 0.95) => {
+            const active = instances[instances.length - 1];
+            if (!active) throw new Error("No active SpeechRecognition");
+            if (activeGainNode) {
+              activeGainNode.gain.value = 0.12;
+              if (speechPulseTimer) clearTimeout(speechPulseTimer);
+              speechPulseTimer = setTimeout(() => {
+                if (activeGainNode) activeGainNode.gain.value = 0.0005;
+              }, 220);
+            }
+            active.say(transcript, confidence);
+          },
+        },
+      });
+    },
+    { disableAutoMicPulse: Boolean(options.disableAutoMicPulse) },
+  );
 
   voice503Counts.tts = 0;
   voice503Counts.stt = 0;
@@ -938,43 +1066,50 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
   }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
 
-    // 1. Healthy local worker on fresh browser -> stays 100% Local Offline!
-    await installLongReadingSession(page, {
-      mode: "prose",
-      lineCount: 10,
-      voiceStatusUnavailable: false,
-    });
-    const badgeHealthy = page.getByTestId("voice-engine-status-badge");
-    const sttHealthy = page.getByTestId("voice-engine-stt-chip");
-    const ttsHealthy = page.getByTestId("voice-engine-tts-chip");
-    await expect(badgeHealthy).toHaveAttribute(
-      "data-stt-tier",
-      "local_offline",
+    // 1. Healthy local worker on fresh browser -> stays Local-Only and renders Voice settings cleanly
+    const { voice503Counts: healthyCounts } = await installLongReadingSession(
+      page,
+      {
+        mode: "prose",
+        lineCount: 10,
+        voiceStatusUnavailable: false,
+      },
     );
-    await expect(badgeHealthy).toHaveAttribute(
-      "data-tts-tier",
-      "local_offline",
+    await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+    const healthyDialog = page.getByRole("dialog", { name: "Giọng đọc mẫu" });
+    await expect(healthyDialog).toBeVisible();
+    await expect(
+      healthyDialog.getByText("Giọng mẫu tiếng Việt", { exact: true }),
+    ).toBeVisible();
+    const healthyPolicy = await page.evaluate(() =>
+      window.localStorage.getItem("viread.voice-policy.v2"),
     );
-    await expect(sttHealthy).toContainText("Offline");
-    await expect(ttsHealthy).toContainText("Offline");
+    expect(healthyPolicy ?? "local_only").not.toContain(
+      "local_with_google_fallback",
+    );
+    expect(healthyCounts.tts).toBe(0);
+    expect(healthyCounts.stt).toBe(0);
+    await page.keyboard.press("Escape");
+    await expect(healthyDialog).not.toBeVisible();
 
-    // An unavailable worker cannot opt the family into an online provider.
+    // 2. An unavailable worker cannot opt the family into an online provider.
     const { voice503Counts } = await installLongReadingSession(page, {
       mode: "prose",
       lineCount: 10,
       voiceStatusUnavailable: true,
     });
-    const badge = page.getByTestId("voice-engine-status-badge");
-    await expect(badge).toHaveAttribute("data-stt-tier", "idle");
-    await expect(badge).toHaveAttribute("data-tts-tier", "idle");
     await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Giọng đọc mẫu" });
+    await expect(dialog).toBeVisible();
     await expect(
-      dialog.getByRole("button", { name: /Chỉ máy này/ }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      dialog.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
-    ).toHaveAttribute("aria-pressed", "false");
+      dialog.getByText("Giọng mẫu tiếng Việt", { exact: true }),
+    ).toBeVisible();
+    const outagePolicy = await page.evaluate(() =>
+      window.localStorage.getItem("viread.voice-policy.v2"),
+    );
+    expect(outagePolicy ?? "local_only").not.toContain(
+      "local_with_google_fallback",
+    );
     expect(
       await page.evaluate(() =>
         (
@@ -986,5 +1121,325 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
     // /voice/text-to-speech or triggering STT / online fallback.
     expect(voice503Counts.tts).toBe(0);
     expect(voice503Counts.stt).toBe(0);
+  });
+
+  for (const vp of [
+    { name: "desktop-1280x800", width: 1280, height: 800 },
+    { name: "mobile-360x640", width: 360, height: 640 },
+  ]) {
+    test(`AUTO-RETRY-01: 105-line page retry words at lines 5, 50, 95 stay in visibility band & unobstructed at ${vp.name}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      const built = buildLongProsePage(105);
+      const targetWords = [
+        built.words[4 * 8], // line 5
+        built.words[49 * 8], // line 50
+        built.words[94 * 8], // line 95
+      ];
+      await installLongReadingSession(page, {
+        mode: "prose",
+        lineCount: 105,
+        disableAutoMicPulse: true,
+        practiceState: {
+          pages: [
+            {
+              page_id: PAGE_1_ID,
+              page_revision_id: PAGE_1_REV,
+              page_number: 1,
+              transcript: built.text,
+              initial_assessment: targetWords.map((w) => ({
+                word_id: w.word_id,
+                word_index: w.word_index,
+                text: w.text,
+                status: "MISPRONUNCIATION" as const,
+              })),
+            },
+          ],
+        },
+      });
+
+      await page.getByRole("button", { name: "Đồng ý, đọc lại" }).click();
+
+      const container = page.locator('[data-reading-scroll-container="true"]');
+      for (let i = 0; i < targetWords.length; i += 1) {
+        const w = targetWords[i];
+        await expect(
+          page.getByText(`Bé đọc lại từ · ${i + 1}/3`),
+        ).toBeVisible();
+        await expect(
+          page.locator(`[data-word-id="${w.word_id}"]`),
+        ).toHaveAttribute("aria-current", "true");
+        await expect(container).toHaveAttribute("data-auto-follow", "active");
+
+        // Wait for smooth auto-scroll to place active word comfortably inside .reader-leaf, unobstructed
+        await expect
+          .poll(
+            async () =>
+              page.evaluate((wordId) => {
+                const c = document.querySelector(
+                  '[data-reading-scroll-container="true"]',
+                );
+                const el = document.querySelector(`[data-word-id="${wordId}"]`);
+                const header = document.querySelector("header");
+                const dock = document.querySelector(
+                  '[data-reading-dock="true"]',
+                );
+                if (!c || !el || !dock) return null;
+                const cRect = c.getBoundingClientRect();
+                const eRect = el.getBoundingClientRect();
+                const dRect = dock.getBoundingClientRect();
+                const hBottom = header
+                  ? header.getBoundingClientRect().bottom
+                  : 0;
+                const relTop = eRect.top - cRect.top;
+                const relBottom = eRect.bottom - cRect.top;
+                const centerY = (relTop + relBottom) / 2;
+                return {
+                  inBand:
+                    eRect.top >= cRect.top - 1 &&
+                    eRect.bottom <= cRect.bottom + 1 &&
+                    centerY >= cRect.height * 0.06 &&
+                    centerY <= cRect.height * 0.82,
+                  unobstructedHeader: eRect.top >= hBottom - 1,
+                  unobstructedDock: eRect.bottom <= dRect.top + 1,
+                  windowScrollY: window.scrollY,
+                  overflow:
+                    document.documentElement.scrollWidth - window.innerWidth,
+                };
+              }, w.word_id),
+            { timeout: 6000 },
+          )
+          .toEqual({
+            inBand: true,
+            unobstructedHeader: true,
+            unobstructedDock: true,
+            windowScrollY: 0,
+            overflow: expect.any(Number),
+          });
+
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - window.innerWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(2);
+
+        // Wait until retry mic opens, then confirm word
+        await expect(
+          page.getByText("Đang nghe bé", { exact: true }),
+        ).toBeVisible({ timeout: 10_000 });
+        await expect
+          .poll(() =>
+            page.evaluate(() =>
+              (
+                window as unknown as { __geomSpeech: { count: () => number } }
+              ).__geomSpeech.count(),
+            ),
+          )
+          .toBeGreaterThanOrEqual(i + 1);
+        await page.waitForTimeout(1700);
+        await page.evaluate((text) => {
+          (
+            window as unknown as {
+              __geomSpeech: { say: (t: string) => void };
+            }
+          ).__geomSpeech.say(text);
+        }, w.text);
+      }
+    });
+  }
+
+  test("AUTO-RETRY-02: detached bottom state resets to active auto-follow and scrolls to wrong word #1 when retryMode starts", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installLongReadingSession(page, {
+      mode: "prose",
+      lineCount: 120,
+      disableAutoMicPulse: true,
+    });
+    const container = page.locator('[data-reading-scroll-container="true"]');
+    await container.hover();
+    await page.mouse.wheel(0, 3500);
+    await container.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      el.dispatchEvent(new Event("scroll"));
+    });
+    await expect(container).toHaveAttribute("data-auto-follow", "paused");
+    await expect(page.getByTestId("resume-auto-follow-btn")).toBeVisible();
+
+    // Now start mic, read only word 0 and skip word 1 ("sớm") by reading "bé Lan" -> then finish session!
+    await page
+      .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __geomSpeech: { count: () => number } }
+          ).__geomSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(1);
+    await page.evaluate(() => {
+      (
+        window as unknown as { __geomSpeech: { say: (t: string) => void } }
+      ).__geomSpeech.say("Sáng bé Lan");
+    });
+
+    // Auto-follow stayed paused while reading because user had manually scrolled to bottom!
+    await expect(container).toHaveAttribute("data-auto-follow", "paused");
+
+    // End reading -> opens retryPrompt -> accept WITHOUT clicking "Về từ đang đọc"
+    await page.getByRole("button", { name: "Kết thúc buổi đọc" }).click();
+    await page.getByRole("button", { name: "Lưu và dừng" }).click();
+    await page.getByRole("button", { name: "Đồng ý, đọc lại" }).click();
+
+    // Dock expanded into retryMode: auto-follow MUST reset to "active", resume button gone, scrolled to wrong word #1!
+    await expect(container).toHaveAttribute("data-auto-follow", "active");
+    await expect(page.getByTestId("resume-auto-follow-btn")).toHaveCount(0);
+    await expect
+      .poll(() => container.evaluate((el) => el.scrollTop), { timeout: 6000 })
+      .toBeLessThan(600);
+  });
+
+  test("AUTO-RETRY-03: cross-page retry (page 2 -> page 1 bottom -> page 2 bottom), mobile tap, Phonics & ILLUSTRATED load keep auto-follow active", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 640 });
+    const p1Built = buildLongProsePage(45);
+    const p2Built = buildLongProsePage(45);
+    p2Built.words.forEach((w, idx) => {
+      w.word_id = `92000000-0000-4000-8000-${String(idx + 1).padStart(12, "0")}`;
+    });
+    const p1BottomWord = p1Built.words[40 * 8];
+    const p2BottomWord = p2Built.words[40 * 8];
+
+    await installLongReadingSession(page, {
+      mode: "prose",
+      disableAutoMicPulse: true,
+      initialPageIndex: 1, // Start on page 2!
+      illustrationUrl: "http://127.0.0.1:8000/fixture-page.png",
+      illustrationTextFree: true,
+      pagesOverride: [
+        {
+          page_id: PAGE_1_ID,
+          page_revision_id: PAGE_1_REV,
+          page_number: 1,
+          text: p1Built.text,
+          words: p1Built.words,
+          illustration_url: "http://127.0.0.1:8000/fixture-page.png",
+          illustration_text_free: true,
+        },
+        {
+          page_id: PAGE_2_ID,
+          page_revision_id: PAGE_2_REV,
+          page_number: 2,
+          text: p2Built.text,
+          words: p2Built.words,
+        },
+      ],
+      practiceState: {
+        pages: [
+          {
+            page_id: PAGE_1_ID,
+            page_revision_id: PAGE_1_REV,
+            page_number: 1,
+            transcript: p1Built.text,
+            initial_assessment: [
+              {
+                word_id: p1BottomWord.word_id,
+                word_index: p1BottomWord.word_index,
+                text: p1BottomWord.text,
+                status: "MISPRONUNCIATION",
+              },
+            ],
+          },
+          {
+            page_id: PAGE_2_ID,
+            page_revision_id: PAGE_2_REV,
+            page_number: 2,
+            transcript: p2Built.text,
+            initial_assessment: [
+              {
+                word_id: p2BottomWord.word_id,
+                word_index: p2BottomWord.word_index,
+                text: p2BottomWord.text,
+                status: "MISPRONUNCIATION",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    await page.getByRole("button", { name: "Đồng ý, đọc lại" }).click();
+
+    // Word 1 is on Page 1 bottom -> navigates from page 2 to page 1 and scrolls down to line 41
+    await expect(page.getByLabel("Trang sách 1")).toBeVisible({
+      timeout: 10_000,
+    });
+    const container = page.locator('[data-reading-scroll-container="true"]');
+    await expect(container).toHaveAttribute("data-auto-follow", "active");
+    await expect
+      .poll(() => container.evaluate((el) => el.scrollTop), { timeout: 6000 })
+      .toBeGreaterThan(200);
+
+    // Mobile tap (touchstart + touchend without >8px drag) keeps auto-follow active
+    await container.evaluate((el) => {
+      const t = new Touch({
+        identifier: 1,
+        target: el,
+        clientX: 100,
+        clientY: 200,
+      });
+      el.dispatchEvent(
+        new TouchEvent("touchstart", { touches: [t], bubbles: true }),
+      );
+      el.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+    });
+    await expect(container).toHaveAttribute("data-auto-follow", "active");
+
+    // Open PhonicsLessonCard -> container shrinks via ResizeObserver, active word stays visible & auto-follow stays active
+    await expect(
+      page.getByRole("button", { name: "Nghe đánh vần" }),
+    ).toBeEnabled({ timeout: 10_000 });
+    const countBeforePhonics = await page.evaluate(() =>
+      (
+        window as unknown as { __geomSpeech: { count: () => number } }
+      ).__geomSpeech.count(),
+    );
+    await page.getByRole("button", { name: "Nghe đánh vần" }).click();
+    await expect(page.getByTestId("phonics-lesson-card")).toBeVisible();
+    await expect(container).toHaveAttribute("data-auto-follow", "active");
+
+    // Confirm word #1 on page 1 -> cross-page transition to page 2 bottom word #2!
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (
+              window as unknown as { __geomSpeech: { count: () => number } }
+            ).__geomSpeech.count(),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(countBeforePhonics);
+    await page.waitForTimeout(1700);
+    await page.evaluate((text) => {
+      (
+        window as unknown as { __geomSpeech: { say: (t: string) => void } }
+      ).__geomSpeech.say(text);
+    }, p1BottomWord.text);
+
+    await expect(page.getByLabel("Trang sách 2")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(container).toHaveAttribute("data-auto-follow", "active");
+    await expect(
+      page.locator(`[data-word-id="${p2BottomWord.word_id}"]`),
+    ).toHaveAttribute("aria-current", "true");
+    await expect
+      .poll(() => container.evaluate((el) => el.scrollTop), { timeout: 6000 })
+      .toBeGreaterThan(200);
   });
 });

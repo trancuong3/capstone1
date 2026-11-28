@@ -32,6 +32,7 @@ from app.services.difficult_words_service import (
     normalize_vietnamese_practice_word,
 )
 from app.services.reading_assessment import aggregate_assessment
+from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 
 BOOK_1 = UUID("33333333-3333-4333-8333-333333333331")
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -1124,6 +1125,70 @@ class ReadingComparisonSelfCorrectedTests(unittest.IsolatedAsyncioTestCase):
         display_by_norm = {item.normalized_word: item.display_text for item in history.items}
         self.assertEqual(display_by_norm["đường"], "Đường")
         self.assertEqual(display_by_norm["mèo"], "Mèo")
+
+    def test_phonics_spelling_hyphenated_words_and_10_mapping(self):
+        # 6-token Grade-1 phonics spelling is CORRECT (not UNCERTAIN)
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca sắc cá"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("tê", "ê tờ ê tê"), "CORRECT")
+        # In-progress phonics spelling is UNCERTAIN (not INCORRECT)
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca"), "UNCERTAIN")
+        # Wrong final tone in phonics spelling remains INCORRECT
+        self.assertEqual(classify_practice_transcript("cá", "cờ a ca huyền cà"), "INCORRECT")
+
+        # Hyphenated words ("ô-tô", "ba-lô")
+        self.assertEqual(classify_practice_transcript("ô-tô", "ô tô"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("ba-lô", "ba lô"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("ô-tô", "ô tồ"), "INCORRECT")
+
+        # "10" -> "mười" and digits inside phrases; "01" stays strict
+        self.assertEqual(classify_practice_transcript("mười", "10"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("mười", "10 điểm"), "CORRECT")
+        self.assertEqual(classify_practice_transcript("một", "01"), "INCORRECT")
+
+        # Strict 6-tone & đ/d discrimination preserved
+        self.assertEqual(classify_practice_transcript("có", "cò"), "INCORRECT")
+        self.assertEqual(classify_practice_transcript("một", "mốt"), "INCORRECT")
+        self.assertEqual(classify_practice_transcript("đứa", "dứa"), "INCORRECT")
+
+    async def test_single_source_audio_without_browser_transcript_evaluates_cleanly_via_orchestrator(self):
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+        from app.providers.local_voice_provider import LocalTranscription, LocalVoiceProvider
+
+        repo = InMemoryPracticeRepo()
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                # Pass 1 empty/unclear -> triggers Pass 2 because SPEECH_DETECTED
+                LocalTranscription(text="", language_code="vi", language_probability=None, words=None),
+                # Pass 2 with contrastive keyterms succeeds cleanly with valid Zipformer logprob
+                LocalTranscription(
+                    text="có",
+                    language_code="vi",
+                    language_probability=None,
+                    words=[{"text": "có", "start": 0.1, "end": 0.35, "logprob": -0.62}],
+                ),
+            ]
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="test-key")
+        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+        service = DifficultWordsService(repo, make_access(), voice_provider=orch)
+
+        res = await service.evaluate_word_direct(
+            CHILD_A,
+            ACTOR,
+            request_id=uuid4(),
+            normalized_word="có",
+            display_text="có",
+            audio_bytes=b"RIFF-fake-wav",
+            filename="co.wav",
+            content_type="audio/wav",
+            audio_quality_status="SPEECH_DETECTED",
+            browser_transcript="",
+            policy=VoicePolicyContext(provider_mode="local_only", allow_google_stt=False),
+        )
+        self.assertEqual(res.assessment_status, "CORRECT")
+        self.assertEqual(res.recognition_source, "SERVER_STT_KEYTERM")
+        self.assertEqual(local.transcribe.await_count, 2)
 
 
 if __name__ == "__main__":

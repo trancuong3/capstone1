@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChildrenListScreen } from "@/components/children/children-list-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
@@ -99,5 +100,39 @@ describe("ChildrenListScreen with real API responses", () => {
     expect(
       await screen.findByRole("heading", { name: "Chưa có hồ sơ bé" }),
     ).toBeInTheDocument();
+  });
+
+  it("paginates 10 child profiles at 6 per page and preserves profile links", async () => {
+    const manyChildren = Array.from({ length: 10 }, (_, index) => ({
+      ...childFixture,
+      id: `11000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      alias: `Bé thứ ${index + 1}`,
+      grade: (index % 5) + 1,
+    }));
+    apiFetchFixture.mockResolvedValueOnce(Response.json(manyChildren));
+
+    const user = userEvent.setup();
+    renderChildren();
+
+    expect(await screen.findByText("Bé thứ 1")).toBeInTheDocument();
+    expect(screen.getByText("Bé thứ 6")).toBeInTheDocument();
+    expect(screen.queryByText("Bé thứ 7")).not.toBeInTheDocument();
+
+    const pagination = screen.getByRole("navigation", { name: /Hồ sơ bé/i });
+    expect(pagination).toHaveTextContent("Trang 1 / 2");
+    expect(pagination).toHaveTextContent("1–6 / 10");
+
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByText("Bé thứ 7")).toBeInTheDocument();
+    expect(screen.getByText("Bé thứ 10")).toBeInTheDocument();
+    expect(screen.queryByText("Bé thứ 1")).not.toBeInTheDocument();
+    expect(pagination).toHaveTextContent("Trang 2 / 2");
+    expect(
+      screen.getByRole("link", { name: "Bé thứ 10, lớp 5" }),
+    ).toHaveAttribute("href", `/children/${manyChildren[9]!.id}`);
+
+    await user.click(within(pagination).getByRole("button", { name: /Trước/ }));
+    expect(screen.getByText("Bé thứ 1")).toBeInTheDocument();
+    expect(screen.queryByText("Bé thứ 10")).not.toBeInTheDocument();
   });
 });

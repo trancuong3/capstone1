@@ -41,15 +41,15 @@
     "books": "Kho sách",
     "metadataQuality": "Chất lượng sách",
     "auditLogs": "Nhật ký",
-    "training": "Huấn luyện OCR",
+    "training": "Quản lý mô hình đọc chữ",
     "health": "Vận hành",
     "moreTitle": "Quản trị khác",
     "mobileQualityShort": "Chất lượng",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Đọc chữ",
     "mobileMoreDescriptions": {
       "auditLogs": "Theo dõi nhật ký kiểm toán quản trị",
-      "training": "Huấn luyện và vận hành model VietOCR V2",
-      "health": "Tình trạng hệ thống, OCR worker và voice"
+      "training": "Nâng cấp và vận hành mô hình nhận diện chữ",
+      "health": "Tình trạng hệ thống, nhận diện chữ và giọng đọc"
     }
   },
   "accountMenu": {

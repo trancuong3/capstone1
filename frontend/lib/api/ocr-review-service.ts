@@ -496,7 +496,7 @@ export function createOcrReviewService(): OcrReviewService {
         }
         if (pollAttempt >= MAX_AI_WORKFLOW_POLL_ATTEMPTS) {
           throw new Error(
-            "Tác vụ AI OCR vượt quá thời gian chờ phản hồi. Hãy thử lại sau ít giây.",
+            "Quá trình hỗ trợ chỉnh sửa văn bản mất nhiều thời gian hơn dự kiến. Vui lòng thử lại sau ít giây.",
           );
         }
         if (current.status === "QUEUED") {
@@ -562,7 +562,8 @@ export function createOcrReviewService(): OcrReviewService {
         throw new AiCorrectionCancelledError();
       }
       throw new Error(
-        current.error ?? "AI OCR cục bộ không thể hoàn tất tác vụ.",
+        current.error ??
+          "Hệ thống hỗ trợ chỉnh sửa văn bản chưa thể hoàn tất yêu cầu.",
       );
     },
     runCombinedWorkflow: async (

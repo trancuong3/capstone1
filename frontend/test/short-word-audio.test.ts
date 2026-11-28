@@ -51,15 +51,55 @@ describe("short-word audio", () => {
     ).resolves.toBeNull();
   });
 
-  it("plays the same sample twice at a clear level with silence between", async () => {
+  it("plays a single crisp sample by default and repeats only when repeat is true", async () => {
     decodeFixture(Float32Array.of(0.1, -0.25, 0.15));
-    const sample = await prepareWordSampleAudio(new Blob(["speech"]));
-    const pcm = new DataView(await sample.arrayBuffer());
+    const single = await prepareWordSampleAudio(new Blob(["speech"]));
+    const singlePcm = new DataView(await single.arrayBuffer());
+    expect((singlePcm.byteLength - 44) / 2).toBe(3);
+    expect(singlePcm.getInt16(44 + 2, true) / 32767).toBeCloseTo(-0.84);
+
+    const repeated = await prepareWordSampleAudio(new Blob(["speech"]), {
+      repeat: true,
+    });
+    const pcm = new DataView(await repeated.arrayBuffer());
     const read = (frame: number) => pcm.getInt16(44 + 2 * frame, true);
     const second = 3 + Math.round(24_000 * 0.34);
     expect(read(1) / 32767).toBeCloseTo(-0.84);
     expect(read(30)).toBe(0);
     expect(read(second + 1)).toBe(read(1));
     expect(read(second + 2)).toBe(read(2));
+  });
+
+  it("trims excessive dead-air >300ms preserving 160ms lead & 200ms trail and avoids double-amplifying loud clips", async () => {
+    const sr = 16_000;
+    const total = Math.round(sr * 2.0); // 0.8s dead lead + 0.4s speech + 0.8s dead trail
+    const samples = new Float32Array(total);
+    for (let i = Math.round(sr * 0.8); i < Math.round(sr * 1.2); i++) {
+      samples[i] = 0.01 * Math.sin((2 * Math.PI * 250 * i) / sr);
+    }
+    decodeFixture(samples);
+    const trimmed = await prepareShortWordAudio(new Blob(["padded"]));
+    expect(trimmed).not.toBeNull();
+    const pcm = new DataView(await trimmed!.arrayBuffer());
+    const frames = (pcm.byteLength - 44) / 2;
+    expect(frames).toBeLessThan(Math.round(sr * 0.9));
+    expect(frames).toBeGreaterThan(Math.round(sr * 0.7));
+
+    // Clip already >= 0.065 RMS should not be double-amplified
+    const loud = new Float32Array(Math.round(sr * 0.4));
+    for (let i = 0; i < loud.length; i++) {
+      loud[i] = 0.14 * Math.sin((2 * Math.PI * 250 * i) / sr);
+    }
+    decodeFixture(loud);
+    const notDoubleAmp = await prepareShortWordAudio(new Blob(["loud"]));
+    const loudPcm = new DataView(await notDoubleAmp!.arrayBuffer());
+    let maxAbs = 0;
+    for (let i = 0; i < (loudPcm.byteLength - 44) / 2; i++) {
+      maxAbs = Math.max(
+        maxAbs,
+        Math.abs(loudPcm.getInt16(44 + 2 * i, true) / 32768),
+      );
+    }
+    expect(maxAbs).toBeLessThan(0.2);
   });
 });

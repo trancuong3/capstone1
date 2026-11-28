@@ -4,27 +4,16 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
+import { ViReadAssistantWidget } from "@/components/assistant/viread-assistant-widget";
 import { NavigationFeedbackBar } from "@/components/common/navigation-feedback";
+import { PreconnectResources } from "@/components/common/preconnect-resources";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
 import { getServerI18n, stripHeavyUnusedNamespaces } from "@/lib/i18n/server";
+import { resolvePreconnectOrigins } from "@/lib/utils/origin";
 import { viMessages } from "@/messages/vi";
 import "./globals.css";
-
-function extractSafeOrigin(rawUrl: string | undefined): string | null {
-  const trimmed = rawUrl?.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      return null;
-    }
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -60,6 +49,10 @@ export default async function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   const { locale, dir, messages } = await getServerI18n();
+  const preconnectOrigins = resolvePreconnectOrigins([
+    process.env.NEXT_PUBLIC_API_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+  ]);
   let requestPath = "/";
   try {
     const requestHeaders = await headers();
@@ -77,29 +70,14 @@ export default async function RootLayout({
       ? undefined
       : stripHeavyUnusedNamespaces(messages, requestPath);
 
-  const preconnectOrigins = Array.from(
-    new Set(
-      [
-        extractSafeOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL),
-        extractSafeOrigin(process.env.NEXT_PUBLIC_API_URL),
-      ].filter((origin): origin is string => Boolean(origin)),
-    ),
-  );
-
   return (
     <html lang={locale} dir={dir}>
-      <head>
-        {preconnectOrigins.map((origin) => (
-          <link key={`pc-${origin}`} rel="preconnect" href={origin} />
-        ))}
-        {preconnectOrigins.map((origin) => (
-          <link key={`dp-${origin}`} rel="dns-prefetch" href={origin} />
-        ))}
-      </head>
       <body>
+        <PreconnectResources origins={preconnectOrigins} />
         <I18nProvider initialLocale={locale} initialMessages={initialMessages}>
           <NavigationFeedbackBar />
           {children}
+          <ViReadAssistantWidget />
         </I18nProvider>
       </body>
     </html>

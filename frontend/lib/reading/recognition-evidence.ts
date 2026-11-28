@@ -83,23 +83,44 @@ export function hasUsableTranscript(
  * Returns true when a keyterm-biased transcription has high enough word-level
  * confidence to be trusted without independent browser corroboration.
  *
- * The threshold (logprob >= −0.5) is intentionally much stricter than the
- * general usability gate (−1.5) to guard against keyterm hallucination while
- * still accepting clear correct pronunciations that the browser missed.
+ * Accepts valid contrastive Zipformer/Google logprobs (>= -0.75) when the exact
+ * target matched, while still returning false if logprob is null/undefined
+ * unless `browserStatus === "CORRECT"`.
  */
 export function hasHighConfidenceKeytermResult(
   transcript: SpeechTranscript,
+  expectedTarget?: string | null,
+  browserStatus?: string | null,
 ): boolean {
   const words =
     transcript.words?.filter((word) => !word.type || word.type === "word") ??
     [];
-  // Require at least one word with a logprob score to make a judgement.
-  if (!words.length || !words.some((w) => w.logprob != null)) return false;
-  return words.every(
+  const hasScoredWord = words.some((w) => w.logprob != null);
+  if (!hasScoredWord) {
+    return browserStatus === "CORRECT";
+  }
+  const allLogprobsValid = words.every(
     (word) =>
       word.logprob == null ||
-      (Number.isFinite(word.logprob) && word.logprob >= -0.5),
+      (Number.isFinite(word.logprob) && word.logprob >= -0.75),
   );
+  if (!allLogprobsValid) return false;
+  if (expectedTarget) {
+    const expectedTokens = tokenizeVietnameseText(expectedTarget);
+    const actualTokens = tokenizeVietnameseText(transcript.text);
+    if (expectedTokens.length > 0) {
+      const span = expectedTokens.length;
+      let matched = false;
+      for (let i = 0; i <= actualTokens.length - span; i += 1) {
+        if (expectedTokens.every((tok, j) => actualTokens[i + j] === tok)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) return false;
+    }
+  }
+  return true;
 }
 
 export function hasUsableBrowserConfidence(confidence?: number): boolean {

@@ -148,6 +148,8 @@ describe("real API client", () => {
 
       const firstPromise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(firstPromise).resolves.toEqual({ title: "Recovered 502" });
@@ -160,6 +162,8 @@ describe("real API client", () => {
 
       const netPromise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(netPromise).resolves.toEqual({ title: "Recovered net" });
@@ -172,6 +176,8 @@ describe("real API client", () => {
 
       const html504Promise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(html504Promise).resolves.toEqual({ title: "Recovered 504" });
@@ -194,6 +200,8 @@ describe("real API client", () => {
     await expect(
       requestApi("/reading/scan-page-ocr", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       }),
     ).rejects.toMatchObject({
       status: 504,
@@ -206,7 +214,11 @@ describe("real API client", () => {
       Response.json({ detail: "unauthorized" }, { status: 401 }),
     );
     await expect(
-      requestApi("/books/", schema, undefined, { bypassCache: true }),
+      requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
+      }),
     ).rejects.toMatchObject({ status: 401, code: "AUTH_REQUIRED" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -227,6 +239,8 @@ describe("real API client", () => {
       requestApi("/books/", schema, undefined, {
         method: "POST",
         body: { title: "Create" },
+        maxRetries: 1,
+        retryDelayMs: 600,
       }),
     ).rejects.toMatchObject({ status: 502 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -335,7 +349,7 @@ describe("real API client", () => {
       requestApi("/books/admin/viread-training/flow2/trigger", schema),
     ).rejects.toMatchObject({
       status: 507,
-      message: expect.stringContaining("Google Drive"),
+      message: expect.stringContaining("Không gian lưu trữ dữ liệu"),
     });
 
     fetchMock.mockResolvedValueOnce(

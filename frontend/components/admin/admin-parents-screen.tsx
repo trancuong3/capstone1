@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  Check,
   ChevronRight,
-  Copy,
   Pencil,
   Plus,
   RefreshCw,
@@ -47,7 +45,7 @@ import type { AdminParentProfileItemDTO } from "@/types/admin";
 
 const PAGE_SIZE = 10;
 const PARENTS_TABLE_GRID_COLS =
-  "md:grid-cols-[minmax(0,1fr)_6.5rem_7rem_15.5rem] xl:grid-cols-[minmax(0,1fr)_7.5rem_8rem_22rem]";
+  "lg:grid-cols-[minmax(0,1fr)_5.5rem_6.75rem_22.5rem] xl:grid-cols-[minmax(0,1fr)_6.5rem_7.5rem_23rem]";
 type LoadError = "auth" | "forbidden" | "unavailable";
 type ParentForm = AdminParentFormValues;
 
@@ -67,7 +65,6 @@ export function AdminParentsScreen() {
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [form, setForm] = useState<ParentForm>(emptyForm);
@@ -75,22 +72,11 @@ export function AdminParentsScreen() {
   const [formContactInfoEditable, setFormContactInfoEditable] = useState(false);
   const editRequestIdRef = useRef(0);
   const editLoadingRef = useRef(false);
-  const copyTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
-    null,
-  );
   const [pendingDelete, setPendingDelete] =
     useState<AdminParentProfileItemDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) {
-        globalThis.clearTimeout(copyTimerRef.current);
-      }
-    };
-  }, []);
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -138,21 +124,6 @@ export function AdminParentsScreen() {
     setSearchInput("");
     setSearch("");
     setOffset(0);
-  }
-
-  async function copyParentId(id: string) {
-    try {
-      await navigator.clipboard?.writeText(id);
-      setCopiedId(id);
-      if (copyTimerRef.current !== null) {
-        globalThis.clearTimeout(copyTimerRef.current);
-      }
-      copyTimerRef.current = globalThis.setTimeout(() => {
-        setCopiedId((current) => (current === id ? null : current));
-      }, 2000);
-    } catch {
-      // Clipboard API may be unavailable in restricted contexts.
-    }
   }
 
   function closeParentForm() {
@@ -423,7 +394,7 @@ export function AdminParentsScreen() {
           >
             <div
               aria-hidden="true"
-              className={`hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:items-center md:gap-4 ${PARENTS_TABLE_GRID_COLS}`}
+              className={`hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted lg:grid lg:items-center lg:gap-4 ${PARENTS_TABLE_GRID_COLS}`}
             >
               <span className="text-start">
                 {t("parents.tableHeaders.parent", undefined, "Phụ huynh")}
@@ -442,50 +413,18 @@ export function AdminParentsScreen() {
             <ul className="divide-y divide-border">
               {items.map((parent) => (
                 <li
-                  className={`flex flex-col gap-3 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:items-center md:gap-4 md:px-4 md:py-3 ${PARENTS_TABLE_GRID_COLS}`}
+                  className={`flex flex-col gap-3 p-4 transition-colors hover:bg-surface-subtle/40 lg:grid lg:items-center lg:gap-4 lg:px-4 lg:py-3 ${PARENTS_TABLE_GRID_COLS}`}
                   key={parent.id}
                 >
                   <div className="min-w-0">
                     <h2 className="truncate text-base font-bold text-ink">
                       {parent.display_name?.trim() || t("parents.nameFallback")}
                     </h2>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <p
-                        className="max-w-44 truncate font-mono text-xs text-muted sm:max-w-56"
-                        title={parent.id}
-                      >
-                        ID: {parent.id}
-                      </p>
-                      <button
-                        aria-label={t(
-                          "parents.copyIdAria",
-                          { id: parent.id },
-                          "Sao chép ID {id}",
-                        )}
-                        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
-                        onClick={() => void copyParentId(parent.id)}
-                        title={
-                          copiedId === parent.id
-                            ? t("parents.copiedId", undefined, "Đã sao chép")
-                            : t("parents.copyId", undefined, "Sao chép ID")
-                        }
-                        type="button"
-                      >
-                        {copiedId === parent.id ? (
-                          <Check
-                            aria-hidden
-                            className="size-3.5 text-success-ink"
-                          />
-                        ) : (
-                          <Copy aria-hidden className="size-3.5" />
-                        )}
-                      </button>
-                    </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 md:contents">
-                    <div className="flex items-center gap-2 md:justify-center">
-                      <span className="text-xs font-semibold text-muted md:hidden">
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:contents">
+                    <div className="flex items-center gap-2 lg:justify-center">
+                      <span className="text-xs font-semibold text-muted lg:hidden">
                         {t("parents.childProfiles")}:
                       </span>
                       <AdminBadge
@@ -495,8 +434,8 @@ export function AdminParentsScreen() {
                       </AdminBadge>
                     </div>
 
-                    <div className="flex items-center gap-2 md:justify-start">
-                      <span className="text-xs font-semibold text-muted md:hidden">
+                    <div className="flex items-center gap-2 lg:justify-start">
+                      <span className="text-xs font-semibold text-muted lg:hidden">
                         {t("parents.createdAt")}:
                       </span>
                       <span className="text-sm font-medium text-ink tabular-nums">
@@ -510,9 +449,9 @@ export function AdminParentsScreen() {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-[8rem_5rem_8.75rem] lg:justify-end">
                     <ButtonLink
-                      fullWidth={false}
+                      className="col-span-2 w-full whitespace-nowrap px-2.5 sm:col-span-1"
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}
                       size="admin"
                       variant="secondary"
@@ -520,21 +459,21 @@ export function AdminParentsScreen() {
                       {t("parents.viewDetail")}
                       <ChevronRight
                         aria-hidden
-                        className="size-4 viread-rtl-flip"
+                        className="size-4 shrink-0 viread-rtl-flip"
                       />
                     </ButtonLink>
                     <Button
+                      className="w-full whitespace-nowrap px-2.5"
                       disabled={formLoading || formMode !== null}
-                      fullWidth={false}
                       onClick={() => void openEdit(parent.id)}
                       size="admin"
                       variant="outline"
                     >
-                      <Pencil aria-hidden className="size-4" />
+                      <Pencil aria-hidden className="size-3.5 shrink-0" />
                       {t("parents.edit")}
                     </Button>
                     <Button
-                      fullWidth={false}
+                      className="w-full whitespace-nowrap px-2.5"
                       onClick={() => {
                         setPendingDelete(parent);
                         setDeleteError(null);
@@ -542,7 +481,7 @@ export function AdminParentsScreen() {
                       size="admin"
                       variant="destructive-outline"
                     >
-                      <UserX aria-hidden className="size-4" />
+                      <UserX aria-hidden className="size-3.5 shrink-0" />
                       {t("parents.deactivate")}
                     </Button>
                   </div>
@@ -631,7 +570,9 @@ export function AdminParentsScreen() {
           <div className="grid gap-3">
             <p className="text-sm leading-relaxed text-ink">
               {t("parents.deactivateConfirm", {
-                name: pendingDelete.display_name?.trim() || pendingDelete.id,
+                name:
+                  pendingDelete.display_name?.trim() ||
+                  t("parents.nameFallback"),
               })}
             </p>
             <p className="text-sm text-muted">

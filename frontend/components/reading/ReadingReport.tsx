@@ -115,31 +115,31 @@ export function ReadingReport({ result, sessionId }: Props) {
   );
 
   return (
-    <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
-        <div className="space-y-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+    <div className="space-y-3.5 rounded-card border border-border bg-white p-3.5 sm:p-4">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+        <div className="space-y-2.5">
+          <div className="rounded-card border border-border bg-cream p-2.5 sm:p-3.5">
             {pageError ? (
-              <p className="rounded-control bg-white/80 p-4 text-sm text-danger">
+              <p className="rounded-control bg-white/80 p-3.5 text-sm text-danger">
                 {pageError}
               </p>
             ) : !page ? (
               <div
                 aria-busy="true"
                 aria-label={t("report.loadingAria")}
-                className="space-y-3 p-2"
+                className="space-y-2.5 p-2"
               >
                 <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-32 rounded-control" />
+                <Skeleton className="h-28 rounded-control" />
               </div>
             ) : (
               <article
-                className="relative flex min-h-[200px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[260px] sm:p-5"
+                className="relative flex min-h-[140px] w-full flex-col rounded-control bg-[#fffdfa] p-3 sm:min-h-[175px] sm:p-4"
                 data-page-id={page.page_id}
                 data-page-revision-id={page.page_revision_id}
               >
                 <header className="mb-2 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2 py-0.5 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
                     {t("report.verifiedContentTitle")}
                   </span>
@@ -166,7 +166,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           >
             {REPORT_WORD_LEGEND.map((legend) => (
               <li
-                className={`rounded-control border px-2.5 py-1 ${legend.swatchClassName}`}
+                className={`rounded-control border px-2 py-0.5 ${legend.swatchClassName}`}
                 key={legend.key}
               >
                 {tp(`sessions.readingReports.legend.${legend.key}`)}
@@ -175,21 +175,23 @@ export function ReadingReport({ result, sessionId }: Props) {
           </ul>
         </div>
 
-        <div className="space-y-4">
-          <dl className="grid grid-cols-2 gap-2.5">
+        <div className="space-y-3">
+          <dl className="grid grid-cols-2 gap-2">
             {metrics.map((metric) => (
               <div
-                className="rounded-control border border-border bg-canvas/50 p-3"
+                className="flex flex-col justify-between rounded-control border border-border bg-canvas/50 p-2.5"
                 key={metric.key}
               >
-                <dt className={`text-xs font-bold ${metric.accentClassName}`}>
+                <dt
+                  className={`text-xs font-bold leading-snug ${metric.accentClassName}`}
+                >
                   {metric.key === "correct"
                     ? t("report.correctLabel")
                     : metric.key === "substitution"
                       ? t("report.substitutionLabel")
                       : tp(`sessions.readingReports.wordMetrics.${metric.key}`)}
                 </dt>
-                <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+                <dd className="mt-1 text-xl font-extrabold tabular-nums text-ink">
                   {formatNumber(metric.count)}
                 </dd>
               </div>
@@ -197,7 +199,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           </dl>
 
           {typeof result.transcript === "string" ? (
-            <div className="rounded-control border border-border bg-canvas/70 p-3.5">
+            <div className="rounded-control border border-border bg-canvas/70 p-3">
               <p className="text-xs font-bold text-muted">
                 {t("report.recordedTranscriptLabel")}
               </p>

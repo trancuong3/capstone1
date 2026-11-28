@@ -65,7 +65,7 @@ Configure these under the Render Web Service's Environment section:
 Do not set `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` on Render (either remove it or keep `LOCAL_OCR_ENABLED=false`). Hosted runtime flags (`RENDER`, `VIREAD_WEB_DISABLE_HEAVY_WORKERS`, `VIREAD_OCR_MODE=remote_worker`) take precedence over `LOCAL_OCR_BASE_URL` unless `LOCAL_OCR_ENABLED=true` is explicitly set.
 
 Restart the Render service after changing OCR settings. Missing keys cause their
-providers to be skipped while the configured chain continues. Local repository
+providers to be skipped while the configured chain continues. **Do not set `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` on Render** unless an Ollama sidecar is actually listening on loopback with `LOCAL_OCR_ENABLED=true`. Local repository
 checks cannot change or verify Render secrets.
 
 Never place the database URL, password, Supabase secret key or service-role key in the frontend or a committed file.

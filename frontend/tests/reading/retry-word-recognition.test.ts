@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildContrastiveKeyterms,
   classifyRetryTranscript,
   hasConfusableNasalEnding,
+  hasConfusableShortCoda,
   normalizeVietnameseRetryToken,
   shortWordContext,
 } from "@/lib/reading/retry-word-recognition";
@@ -94,15 +96,73 @@ describe("Vietnamese retry recognition", () => {
       shouldAutoStopShortWordCapture({
         elapsedMs: 900,
         speechObserved: true,
-        silenceElapsedMs: 520,
+        silenceElapsedMs: 800,
       }),
     ).toBe(false);
     expect(
       shouldAutoStopShortWordCapture({
         elapsedMs: 1000,
         speechObserved: true,
-        silenceElapsedMs: 800,
+        silenceElapsedMs: 950,
       }),
     ).toBe(true);
+  });
+
+  it("builds contrastive 6-tone and close-coda keyterms capped cleanly", () => {
+    const co = buildContrastiveKeyterms("có", "Bé có một bông hoa.");
+    expect(co.length).toBeLessThanOrEqual(14);
+    expect(co).toEqual(
+      expect.arrayContaining([
+        "có",
+        "co",
+        "cò",
+        "cỏ",
+        "cõ",
+        "cọ",
+        "có một bông",
+      ]),
+    );
+
+    const mot = buildContrastiveKeyterms("một");
+    expect(mot.length).toBeLessThanOrEqual(14);
+    expect(mot).toEqual(expect.arrayContaining(["một", "mốt", "mộc", "mộp"]));
+
+    const dua = buildContrastiveKeyterms("đứa");
+    expect(dua).toContain("dứa");
+  });
+
+  it("detects confusable nasal and stopped codas without forgiving wrong tones", () => {
+    expect(hasConfusableShortCoda("hôm", "hôn")).toBe(true);
+    expect(hasConfusableShortCoda("một", "mộc")).toBe(true);
+    expect(hasConfusableShortCoda("một", "mốt")).toBe(false);
+    expect(hasConfusableShortCoda("hôm", "hồn")).toBe(false);
+  });
+
+  it("handles hyphenated words, 10->mười, digits in phrases, phonics-in-progress, and padded/repeated phrases", () => {
+    expect(classifyRetryTranscript("ô-tô", "ô tô")).toBe("CORRECT");
+    expect(classifyRetryTranscript("ba-lô", "ba lô")).toBe("CORRECT");
+    expect(classifyRetryTranscript("ô-tô", "ô tồ")).toBe("INCORRECT");
+
+    expect(classifyRetryTranscript("mười", "10")).toBe("CORRECT");
+    expect(classifyRetryTranscript("mười", "10 điểm")).toBe("CORRECT");
+    expect(classifyRetryTranscript("bé có một", "bé có 1 bông hoa")).toBe(
+      "CORRECT",
+    );
+
+    // Phonics spelling in progress returns UNCERTAIN instead of INCORRECT
+    expect(classifyRetryTranscript("cá", "cờ a ca")).toBe("UNCERTAIN");
+    expect(classifyRetryTranscript("cá", "cờ a ca sắc cá")).toBe("CORRECT");
+    expect(classifyRetryTranscript("cá", "cờ a ca huyền cà")).toBe("INCORRECT");
+
+    // Padded/repeated target phrase >4 tokens matches contiguously when tone is exact
+    expect(classifyRetryTranscript("ba-lô", "con đọc ba lô ba lô ạ")).toBe(
+      "CORRECT",
+    );
+    expect(classifyRetryTranscript("ba-lô", "ba lồ")).toBe("INCORRECT");
+
+    // Wrong tones MUST continue to fail
+    expect(classifyRetryTranscript("có", "cò")).toBe("INCORRECT");
+    expect(classifyRetryTranscript("một", "mốt")).toBe("INCORRECT");
+    expect(classifyRetryTranscript("đứa", "dứa")).toBe("INCORRECT");
   });
 });

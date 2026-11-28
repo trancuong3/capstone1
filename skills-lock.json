@@ -201,6 +201,14 @@
       "computedHash": "4cfaaba2a265ae01444e6d0b4f629ef6ce190c6ca336c83c99b8a9afec70f702",
       "installMode": "copy"
     },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "commit": "2fc5e1459efbbf06d92c7306517c286bf12490cf",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "f3c39dfd273eb144f0ae555483bb75c82d05723d0f71e49b47e4d35c8c1e8e1c",
+      "installMode": "copy"
+    },
     "mcp-builder": {
       "source": "anthropics/skills",
       "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",

@@ -18,6 +18,7 @@ import inspect
 import logging
 import math
 import time
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Literal
@@ -54,8 +55,168 @@ from app.services.tts_audio_cache_service import (
     folded_catalog_tts_text,
     is_tts_cache_enabled,
 )
+from app.services.vietnamese_phonics import (
+    TONE_CHAR_MAP as _PHONICS_TONE_CHAR_MAP,
+    VALID_VIETNAMESE_UNTONED_RHYMES as _VALID_VIETNAMESE_UNTONED_RHYMES,
+    _resolve_underlying_rhyme,
+    decompose_vietnamese_syllable,
+    normalize_vietnamese_word,
+    split_vietnamese_rhyme,
+)
 
 logger = logging.getLogger("viread.voice_orchestrator")
+
+MAX_CONTRASTIVE_KEYTERMS = 14
+_ALL_TONES: tuple[str, ...] = ("ngang", "sac", "huyen", "hoi", "nga", "nang")
+_CHECKED_TONES: tuple[str, ...] = ("sac", "nang")
+_NASAL_CODAS: tuple[str, ...] = ("m", "n", "ng", "nh")
+_STOPPED_CODAS: tuple[str, ...] = ("t", "c", "p", "ch")
+_VOWEL_WITH_TONE: dict[tuple[str, str], str] = {
+    **{
+        (base, tone): toned
+        for toned, (base, tone) in _PHONICS_TONE_CHAR_MAP.items()
+    },
+    **{
+        (base, "ngang"): base
+        for base in ("a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y")
+    },
+}
+
+
+def _tone_vowel_index(nucleus: str, coda: str) -> int:
+    for idx in range(len(nucleus) - 1, -1, -1):
+        if nucleus[idx] in "ăâêôơư":
+            return idx
+    if coda and len(nucleus) >= 2:
+        return 1
+    if len(nucleus) >= 3:
+        return 1
+    if len(nucleus) == 2 and nucleus in ("oa", "oe", "uy"):
+        return 0
+    return 0
+
+
+def _render_vietnamese_syllable(
+    onset: str, nucleus: str, coda: str, tone: str
+) -> str | None:
+    if not nucleus:
+        return None
+    idx = _tone_vowel_index(nucleus, coda)
+    ch = nucleus[idx]
+    toned = _VOWEL_WITH_TONE.get((ch, tone))
+    if toned is None:
+        return None
+    return unicodedata.normalize(
+        "NFC", f"{onset}{nucleus[:idx]}{toned}{nucleus[idx + 1:]}{coda}"
+    )
+
+
+def _expand_syllable_contrastive_terms(syllable: str) -> list[str]:
+    parts = decompose_vietnamese_syllable(syllable)
+    if parts is None:
+        return []
+    canonical_rhyme = _resolve_underlying_rhyme(parts.onset, parts.rhyme)
+    nucleus, coda = split_vietnamese_rhyme(canonical_rhyme)
+    if not nucleus:
+        return []
+
+    out: list[str] = [parts.normalized]
+    tones = _CHECKED_TONES if coda in _STOPPED_CODAS else _ALL_TONES
+    for tone in tones:
+        if tone == parts.tone:
+            continue
+        variant = _render_vietnamese_syllable(parts.onset, nucleus, coda, tone)
+        if variant:
+            out.append(variant)
+
+    coda_group = (
+        _NASAL_CODAS
+        if coda in _NASAL_CODAS
+        else _STOPPED_CODAS
+        if coda in _STOPPED_CODAS
+        else ()
+    )
+    for alt_coda in coda_group:
+        if alt_coda == coda:
+            continue
+        candidate_rhyme = _resolve_underlying_rhyme(parts.onset, f"{nucleus}{alt_coda}")
+        if candidate_rhyme not in _VALID_VIETNAMESE_UNTONED_RHYMES:
+            continue
+        competitor = _render_vietnamese_syllable(
+            parts.onset, nucleus, alt_coda, parts.tone
+        )
+        if competitor:
+            out.append(competitor)
+        if coda in _STOPPED_CODAS:
+            alt_tone = "sac" if parts.tone == "nang" else "nang"
+            alt_comp = _render_vietnamese_syllable(
+                parts.onset, nucleus, alt_coda, alt_tone
+            )
+            if alt_comp:
+                out.append(alt_comp)
+
+    if parts.onset == "đ":
+        d_variant = _render_vietnamese_syllable("d", nucleus, coda, parts.tone)
+        if d_variant:
+            out.append(d_variant)
+    elif parts.onset == "d":
+        dd_variant = _render_vietnamese_syllable("đ", nucleus, coda, parts.tone)
+        if dd_variant:
+            out.append(dd_variant)
+
+    return out
+
+
+def build_contrastive_vietnamese_keyterms(
+    keyterms: list[str] | None,
+    *,
+    max_items: int = MAX_CONTRASTIVE_KEYTERMS,
+) -> list[str]:
+    """Expand Vietnamese target keyterms into their 6-tone + close-coda contrastive family."""
+    if not keyterms:
+        return []
+    limit = max(1, int(max_items))
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def _add(term: str) -> bool:
+        cleaned = unicodedata.normalize("NFC", term).strip()
+        if not cleaned:
+            return False
+        key = cleaned.lower()
+        if key in seen:
+            return False
+        if len(result) >= limit:
+            return False
+        seen.add(key)
+        result.append(cleaned)
+        return True
+
+    single_syllables: list[str] = []
+    for raw in keyterms:
+        if not isinstance(raw, str):
+            continue
+        cleaned = unicodedata.normalize("NFC", raw).strip()
+        if not cleaned:
+            continue
+        _add(cleaned)
+        tokens = [
+            normalize_vietnamese_word(tok)
+            for tok in cleaned.replace("-", " ").split()
+        ]
+        tokens = [tok for tok in tokens if tok]
+        if len(tokens) == 1:
+            single_syllables.append(tokens[0])
+        elif len(tokens) == 2 and "-" in cleaned:
+            single_syllables.extend(tokens)
+
+    for syl in single_syllables:
+        for variant in _expand_syllable_contrastive_terms(syl):
+            if len(result) >= limit:
+                return result
+            _add(variant)
+
+    return result[:limit]
 
 VoiceProviderMode = Literal["local_only", "local_with_google_fallback"]
 
@@ -1497,17 +1658,25 @@ class VoiceOrchestrator:
         ctx: VoicePolicyContext,
     ) -> LocalTranscription:
         t0 = time.perf_counter()
+        expanded_keyterms = (
+            build_contrastive_vietnamese_keyterms(keyterms) or None
+            if keyterms
+            else None
+        )
         try:
+            local_kwargs: dict[str, Any] = {
+                "audio": audio,
+                "filename": filename,
+                "content_type": content_type,
+                "language_code": language_code,
+                "source": ctx.source,
+                "session_id": ctx.session_id,
+                "turn_id": ctx.turn_id,
+            }
+            if expanded_keyterms is not None:
+                local_kwargs["keyterms"] = expanded_keyterms
             res = await _call_local_with_busy_retry(
-                lambda: self.local.transcribe(
-                    audio=audio,
-                    filename=filename,
-                    content_type=content_type,
-                    language_code=language_code,
-                    source=ctx.source,
-                    session_id=ctx.session_id,
-                    turn_id=ctx.turn_id,
-                )
+                lambda: self.local.transcribe(**local_kwargs)
             )
             logger.info(
                 "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s request_id=%s",
@@ -1575,7 +1744,7 @@ class VoiceOrchestrator:
                 filename=filename,
                 content_type=content_type,
                 language_code=language_code,
-                keyterms=keyterms,
+                keyterms=expanded_keyterms,
                 fallback_reason=local_err.code,
             )
             logger.info(

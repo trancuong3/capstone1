@@ -43,6 +43,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   getCachedLocaleMessages,
   loadLocaleMessages,
+  withCachedRuntimeNamespaces,
   type LocaleBundleLoader,
 } from "@/messages/loader";
 import { viMessages } from "@/messages/vi";
@@ -81,15 +82,21 @@ const defaultI18nContextValue: I18nContextValue = {
   metadata: getLocaleMetadata(DEFAULT_LOCALE),
   messages: viMessages,
   isLoadingLocale: false,
-  t: (key: string, params?: TranslationParams, defaultValue?: string): string =>
-    translateMessage(
-      viMessages,
-      viMessages,
+  t: (
+    key: string,
+    params?: TranslationParams,
+    defaultValue?: string,
+  ): string => {
+    const dictionary = withCachedRuntimeNamespaces(DEFAULT_LOCALE, viMessages);
+    return translateMessage(
+      dictionary,
+      dictionary,
       DEFAULT_LOCALE,
       key,
       params,
       defaultValue,
-    ),
+    );
+  },
   setLocale: async (nextLocale: string) =>
     normalizeLocale(nextLocale) ?? DEFAULT_LOCALE,
   ...defaultFormatter,
@@ -197,38 +204,6 @@ export function I18nProvider({
     syncDocumentAttributes(localeState.locale);
     localeRef.current = localeState.locale;
   }, [localeState.locale]);
-
-  // If SSR trimmed the heavy `admin` namespace for a non-default locale on a
-  // parent/public page, hydrate the full client locale chunk lazily in the
-  // background so admin or GlobalTaskCenter labels remain localized.
-  useEffect(() => {
-    if (
-      customLoadMessages ||
-      localeState.locale === DEFAULT_LOCALE ||
-      "admin" in localeState.messages
-    ) {
-      return;
-    }
-    let active = true;
-    const targetLocale = localeState.locale;
-    void loadLocaleMessages(targetLocale).then((fullBundle) => {
-      if (
-        !active ||
-        !mountedRef.current ||
-        localeRef.current !== targetLocale
-      ) {
-        return;
-      }
-      setLocaleState((prev) =>
-        prev.locale === targetLocale && !("admin" in prev.messages)
-          ? { locale: targetLocale, messages: fullBundle }
-          : prev,
-      );
-    });
-    return () => {
-      active = false;
-    };
-  }, [customLoadMessages, localeState.locale, localeState.messages]);
 
   useEffect(() => {
     function handleAuthSyncEvent(event: Event) {
@@ -419,8 +394,8 @@ export function I18nProvider({
       isLoadingLocale,
       t: (key, params, defaultValue) =>
         translateMessage(
-          localeState.messages,
-          viMessages,
+          withCachedRuntimeNamespaces(localeState.locale, localeState.messages),
+          withCachedRuntimeNamespaces(DEFAULT_LOCALE, viMessages),
           localeState.locale,
           key,
           params,

@@ -213,7 +213,7 @@ describe("page status never recolors or relabels a word", () => {
     expect(getWordReviewStatus(red, "VERIFIED")).toBe("confirmed_mismatch");
     expect(getWordReviewStatus(green, "VERIFIED")).toBe("verified");
     expect(getWordReviewLabel(getWordReviewStatus(red, "VERIFIED"), red)).toBe(
-      "Sai so với reference đã xác minh",
+      "Sai so với văn bản đã xác minh",
     );
   });
 

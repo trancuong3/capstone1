@@ -23,6 +23,7 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
@@ -124,6 +125,8 @@ type SpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 const RECALL_SILENCE_AUTO_SUBMIT_MS = 2500;
 const RECALL_SILENCE_TICK_MS = 100;
+const MEMORY_THEMES_PAGE_SIZE = 6;
+const MEMORY_HISTORY_PAGE_SIZE = 6;
 
 const FALLBACK_TIMER_OPTIONS: ReadonlyArray<{
   mode: MemoryTimerMode;
@@ -266,6 +269,8 @@ export function MemoryGameScreen({
     childId: string;
     items: MemorySessionSummaryDTO[];
   } | null>(null);
+  const [themesPage, setThemesPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const history = historyState?.childId === childId ? historyState.items : [];
   const catalogLoading = catalog === null && catalogError === null;
 
@@ -1641,49 +1646,76 @@ export function MemoryGameScreen({
                 ))}
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {(catalog?.themes ?? []).map((theme) => {
-                  const isActive = selectedTheme === theme.theme_key;
-                  return (
-                    <button
-                      key={theme.theme_key}
-                      aria-pressed={isActive}
-                      className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-start transition-colors ${
-                        isActive
-                          ? "border-primary bg-sky/70"
-                          : "border-border bg-cream hover:border-primary/50"
-                      }`}
-                      onClick={() => setSelectedTheme(theme.theme_key)}
-                      type="button"
-                    >
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <span
-                          className="viread-learning-content text-lg font-extrabold text-ink"
-                          dir="ltr"
-                          lang="vi"
-                        >
-                          {theme.name_vi}
-                        </span>
-                        <span
-                          className="viread-learning-content rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
-                          dir="ltr"
-                          lang="vi"
-                          style={{ backgroundColor: theme.accent_hex }}
-                        >
-                          {theme.badge_vi}
-                        </span>
-                      </div>
-                      <p
-                        className="viread-learning-content text-sm leading-5 text-muted"
-                        dir="ltr"
-                        lang="vi"
-                      >
-                        {theme.description_vi}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
+              (() => {
+                const allThemes = catalog?.themes ?? [];
+                const totalThemesPages = Math.max(
+                  1,
+                  Math.ceil(allThemes.length / MEMORY_THEMES_PAGE_SIZE),
+                );
+                const safeThemesPage = Math.min(
+                  Math.max(1, themesPage),
+                  totalThemesPages,
+                );
+                const visibleThemes = allThemes.slice(
+                  (safeThemesPage - 1) * MEMORY_THEMES_PAGE_SIZE,
+                  safeThemesPage * MEMORY_THEMES_PAGE_SIZE,
+                );
+                return (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {visibleThemes.map((theme) => {
+                        const isActive = selectedTheme === theme.theme_key;
+                        return (
+                          <button
+                            key={theme.theme_key}
+                            aria-pressed={isActive}
+                            className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-start transition-colors ${
+                              isActive
+                                ? "border-primary bg-sky/70"
+                                : "border-border bg-cream hover:border-primary/50"
+                            }`}
+                            onClick={() => setSelectedTheme(theme.theme_key)}
+                            type="button"
+                          >
+                            <div className="flex w-full items-center justify-between gap-2">
+                              <span
+                                className="viread-learning-content text-lg font-extrabold text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {theme.name_vi}
+                              </span>
+                              <span
+                                className="viread-learning-content rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
+                                dir="ltr"
+                                lang="vi"
+                                style={{ backgroundColor: theme.accent_hex }}
+                              >
+                                {theme.badge_vi}
+                              </span>
+                            </div>
+                            <p
+                              className="viread-learning-content text-sm leading-5 text-muted"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {theme.description_vi}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <PaginationBar
+                      className="mt-4"
+                      compact
+                      onPageChange={setThemesPage}
+                      page={safeThemesPage}
+                      pageSize={MEMORY_THEMES_PAGE_SIZE}
+                      total={allThemes.length}
+                    />
+                  </>
+                );
+              })()
             )}
           </div>
 
@@ -1820,56 +1852,80 @@ export function MemoryGameScreen({
           </div>
 
           {/* Recent sessions */}
-          {history.length > 0 ? (
-            <div className="rounded-card border border-border bg-cream p-5">
-              <h2 className="mb-3 text-lg font-extrabold text-ink">
-                {t("memoryGame.recentHeading")}
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {history.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col gap-1.5 rounded-control border border-border bg-white p-3.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className="viread-learning-content font-extrabold text-ink"
-                        dir="ltr"
-                        lang="vi"
-                      >
-                        {item.theme_name_vi}
-                      </span>
-                      {renderStars(
-                        item.stars,
-                        t("memoryGame.starsAria", { count: item.stars }),
-                      )}
+          {history.length > 0
+            ? (() => {
+                const totalHistoryPages = Math.max(
+                  1,
+                  Math.ceil(history.length / MEMORY_HISTORY_PAGE_SIZE),
+                );
+                const safeHistoryPage = Math.min(
+                  Math.max(1, historyPage),
+                  totalHistoryPages,
+                );
+                const visibleHistory = history.slice(
+                  (safeHistoryPage - 1) * MEMORY_HISTORY_PAGE_SIZE,
+                  safeHistoryPage * MEMORY_HISTORY_PAGE_SIZE,
+                );
+                return (
+                  <div className="rounded-card border border-border bg-cream p-5">
+                    <h2 className="mb-3 text-lg font-extrabold text-ink">
+                      {t("memoryGame.recentHeading")}
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {visibleHistory.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex flex-col gap-1.5 rounded-control border border-border bg-white p-3.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="viread-learning-content font-extrabold text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {item.theme_name_vi}
+                            </span>
+                            {renderStars(
+                              item.stars,
+                              t("memoryGame.starsAria", { count: item.stars }),
+                            )}
+                          </div>
+                          <p className="text-xs text-muted">
+                            {t("memoryGame.historyDetailsCount", {
+                              count: item.object_count,
+                            })}{" "}
+                            ·{" "}
+                            {item.timer_seconds
+                              ? `${item.timer_seconds}s`
+                              : t("memoryGame.timers.UNLIMITED.label")}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
+                            <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-success-ink">
+                              {t("memoryGame.historyMemoryScore", {
+                                score: item.best_factual_score,
+                              })}
+                            </span>
+                            <span className="rounded-full bg-purple px-2.5 py-0.5 text-purple-ink">
+                              {t("memoryGame.historyCreativeScore", {
+                                score: item.best_creative_score,
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <p className="text-xs text-muted">
-                      {t("memoryGame.historyDetailsCount", {
-                        count: item.object_count,
-                      })}{" "}
-                      ·{" "}
-                      {item.timer_seconds
-                        ? `${item.timer_seconds}s`
-                        : t("memoryGame.timers.UNLIMITED.label")}
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
-                      <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-success-ink">
-                        {t("memoryGame.historyMemoryScore", {
-                          score: item.best_factual_score,
-                        })}
-                      </span>
-                      <span className="rounded-full bg-purple px-2.5 py-0.5 text-purple-ink">
-                        {t("memoryGame.historyCreativeScore", {
-                          score: item.best_creative_score,
-                        })}
-                      </span>
-                    </div>
+                    <PaginationBar
+                      className="mt-4"
+                      compact
+                      onPageChange={setHistoryPage}
+                      page={safeHistoryPage}
+                      pageSize={MEMORY_HISTORY_PAGE_SIZE}
+                      total={history.length}
+                    />
                   </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+                );
+              })()
+            : null}
         </div>
       ) : null}
 

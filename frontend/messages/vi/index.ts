@@ -1,5 +1,4 @@
 import accessibility from "./accessibility.json";
-import admin from "./admin.json";
 import auth from "./auth.json";
 import books from "./books.json";
 import child from "./child.json";
@@ -25,7 +24,6 @@ export const viMessages: MessagesDictionary = {
   navigation,
   parent,
   child,
-  admin,
   books,
   ocr,
   reading,

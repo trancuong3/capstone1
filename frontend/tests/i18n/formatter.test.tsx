@@ -116,6 +116,13 @@ describe("i18n formatter and Intl helpers", () => {
     expect(
       formatDateTime(sampleDate, "vi", { timeZone: "Asia/Ho_Chi_Minh" }),
     ).toContain("2026");
+    const shortStyled = formatDateTime(sampleDate, "vi", {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: "Asia/Ho_Chi_Minh",
+    });
+    expect(shortStyled).not.toContain("T14:30:00");
+    expect(shortStyled).toContain("21:30");
 
     const styledDateTime = formatDateTime("2026-11-27T17:09:49.254Z", "vi", {
       dateStyle: "short",

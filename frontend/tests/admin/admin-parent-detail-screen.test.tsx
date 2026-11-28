@@ -91,7 +91,7 @@ describe("AdminParentDetailScreen", () => {
 
     expect(
       await screen.findByText(
-        /backend chưa được cấu hình quyền truy xuất Supabase Auth/i,
+        /do hệ thống xác thực chưa được cấp quyền truy xuất/i,
       ),
     ).toBeInTheDocument();
     expect(await screen.findAllByText("Chưa khả dụng")).toHaveLength(2);
@@ -167,8 +167,11 @@ describe("AdminParentDetailScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(
-      await screen.findByText(/Mã yêu cầu: req-admin-edit/i),
+      await screen.findByText(
+        /Dịch vụ quản trị hoặc hệ thống xác thực đang tạm thời không khả dụng/i,
+      ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/req-admin-edit/i)).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("Changed Name")).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(update).toHaveBeenCalledTimes(1);

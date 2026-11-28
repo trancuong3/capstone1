@@ -109,10 +109,10 @@
   flex-wrap: wrap;
 }
 .family-title {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 .family-title h1 {
-  font-size: clamp(38px, 4vw, 56px);
+  font-size: clamp(32px, 3.4vw, 44px);
   letter-spacing: -0.015em;
 }
 .family-dashboard h2:not(#desk-title) {
@@ -240,7 +240,7 @@
   line-height: 1.4;
 }
 .family-tools {
-  margin-top: 32px;
+  margin-top: 22px;
 }
 .family-tools-heading {
   padding-bottom: 10px;
@@ -300,13 +300,6 @@
 }
 .parent-nav-links a[href="/reports/difficult-words"] svg {
   color: #9b541e;
-}
-.activity-library > div > article:first-child > div:first-child {
-  background: #e0f4f8;
-}
-.activity-library > article {
-  background: #fff0be;
-  border-color: #e5cc83;
 }
 .catalog-volume:nth-child(3n + 2) .catalog-jacket {
   border-inline-start-color: #c3773a;
@@ -1052,11 +1045,11 @@ button:disabled {
   padding: 0;
 }
 .report-metric {
-  padding: 14px 14px;
+  padding: 10px 12px;
 }
 @media (min-width: 48rem) {
   .report-metric {
-    padding: 18px 20px;
+    padding: 12px 14px;
   }
 }
 .report-metric > p[data-metric-value="true"]:not([data-unavailable="true"]) {
@@ -1066,37 +1059,16 @@ button:disabled {
 .history-entry {
   padding: 14px 16px;
 }
-.activity-library > div > article {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0 0 20px;
-}
-.activity-library > div {
-  gap: clamp(20px, 3vw, 40px);
-}
-.activity-library > div > article > div:first-child {
-  border-radius: 4px;
-}
-.activity-library h2,
 .song-cover h2 {
   font-size: 26px;
   font-weight: 800;
   line-height: 1.25;
-}
-.activity-library > div > article > a {
-  align-self: start;
-  width: auto;
 }
 .song-cover {
   border-width: 0 0 1px;
   border-radius: 0;
   background: transparent;
   padding: 0 0 16px;
-}
-.reading-organizer > header {
-  border-bottom: 1px solid var(--ra-color-border);
-  padding-bottom: 20px;
 }
 .settings-sheet dl > div {
   border-width: 0 0 1px;
@@ -1250,4 +1222,89 @@ html:lang(bn) {
 
 [dir="rtl"] .viread-rtl-flip {
   transform: scaleX(-1);
+}
+
+@keyframes avatar-menu-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes avatar-view-forward {
+  0% {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes avatar-view-back {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes avatar-view-forward-rtl {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes avatar-view-back-rtl {
+  0% {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.avatar-menu-enter {
+  transform-origin: top right;
+  animation: avatar-menu-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[dir="rtl"] .avatar-menu-enter {
+  transform-origin: top left;
+}
+
+.avatar-menu-view-forward {
+  animation: avatar-view-forward 160ms ease-out;
+}
+
+.avatar-menu-view-back {
+  animation: avatar-view-back 160ms ease-out;
+}
+
+[dir="rtl"] .avatar-menu-view-forward {
+  animation-name: avatar-view-forward-rtl;
+}
+
+[dir="rtl"] .avatar-menu-view-back {
+  animation-name: avatar-view-back-rtl;
+}
+
+.avatar-menu-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(8 116 103 / 24%) transparent;
 }

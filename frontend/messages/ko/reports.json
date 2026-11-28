@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "독서 여정 탐색"
+  },
   "overview": {
     "title": "읽기 리포트",
     "subtitle": "아이의 읽기 시간, 정확도, 연속 읽기 기록을 확인하세요.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "현재 리포트가 표시되고 있습니다. 기간 목록을 다시 불러와 보세요.",
     "noPeriodReportTitle": "선택한 기간에 대한 리포트가 없습니다",
     "noSavedReportTitle": "저장된 리포트가 없습니다",
-    "noReportDescription": "선택한 조건에 맞는 리포트가 없습니다. 다른 아이나 기간을 선택해주세요. 시스템은 샘플 데이터를 사용하지 않습니다.",
+    "noReportDescription": "이 선택에 해당하는 보고서가 없습니다. 다른 아이 프로필이나 기간을 선택해 주세요.",
     "pendingReportTitle": "데이터 보충 대기 중",
-    "pendingReportDesc": "리포트 데이터가 아직 준비되지 않았습니다. 시스템은 추정치를 표시하지 않습니다.",
+    "pendingReportDesc": "보고서 데이터가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "periodBannerRange": "기간: {start} → {end}",
     "periodGeneratedAt": "{dateTime} (베트남 시간) 기준 업데이트, 세션마다 자동 계산되지 않습니다.",
     "unsupportedFormatTitle": "지원되지 않는 리포트 형식입니다",
@@ -61,10 +64,10 @@
     "viewAllWords": "모두 보기 ({count})",
     "noDifficultWordsInPeriod": "이번 기간에 기록된 주의할 단어가 없습니다.",
     "difficultWordsWindowNote": "참고: 주의할 단어 개별 항목은 기본적으로 최근 90일을 기준으로 종합되며, 위의 보고서 기간에 따라 자동으로 변경되지 않습니다.",
-    "legacyMetricsTitle": "레거시 측정항목",
-    "legacyMetricsSubtitle": "저장된 필드 이름을 유지했습니다. 독서 세션 수나 정확한 백분율로 변환되지 않았습니다.",
-    "legacyTotalBooks": "저장된 총 도서 수 (total_books)",
-    "legacyAvgFluency": "저장된 avg_fluency 값 (단위 미정)",
+    "legacyMetricsTitle": "이전 저장 지표",
+    "legacyMetricsSubtitle": "이전 저장 형식의 요약 지표입니다.",
+    "legacyTotalBooks": "저장된 총 도서 수",
+    "legacyAvgFluency": "평균 유창성 점수",
     "periodSelectLabel": "저장된 보고서 기간",
     "periodLatestOption": "최신",
     "periodSelectedRange": "{start} → {end} (선택됨)",
@@ -162,7 +165,11 @@
       "uncertainLabel": "잘 들리지 않아요",
       "uncertainNote": "별도로 기록되며, 확정된 발음 오류로 간주되지 않습니다."
     },
-    "entertainmentSummaryHeading": "놀이 학습 및 언어 능력 요약 (V4.0)"
+    "entertainmentSummaryHeading": "놀이 학습 및 언어 능력 요약 (V4.0)",
+    "focusAria": "보고서 섹션 필터",
+    "focusAssessment": "AI 평가",
+    "focusSignals": "차트 및 지표",
+    "focusEntertainment": "놀이 학습"
   },
   "sessions": {
     "title": "읽기 기록",
@@ -174,7 +181,7 @@
     "noChildDesc": "프로필을 생성하여 아이의 읽기 세션을 저장해 보세요.",
     "createChildAction": "아이 프로필 생성",
     "pendingDataTitle": "데이터 보충 대기 중",
-    "pendingHistoryDesc": "읽기 기록 데이터를 사용할 수 없습니다. 시스템에서 샘플 데이터를 표시하지 않습니다.",
+    "pendingHistoryDesc": "읽기 기록 데이터가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "retry": "재시도",
     "manageChildren": "자녀 프로필 관리",
     "notFoundTitle": "기록을 찾을 수 없음",
@@ -217,7 +224,7 @@
     "durationMinutesSeconds": "{minutes}분 {seconds}초",
     "detail": {
       "loadingAria": "읽기 세션 세부 정보 불러오는 중",
-      "pendingDesc": "현재 형식으로 제공할 수 있는 데이터가 없습니다. 샘플 데이터가 없습니다.",
+      "pendingDesc": "이 항목의 데이터가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
       "notFoundTitle": "읽기 세션을 찾을 수 없습니다",
       "notFoundDesc": "읽기 세션이 존재하지 않거나 현재 계정에 속해 있지 않습니다.",
       "backToHistory": "기록으로 돌아가기",
@@ -283,7 +290,7 @@
       "originalOmission": "건너뛰기",
       "originalMispronunciation": "잘못된 발음",
       "recognizedPrefix": "ViRead 인식: “{text}”",
-      "pageRevisionMeta": "페이지 코드 {pageId} · 버전 ",
+      "pageRevisionMeta": "책 페이지",
       "firstPassSectionAria": "첫 번째 읽기 이벤트",
       "firstPassSectionTitle": "첫 번째 읽기 이벤트",
       "timestampAt": "지점 ",
@@ -346,7 +353,7 @@
       "prevShort": "이전",
       "nextShort": "다음",
       "loadingPageAria": "책 페이지 콘텐츠 불러오는 중",
-      "verifiedPageTitle": "확인된 페이지 내용",
+      "verifiedPageTitle": "책 페이지 내용",
       "selfCorrectedCount": "자기 교정: {count} 단어",
       "pageMissingContentNote": "아이가 읽었을 당시의 정확한 책 페이지 버전을 불러올 수 없습니다. 저장된 대본과 통계는 변경되지 않습니다.",
       "legendAria": "대조 색상 범례",
@@ -527,7 +534,7 @@
     "goalsTimezoneRule": "진도는 유효한 시작/종료 시간을 가진 완료된 세션만 계산합니다. 목표는 100%에 도달했다고 해서 자동으로 완료되지 않습니다.",
     "remindersSectionAria": "독서 알림",
     "remindersTitle": "독서 알림",
-    "remindersSubtitle": "일정은 선택한 시간대에 저장됩니다. 이메일 알림을 켜면 서버가 부모님의 인증된 이메일 주소로 알림을 보냅니다.",
+    "remindersSubtitle": "일정은 선택한 시간대로 저장됩니다. 이메일을 켜면 인증된 부모님 이메일로 알림이 전송됩니다.",
     "addReminder": "알림 추가",
     "dueRemindersTitle": "독서 시간 ({count})",
     "reminderAtPrefix": "알림 시간 ",
@@ -578,7 +585,7 @@
       "startLabel": "시작",
       "createGoal": "목표 생성",
       "localTimeLabel": "현지 시간",
-      "ianaTimezoneLabel": "IANA 시간대",
+      "ianaTimezoneLabel": "세부 시간대",
       "repeatDaysLabel": "반복 요일",
       "emailReminderLabel": "독서 알림 이메일",
       "sendEmailCheck": "독서 시간에 부모님께 이메일 발송",
@@ -656,7 +663,11 @@
       "favorited": "즐겨찾기됨",
       "wantToRead": "읽고 싶은 책",
       "savedToRead": "독서 목록에 저장됨"
-    }
+    },
+    "focusAria": "독서 관리 섹션 필터",
+    "focusPlans": "계획",
+    "focusGoals": "목표",
+    "focusReminders": "알림"
   },
   "entertainmentSummary": {
     "loading": "{childName}의 놀이 학습 진행 상황을 요약하는 중…",

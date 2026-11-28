@@ -41,15 +41,15 @@
     "books": "書庫",
     "metadataQuality": "書籍品質",
     "auditLogs": "稽核日誌",
-    "training": "OCR 訓練",
+    "training": "文字辨識模型",
     "health": "營運",
     "moreTitle": "更多管理",
     "mobileQualityShort": "品質",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "識字",
     "mobileMoreDescriptions": {
       "auditLogs": "追蹤管理稽核日誌",
-      "training": "訓練並操作 VietOCR V2 模型",
-      "health": "系統狀態、OCR worker 與語音"
+      "training": "訓練與管理文字辨識模型",
+      "health": "系統狀態、文字辨識與語音"
     }
   },
   "accountMenu": {

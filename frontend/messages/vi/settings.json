@@ -34,7 +34,7 @@
     "currentInvalid": "Mật khẩu hiện tại chưa chính xác.",
     "changeError": "Chưa thể đổi mật khẩu. Ba mẹ vui lòng kiểm tra kết nối và thử lại.",
     "noEmailForRecovery": "Tài khoản chưa có email để gửi liên kết đặt mật khẩu.",
-    "recoverySent": "Supabase Auth đã tiếp nhận yêu cầu gửi liên kết đặt mật khẩu. Ba mẹ hãy kiểm tra hộp thư và thư rác.",
+    "recoverySent": "Hệ thống tài khoản đã tiếp nhận yêu cầu gửi liên kết đặt mật khẩu. Ba mẹ hãy kiểm tra hộp thư và thư rác.",
     "recoveryError": "Chưa gửi được liên kết đặt mật khẩu. Ba mẹ vui lòng thử lại sau.",
     "showFieldAria": "Hiện {label}",
     "hideFieldAria": "Ẩn {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "Ngôn ngữ hiển thị",
     "description": "Chọn ngôn ngữ cho giao diện điều hướng và cài đặt. Nội dung sách tiếng Việt vẫn được giữ nguyên.",
-    "learningContentNote": "Đổi ngôn ngữ chỉ thay đổi thanh điều hướng, nút bấm và cài đặt. Sách tiếng Việt, OCR, nhận diện giọng nói (STT) và giọng đọc mẫu (TTS) vẫn giữ nguyên tiếng Việt."
+    "learningContentNote": "Đổi ngôn ngữ chỉ thay đổi thanh điều hướng, nút bấm và cài đặt. Sách tiếng Việt, nhận diện trang sách, nhận diện giọng nói và giọng đọc mẫu vẫn giữ nguyên tiếng Việt."
   }
 }

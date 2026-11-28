@@ -64,6 +64,10 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  if (pathname === "/" && !auth.userId) {
+    return redirectWithAuthState(request, "/login", auth.response);
+  }
+
   if (pathname === "/admin" && auth.userId) {
     return redirectWithAuthState(
       request,

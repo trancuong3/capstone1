@@ -77,28 +77,32 @@ export function PaginationBar({
         total: totalFormatted,
       });
 
-  const buttonSizeClass = compact
-    ? "min-h-10 px-3 py-1.5 text-sm"
-    : "min-h-11 px-3.5 py-2 text-sm";
+  const buttonClassName = compact ? undefined : "min-h-11! px-3.5! py-2!";
 
   return (
     <nav
       aria-label={navAriaLabel}
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white",
-        compact ? "px-3.5 py-2.5" : "px-4 py-3 sm:px-5",
+        "flex flex-wrap items-center justify-between rounded-card border border-border bg-white",
+        compact ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3 sm:px-5",
         className,
       )}
     >
       <p className="text-sm text-muted tabular-nums">{rangeSummary}</p>
 
       {!isSinglePage ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div
+          className={cn(
+            "flex flex-wrap items-center",
+            compact ? "gap-1.5" : "gap-2",
+          )}
+        >
           <Button
-            className={buttonSizeClass}
+            className={buttonClassName}
             disabled={disabled || safePage <= 1}
             fullWidth={false}
             onClick={() => onPageChange(Math.max(1, safePage - 1))}
+            size="admin"
             type="button"
             variant="secondary"
           >
@@ -110,7 +114,10 @@ export function PaginationBar({
           </Button>
           <span
             aria-current="page"
-            className="min-w-20 text-center text-sm font-bold text-ink tabular-nums"
+            className={cn(
+              "text-center text-sm font-bold text-ink tabular-nums",
+              compact ? "min-w-16" : "min-w-20",
+            )}
           >
             {t("common.pagination.summary", {
               page: formatNumber(safePage),
@@ -118,10 +125,11 @@ export function PaginationBar({
             })}
           </span>
           <Button
-            className={buttonSizeClass}
+            className={buttonClassName}
             disabled={disabled || safePage >= totalPages}
             fullWidth={false}
             onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+            size="admin"
             type="button"
             variant="secondary"
           >

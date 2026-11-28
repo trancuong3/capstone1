@@ -3,7 +3,7 @@ import {
   normalizeLocale,
   type SupportedLocale,
 } from "@/lib/i18n/locales";
-import type { MessagesDictionary } from "@/lib/i18n/types";
+import type { MessageTree, MessagesDictionary } from "@/lib/i18n/types";
 import { viMessages } from "@/messages/vi";
 
 export type LocaleBundleLoader = () => Promise<MessagesDictionary>;
@@ -30,6 +30,104 @@ const messageCache = new Map<SupportedLocale, MessagesDictionary>([
 ]);
 const inflightLoads = new Map<SupportedLocale, Promise<MessagesDictionary>>();
 
+// Runtime-registered lazy namespaces (e.g. "admin") so root bundles never
+// statically include route-scoped dictionaries while `translateRuntime` and
+// default context fallback still resolve them once loaded.
+const runtimeNamespaces = new Map<SupportedLocale, Map<string, MessageTree>>();
+const persistentTestNamespaces = new Map<
+  SupportedLocale,
+  Map<string, MessageTree>
+>();
+let namespaceVersion = 0;
+const mergedNamespaceCache = new Map<
+  SupportedLocale,
+  {
+    readonly base: MessagesDictionary;
+    readonly version: number;
+    readonly merged: MessagesDictionary;
+  }
+>();
+
+export function registerRuntimeNamespace(
+  locale: SupportedLocale,
+  namespace: string,
+  tree: MessageTree,
+): void {
+  let byNs = runtimeNamespaces.get(locale);
+  if (!byNs) {
+    byNs = new Map<string, MessageTree>();
+    runtimeNamespaces.set(locale, byNs);
+  }
+  byNs.set(namespace, tree);
+  namespaceVersion += 1;
+}
+
+/**
+ * Registers a persistent test-only fallback namespace (e.g. `vi/admin.json`
+ * in `test/setup.ts`) that survives `resetLocaleLoaderStateForTests()`.
+ */
+export function registerPersistentTestNamespace(
+  locale: SupportedLocale,
+  namespace: string,
+  tree: MessageTree,
+): void {
+  let byNs = persistentTestNamespaces.get(locale);
+  if (!byNs) {
+    byNs = new Map<string, MessageTree>();
+    persistentTestNamespaces.set(locale, byNs);
+  }
+  byNs.set(namespace, tree);
+  namespaceVersion += 1;
+}
+
+export function getCachedRuntimeNamespace(
+  locale: SupportedLocale,
+  namespace: string,
+): MessageTree | null {
+  return (
+    runtimeNamespaces.get(locale)?.get(namespace) ??
+    persistentTestNamespaces.get(locale)?.get(namespace) ??
+    null
+  );
+}
+
+export function withCachedRuntimeNamespaces(
+  locale: SupportedLocale,
+  base: MessagesDictionary,
+): MessagesDictionary {
+  const persistent = persistentTestNamespaces.get(locale);
+  const runtime = runtimeNamespaces.get(locale);
+  if (
+    (!persistent || persistent.size === 0) &&
+    (!runtime || runtime.size === 0)
+  ) {
+    return base;
+  }
+  const cached = mergedNamespaceCache.get(locale);
+  if (cached && cached.base === base && cached.version === namespaceVersion) {
+    return cached.merged;
+  }
+  const merged: Record<string, MessageTree | string> = { ...base };
+  if (persistent) {
+    for (const [ns, tree] of persistent.entries()) {
+      if (!Object.hasOwn(merged, ns)) {
+        merged[ns] = tree;
+      }
+    }
+  }
+  if (runtime) {
+    for (const [ns, tree] of runtime.entries()) {
+      merged[ns] = tree;
+    }
+  }
+  mergedNamespaceCache.set(locale, {
+    base,
+    version: namespaceVersion,
+    merged,
+  });
+  return merged;
+}
+
 export function getCachedLocaleMessages(
   locale: SupportedLocale,
 ): MessagesDictionary | null {
@@ -53,11 +151,21 @@ export function resetLocaleLoaderStateForTests(): void {
   inflightLoads.clear();
   messageCache.clear();
   messageCache.set(DEFAULT_LOCALE, viMessages);
+  runtimeNamespaces.clear();
+  namespaceVersion += 1;
+  mergedNamespaceCache.clear();
+}
+
+export function clearAllRuntimeNamespacesForTests(): void {
+  runtimeNamespaces.clear();
+  persistentTestNamespaces.clear();
+  namespaceVersion += 1;
+  mergedNamespaceCache.clear();
 }
 
 /**
- * Dynamically loads ONLY the requested locale's message bundle and caches it
- * in memory. Falls back to `viMessages` without throwing if the bundle is
+ * Dynamically loads ONLY the requested locale's core message bundle and caches
+ * it in memory. Falls back to `viMessages` without throwing if the bundle is
  * missing or fails to load.
  */
 export async function loadLocaleMessages(

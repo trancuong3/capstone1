@@ -11,11 +11,16 @@ import { isAdminOcrJobQueuedSignal } from "@/lib/api/admin-page-service";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { AdminPageImageUI } from "@/types/admin";
 
+export interface AdminPageImageReplacedEvent {
+  readonly queued: boolean;
+  readonly message?: string;
+}
+
 interface AdminPageImagePreviewProps {
   readonly pageId: string;
   readonly revisionId: string;
   readonly pageNumber: number;
-  readonly onReplaced?: () => void;
+  readonly onReplaced?: (event: AdminPageImageReplacedEvent) => void;
 }
 
 export function AdminPageImagePreview(props: AdminPageImagePreviewProps) {
@@ -121,13 +126,13 @@ function AdminPageImagePreviewContent({
         throw new Error("Replacement belongs to another page");
       setNotice(t("books.imagePreview.uploadedNotice"));
       setFile(null);
-      onReplaced?.();
+      onReplaced?.({ queued: false });
     } catch (cause) {
       if (!mountedRef.current) return;
       if (isAdminOcrJobQueuedSignal(cause)) {
         setNotice(cause.message);
         setFile(null);
-        onReplaced?.();
+        onReplaced?.({ queued: true, message: cause.message });
         return;
       }
       setNotice(t("books.imagePreview.uploadFailedNotice"));

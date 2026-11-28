@@ -64,8 +64,8 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(
-      screen.getByText(/ID: 22222222-2222-4222-8222-222222222222/),
-    ).toBeInTheDocument();
+      screen.queryByText(/22222222-2222-4222-8222-222222222222/),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Xem chi tiết/i })).toHaveAttribute(
       "href",
       "/admin/parents/22222222-2222-4222-8222-222222222222",
@@ -135,7 +135,7 @@ describe("AdminParentsScreen", () => {
       });
     });
     expect(
-      await screen.findByText(/Đã gửi lời mời tạo tài khoản Parent/i),
+      await screen.findByText(/Đã gửi lời mời tạo tài khoản phụ huynh/i),
     ).toBeInTheDocument();
   });
 
@@ -276,7 +276,7 @@ describe("AdminParentsScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(
-      await screen.findByText(/Backend hiện không hỗ trợ xóa email/i),
+      await screen.findByText(/Hệ thống hiện không hỗ trợ xóa trống email/i),
     ).toBeInTheDocument();
     expect(update).not.toHaveBeenCalled();
   });
@@ -308,7 +308,11 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa" }));
-    expect(await screen.findByText(/Đây là xóa mềm/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /tài khoản phụ huynh sẽ chuyển sang trạng thái ngừng hoạt động/i,
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa Parent" }));
 
     await waitFor(() => {

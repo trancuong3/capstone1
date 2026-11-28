@@ -8,6 +8,7 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
+  DEFAULT_USER_CACHE_TTL_MS,
   invalidateUserCacheKey,
   readUserCacheWithStale,
 } from "@/lib/cache/user-query-cache";
@@ -42,6 +43,36 @@ function findCachedChild(
   return children?.data.find((candidate) => candidate.id === childId) ?? null;
 }
 
+function findFreshCachedChild(
+  userId: string | null | undefined,
+  childId: string,
+): ChildProfileDTO | null {
+  if (!userId || !childId) return null;
+
+  const summary = readUserCacheWithStale<DashboardSummaryDTO>(
+    userId,
+    "dashboard-summary",
+    DEFAULT_USER_CACHE_TTL_MS,
+  );
+  if (summary && !summary.isStale) {
+    const fromSummary = summary.data.children.find(
+      (candidate) => candidate.id === childId,
+    );
+    if (fromSummary) return fromSummary;
+  }
+
+  const children = readUserCacheWithStale<ChildProfileDTO[]>(
+    userId,
+    "children",
+    DEFAULT_USER_CACHE_TTL_MS,
+  );
+  if (children && !children.isStale) {
+    return children.data.find((candidate) => candidate.id === childId) ?? null;
+  }
+
+  return null;
+}
+
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
   const authRuntime = useAuthRuntime();
@@ -72,9 +103,13 @@ export function useValidatedSelectedChild() {
     return findCachedChild(userId, selectedChildId);
   }, [selectedChildId, userId, validatedSelectedChild]);
   const immediateChildRef = useRef<ChildProfileDTO | null>(immediateChild);
+  const validatedSelectedChildRef = useRef<ChildProfileDTO | null>(
+    validatedSelectedChild,
+  );
   useEffect(() => {
     immediateChildRef.current = immediateChild;
-  }, [immediateChild]);
+    validatedSelectedChildRef.current = validatedSelectedChild;
+  }, [immediateChild, validatedSelectedChild]);
 
   useEffect(() => {
     if (waitingForAuthInit) {
@@ -105,6 +140,17 @@ export function useValidatedSelectedChild() {
 
     consumedQueryChildRef.current = true;
     const requestChildId = selectedChildId;
+    const freshCachedChild =
+      retryKey === 0 ? findFreshCachedChild(userId, requestChildId) : null;
+    if (freshCachedChild) {
+      if (validatedSelectedChildRef.current?.id !== freshCachedChild.id) {
+        setValidatedSelectedChild(freshCachedChild);
+      }
+      return () => {
+        active = false;
+      };
+    }
+
     const hadImmediateChild = Boolean(immediateChildRef.current);
 
     void childService

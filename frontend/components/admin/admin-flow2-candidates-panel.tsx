@@ -59,7 +59,7 @@ export function AdminFlow2CandidatesPanel() {
   const { bookContentQuality } = useAdminServices();
   const t = useTranslations("admin");
   const { formatNumber } = useI18n();
-  const FLOW2_PAGE_SIZE = 50;
+  const FLOW2_PAGE_SIZE = 10;
   const [statusFilter, setStatusFilter] = useState<"" | Flow2CandidateStatus>(
     "PENDING_VERIFICATION",
   );
@@ -347,8 +347,6 @@ export function AdminFlow2CandidatesPanel() {
                   <p className="mt-0.5 text-xs text-muted">
                     {t("flow2.rightsMeta", {
                       rights: selected.rights_basis_label,
-                      consentVersion: selected.consent_version,
-                      sha: selected.image_sha256.slice(0, 12),
                     })}
                   </p>
                 </div>

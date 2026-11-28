@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 from datetime import datetime, timezone
 from uuid import UUID
@@ -27,7 +28,13 @@ from app.services.catalog_tts_cache import (
     get_catalog_tts_default_voice_id,
     resolve_verified_catalog_tts_url,
 )
-from app.services.storage_service import create_signed_image_url
+from app.services.storage_service import (
+    create_cached_signed_image_urls,
+    create_signed_image_url,
+    is_local_storage_enabled,
+)
+
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
 from app.services.word_box_geometry import has_verified_geometry
 
 
@@ -1370,36 +1377,8 @@ class ReadingContentService:
                     if tts_cached_speed is None:
                         tts_cached_speed = expected_speed
 
-        await self.repository.db.rollback()
-
-        image_url = None
-        if book_is_private and book_id_value is not None:
-            image_url = await asyncio.to_thread(
-                private_page_image_url,
-                book_id_value,
-                page_id,
-                revision_id=page_revision_id,
-                base_url=base_url,
-                storage_path=image_path,
-                owner_id=owner_parent_id,
-            )
-        elif image_path:
-            try:
-                image_url = await asyncio.to_thread(create_signed_image_url, image_path)
-            except Exception:
-                # Keep reading text available if Storage preview URLs are temporarily unavailable.
-                image_url = None
-
-        def safe_line_indices(name: str) -> list[int]:
-            value = processing_meta.get(name, [])
-            if not isinstance(value, (list, tuple)):
-                return []
-            return sorted({
-                item for item in value
-                if isinstance(item, int) and not isinstance(item, bool) and item >= 0
-            })
-
-        illustration_url = None
+        ill_id: UUID | None = None
+        ill_storage_path: str | None = None
         illustration_text_free = False
         try:
             from sqlalchemy import desc, select
@@ -1421,11 +1400,105 @@ class ReadingContentService:
                         .limit(1)
                     )
                     if ill_asset is not None:
-                        illustration_url = f"/studio/assets/{ill_asset.Id}/media"
+                        ill_id = ill_asset.Id
+                        raw_ill_path = getattr(ill_asset, "StoragePath", None)
+                        if isinstance(raw_ill_path, str) and raw_ill_path.strip():
+                            ill_storage_path = raw_ill_path.strip()
                         illustration_text_free = True
         except Exception:
-            illustration_url = None
+            ill_id = None
+            ill_storage_path = None
             illustration_text_free = False
+
+        rollback = getattr(self.repository.db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+
+        image_url = None
+        illustration_url = f"/studio/assets/{ill_id}/media" if ill_id is not None else None
+        if book_is_private and book_id_value is not None:
+            image_url = await asyncio.to_thread(
+                private_page_image_url,
+                book_id_value,
+                page_id,
+                revision_id=page_revision_id,
+                base_url=base_url,
+                storage_path=image_path,
+                owner_id=owner_parent_id,
+            )
+        elif not book_is_private:
+            can_sign_ill = (
+                ill_id is not None
+                and ill_storage_path is not None
+                and not is_local_storage_enabled()
+            )
+            if create_signed_image_url is not _ORIGINAL_CREATE_SIGNED_IMAGE_URL:
+                if image_path:
+                    try:
+                        image_url = await asyncio.to_thread(create_signed_image_url, image_path)
+                    except Exception:
+                        # Keep reading text available if Storage preview URLs are temporarily unavailable.
+                        image_url = None
+                if can_sign_ill:
+                    try:
+                        signed_ill = (
+                            await asyncio.to_thread(create_cached_signed_image_urls, [ill_storage_path])
+                        )[0]
+                        if signed_ill:
+                            illustration_url = signed_ill
+                    except Exception:
+                        pass
+            elif image_path and can_sign_ill:
+                try:
+                    signed_pair = await asyncio.to_thread(
+                        create_cached_signed_image_urls,
+                        [image_path, ill_storage_path],
+                    )
+                    image_url = signed_pair[0]
+                    if signed_pair[1]:
+                        illustration_url = signed_pair[1]
+                except Exception:
+                    try:
+                        image_url = (
+                            await asyncio.to_thread(create_cached_signed_image_urls, [image_path])
+                        )[0]
+                    except Exception:
+                        image_url = None
+                    try:
+                        signed_ill = (
+                            await asyncio.to_thread(create_cached_signed_image_urls, [ill_storage_path])
+                        )[0]
+                        if signed_ill:
+                            illustration_url = signed_ill
+                    except Exception:
+                        pass
+            elif image_path:
+                try:
+                    image_url = (
+                        await asyncio.to_thread(create_cached_signed_image_urls, [image_path])
+                    )[0]
+                except Exception:
+                    image_url = None
+            elif can_sign_ill:
+                try:
+                    signed_ill = (
+                        await asyncio.to_thread(create_cached_signed_image_urls, [ill_storage_path])
+                    )[0]
+                    if signed_ill:
+                        illustration_url = signed_ill
+                except Exception:
+                    pass
+
+        def safe_line_indices(name: str) -> list[int]:
+            value = processing_meta.get(name, [])
+            if not isinstance(value, (list, tuple)):
+                return []
+            return sorted({
+                item for item in value
+                if isinstance(item, int) and not isinstance(item, bool) and item >= 0
+            })
 
         return ReadingPageDTO(
             page_id=page_id,

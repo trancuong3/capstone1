@@ -34,6 +34,8 @@ export const adminOcrJobSchema = z.object({
   page_id: z.string().nullable().optional(),
   revision_id: z.string().nullable().optional(),
   submission_id: z.string().nullable().optional(),
+  file_name: z.string().nullable().optional(),
+  queue_position: z.number().int().nonnegative().nullable().optional(),
   worker_id: z.string().nullable().optional(),
   worker_online: z.boolean().optional(),
   progress_pct: z.number().min(0).max(100).nullable().optional(),
@@ -47,6 +49,12 @@ export const adminOcrJobSchema = z.object({
   updated_at: z.string().nullable().optional(),
   completed_at: z.string().nullable().optional(),
 });
+
+export function notifyTasksChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+  }
+}
 
 export type AdminOcrJobDTO = z.infer<typeof adminOcrJobSchema>;
 
@@ -120,6 +128,34 @@ export async function listAdminBookOcrJobs(
     signal,
     { method: "GET", bypassCache: true },
   );
+}
+
+export async function cancelAdminOcrJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<AdminOcrJobDTO> {
+  const job = await requestApi(
+    `/books/admin/ocr-jobs/${encodeURIComponent(jobId)}`,
+    adminOcrJobSchema,
+    signal,
+    { method: "DELETE" },
+  );
+  notifyTasksChanged();
+  return job;
+}
+
+export async function retryAdminOcrJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<AdminOcrJobDTO> {
+  const job = await requestApi(
+    `/books/admin/ocr-jobs/${encodeURIComponent(jobId)}/retry`,
+    adminOcrJobSchema,
+    signal,
+    { method: "POST" },
+  );
+  notifyTasksChanged();
+  return job;
 }
 
 function isTransientAdminPollError(error: unknown): boolean {
@@ -297,7 +333,21 @@ export async function pollAdminBookOcrJobsBatch(
     return completedCount + failedCount >= jobMap.size;
   };
 
-  if (report()) return Array.from(jobMap.values());
+  const allPendingOffline = () => {
+    const pending = Array.from(jobMap.values()).filter(
+      (job) => !isTerminalOcrJobStatus(job.status),
+    );
+    return (
+      pending.length > 0 &&
+      pending.every(
+        (job) =>
+          job.worker_online === false &&
+          (job.status === "QUEUED" || job.status === "FAILED_RETRYABLE"),
+      )
+    );
+  };
+
+  if (report() || allPendingOffline()) return Array.from(jobMap.values());
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (options.signal?.aborted) {
@@ -355,7 +405,7 @@ export async function pollAdminBookOcrJobsBatch(
       continue;
     }
 
-    if (report()) {
+    if (report() || allPendingOffline()) {
       return Array.from(jobMap.values());
     }
   }
@@ -413,6 +463,8 @@ export interface AdminPageService {
     bookId: string,
     signal?: AbortSignal,
   ): Promise<readonly AdminOcrJobDTO[]>;
+  cancelOcrJob?(jobId: string, signal?: AbortSignal): Promise<AdminOcrJobDTO>;
+  retryOcrJob?(jobId: string, signal?: AbortSignal): Promise<AdminOcrJobDTO>;
   getImage(pageId: string, revisionId?: string): Promise<AdminPageImageUI>;
   replaceImageAndReprocess(
     pageId: string,
@@ -551,6 +603,8 @@ export function createAdminPageService(options?: {
           .refine((items) => items.every((item) => item.book_id === bookId)),
       ),
     listOcrJobs: (bookId, signal) => listAdminBookOcrJobs(bookId, signal),
+    cancelOcrJob: (jobId, signal) => cancelAdminOcrJob(jobId, signal),
+    retryOcrJob: (jobId, signal) => retryAdminOcrJob(jobId, signal),
     getImage: (pageId, revisionId) =>
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/image${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
@@ -596,19 +650,23 @@ export function createAdminPageService(options?: {
           undefined,
           { method: "POST", body: form },
         );
+        notifyTasksChanged();
         const finalJob = await pollAdminOcrJob(job, {
           pollIntervalMs,
           maxAttempts: maxPollAttempts,
         });
+        notifyTasksChanged();
         return fetchRevisionForCompletedJob(pageId, finalJob);
       } catch (error) {
         if (!isAsyncRouteUnsupported(error)) throw error;
-        return requestApi(
+        const detail = await requestApi(
           `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr`,
           adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
           undefined,
           { method: "POST", body: form },
         );
+        notifyTasksChanged();
+        return detail;
       }
     },
     upload: async (bookId, pages, onProgress) => {
@@ -638,12 +696,14 @@ export function createAdminPageService(options?: {
                 undefined,
                 { method: "POST", body: form },
               );
+              notifyTasksChanged();
               if (!enqueued.worker_online) {
                 onProgress?.({
                   client_id: page.client_id,
                   file_name: page.file_name,
-                  progress_percent: 100,
-                  status: "PROCESSING",
+                  progress_percent: 0,
+                  status: "QUEUED_OFFLINE",
+                  queued_offline: true,
                   created_pages_count: enqueued.queued_count,
                   skipped_empty_count: 0,
                   failed_pages_count: 0,
@@ -691,6 +751,7 @@ export function createAdminPageService(options?: {
                     },
                   },
                 );
+                notifyTasksChanged();
                 const completedCount = settledJobs.filter(
                   (j) => j.status === "SUCCEEDED",
                 ).length;
@@ -701,11 +762,20 @@ export function createAdminPageService(options?: {
                   0,
                   enqueued.queued_count - completedCount - failedCount,
                 );
+                const pendingOffline =
+                  pendingCount > 0 &&
+                  settledJobs.some(
+                    (j) =>
+                      j.worker_online === false &&
+                      (j.status === "QUEUED" ||
+                        j.status === "FAILED_RETRYABLE"),
+                  );
                 onProgress?.({
                   client_id: page.client_id,
                   file_name: page.file_name,
-                  progress_percent: 100,
-                  status: "PROCESSING",
+                  progress_percent: pendingOffline ? 0 : 100,
+                  status: pendingOffline ? "QUEUED_OFFLINE" : "PROCESSING",
+                  queued_offline: pendingOffline || undefined,
                   created_pages_count: completedCount,
                   skipped_empty_count: 0,
                   failed_pages_count: failedCount,
@@ -736,6 +806,7 @@ export function createAdminPageService(options?: {
                 undefined,
                 { method: "POST", body: form },
               );
+              notifyTasksChanged();
               onProgress?.({
                 client_id: page.client_id,
                 file_name: page.file_name,
@@ -755,6 +826,7 @@ export function createAdminPageService(options?: {
                 undefined,
                 { method: "POST", body: form },
               );
+              notifyTasksChanged();
               if (
                 job.worker_online === false &&
                 (job.status === "QUEUED" || job.status === "FAILED_RETRYABLE")
@@ -762,8 +834,9 @@ export function createAdminPageService(options?: {
                 onProgress?.({
                   client_id: page.client_id,
                   file_name: page.file_name,
-                  progress_percent: 100,
-                  status: "PROCESSING",
+                  progress_percent: 0,
+                  status: "QUEUED_OFFLINE",
+                  queued_offline: true,
                   summary_message: translateRuntime(
                     "admin.pageUploadRuntime.singlePageWaitingWorker",
                   ),
@@ -787,6 +860,7 @@ export function createAdminPageService(options?: {
                   pollIntervalMs,
                   maxAttempts: maxPollAttempts,
                 });
+                notifyTasksChanged();
                 if (
                   finalJob.status === "DEAD_LETTER" ||
                   finalJob.status === "CANCELLED"
@@ -802,20 +876,26 @@ export function createAdminPageService(options?: {
                         "admin.pageUploadRuntime.singlePageFailed",
                       ),
                   });
+                } else if (finalJob.status !== "SUCCEEDED") {
+                  onProgress?.({
+                    client_id: page.client_id,
+                    file_name: page.file_name,
+                    progress_percent: 0,
+                    status: "QUEUED_OFFLINE",
+                    queued_offline: true,
+                    summary_message: translateRuntime(
+                      "admin.pageUploadRuntime.singlePageWaitingWorker",
+                    ),
+                  });
                 } else {
                   onProgress?.({
                     client_id: page.client_id,
                     file_name: page.file_name,
                     progress_percent: 100,
                     status: "PROCESSING",
-                    summary_message:
-                      finalJob.status === "SUCCEEDED"
-                        ? translateRuntime(
-                            "admin.pageUploadRuntime.singlePageSucceeded",
-                          )
-                        : translateRuntime(
-                            "admin.pageUploadRuntime.singlePageWaitingWorker",
-                          ),
+                    summary_message: translateRuntime(
+                      "admin.pageUploadRuntime.singlePageSucceeded",
+                    ),
                   });
                 }
               }
@@ -827,6 +907,7 @@ export function createAdminPageService(options?: {
                 undefined,
                 { method: "POST", body: form },
               );
+              notifyTasksChanged();
               onProgress?.({
                 client_id: page.client_id,
                 file_name: page.file_name,

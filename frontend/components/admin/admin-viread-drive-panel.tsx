@@ -125,27 +125,15 @@ function recoveryHint(
     return t("training.drive.guides.DRIVE_SCOPE_MISMATCH");
   }
   if (errorCode === "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER") {
-    return t(
-      "training.drive.guides.DESKTOP_UNAVAILABLE_CLOUD",
-      undefined,
-      "Cloud server (Render) không thể truy cập Google Drive Desktop (G:\\) trên máy cá nhân. Hãy chuyển sang Apps Script Bridge.",
-    );
+    return t("training.drive.guides.DESKTOP_UNAVAILABLE_CLOUD");
   }
   if (errorCode === "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST") {
-    return t(
-      "training.drive.guides.DESKTOP_REQUIRES_WINDOWS",
-      undefined,
-      "Máy chủ Linux không hỗ trợ Google Drive for Desktop local mount. Hãy kết nối qua Apps Script Bridge.",
-    );
+    return t("training.drive.guides.DESKTOP_REQUIRES_WINDOWS");
   }
   if (errorCode === "DRIVE_ENCRYPTION_KEY_MISSING") {
-    return t(
-      "training.drive.guides.ENCRYPTION_KEY_MISSING",
-      undefined,
-      "Thiếu biến VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự) trên server.",
-    );
+    return t("training.drive.guides.ENCRYPTION_KEY_MISSING");
   }
-  return t("training.drive.guides.genericCode", { code: errorCode });
+  return t("training.drive.guides.genericCode", { code: "" });
 }
 
 export function AdminVireadDrivePanel({
@@ -441,12 +429,8 @@ export function AdminVireadDrivePanel({
                 undefined,
                 "Kết nối hiện tại đang dùng",
               )}{" "}
-              <code className="font-mono text-xs">drive_desktop_sync</code>{" "}
-              {t(
-                "training.drive.desktopCloudWarningMid",
-                undefined,
-                "(chỉ đọc được ổ G:\\ trên máy Windows local). Để backend Cloud (Render) và Google Colab đọc/ghi Drive, hãy chuyển sang",
-              )}{" "}
+              <strong>{t("training.drive.desktopMethod")}</strong>{" "}
+              {t("training.drive.desktopCloudWarningMid")}{" "}
               <strong>{t("training.drive.appsScriptMethod")}</strong>.
             </p>
           </div>
@@ -470,21 +454,6 @@ export function AdminVireadDrivePanel({
               ) : (
                 <>
                   {t("training.drive.missingOauthEnvPrefix")}
-                  <code className="font-mono text-xs">
-                    VIREAD_GDRIVE_OAUTH_CLIENT_ID
-                  </code>
-                  ,{" "}
-                  <code className="font-mono text-xs">
-                    VIREAD_GDRIVE_OAUTH_CLIENT_SECRET
-                  </code>
-                  ,{" "}
-                  <code className="font-mono text-xs">
-                    VIREAD_GDRIVE_OAUTH_REDIRECT_URI
-                  </code>
-                  ,{" "}
-                  <code className="font-mono text-xs">
-                    VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY
-                  </code>
                   {t("training.drive.missingOauthEnvSuffix")}
                 </>
               )}
@@ -544,7 +513,7 @@ export function AdminVireadDrivePanel({
                 <dt className="text-muted">
                   {t("training.drive.folderLabel")}
                 </dt>
-                <dd className="break-all text-end font-mono text-xs text-ink">
+                <dd className="break-words text-end text-xs text-ink">
                   {status.root_folder_path}
                 </dd>
               </div>
@@ -552,8 +521,12 @@ export function AdminVireadDrivePanel({
                 <dt className="text-muted">
                   {t("training.drive.providerLabel")}
                 </dt>
-                <dd className="font-mono text-xs font-bold text-ink">
-                  {status.provider}
+                <dd className="text-xs font-bold text-ink">
+                  {status.provider === "drive_desktop_sync"
+                    ? t("training.drive.desktopMethod")
+                    : status.provider === "apps_script_bridge"
+                      ? t("training.drive.appsScriptMethod")
+                      : "Kho lưu trữ đám mây"}
                 </dd>
               </div>
             </dl>
@@ -564,8 +537,13 @@ export function AdminVireadDrivePanel({
               <p className="font-extrabold text-ink">
                 {t("training.drive.quotaHeading")}
               </p>
-              <span className="font-mono text-xs font-bold text-muted">
-                {quota.warning_level}
+              <span className="text-xs font-bold text-muted">
+                {quota.warning_level === "CRITICAL" ||
+                quota.warning_level === "LOW"
+                  ? "Cần giải phóng dung lượng"
+                  : quota.warning_level === "WARNING"
+                    ? "Dung lượng sắp đầy"
+                    : "Bình thường"}
               </span>
             </div>
             <div className="mt-2.5">
@@ -613,12 +591,6 @@ export function AdminVireadDrivePanel({
               <span>{t("training.drive.selftestHeading")}</span>
             </div>
             <p className="mt-1">
-              {t("training.drive.pathPrefix")}
-              <code className="font-mono">{selfTestResult.logical_path}</code> ·
-              SHA-256:{" "}
-              <code className="font-mono">
-                {selfTestResult.sha256?.slice(0, 16) ?? t("common.emptyDash")}…
-              </code>
               {t("training.drive.privateLabel")}
               <strong>
                 {selfTestResult.is_private ? t("common.yes") : t("common.no")}
@@ -736,24 +708,17 @@ export function AdminVireadDrivePanel({
             </p>
             <p className="mt-1 text-xs text-muted">
               {t("training.drive.appsScriptStep1Prefix")}
-              <code className="font-mono">https://script.google.com/</code>{" "}
               {t("training.drive.appsScriptStep1Mid")}
               {status.required_account_email
                 ? ` (${status.required_account_email})`
                 : ""}
-              {t("training.drive.appsScriptStep1CodeRef")}
-              <code className="font-mono">
-                scripts/google-apps-script/viread_flow2_drive_bridge.gs
-              </code>
-              {t("training.drive.appsScriptStep1Secret")}
-              <code className="font-mono">VIREAD_BRIDGE_SECRET</code>{" "}
-              {t("training.drive.appsScriptStep1End")}
+              {" — mã nguồn cầu nối và khóa bảo mật đã cấu hình."}
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block text-xs font-semibold text-ink">
                 {t("training.drive.appsScriptUrlLabel")}
                 <input
-                  className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 font-mono text-xs text-ink focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                  className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-xs text-ink focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-primary"
                   onChange={(e) => setBridgeUrl(e.target.value)}
                   placeholder={t("training.drive.appsScriptUrlPlaceholder")}
                   type="url"
@@ -761,7 +726,7 @@ export function AdminVireadDrivePanel({
                 />
               </label>
               <label className="block text-xs font-semibold text-ink">
-                VIREAD_BRIDGE_SECRET{" "}
+                Khóa bảo mật kết nối{" "}
                 {serverBridgeSecretConfigured
                   ? t("training.drive.secretConfiguredSuffix")
                   : t("training.drive.secretRequiredSuffix")}

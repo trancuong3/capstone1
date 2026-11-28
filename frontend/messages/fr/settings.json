@@ -34,7 +34,7 @@
     "currentInvalid": "Le mot de passe actuel est incorrect.",
     "changeError": "Impossible de changer le mot de passe. Veuillez vérifier votre connexion et réessayer.",
     "noEmailForRecovery": "Aucun e-mail associé au compte pour envoyer un lien de réinitialisation.",
-    "recoverySent": "Supabase Auth a reçu la demande de réinitialisation. Veuillez vérifier votre boîte de réception et vos courriers indésirables.",
+    "recoverySent": "Le système de compte a reçu votre demande de lien de mot de passe. Vérifiez votre boîte de réception et vos spams.",
     "recoveryError": "Impossible d'envoyer le lien de réinitialisation du mot de passe. Veuillez réessayer plus tard.",
     "showFieldAria": "Afficher {label}",
     "hideFieldAria": "Masquer {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "Langue d'affichage",
     "description": "Choisissez la langue pour la navigation et les paramètres. Le contenu des livres en vietnamien reste inchangé.",
-    "learningContentNote": "Le changement de langue affecte uniquement la barre de navigation, les boutons et les paramètres. Les livres vietnamiens, l'OCR, la reconnaissance vocale (STT) et la synthèse vocale (TTS) restent en vietnamien."
+    "learningContentNote": "Changer de langue met uniquement à jour la navigation, les boutons et les paramètres. Les livres en vietnamien, la reconnaissance des pages et la voix restent en vietnamien."
   }
 }

@@ -267,7 +267,7 @@ def compute_parent_submission_progress(
     if not ocr_done:
         if linked_ocr_status:
             linked_norm = str(linked_ocr_status).strip().upper()
-            if linked_norm == "QUEUED" and worker_online is False:
+            if linked_norm in ("QUEUED", "FAILED_RETRYABLE") and worker_online is False:
                 return 0, 3, 2.0, "staged"
             ocr_pct, _ = compute_ocr_job_progress(
                 status=linked_norm,

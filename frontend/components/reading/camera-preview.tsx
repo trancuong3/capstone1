@@ -360,10 +360,10 @@ export function CameraPreview({
             if (serviceUnavailable || consecutiveErrorCountRef.current >= 3) {
               const reason =
                 isServiceError(error) && error.status === 504
-                  ? "Máy chủ OCR phản hồi chậm hơn dự kiến. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng."
+                  ? "Hệ thống nhận diện trang đang xử lý chậm hơn dự kiến. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng."
                   : isServiceError(error) && error.message
                     ? error.message
-                    : "Máy chủ OCR đang tạm tắt hoặc tạm bận. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng.";
+                    : "Hệ thống nhận diện trang đang tạm nghỉ hoặc tạm bận. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng.";
               setAutoScan(false);
               setOcrUnavailableBanner(reason);
               setScanResult({

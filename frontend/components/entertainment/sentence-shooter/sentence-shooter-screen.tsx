@@ -511,7 +511,7 @@ export function SentenceShooterScreen({
   });
   const [selectedBookId, setSelectedBookId] = useState("");
   const [booksPage, setBooksPage] = useState(1);
-  const SHOOTER_BOOKS_PAGE_SIZE = 9;
+  const SHOOTER_BOOKS_PAGE_SIZE = 6;
   const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
@@ -871,7 +871,14 @@ export function SentenceShooterScreen({
           controller.signal,
         );
         if (!active) return;
-        setBooksPage(1);
+        const initialBookIdx = initialBookId
+          ? books.findIndex((book) => book.id === initialBookId)
+          : -1;
+        setBooksPage(
+          initialBookIdx >= 0
+            ? Math.floor(initialBookIdx / SHOOTER_BOOKS_PAGE_SIZE) + 1
+            : 1,
+        );
         setBookState({ status: "ready", books });
       } catch {
         if (!active || controller.signal.aborted) return;
@@ -883,7 +890,14 @@ export function SentenceShooterScreen({
       active = false;
       controller.abort();
     };
-  }, [childId, difficulty, reloadKey, shooterService, totalRounds]);
+  }, [
+    childId,
+    difficulty,
+    initialBookId,
+    reloadKey,
+    shooterService,
+    totalRounds,
+  ]);
 
   const effectiveSelectedBookId =
     !hasManuallySelectedBook && initialBookId
@@ -2504,95 +2518,109 @@ export function SentenceShooterScreen({
             title={t("sentenceShooter.emptyBooksTitle")}
           />
         ) : null}
-        {bookState.status === "ready" && bookState.books.length > 0 ? (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {bookState.books
-                .slice(
-                  (booksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
-                  booksPage * SHOOTER_BOOKS_PAGE_SIZE,
-                )
-                .map((book) => {
-                  const selected = effectiveSelectedBookId === book.id;
-                  return (
-                    <button
-                      aria-pressed={selected}
-                      className={[
-                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
-                        selected
-                          ? "border-primary ring-2 ring-primary/20"
-                          : "border-border hover:border-primary/60",
-                      ].join(" ")}
-                      key={book.id}
-                      onClick={() => {
-                        setHasManuallySelectedBook(true);
-                        setSelectedBookId(book.id);
-                      }}
-                      type="button"
-                    >
-                      <BookCover book={toBookCover(book)} size="small" />
-                      <span className="min-w-0">
-                        <span
-                          className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
-                          dir="ltr"
-                          lang="vi"
+        {bookState.status === "ready" && bookState.books.length > 0
+          ? (() => {
+              const totalBooksPages = Math.max(
+                1,
+                Math.ceil(bookState.books.length / SHOOTER_BOOKS_PAGE_SIZE),
+              );
+              const safeBooksPage = Math.min(
+                Math.max(1, booksPage),
+                totalBooksPages,
+              );
+              const visibleBooks = bookState.books.slice(
+                (safeBooksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
+                safeBooksPage * SHOOTER_BOOKS_PAGE_SIZE,
+              );
+              return (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleBooks.map((book) => {
+                      const selected = effectiveSelectedBookId === book.id;
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={[
+                            "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                            selected
+                              ? "border-primary ring-2 ring-primary/20"
+                              : "border-border hover:border-primary/60",
+                          ].join(" ")}
+                          key={book.id}
+                          onClick={() => {
+                            setHasManuallySelectedBook(true);
+                            setSelectedBookId(book.id);
+                          }}
+                          type="button"
                         >
-                          {book.title}
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-muted">
-                          {book.author ? (
-                            <>
-                              {t("sentenceShooter.authorPrefix", {
-                                author: "",
-                              }).trimEnd()}{" "}
-                              <span
-                                className="viread-learning-content"
-                                dir="ltr"
-                                lang="vi"
-                              >
-                                {book.author}
-                              </span>
-                            </>
-                          ) : (
-                            t("sentenceShooter.defaultBookSource")
-                          )}
-                        </span>
-                        <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                          {t("sentenceShooter.readyRoundsBadge", {
-                            count: book.available_rounds,
-                          })}
-                        </span>
-                        {(book.matched_difficult_words?.length ?? 0) > 0 ? (
-                          <span className="mt-2 inline-flex flex-wrap items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning">
-                            <Sparkles aria-hidden="true" className="size-3" />
-                            {t(
-                              "sentenceShooter.difficultWordReviewPrefix",
-                            )}{" "}
+                          <BookCover book={toBookCover(book)} size="small" />
+                          <span className="min-w-0">
                             <span
-                              className="viread-learning-content"
+                              className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
                               dir="ltr"
                               lang="vi"
                             >
-                              {book.matched_difficult_words?.join(", ")}
+                              {book.title}
                             </span>
+                            <span className="mt-1 block text-sm font-semibold text-muted">
+                              {book.author ? (
+                                <>
+                                  {t("sentenceShooter.authorPrefix", {
+                                    author: "",
+                                  }).trimEnd()}{" "}
+                                  <span
+                                    className="viread-learning-content"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
+                                    {book.author}
+                                  </span>
+                                </>
+                              ) : (
+                                t("sentenceShooter.defaultBookSource")
+                              )}
+                            </span>
+                            <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                              {t("sentenceShooter.readyRoundsBadge", {
+                                count: book.available_rounds,
+                              })}
+                            </span>
+                            {(book.matched_difficult_words?.length ?? 0) > 0 ? (
+                              <span className="mt-2 inline-flex flex-wrap items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning">
+                                <Sparkles
+                                  aria-hidden="true"
+                                  className="size-3"
+                                />
+                                {t(
+                                  "sentenceShooter.difficultWordReviewPrefix",
+                                )}{" "}
+                                <span
+                                  className="viread-learning-content"
+                                  dir="ltr"
+                                  lang="vi"
+                                >
+                                  {book.matched_difficult_words?.join(", ")}
+                                </span>
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  );
-                })}
-            </div>
-            <PaginationBar
-              ariaLabel={t("sentenceShooter.booksPaginationAria")}
-              compact
-              itemLabel={t("sentenceShooter.booksPaginationItem")}
-              onPageChange={setBooksPage}
-              page={booksPage}
-              pageSize={SHOOTER_BOOKS_PAGE_SIZE}
-              total={bookState.books.length}
-            />
-          </>
-        ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <PaginationBar
+                    ariaLabel={t("sentenceShooter.booksPaginationAria")}
+                    compact
+                    itemLabel={t("sentenceShooter.booksPaginationItem")}
+                    onPageChange={setBooksPage}
+                    page={safeBooksPage}
+                    pageSize={SHOOTER_BOOKS_PAGE_SIZE}
+                    total={bookState.books.length}
+                  />
+                </>
+              );
+            })()
+          : null}
       </div>
 
       <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-between">
