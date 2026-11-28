@@ -62,8 +62,10 @@ async def list_my_book_reports(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await _service(db).list_parent_reports(
-        actor_id, limit=limit, offset=offset
+        actor_id, limit=resolved_limit, offset=resolved_offset
     )
 
 
@@ -93,16 +95,24 @@ async def list_admin_book_reports(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_status = report_status if isinstance(report_status, str) else None
+    resolved_issue_type = issue_type if isinstance(issue_type, str) else None
+    resolved_book_id = book_id if isinstance(book_id, UUID) else None
+    resolved_search = search if isinstance(search, str) else None
+    resolved_created_after = created_after if isinstance(created_after, datetime) else None
+    resolved_created_before = created_before if isinstance(created_before, datetime) else None
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await _service(db).list_admin_reports(
         actor_id,
-        status=report_status,
-        issue_type=issue_type,
-        book_id=book_id,
-        search=search,
-        created_after=created_after,
-        created_before=created_before,
-        limit=limit,
-        offset=offset,
+        status=resolved_status,
+        issue_type=resolved_issue_type,
+        book_id=resolved_book_id,
+        search=resolved_search,
+        created_after=resolved_created_after,
+        created_before=resolved_created_before,
+        limit=resolved_limit,
+        offset=resolved_offset,
     )
 
 
@@ -141,13 +151,18 @@ async def list_admin_quality_books(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_search = search if isinstance(search, str) else None
+    resolved_approval = approval_status if isinstance(approval_status, str) else None
+    resolved_alert = alert_filter if isinstance(alert_filter, str) else None
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await _service(db).list_books(
         actor_id,
-        search=search,
-        limit=limit,
-        offset=offset,
-        status_filter=approval_status,
-        alert_filter=alert_filter,
+        search=resolved_search,
+        limit=resolved_limit,
+        offset=resolved_offset,
+        status_filter=resolved_approval,
+        alert_filter=resolved_alert,
     )
 
 
@@ -167,7 +182,8 @@ async def get_admin_book_rights(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _service(db).get_book_rights(actor_id, book_id, page_id=page_id)
+    resolved_page_id = page_id if isinstance(page_id, UUID) else None
+    return await _service(db).get_book_rights(actor_id, book_id, page_id=resolved_page_id)
 
 
 @router.put("/admin/quality/books/{book_id}/rights", response_model=BookRightsEvidenceRead)

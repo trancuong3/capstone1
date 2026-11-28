@@ -24,6 +24,8 @@ from pydantic.fields import FieldInfo  # noqa: E402
 
 from app.api.routes import (  # noqa: E402
     book,
+    book_assets,
+    book_content_quality,
     child_progress,
     karaoke_practice,
     karaoke_processing,
@@ -515,6 +517,97 @@ class RouteDirectCallDefaultsTests(unittest.IsolatedAsyncioTestCase):
         self._assert_no_field_info_leaks(mem_svc.list_sessions)
         mem_svc.list_sessions.assert_awaited_once_with(
             actor_id, child_id, limit=10
+        )
+
+    async def test_book_quality_and_cover_upload_routes_direct_call_unwrap_defaults(self):
+        actor_id = uuid4()
+        book_id = uuid4()
+        qual_svc = SimpleNamespace(
+            list_parent_reports=AsyncMock(return_value="mine_ok"),
+            list_admin_reports=AsyncMock(return_value="admin_reports_ok"),
+            list_books=AsyncMock(return_value="admin_books_ok"),
+            get_book_rights=AsyncMock(return_value="rights_ok"),
+        )
+        with patch.object(book_content_quality, "_service", return_value=qual_svc):
+            self.assertEqual(
+                await book_content_quality.list_my_book_reports(actor_id=actor_id, db=None),
+                "mine_ok",
+            )
+            self._assert_no_field_info_leaks(qual_svc.list_parent_reports)
+            qual_svc.list_parent_reports.assert_awaited_once_with(
+                actor_id, limit=20, offset=0
+            )
+
+            self.assertEqual(
+                await book_content_quality.list_admin_book_reports(actor_id=actor_id, db=None),
+                "admin_reports_ok",
+            )
+            self._assert_no_field_info_leaks(qual_svc.list_admin_reports)
+            qual_svc.list_admin_reports.assert_awaited_once_with(
+                actor_id,
+                status=None,
+                issue_type=None,
+                book_id=None,
+                search=None,
+                created_after=None,
+                created_before=None,
+                limit=20,
+                offset=0,
+            )
+
+            self.assertEqual(
+                await book_content_quality.list_admin_quality_books(actor_id=actor_id, db=None),
+                "admin_books_ok",
+            )
+            self._assert_no_field_info_leaks(qual_svc.list_books)
+            qual_svc.list_books.assert_awaited_once_with(
+                actor_id,
+                search=None,
+                limit=20,
+                offset=0,
+                status_filter=None,
+                alert_filter=None,
+            )
+
+            self.assertEqual(
+                await book_content_quality.get_admin_book_rights(
+                    book_id, actor_id=actor_id, db=None
+                ),
+                "rights_ok",
+            )
+            self._assert_no_field_info_leaks(qual_svc.get_book_rights)
+            qual_svc.get_book_rights.assert_awaited_once_with(
+                actor_id, book_id, page_id=None
+            )
+
+        cover_svc = SimpleNamespace(
+            upload_user_cover=AsyncMock(return_value="cover_ok")
+        )
+        fake_file = SimpleNamespace(
+            content_type="image/jpeg",
+            read=AsyncMock(return_value=b"jpeg-bytes"),
+            close=AsyncMock(),
+        )
+        with patch.object(book_assets, "BookCoverService", return_value=cover_svc):
+            res_cover = await book_assets.upload_book_cover(
+                book_id,
+                Response(),
+                file=fake_file,
+                actor_id=actor_id,
+                db=None,
+            )
+        self.assertEqual(res_cover, "cover_ok")
+        self._assert_no_field_info_leaks(cover_svc.upload_user_cover)
+        cover_svc.upload_user_cover.assert_awaited_once_with(
+            actor_id,
+            book_id,
+            b"jpeg-bytes",
+            "image/jpeg",
+            crop_x=None,
+            crop_y=None,
+            crop_w=None,
+            crop_h=None,
+            rotation=0,
         )
 
 
