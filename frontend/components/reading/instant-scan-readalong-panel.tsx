@@ -338,12 +338,38 @@ export function InstantScanReadAlongPanel({
     return basePhonicsLesson;
   }, [aiPhonicsOverride, basePhonicsLesson, selectedWord]);
 
+  const PHONICS_AUTO_HIDE_DELAY_MS = 1800;
+  const [isPhonicsAutoHiding, setIsPhonicsAutoHiding] = useState(false);
+  const phonicsAutoHideTimerRef = useRef<number | null>(null);
+  const selectedWordIndexRef = useRef(selectedWordIndex);
+  useEffect(() => {
+    selectedWordIndexRef.current = selectedWordIndex;
+  }, [selectedWordIndex]);
+
+  const clearPhonicsAutoHideTimer = useCallback(() => {
+    if (phonicsAutoHideTimerRef.current !== null) {
+      window.clearTimeout(phonicsAutoHideTimerRef.current);
+      phonicsAutoHideTimerRef.current = null;
+    }
+    setIsPhonicsAutoHiding(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (phonicsAutoHideTimerRef.current !== null) {
+        window.clearTimeout(phonicsAutoHideTimerRef.current);
+        phonicsAutoHideTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleStopAudio = useCallback(() => {
+    clearPhonicsAutoHideTimer();
     speechPlayer.stop();
     setTtsWordIndex(null);
     setPhonicsStepIndex(null);
     setTtsMode("idle");
-  }, [speechPlayer]);
+  }, [clearPhonicsAutoHideTimer, speechPlayer]);
 
   const handlePlayPassage = useCallback(async () => {
     const cleanPassage = ocrText.normalize("NFC").trim();
@@ -398,6 +424,7 @@ export function InstantScanReadAlongPanel({
 
   const handleSelectWord = useCallback(
     (index: number) => {
+      clearPhonicsAutoHideTimer();
       if (ttsMode === "passage" && speechPlayer.isPlaying) {
         speechPlayer.stop();
         setTtsWordIndex(null);
@@ -407,7 +434,7 @@ export function InstantScanReadAlongPanel({
       setTtsMode("idle");
       setSelectedWordIndex(index);
     },
-    [speechPlayer, ttsMode],
+    [clearPhonicsAutoHideTimer, speechPlayer, ttsMode],
   );
 
   const handlePlaySelectedWord = useCallback(async () => {
@@ -436,6 +463,8 @@ export function InstantScanReadAlongPanel({
 
   const handlePlaySelectedPhonics = useCallback(async () => {
     if (!activePhonicsLesson || !activePhonicsLesson.supported) return;
+    const expectedIndex = selectedWordIndex;
+    clearPhonicsAutoHideTimer();
     if (speechRecorder.isRecording) {
       stopLiveRecognition();
       speechRecorder.cancel();
@@ -454,6 +483,18 @@ export function InstantScanReadAlongPanel({
           setTtsMode("idle");
         },
       });
+      setPhonicsStepIndex(null);
+      setTtsMode("idle");
+      if (selectedWordIndexRef.current === expectedIndex) {
+        setIsPhonicsAutoHiding(true);
+        phonicsAutoHideTimerRef.current = window.setTimeout(() => {
+          phonicsAutoHideTimerRef.current = null;
+          setIsPhonicsAutoHiding(false);
+          if (selectedWordIndexRef.current === expectedIndex) {
+            setSelectedWordIndex(null);
+          }
+        }, PHONICS_AUTO_HIDE_DELAY_MS);
+      }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
       setPhonicsStepIndex(null);
@@ -462,6 +503,8 @@ export function InstantScanReadAlongPanel({
     }
   }, [
     activePhonicsLesson,
+    clearPhonicsAutoHideTimer,
+    selectedWordIndex,
     speechPlayer,
     speechRecorder,
     stopLiveRecognition,
@@ -962,11 +1005,15 @@ export function InstantScanReadAlongPanel({
       {activePhonicsLesson ? (
         <PhonicsLessonCard
           activeStepIndex={phonicsStepIndex}
+          autoHideDurationMs={PHONICS_AUTO_HIDE_DELAY_MS}
+          compact
           isAnalyzingAi={isAnalyzingPhonicsAi}
+          isAutoHiding={isPhonicsAutoHiding}
           isPlayingPhonics={ttsMode === "phonics" && speechPlayer.isPlaying}
           isPlayingWord={ttsMode === "word" && speechPlayer.isPlaying}
           lesson={activePhonicsLesson}
           onClose={() => {
+            clearPhonicsAutoHideTimer();
             if (ttsMode === "word" || ttsMode === "phonics") {
               handleStopAudio();
             }
@@ -975,6 +1022,7 @@ export function InstantScanReadAlongPanel({
           onPlayPhonics={() => void handlePlaySelectedPhonics()}
           onPlayWord={() => void handlePlaySelectedWord()}
           onStopAudio={handleStopAudio}
+          onUserInteract={clearPhonicsAutoHideTimer}
         />
       ) : null}
     </section>

@@ -189,9 +189,7 @@ export function ReadingLayout({
     countdown !== null ||
     isPlayingSample ||
     isReadingWord ||
-    (!suppressSecondaryBanners &&
-      isMicRecording &&
-      isCurrentWordMispronounced);
+    (!suppressSecondaryBanners && isMicRecording && isCurrentWordMispronounced);
   const showCompanionBubble =
     !retryMode && !suppressSecondaryBanners && Boolean(companionBubble);
   const hasFeedbackPanel =
@@ -629,6 +627,11 @@ export function ReadingLayout({
               ).length
             }
             currentWord={currentWordText}
+            latestTranscript={
+              !retryMode && !suppressSecondaryBanners && !isReadingWord
+                ? latestTranscript
+                : null
+            }
           />
         </div>
       </div>

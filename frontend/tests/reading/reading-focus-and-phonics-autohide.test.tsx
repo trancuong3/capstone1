@@ -4,7 +4,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -116,7 +115,12 @@ function makePage(
       word_id: `50000000-0000-4000-8000-00000000${String(pageNum).padStart(2, "0")}${String(index).padStart(2, "0")}`,
       word_index: index,
       text: w,
-      bbox: [0.06 + (index % 5) * 0.16, 0.18 + Math.floor(index / 5) * 0.1, 0.12, 0.05] as const,
+      bbox: [
+        0.06 + (index % 5) * 0.16,
+        0.18 + Math.floor(index / 5) * 0.1,
+        0.12,
+        0.05,
+      ] as const,
     })),
   };
 }
@@ -135,90 +139,89 @@ function createReadingServices(activePage: ReadingPageDTO): ReadingServices {
     current_index: 0,
     total_pages: 2,
     completed_pages: 0,
-    pages: [
-      {
-        page_id: activePage.page_id,
-        page_revision_id: activePage.page_revision_id,
-        page_number: activePage.page_number,
-        page_order: 0,
-        status: "IN_PROGRESS",
-        started_at: "2026-11-28T10:00:00Z",
-        completed_at: null,
-      },
-      {
-        page_id: secondPage.page_id,
-        page_revision_id: secondPage.page_revision_id,
-        page_number: secondPage.page_number,
-        page_order: 1,
-        status: "PENDING",
-        started_at: null,
-        completed_at: null,
-      },
-    ],
+    pages: [activePage, secondPage].map((p, order) => ({
+      page_id: p.page_id,
+      page_revision_id: p.page_revision_id,
+      page_number: p.page_number,
+      page_order: order,
+      status: order === 0 ? ("IN_PROGRESS" as const) : ("PENDING" as const),
+      started_at: null,
+      completed_at: null,
+    })),
   };
 
   return {
+    bookService: {
+      list: vi.fn().mockResolvedValue([bookFixture]),
+      get: vi.fn().mockResolvedValue(bookFixture),
+      listPages: vi.fn().mockResolvedValue([]),
+    },
+    childService: {
+      list: vi.fn().mockResolvedValue([childFixture]),
+      get: vi.fn().mockResolvedValue(childFixture),
+    },
+    comprehensionService: {
+      getQuestion: vi.fn().mockRejectedValue(new Error("No question")),
+      submitAnswer: vi.fn().mockRejectedValue(new Error("No answer")),
+    },
+    devicePermissionService: {
+      getSnapshot: vi
+        .fn()
+        .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getMicrophonePermissionState: vi.fn().mockResolvedValue("granted"),
+      watchMicrophonePermissionState: vi
+        .fn()
+        .mockResolvedValue(() => undefined),
+      requestAccess: vi.fn().mockResolvedValue({
+        status: "granted",
+        verified: true,
+        message: "OK",
+        mediaRecorderSupported: true,
+      }),
+      retry: vi.fn().mockResolvedValue("ready"),
+    },
+    pageMatchService: {
+      retryCurrentPage: vi.fn().mockResolvedValue(activePage),
+      selectPage: vi.fn().mockResolvedValue(secondPage),
+    },
     readingService: {
-      getSession: vi.fn(async () => ({
-        id: TEST_SESSION_ID,
-        child_id: childFixture.id,
-        book_id: bookFixture.id,
+      get: vi.fn().mockResolvedValue({
+        ...sessionSummaryFixture,
         state: "PAGE_READY",
-        started_at: "2026-11-28T10:00:00Z",
         ended_at: null,
         duration_ms: null,
-      })),
-      getCurrentPage: vi.fn(async () => activePage),
-      getSessionProgress: vi.fn(async () => progress),
-      navigateToPage: vi.fn(async () => progress),
-      completeSessionPage: vi.fn(async () => progress),
-      getPracticeState: vi.fn(async () => ({
-        session_id: TEST_SESSION_ID,
-        legacy_evidence_present: false,
-        pages: [],
-        words: [],
-      })),
-      getCompletionSummary: vi.fn(async () => sessionSummaryFixture),
-      finishSession: vi.fn(async () => ({
-        id: TEST_SESSION_ID,
-        child_id: childFixture.id,
-        book_id: bookFixture.id,
-        state: "FINISHED",
-        started_at: "2026-11-28T10:00:00Z",
-        ended_at: "2026-11-28T10:05:00Z",
-        duration_ms: 300_000,
-      })),
-      createEvent: vi.fn(async () => ({
-        Id: "evt-1",
-        SessionId: TEST_SESSION_ID,
-        PageId: activePage.page_id,
-        PageRevisionId: activePage.page_revision_id,
-        WordId: null,
-        Type: "WORD_HELP",
-        StartMs: 0,
-        EndMs: null,
-        Confidence: null,
-        Status: "CONFIRMED",
-        Metadata: {},
-        CreatedAt: "2026-11-28T10:00:00Z",
-      })),
-      createRetryEvent: vi.fn(),
-      getSessionQuestions: vi.fn(async () => ({
-        session_id: TEST_SESSION_ID,
-        questions: [],
-      })),
-    } as unknown as ReadingServices["readingService"],
-    bookService: {
-      get: vi.fn(async () => bookFixture),
-      listPages: vi.fn(async () => []),
-    } as unknown as ReadingServices["bookService"],
-    childService: {
-      get: vi.fn(async () => childFixture),
-    } as unknown as ReadingServices["childService"],
+      }),
+      getCurrentPage: vi.fn().mockResolvedValue(activePage),
+      getPageProgress: vi.fn().mockResolvedValue(progress),
+      navigateToPage: vi.fn().mockResolvedValue(progress),
+      completeCurrentPage: vi.fn().mockResolvedValue({
+        ...progress,
+        completed_pages: 1,
+      }),
+      getCompletionSummary: vi.fn().mockResolvedValue({
+        duration_minutes: 3,
+        pages_explored: 1,
+        practiced_words: 1,
+      }),
+      finish: vi.fn().mockResolvedValue({}),
+      createRetryEvent: vi.fn().mockResolvedValue(undefined),
+    },
     readingSocketAdapter: {
-      subscribe: vi.fn(() => () => {}),
-    } as unknown as ReadingServices["readingSocketAdapter"],
-  };
+      subscribe: vi.fn().mockReturnValue(vi.fn()),
+      sendControl: vi.fn().mockResolvedValue("LISTENING"),
+      reconnect: vi.fn().mockResolvedValue("recovered"),
+      getSafetySnapshot: vi.fn().mockReturnValue({
+        connection: "connected",
+        scoring_active: false,
+        evidence_valid: false,
+        child_error_events: [],
+      }),
+    },
+    tutorService: {
+      requestReadExample: vi.fn(),
+      retryReadExample: vi.fn(),
+    },
+  } as unknown as ReadingServices;
 }
 
 describe("Reading focus decluttering & phonics auto-hide", () => {
@@ -230,14 +233,15 @@ describe("Reading focus decluttering & phonics auto-hide", () => {
     speechPlayerMock.play.mockResolvedValue(undefined);
     speechPlayerMock.playPhonicsLesson.mockResolvedValue(undefined);
     speechRecorderMock.getQuality.mockReturnValue({
+      status: "SPEECH_DETECTED",
       durationMs: 1200,
-      peakRms: 0.08,
-      speechFrames: 14,
-      totalFrames: 24,
-      speechRatio: 0.58,
-      noiseFloorRms: 0.005,
-      clippingRatio: 0,
-      speechActiveMs: 700,
+      speechDurationMs: 700,
+      silenceDurationMs: 500,
+      rms: 0.05,
+      peak: 0.08,
+      noiseFloor: 0.005,
+      clipped: false,
+      isSpeaking: false,
     });
   });
 
