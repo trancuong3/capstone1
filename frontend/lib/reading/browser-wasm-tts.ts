@@ -72,6 +72,16 @@ export interface BrowserWasmSynthesizeResult {
   readonly synthMs: number;
 }
 
+export interface PhonicsStepTiming {
+  readonly index: number;
+  readonly startSec: number;
+  readonly endSec: number;
+}
+
+export interface BrowserWasmPhonicsResult extends BrowserWasmSynthesizeResult {
+  readonly stepTimings: readonly PhonicsStepTiming[];
+}
+
 export function normalizePhonicsSpeechTextForTts(rawText: string): string {
   const cleaned = rawText
     .normalize("NFC")
@@ -311,6 +321,24 @@ export class BrowserWasmTtsClient {
     return true;
   }
 
+  private syncReadyGenders(
+    rawReadyGenders?: readonly VoiceGender[],
+    fallbackGender?: VoiceGender,
+  ): void {
+    if (Array.isArray(rawReadyGenders) && rawReadyGenders.length > 0) {
+      this.readyGenders.clear();
+      for (const g of rawReadyGenders) {
+        if (g === "male" || g === "female") {
+          this.readyGenders.add(g);
+        }
+      }
+      return;
+    }
+    if (fallbackGender === "male" || fallbackGender === "female") {
+      this.readyGenders.add(fallbackGender);
+    }
+  }
+
   subscribeProgress(
     listener: (event: WasmTtsProgressEvent) => void,
   ): () => void {
@@ -332,6 +360,7 @@ export class BrowserWasmTtsClient {
         type?: string;
         id?: string;
         gender?: VoiceGender;
+        readyGenders?: readonly VoiceGender[];
         stage?: string;
         file?: string;
         index?: number;
@@ -339,6 +368,7 @@ export class BrowserWasmTtsClient {
         sampleRate?: number;
         durationSeconds?: number;
         synthMs?: number;
+        stepTimings?: readonly PhonicsStepTiming[];
         wavBuffer?: ArrayBuffer;
         message?: string;
       };
@@ -375,15 +405,33 @@ export class BrowserWasmTtsClient {
       job.cleanup?.();
       if (msg.type === "error") {
         job.reject(new Error(msg.message ?? "WASM TTS failed"));
-      } else if (msg.type === "result" && msg.wavBuffer) {
+      } else if (msg.type === "phonics_result" && msg.wavBuffer) {
+        const resolvedGender: VoiceGender =
+          msg.gender === "male" ? "male" : "female";
+        this.syncReadyGenders(msg.readyGenders, resolvedGender);
         job.resolve({
           wavBuffer: msg.wavBuffer,
           sampleRate: msg.sampleRate ?? 22050,
           durationSeconds: msg.durationSeconds ?? 0,
-          gender: msg.gender === "male" ? "male" : "female",
+          gender: resolvedGender,
+          synthMs: msg.synthMs ?? 0,
+          stepTimings: Array.isArray(msg.stepTimings) ? msg.stepTimings : [],
+        } satisfies BrowserWasmPhonicsResult);
+      } else if (msg.type === "result" && msg.wavBuffer) {
+        const resolvedGender: VoiceGender =
+          msg.gender === "male" ? "male" : "female";
+        this.syncReadyGenders(msg.readyGenders, resolvedGender);
+        job.resolve({
+          wavBuffer: msg.wavBuffer,
+          sampleRate: msg.sampleRate ?? 22050,
+          durationSeconds: msg.durationSeconds ?? 0,
+          gender: resolvedGender,
           synthMs: msg.synthMs ?? 0,
         } satisfies BrowserWasmSynthesizeResult);
       } else {
+        if (msg.type === "ready") {
+          this.syncReadyGenders(msg.readyGenders, msg.gender);
+        }
         job.resolve(msg);
       }
     };
@@ -478,9 +526,12 @@ export class BrowserWasmTtsClient {
       let initPromise = this.pendingInits.get(gender);
       if (!initPromise) {
         const req = this.postRequest<unknown>({ type: "init", gender }, 90_000)
-          .then(() => {
+          .then((res) => {
             if (this.worker) {
-              this.readyGenders.add(gender);
+              const readyList = (
+                res as { readyGenders?: readonly VoiceGender[] } | undefined
+              )?.readyGenders;
+              this.syncReadyGenders(readyList, gender);
             }
           })
           .catch((err) => {
@@ -534,6 +585,55 @@ export class BrowserWasmTtsClient {
       {
         type: "synthesize",
         text: normalizedText,
+        gender,
+        region: options.region ?? "north",
+        speed: options.speed ?? 1.0,
+      },
+      synthTimeoutMs,
+      options.signal,
+    );
+  }
+
+  async synthesizePhonics(
+    steps: readonly {
+      readonly index: number;
+      readonly kind?: string;
+      readonly spokenText: string;
+      readonly pauseAfterMs: number;
+    }[],
+    options: {
+      gender?: VoiceGender;
+      region?: VoiceRegion;
+      speed?: number;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      initTimeoutMs?: number;
+      onProgress?: (event: WasmTtsProgressEvent) => void;
+    } = {},
+  ): Promise<BrowserWasmPhonicsResult> {
+    const gender: VoiceGender = options.gender === "male" ? "male" : "female";
+    const synthTimeoutMs = options.timeoutMs ?? 25_000;
+    const initTimeoutMs =
+      options.initTimeoutMs ?? Math.max(synthTimeoutMs, 60_000);
+
+    await this.init({
+      gender,
+      signal: options.signal,
+      timeoutMs: initTimeoutMs,
+      onProgress: options.onProgress,
+    });
+
+    const normalizedSteps = steps.map((step, idx) => ({
+      index: typeof step.index === "number" ? step.index : idx,
+      kind: step.kind ?? "step",
+      spokenText: normalizePhonicsSpeechTextForTts(step.spokenText),
+      pauseAfterMs: step.pauseAfterMs,
+    }));
+
+    return this.postRequest<BrowserWasmPhonicsResult>(
+      {
+        type: "synthesize_phonics",
+        steps: normalizedSteps,
         gender,
         region: options.region ?? "north",
         speed: options.speed ?? 1.0,

@@ -33,6 +33,7 @@ import {
   detectBrowserWasmTtsSupport,
   getBrowserWasmTtsClient,
   normalizePhonicsSpeechTextForTts,
+  type PhonicsStepTiming as WasmPhonicsStepTiming,
 } from "@/lib/reading/browser-wasm-tts";
 import type {
   PhonicsLessonStep,
@@ -536,6 +537,16 @@ function canUseAllowedDeviceFallbackTts(
   const isSessionLocked = voice?.bypassSessionLock
     ? false
     : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
+  const isTransientBusyError = (err: unknown): boolean => {
+    if (!err) return false;
+    const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
+    const status = typeof rec.status === "number" ? rec.status : NaN;
+    const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${err instanceof Error ? err.message : String(err)}`;
+    if (status === 409 && !/SESSION_VOICE_LOCKED/i.test(combined)) {
+      return true;
+    }
+    return isTransientBusyTtsError(err);
+  };
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
     (isTechnicalServerOutage(error) ||
@@ -560,12 +571,17 @@ function canUseAllowedDeviceFallbackTts(
     (isAndroidNativeSpeechAvailable() ||
       wasmAvailable ||
       hasVietnameseBrowserVoice());
+  const wasmBusyFallback =
+    wasmAvailable &&
+    !isAndroidNativeSpeechAvailable() &&
+    isTransientBusyError(error);
   const offlineWasmOutageFallback =
     wasmAvailable &&
     (isHostedNoLiveServerTts(error, voice) ||
       isTechnicalServerOutage(error) ||
       Boolean(alreadyPinnedDevice === "wasm_tts") ||
-      isNoLiveServerTtsKnown(voice));
+      isNoLiveServerTtsKnown(voice) ||
+      wasmBusyFallback);
 
   if (
     isSessionLocked &&
@@ -607,14 +623,7 @@ function shouldSkipBackendTtsForVoice(
   voice: ResolvedOperationVoice,
   hasBackendCacheTarget = false,
 ): boolean {
-  // Strict Offline-First priority: NEVER skip Tier 1 Offline VieNeu
-  // `catalog_cache` / IndexedDB / backend `precomputed_cache` when a backend
-  // cache target exists (COACHING, CATALOG, wordSample, page/book refs).
-  if (
-    hasBackendCacheTarget ||
-    !canUseAllowedDeviceFallbackTts(voice) ||
-    voice.provider !== "local"
-  ) {
+  if (!canUseAllowedDeviceFallbackTts(voice) || voice.provider !== "local") {
     return false;
   }
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured();
@@ -629,9 +638,20 @@ function shouldSkipBackendTtsForVoice(
     canUseGoogleTtsFallback() &&
     Boolean(health?.google.tts_configured) &&
     !Boolean(health?.google.tts_cooldown);
-  return (
-    (!health?.local.available || !health?.local.tts_ready) && !googleUsable
-  );
+  const noLiveServerTts =
+    (!health?.local.available || !health?.local.tts_ready) && !googleUsable;
+  if (!noLiveServerTts) return false;
+  if (hasBackendCacheTarget) {
+    // Once on-device WASM TTS is already warm for the exact locked gender and no
+    // live server engine exists, skip Render HTTP completely (including COACHING/
+    // CATALOG/wordSample/precomputed targets) so TTS starts in <250ms with one voice.
+    return (
+      !isAndroidNativeSpeechAvailable() &&
+      hasWasmVietnameseTts() &&
+      getBrowserWasmTtsClient().isReady(requestedGender)
+    );
+  }
+  return true;
 }
 
 function shouldSkipBackendTtsForBrowserFallback(
@@ -771,8 +791,7 @@ function stripRegionTokensForGenderMatch(raw: string): string {
   return raw
     .normalize("NFC")
     .replace(/\b(?:miền|mien)\s+(?:bắc|bac|trung|nam)\b/giu, " ")
-    .replace(/\b(?:việt|viet)\s*nam\b/giu, " ")
-    .replace(/\bvietnam\b/giu, " ");
+    .replace(/\b(?:việt\s*nam|viet\s*nam|vietnamese|vietnam)\b/giu, " ");
 }
 
 function inferBrowserVoiceGender(
@@ -1123,6 +1142,91 @@ function buildProportionalWordTimings(
   });
 }
 
+interface WasmStreamingClause {
+  readonly text: string;
+  readonly words?: readonly string[];
+  readonly wordStartIndex: number;
+}
+
+function splitSpokenIntoStreamingClauses(
+  text: string,
+  words?: readonly string[],
+): WasmStreamingClause[] {
+  const CLAUSE_END_RE = /[.!?;:,…]$/u;
+  if (words && words.length > 14) {
+    const clauses: WasmStreamingClause[] = [];
+    let cursor = 0;
+    while (cursor < words.length) {
+      const isFirst = clauses.length === 0;
+      const minWords = isFirst ? 4 : 8;
+      const maxWords = isFirst ? 10 : 18;
+      let end = Math.min(words.length, cursor + maxWords);
+      for (
+        let probe = cursor + minWords - 1;
+        probe < end && probe < words.length;
+        probe += 1
+      ) {
+        if (CLAUSE_END_RE.test(words[probe].trim())) {
+          end = probe + 1;
+          break;
+        }
+      }
+      const slice = words.slice(cursor, end);
+      clauses.push({
+        text: slice.join(" ").trim(),
+        words: slice,
+        wordStartIndex: cursor,
+      });
+      cursor = end;
+    }
+    return clauses.filter((c) => c.text.length > 0);
+  }
+
+  if (text.length > 120) {
+    const sentences = text
+      .split(/(?<=[.!?;:,…])\s+/u)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const clauses: WasmStreamingClause[] = [];
+    let buffer = "";
+    const pushBuffer = () => {
+      if (buffer.trim()) {
+        clauses.push({ text: buffer.trim(), wordStartIndex: 0 });
+      }
+      buffer = "";
+    };
+    const pushOversized = (segment: string, maxChars: number) => {
+      const tokens = segment.split(/\s+/).filter(Boolean);
+      let part = "";
+      for (const tok of tokens) {
+        if (part && part.length + 1 + tok.length > maxChars) {
+          clauses.push({ text: part, wordStartIndex: 0 });
+          part = tok;
+        } else {
+          part = part ? `${part} ${tok}` : tok;
+        }
+      }
+      if (part) clauses.push({ text: part, wordStartIndex: 0 });
+    };
+    for (const seg of sentences) {
+      const maxChars = clauses.length === 0 ? 80 : 140;
+      if (seg.length > maxChars) {
+        pushBuffer();
+        pushOversized(seg, maxChars);
+      } else if (buffer && buffer.length + 1 + seg.length > maxChars) {
+        pushBuffer();
+        buffer = seg;
+      } else {
+        buffer = buffer ? `${buffer} ${seg}` : seg;
+      }
+    }
+    pushBuffer();
+    if (clauses.length > 0) return clauses;
+  }
+
+  return [{ text, words, wordStartIndex: 0 }];
+}
+
 function encodeAudioBufferSliceToWavBlob(
   buffer: AudioBuffer,
   startSec: number,
@@ -1260,6 +1364,14 @@ export class TtsPlayback {
   >();
   private shortCacheBytes = 0;
   private readonly phonicsCache = new Map<string, SynthesizedPhonicsSpeech>();
+  private readonly wasmPhonicsCache = new Map<
+    string,
+    {
+      readonly blob: Blob;
+      readonly durationSeconds: number;
+      readonly stepTimings: readonly WasmPhonicsStepTiming[];
+    }
+  >();
   private phonicsCacheBytes = 0;
   private timedCooldownUntil = 0;
   private defaultCacheContext: TtsPlaybackCacheContext | null = null;
@@ -1273,9 +1385,10 @@ export class TtsPlayback {
 
   private computePreferencesVoiceKey(): string {
     const policy = getVoicePolicyPreferences();
+    const effectiveGender = getSpeechPreferencesMeta().gender ?? "";
     const effectiveVoice =
       getActiveSessionVoiceLock()?.voiceId ?? getEffectiveVoiceId();
-    return `${policy.providerMode}::${policy.allowGoogleTtsFallback}::${effectiveVoice}`;
+    return `${policy.providerMode}::${policy.allowGoogleTtsFallback}::${effectiveVoice}::${effectiveGender}`;
   }
 
   private sessionTransportKey(operation: Operation): string | null {
@@ -1588,6 +1701,7 @@ export class TtsPlayback {
     this.inFlightShortPrefetch.clear();
     this.shortCacheBytes = 0;
     this.phonicsCache.clear();
+    this.wasmPhonicsCache.clear();
     this.phonicsCacheBytes = 0;
     this.sessionDeviceTransport.clear();
     this.sessionServerAudioServed.clear();
@@ -1931,21 +2045,27 @@ export class TtsPlayback {
     const normalizedSpoken = normalizePhonicsSpeechTextForTts(text);
     if (!normalizedSpoken.trim()) throw unavailable();
 
-    const synthesizeWasmClause = async (
-      clauseText: string,
-      clauseWords: readonly string[] | undefined,
-    ): Promise<{ blob: Blob; durationSeconds: number }> => {
-      const wasmKey = JSON.stringify([
+    const isUnconfiguredHosted = isPermanentlyHostedLocalUnconfigured();
+    const clauses = splitSpokenIntoStreamingClauses(
+      normalizedSpoken,
+      options.words,
+    );
+
+    const synthesizeClause = async (clause: WasmStreamingClause) => {
+      const clauseText = clause.text.trim();
+      const clauseKey = JSON.stringify([
         "wasm_tts",
         preferredGender,
         operation.voice.speed,
         clauseText,
         Boolean(options.wordSample),
-        clauseWords ?? null,
       ]);
-      const cached = this.shortCache.get(wasmKey);
+      const cached = this.shortCache.get(clauseKey)?.audio ?? null;
       if (cached) {
-        return { blob: cached.audio, durationSeconds: 0 };
+        return {
+          blob: cached,
+          durationSeconds: Math.max(0.25, (cached.size - 44) / (22_050 * 2)),
+        };
       }
       const synthesized = await this.wait(
         operation,
@@ -1957,20 +2077,42 @@ export class TtsPlayback {
         }),
       );
       this.ensure(operation);
-      let blob = new Blob([synthesized.wavBuffer], { type: "audio/wav" });
+      let wavBlob = new Blob([synthesized.wavBuffer], { type: "audio/wav" });
       if (options.wordSample) {
-        blob = await this.wait(operation, prepareWordSampleAudio(blob));
+        wavBlob = await this.wait(operation, prepareWordSampleAudio(wavBlob));
       }
-      this.cacheShort(wasmKey, {
-        audio: blob,
+      this.cacheShort(clauseKey, {
+        audio: wavBlob,
         usedFallbackVoice: false,
         cachedSpeed: operation.voice.speed,
       });
-      return { blob, durationSeconds: synthesized.durationSeconds };
+      return {
+        blob: wavBlob,
+        durationSeconds:
+          synthesized.durationSeconds > 0
+            ? synthesized.durationSeconds
+            : Math.max(0.25, (wavBlob.size - 44) / (22_050 * 2)),
+      };
     };
 
-    const isUnconfiguredHosted = isPermanentlyHostedLocalUnconfigured();
-    const markWasmUsage = () => {
+    if (clauses.length <= 1) {
+      const single = clauses[0] ?? {
+        text: normalizedSpoken,
+        words: options.words,
+        wordStartIndex: 0,
+      };
+      const wav = await synthesizeClause(single);
+      const timings = options.words?.length
+        ? buildProportionalWordTimings(options.words, wav.durationSeconds)
+        : undefined;
+      if (options.words?.length && timings?.length) {
+        this.recordPageSampleSegment(
+          operation,
+          wav.blob,
+          options.words,
+          timings,
+        );
+      }
       recordTtsEngineUsage({
         provider: "wasm_tts",
         fallbackUsed: !isUnconfiguredHosted,
@@ -1979,81 +2121,83 @@ export class TtsPlayback {
         voiceGender: preferredGender,
       });
       this.setFallbackNotice(null);
-    };
 
-    // Sentence/clause streaming pipeline for multi-clause WASM prompts (>95 chars):
-    // plays clause 0 in ~150ms while the Web Worker synthesizes clause 1 in parallel.
-    if (
-      !options.words?.length &&
-      !options.wordSample &&
-      normalizedSpoken.length > 95
-    ) {
-      const clauses = splitSpeechText(normalizedSpoken, 95);
-      if (clauses.length > 1) {
-        let totalElapsed = 0;
-        let nextClausePromise: Promise<{
-          blob: Blob;
-          durationSeconds: number;
-        }> | null = null;
-        for (let i = 0; i < clauses.length; i += 1) {
-          await this.waitIfPaused(operation);
-          this.ensure(operation);
-          const current = await (nextClausePromise ??
-            synthesizeWasmClause(clauses[i].text, undefined));
-          nextClausePromise = null;
-          this.ensure(operation);
-          if (i + 1 < clauses.length) {
-            nextClausePromise = synthesizeWasmClause(
-              clauses[i + 1].text,
-              undefined,
-            );
-            nextClausePromise.catch(() => undefined);
-          }
-          if (i === 0) markWasmUsage();
-          totalElapsed += await this.playAudio(
-            operation,
-            current.blob,
-            undefined,
-            0,
-            i === 0 ? (duration) => options.onStart?.(duration) : () => {},
-            undefined,
-            (time, duration) =>
-              options.onTime?.(totalElapsed + time, totalElapsed + duration),
-            1,
-          );
-        }
-        return totalElapsed;
+      return this.playAudio(
+        operation,
+        wav.blob,
+        timings,
+        0,
+        (duration) => options.onStart?.(duration),
+        options.onWord,
+        options.onTime,
+        1,
+      );
+    }
+
+    recordTtsEngineUsage({
+      provider: "wasm_tts",
+      fallbackUsed: !isUnconfiguredHosted,
+      fallbackReason: isUnconfiguredHosted ? null : "LOCAL_TTS_UNAVAILABLE",
+      voiceId: operation.voice.requestedVoiceId,
+      voiceGender: preferredGender,
+    });
+    this.setFallbackNotice(null);
+
+    let totalElapsedSec = 0;
+    let nextClausePromise: ReturnType<typeof synthesizeClause> | null =
+      synthesizeClause(clauses[0]);
+    nextClausePromise.catch(() => undefined);
+
+    for (let cIdx = 0; cIdx < clauses.length; cIdx += 1) {
+      const clause = clauses[cIdx];
+      const currentWav = await this.wait(operation, nextClausePromise!);
+      this.ensure(operation);
+      if (cIdx + 1 < clauses.length) {
+        nextClausePromise = synthesizeClause(clauses[cIdx + 1]);
+        nextClausePromise.catch(() => undefined);
+      } else {
+        nextClausePromise = null;
       }
+
+      await this.waitIfPaused(operation);
+      this.ensure(operation);
+
+      const clauseTimings = clause.words?.length
+        ? buildProportionalWordTimings(clause.words, currentWav.durationSeconds)
+        : undefined;
+      if (clause.words?.length && clauseTimings?.length) {
+        this.recordPageSampleSegment(
+          operation,
+          currentWav.blob,
+          clause.words,
+          clauseTimings,
+        );
+      }
+
+      const elapsedBeforeChunk = totalElapsedSec;
+      const chunkElapsed = await this.playAudio(
+        operation,
+        currentWav.blob,
+        clauseTimings,
+        0,
+        (duration) => {
+          if (cIdx === 0) {
+            options.onStart?.(duration);
+          }
+        },
+        clause.words?.length && options.onWord
+          ? (localIdx) => options.onWord?.(clause.wordStartIndex + localIdx)
+          : undefined,
+        options.onTime
+          ? (t, d) =>
+              options.onTime?.(elapsedBeforeChunk + t, elapsedBeforeChunk + d)
+          : undefined,
+        1,
+      );
+      totalElapsedSec += chunkElapsed;
     }
 
-    const { blob, durationSeconds } = await synthesizeWasmClause(
-      normalizedSpoken,
-      options.words,
-    );
-
-    const estimatedDurationSec =
-      durationSeconds > 0
-        ? durationSeconds
-        : Math.max(0.35, (blob.size - 44) / (22_050 * 2));
-    const timings = options.words?.length
-      ? buildProportionalWordTimings(options.words, estimatedDurationSec)
-      : undefined;
-    if (options.words?.length && timings?.length) {
-      this.recordPageSampleSegment(operation, blob, options.words, timings);
-    }
-
-    markWasmUsage();
-
-    return this.playAudio(
-      operation,
-      blob,
-      timings,
-      0,
-      (duration) => options.onStart?.(duration),
-      options.onWord,
-      options.onTime,
-      1,
-    );
+    return totalElapsedSec;
   }
 
   private async playDeviceFallbackSpeech(
@@ -3292,11 +3436,13 @@ export class TtsPlayback {
                 onTransportChosen: (transport) => {
                   recordActualUtterance({
                     provider:
-                      transport === "android_native"
-                        ? "android_native"
-                        : transport === "browser"
-                          ? "browser"
-                          : operation.voice.provider,
+                      transport === "wasm_tts"
+                        ? "wasm_tts"
+                        : transport === "android_native"
+                          ? "android_native"
+                          : transport === "browser"
+                            ? "browser"
+                            : operation.voice.provider,
                     voiceId:
                       transport === "android_native"
                         ? "android_vi_vn"
@@ -3353,11 +3499,13 @@ export class TtsPlayback {
                   onTransportChosen: (transport) => {
                     recordActualUtterance({
                       provider:
-                        transport === "android_native"
-                          ? "android_native"
-                          : transport === "browser"
-                            ? "browser"
-                            : operation.voice.provider,
+                        transport === "wasm_tts"
+                          ? "wasm_tts"
+                          : transport === "android_native"
+                            ? "android_native"
+                            : transport === "browser"
+                              ? "browser"
+                              : operation.voice.provider,
                       voiceId:
                         transport === "android_native"
                           ? "android_vi_vn"
@@ -3515,10 +3663,178 @@ export class TtsPlayback {
           );
         };
 
+        const isEphemeral = Boolean(
+          options.ephemeral || this.defaultCacheContext?.ephemeral,
+        );
         const playPhonicsViaBrowser = async () => {
           const preferredGender = resolveVoiceGender(
             operation.voice.requestedVoiceId,
           );
+          const transportKey = this.sessionTransportKey(operation);
+          const pinnedTransport = transportKey
+            ? (getSessionDeviceTransport(transportKey) ??
+              this.sessionDeviceTransport.get(transportKey) ??
+              null)
+            : null;
+          const canTrySingleWavWasm =
+            !isAndroidNativeSpeechAvailable() &&
+            hasWasmVietnameseTts() &&
+            pinnedTransport !== "browser" &&
+            pinnedTransport !== "android_native";
+
+          if (canTrySingleWavWasm) {
+            const wasmClient = getBrowserWasmTtsClient();
+            const wasmPhonicsKey = JSON.stringify([
+              "wasm_phonics",
+              preferredGender,
+              operation.voice.region,
+              operation.voice.speed,
+              lesson.steps.map((s) => [
+                s.id,
+                s.spokenText.normalize("NFC"),
+                s.pauseAfterMs,
+              ]),
+            ]);
+            try {
+              let cachedWasmPhonics = isEphemeral
+                ? null
+                : (this.wasmPhonicsCache.get(wasmPhonicsKey) ?? null);
+              if (!cachedWasmPhonics) {
+                const synthesized = await this.wait(
+                  operation,
+                  wasmClient.synthesizePhonics(
+                    lesson.steps.map((s) => ({
+                      index: s.index,
+                      kind: s.kind,
+                      spokenText: s.spokenText.normalize("NFC"),
+                      pauseAfterMs: s.pauseAfterMs,
+                    })),
+                    {
+                      gender: preferredGender,
+                      region: operation.voice.region,
+                      speed: operation.voice.speed,
+                      signal: operation.controller.signal,
+                    },
+                  ),
+                );
+                this.ensure(operation);
+                cachedWasmPhonics = {
+                  blob: new Blob([synthesized.wavBuffer], {
+                    type: "audio/wav",
+                  }),
+                  durationSeconds: synthesized.durationSeconds,
+                  stepTimings: synthesized.stepTimings,
+                };
+                if (!isEphemeral) {
+                  if (this.wasmPhonicsCache.size >= 32) {
+                    const oldestKey = this.wasmPhonicsCache.keys().next().value;
+                    if (oldestKey !== undefined) {
+                      this.wasmPhonicsCache.delete(oldestKey);
+                    }
+                  }
+                  this.wasmPhonicsCache.set(wasmPhonicsKey, cachedWasmPhonics);
+                }
+              }
+
+              const isUnconfiguredHosted =
+                isPermanentlyHostedLocalUnconfigured();
+              this.pinSessionToDeviceTts(operation, "wasm_tts");
+              recordTtsEngineUsage({
+                provider: "wasm_tts",
+                fallbackUsed: !isUnconfiguredHosted,
+                fallbackReason: isUnconfiguredHosted
+                  ? null
+                  : "LOCAL_TTS_UNAVAILABLE",
+                voiceId: operation.voice.requestedVoiceId,
+                voiceGender: preferredGender,
+              });
+              recordPhonicsUtterance({
+                provider: "wasm_tts",
+                voiceId: operation.voice.cacheVoiceId,
+              });
+              this.setFallbackNotice(null);
+
+              const stepTimings = cachedWasmPhonics.stepTimings;
+              let lastEmittedStep = -1;
+              const emitWasmStepAt = (tSec: number) => {
+                let matchedIdx = 0;
+                for (let i = stepTimings.length - 1; i >= 0; i -= 1) {
+                  if (tSec + 0.02 >= stepTimings[i].startSec) {
+                    matchedIdx = stepTimings[i].index;
+                    break;
+                  }
+                }
+                const matchedStep =
+                  lesson.steps.find((s) => s.index === matchedIdx) ??
+                  lesson.steps[matchedIdx];
+                if (matchedStep && matchedStep.index !== lastEmittedStep) {
+                  lastEmittedStep = matchedStep.index;
+                  options.onStepChange?.(matchedStep.index, matchedStep);
+                }
+              };
+
+              const backupTimers: number[] = [];
+              const clearBackupTimers = () => {
+                for (const id of backupTimers) {
+                  window.clearTimeout(id);
+                }
+                backupTimers.length = 0;
+              };
+
+              emitWasmStepAt(0);
+              try {
+                await this.playAudio(
+                  operation,
+                  cachedWasmPhonics.blob,
+                  undefined,
+                  0,
+                  (duration) =>
+                    this.started(operation, () => {
+                      options.onPlay?.(duration);
+                      for (const timing of stepTimings) {
+                        if (timing.startSec > 0) {
+                          const timer = window.setTimeout(
+                            () => {
+                              if (
+                                this.current !== operation ||
+                                operation.controller.signal.aborted
+                              ) {
+                                return;
+                              }
+                              emitWasmStepAt(timing.startSec);
+                            },
+                            Math.round(timing.startSec * 1000),
+                          );
+                          backupTimers.push(timer);
+                        }
+                      }
+                    }),
+                  undefined,
+                  (currentTime, duration) => {
+                    emitWasmStepAt(currentTime);
+                    options.onTimeUpdate?.(currentTime, duration);
+                  },
+                  1,
+                );
+              } finally {
+                clearBackupTimers();
+              }
+              this.ensure(operation);
+              options.onEnded?.();
+              return;
+            } catch (wasmPhonicsError) {
+              this.ensure(operation);
+              if (
+                isAbort(wasmPhonicsError) ||
+                isNotAllowedError(wasmPhonicsError) ||
+                wasmPhonicsError instanceof PartialPlaybackError
+              ) {
+                throw wasmPhonicsError;
+              }
+              // Fall back cleanly to per-step browser/device speech when single-WAV fails.
+            }
+          }
+
           const warmupNextPhonicsStepViaWasm = (nextIdx: number) => {
             if (!hasWasmVietnameseTts() || nextIdx >= lesson.steps.length) {
               return;
@@ -3534,7 +3850,6 @@ export class TtsPlayback {
               operation.voice.speed,
               nextSpoken,
               false,
-              null,
             ]);
             if (this.shortCache.has(nextKey)) return;
             void getBrowserWasmTtsClient()
@@ -3576,11 +3891,13 @@ export class TtsPlayback {
                 onTransportChosen: (transport) => {
                   recordPhonicsUtterance({
                     provider:
-                      transport === "android_native"
-                        ? "android_native"
-                        : transport === "browser"
-                          ? "browser"
-                          : operation.voice.provider,
+                      transport === "wasm_tts"
+                        ? "wasm_tts"
+                        : transport === "android_native"
+                          ? "android_native"
+                          : transport === "browser"
+                            ? "browser"
+                            : operation.voice.provider,
                     voiceId:
                       transport === "android_native"
                         ? "android_vi_vn"
@@ -3600,9 +3917,6 @@ export class TtsPlayback {
           options.onEnded?.();
         };
 
-        const isEphemeral = Boolean(
-          options.ephemeral || this.defaultCacheContext?.ephemeral,
-        );
         const hasPhonicsCacheTarget =
           !isEphemeral &&
           Boolean(
@@ -4032,13 +4346,35 @@ export class TtsPlayback {
                     await playPhonicsViaBrowser();
                     return;
                   }
+                  if (
+                    hasWasmVietnameseTts() &&
+                    !isAndroidNativeSpeechAvailable()
+                  ) {
+                    this.pinSessionToDeviceTts(operation, "wasm_tts");
+                    await playPhonicsViaBrowser();
+                    return;
+                  }
                 } else {
                   if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    const servedCachedWords =
+                      !isHostedNoLiveServerTts(error) &&
+                      (await tryPlayPhonicsViaCachedWordSynthesize());
+                    if (servedCachedWords) {
+                      return;
+                    }
                     this.pinSessionToDeviceTts(operation);
                     await playPhonicsViaBrowser();
                     return;
                   }
                   if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                    return;
+                  }
+                  if (
+                    hasWasmVietnameseTts() &&
+                    !isAndroidNativeSpeechAvailable()
+                  ) {
+                    this.pinSessionToDeviceTts(operation, "wasm_tts");
+                    await playPhonicsViaBrowser();
                     return;
                   }
                 }
@@ -4562,11 +4898,13 @@ export class TtsPlayback {
                 onTransportChosen: (transport) => {
                   recordTimedUtterance({
                     provider:
-                      transport === "android_native"
-                        ? "android_native"
-                        : transport === "browser"
-                          ? "browser"
-                          : operation.voice.provider,
+                      transport === "wasm_tts"
+                        ? "wasm_tts"
+                        : transport === "android_native"
+                          ? "android_native"
+                          : transport === "browser"
+                            ? "browser"
+                            : operation.voice.provider,
                     voiceId:
                       transport === "android_native"
                         ? "android_vi_vn"
@@ -4793,11 +5131,13 @@ export class TtsPlayback {
                   onTransportChosen: (transport) => {
                     recordTimedUtterance({
                       provider:
-                        transport === "android_native"
-                          ? "android_native"
-                          : transport === "browser"
-                            ? "browser"
-                            : operation.voice.provider,
+                        transport === "wasm_tts"
+                          ? "wasm_tts"
+                          : transport === "android_native"
+                            ? "android_native"
+                            : transport === "browser"
+                              ? "browser"
+                              : operation.voice.provider,
                       voiceId:
                         transport === "android_native"
                           ? "android_vi_vn"

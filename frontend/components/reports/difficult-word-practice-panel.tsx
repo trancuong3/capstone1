@@ -73,6 +73,7 @@ import {
 import {
   awaitSttReadyBeforeListening,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
 } from "@/lib/reading/voice-preloader";
 import {
   buildPhonicsLesson,
@@ -1687,7 +1688,10 @@ export function DifficultWordPracticePanel({
         const localSttDown =
           permanentlyUnconfigured ||
           (routingHealth !== null &&
-            (!routingHealth.local.available || !routingHealth.local.stt_ready));
+            (!routingHealth.local.available ||
+              !routingHealth.local.stt_ready)) ||
+          (detectBrowserWasmSttSupport().supported &&
+            shouldPreferWarmWasmBatchStt());
         if (
           localSttDown &&
           !effectiveTranscript &&

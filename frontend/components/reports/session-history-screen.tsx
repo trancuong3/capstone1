@@ -3,6 +3,7 @@
 import { History, RefreshCw, Search, X } from "lucide-react";
 import { useContext, useEffect, useMemo, useState } from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { AppStoreContext } from "@/components/providers/app-store-provider";

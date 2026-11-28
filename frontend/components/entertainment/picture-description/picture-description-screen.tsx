@@ -46,6 +46,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { VocabularyNotebookDrawer } from "@/components/reading/vocabulary-notebook-drawer";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
@@ -96,7 +97,10 @@ import {
   isServerSttConfirmedUnavailable,
   refreshVoiceHealthQuietlyAfterSttFailure,
 } from "@/lib/reading/voice-capture-guard";
-import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
+import {
+  preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
+} from "@/lib/reading/voice-preloader";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import {
   getVoiceEngineHealthForRouting,
@@ -1801,13 +1805,14 @@ export function PictureDescriptionScreen({
         const cloudSttAllowed =
           policy.providerMode === "local_with_google_fallback" &&
           policy.allowGoogleSttFallback;
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
         const serverSttUnavailable =
           isPermanentlyHostedLocalUnconfigured(routingHealth) ||
           isServerSttConfirmedUnavailable() ||
+          (wasmSupported && shouldPreferWarmWasmBatchStt()) ||
           (!cloudSttAllowed &&
             routingHealth !== null &&
             (!routingHealth.local.available || !routingHealth.local.stt_ready));
-        const wasmSupported = detectBrowserWasmSttSupport().supported;
         if (serverSttUnavailable && browserFallback) {
           sttTranscript = browserFallback;
         } else if (serverSttUnavailable && wasmSupported) {
@@ -2358,6 +2363,7 @@ export function PictureDescriptionScreen({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <VoiceEngineBadge compact />
             <ReadingVoiceSettings
               childId={selectedChildForHeader.id}
               disabled={isRecordingVoice}

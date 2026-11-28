@@ -70,19 +70,19 @@ const VOICE_MODEL_CONFIGS = {
     version: "vits-piper-vi_VN-vais1000-medium",
     baseUrl:
       "https://huggingface.co/csukuangfj/vits-piper-vi_VN-vais1000-medium/resolve/main",
-    noiseScale: 0.5,
+    noiseScale: 0.45,
     noiseScaleW: 0.35,
     files: [
       {
         remoteName: "vi_VN-vais1000-medium.onnx",
-        localName: "model.onnx",
+        localName: "female_model.onnx",
         expectedBytes: 63201425,
         sha256:
           "7264e130a2f2e62c2dd586e3790ba054b669f9f72a2bdb2c0d60207136611576",
       },
       {
         remoteName: "tokens.txt",
-        localName: "tokens.txt",
+        localName: "female_tokens.txt",
         expectedBytes: 921,
         sha256:
           "87c8ef66eae5473ed0cc0366b3964c736ca6c5f676c979522ea31234e47430b9",
@@ -93,19 +93,19 @@ const VOICE_MODEL_CONFIGS = {
     version: "vits-piper-vi_VN-diemdam-medium",
     baseUrl:
       "https://huggingface.co/vnhellboy/vietnamese-piper-voices/resolve/main/vits-piper-vi_VN-diemdam-medium",
-    noiseScale: 0.55,
-    noiseScaleW: 0.45,
+    noiseScale: 0.45,
+    noiseScaleW: 0.35,
     files: [
       {
         remoteName: "vi_VN-diemdam-medium.onnx",
-        localName: "model.onnx",
+        localName: "male_model.onnx",
         expectedBytes: 63516182,
         sha256:
           "821096ee1f6d424fd9d1a0ff83fd851637e5ff880e8aaf3c5b53be87269a6e26",
       },
       {
         remoteName: "tokens.txt",
-        localName: "tokens.txt",
+        localName: "male_tokens.txt",
         expectedBytes: 968,
         sha256:
           "e8a50ae0c75612d18cfcf3f90800dca79f961e3ed97f9574f3535194469187fd",
@@ -113,6 +113,11 @@ const VOICE_MODEL_CONFIGS = {
     ],
   },
 };
+
+const canRetainBothGenders =
+  typeof self.navigator === "undefined" ||
+  !self.navigator.deviceMemory ||
+  self.navigator.deviceMemory >= 4;
 
 let scriptsLoaded = false;
 let piperPromise = null;
@@ -123,6 +128,7 @@ const ttsInstancesByGender = { female: null, male: null };
 const loadPromisesByGender = { female: null, male: null };
 let espeakAssetsPromise = null;
 let wasmCreateChain = Promise.resolve();
+let callbackSupported = true;
 let loadEpoch = 0;
 const activeFetchControllers = new Set();
 const cancelledIds = new Set();
@@ -496,7 +502,15 @@ async function ensureSharedEspeakAssets(epoch, genderForProgress) {
 async function ensureTtsReadyForGender(rawGender) {
   const gender = normalizeGender(rawGender);
   if (ttsInstancesByGender[gender] && piperModule) {
-    return { piper: piperModule, tts: ttsInstancesByGender[gender], gender };
+    const readyGenders = ["female", "male"].filter(
+      (g) => Boolean(ttsInstancesByGender[g]),
+    );
+    return {
+      piper: piperModule,
+      tts: ttsInstancesByGender[gender],
+      gender,
+      readyGenders,
+    };
   }
   if (loadPromisesByGender[gender]) {
     return loadPromisesByGender[gender];
@@ -524,9 +538,10 @@ async function ensureTtsReadyForGender(rawGender) {
             index: Math.min(progressIndex++, totalSteps),
             total: totalSteps,
           });
+          // Cache bytes under version/model.onnx to preserve existing IndexedDB warm entries.
           const bytes = await loadOrFetchVerifiedFile(
             db,
-            `${spec.version}/${mf.localName}`,
+            `${spec.version}/${mf.localName.replace(/^(female|male)_/, "")}`,
             spec.version,
             `${spec.baseUrl}/${mf.remoteName}`,
             mf.expectedBytes,
@@ -550,7 +565,7 @@ async function ensureTtsReadyForGender(rawGender) {
         db,
         spec.version,
         spec.files.map((f) => ({
-          name: f.localName,
+          name: f.localName.replace(/^(female|male)_/, ""),
           expectedBytes: f.expectedBytes,
           sha256: f.sha256,
         })),
@@ -591,7 +606,15 @@ async function ensureTtsReadyForGender(rawGender) {
         throw new Error("WASM TTS init disposed");
       }
       if (ttsInstancesByGender[gender]) {
-        return { piper, tts: ttsInstancesByGender[gender], gender };
+        const readyGenders = ["female", "male"].filter(
+          (g) => Boolean(ttsInstancesByGender[g]),
+        );
+        return {
+          piper,
+          tts: ttsInstancesByGender[gender],
+          gender,
+          readyGenders,
+        };
       }
       const FS = M.__exposeFS || M.FS;
       const modelMemPath = `./model-${gender}.onnx`;
@@ -704,7 +727,10 @@ async function ensureTtsReadyForGender(rawGender) {
       }
 
       ttsInstancesByGender[gender] = instance;
-      return { piper, tts: instance, gender };
+      const readyGenders = ["female", "male"].filter(
+        (g) => Boolean(ttsInstancesByGender[g]),
+      );
+      return { piper, tts: instance, gender, readyGenders };
     } finally {
       if (releaseLock) releaseLock();
     }
@@ -718,46 +744,128 @@ async function ensureTtsReadyForGender(rawGender) {
   return pending;
 }
 
-function encodeWavFromFloat32(rawSamples, sampleRate) {
+function generateSamplesWithCancel(tts, phonemeCodepoints, speed, reqId) {
+  if (reqId && cancelledIds.has(reqId)) {
+    throw new Error("WASM TTS cancelled");
+  }
+  if (callbackSupported) {
+    try {
+      const out = tts.generateWithConfig("", {
+        phonemeCodepoints,
+        sid: 0,
+        speed,
+        callback: () => (reqId && cancelledIds.has(reqId) ? 0 : 1),
+      });
+      if (reqId && cancelledIds.has(reqId)) {
+        throw new Error("WASM TTS cancelled");
+      }
+      return out;
+    } catch (err) {
+      if (reqId && cancelledIds.has(reqId)) {
+        throw new Error("WASM TTS cancelled");
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/failed to generate audio/i.test(msg)) {
+        throw err;
+      }
+      callbackSupported = false;
+    }
+  }
+  const fallbackOut = tts.generateWithConfig("", {
+    phonemeCodepoints,
+    sid: 0,
+    speed,
+  });
+  if (reqId && cancelledIds.has(reqId)) {
+    throw new Error("WASM TTS cancelled");
+  }
+  return fallbackOut;
+}
+
+function trimAndNormalizeFloat32(rawSamples, sampleRate, options = {}) {
   const sr = sampleRate > 0 ? sampleRate : 22050;
-  // Trim excess leading/trailing dead digital silence while retaining ~45ms lead + ~65ms tail
-  // so WebAudio never pops or truncates isolated single syllables.
+  const threshold =
+    typeof options.threshold === "number" ? options.threshold : 0.0025;
+  const leadSec = typeof options.leadSec === "number" ? options.leadSec : 0.035;
+  const tailSec = typeof options.tailSec === "number" ? options.tailSec : 0.055;
+  const fadeSec = typeof options.fadeSec === "number" ? options.fadeSec : 0.008;
+  const targetPeak =
+    typeof options.targetPeak === "number" ? options.targetPeak : 0.82;
+  const maxGain = typeof options.maxGain === "number" ? options.maxGain : 2.6;
+  const extraGain =
+    typeof options.extraGain === "number" ? options.extraGain : 1.0;
+
   let firstActive = 0;
   while (
     firstActive < rawSamples.length &&
-    Math.abs(rawSamples[firstActive]) < 0.002
+    Math.abs(rawSamples[firstActive]) < threshold
   ) {
     firstActive += 1;
   }
   let lastActive = rawSamples.length - 1;
-  while (lastActive > firstActive && Math.abs(rawSamples[lastActive]) < 0.002) {
+  while (
+    lastActive > firstActive &&
+    Math.abs(rawSamples[lastActive]) < threshold
+  ) {
     lastActive -= 1;
   }
 
   const startIdx = firstActive < lastActive ? firstActive : 0;
   const endIdx = firstActive < lastActive ? lastActive + 1 : rawSamples.length;
   const activeLen = Math.max(0, endIdx - startIdx);
-  const leadSamples = Math.round(sr * 0.045);
-  const tailSamples = Math.round(sr * 0.065);
-  const totalSamples = leadSamples + activeLen + tailSamples;
-  const pcm = new Int16Array(totalSamples);
+  const leadSamples = Math.max(0, Math.round(sr * leadSec));
+  const tailSamples = Math.max(0, Math.round(sr * tailSec));
+  const totalSamples = Math.max(1, leadSamples + activeLen + tailSamples);
+  const out = new Float32Array(totalSamples);
+  if (activeLen === 0) {
+    return out;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < activeLen; i += 1) {
+    sum += rawSamples[startIdx + i];
+  }
+  const dcMean = sum / activeLen;
+  let maxAbs = 0;
+  for (let i = 0; i < activeLen; i += 1) {
+    const centered = Math.abs(rawSamples[startIdx + i] - dcMean);
+    if (centered > maxAbs) maxAbs = centered;
+  }
+  const gain =
+    maxAbs > 0.005 ? Math.min(maxGain, (targetPeak / maxAbs) * extraGain) : 1.0;
   const fadeSamples = Math.min(
-    Math.round(sr * 0.005),
+    Math.max(1, Math.round(sr * fadeSec)),
     Math.floor(activeLen / 4),
   );
 
   for (let i = 0; i < activeLen; i += 1) {
-    let s = rawSamples[startIdx + i];
+    let s = (rawSamples[startIdx + i] - dcMean) * gain;
     if (fadeSamples > 0) {
       if (i < fadeSamples) {
-        s *= (i + 1) / fadeSamples;
+        s *= 0.5 * (1 - Math.cos((Math.PI * (i + 1)) / fadeSamples));
       } else if (i >= activeLen - fadeSamples) {
-        s *= (activeLen - i) / fadeSamples;
+        s *= 0.5 * (1 - Math.cos((Math.PI * (activeLen - i)) / fadeSamples));
       }
     }
     if (s >= 1) s = 1;
     else if (s <= -1) s = -1;
-    pcm[leadSamples + i] = Math.round(s * 32767);
+    out[leadSamples + i] = s;
+  }
+  return out;
+}
+
+function encodeWavFromFloat32(rawSamples, sampleRate, normalizeOpts = {}) {
+  const sr = sampleRate > 0 ? sampleRate : 22050;
+  const normalizedSamples = normalizeOpts.preNormalized
+    ? rawSamples
+    : trimAndNormalizeFloat32(rawSamples, sr, normalizeOpts);
+  const totalSamples = Math.max(1, normalizedSamples.length);
+  const pcm = new Int16Array(totalSamples);
+  for (let i = 0; i < totalSamples; i += 1) {
+    let s = i < normalizedSamples.length ? normalizedSamples[i] : 0;
+    if (s >= 1) s = 1;
+    else if (s <= -1) s = -1;
+    pcm[i] = Math.round(s * 32767);
   }
 
   const buffer = new ArrayBuffer(44 + totalSamples * 2);
@@ -826,9 +934,190 @@ self.onmessage = async (event) => {
   if (msg.type === "init") {
     const id = msg.id;
     try {
-      const { gender } = await ensureTtsReadyForGender(msg.gender);
-      self.postMessage({ type: "ready", id, gender });
+      const { gender, readyGenders } = await ensureTtsReadyForGender(
+        msg.gender,
+      );
+      self.postMessage({ type: "ready", id, gender, readyGenders });
     } catch (err) {
+      self.postMessage({
+        type: "error",
+        id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+
+  if (msg.type === "synthesize_phonics") {
+    const id = msg.id;
+    if (cancelledIds.has(id)) {
+      cancelledIds.delete(id);
+      return;
+    }
+    try {
+      const steps = Array.isArray(msg.steps) ? msg.steps : [];
+      if (steps.length === 0) {
+        throw new Error("Phonics steps are empty");
+      }
+      const speedRaw = Number(msg.speed);
+      const speed =
+        Number.isFinite(speedRaw) && speedRaw >= 0.65 && speedRaw <= 1.5
+          ? speedRaw
+          : 1.0;
+
+      const { piper, tts, gender, readyGenders } =
+        await ensureTtsReadyForGender(msg.gender);
+      if (cancelledIds.has(id)) {
+        cancelledIds.delete(id);
+        return;
+      }
+
+      const sr = tts.sampleRate || 22050;
+      const espeakVoice = resolveEspeakVoiceForRegion(msg.region);
+      const speedScaleFactor = Math.sqrt(speed);
+      const initialLead = new Float32Array(Math.round(sr * 0.035));
+      const segments = [initialLead];
+      let totalSampleCount = initialLead.length;
+      const stepTimings = [];
+      const t0 = self.performance ? self.performance.now() : Date.now();
+
+      for (let sIdx = 0; sIdx < steps.length; sIdx += 1) {
+        if (cancelledIds.has(id)) {
+          cancelledIds.delete(id);
+          return;
+        }
+        const step = steps[sIdx] || {};
+        const stepStartSample = totalSampleCount;
+        const cleanedStepText = String(step.spokenText || "")
+          .normalize("NFC")
+          .replace(/[.!?…]+$/g, "")
+          .trim();
+        const units = cleanedStepText
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        for (let uIdx = 0; uIdx < units.length; uIdx += 1) {
+          if (cancelledIds.has(id)) {
+            cancelledIds.delete(id);
+            return;
+          }
+          const unitText = units[uIdx];
+          const sentences = piper.phonemize(unitText, espeakVoice) || [];
+          const phonemeCodepoints = sentences.filter(
+            (s) => Array.isArray(s) && s.length > 0,
+          );
+          if (phonemeCodepoints.length === 0) {
+            continue;
+          }
+          const isFinalBlend = uIdx === units.length - 1;
+          const unitSpeed = isFinalBlend
+            ? Math.max(0.72, Math.min(1.35, speed * 0.92))
+            : Math.min(1.42, Math.max(0.75, speed * 1.06));
+          const generated = generateSamplesWithCancel(
+            tts,
+            phonemeCodepoints,
+            unitSpeed,
+            id,
+          );
+          const normSamples = trimAndNormalizeFloat32(
+            generated.samples,
+            generated.sampleRate || sr,
+            isFinalBlend
+              ? {
+                  leadSec: 0.02,
+                  tailSec: 0.045,
+                  fadeSec: 0.01,
+                  targetPeak: 0.84,
+                  maxGain: 2.6,
+                }
+              : {
+                  leadSec: 0.012,
+                  tailSec: 0.018,
+                  fadeSec: 0.008,
+                  targetPeak: 0.76,
+                  maxGain: 2.4,
+                },
+          );
+          segments.push(normSamples);
+          totalSampleCount += normSamples.length;
+
+          if (uIdx < units.length - 1) {
+            const isBeforeBlend =
+              units.length >= 2 && uIdx + 1 === units.length - 1;
+            const gapSec = (isBeforeBlend ? 0.21 : 0.115) / speedScaleFactor;
+            const gapSamples = Math.max(1, Math.round(sr * gapSec));
+            segments.push(new Float32Array(gapSamples));
+            totalSampleCount += gapSamples;
+          }
+        }
+
+        const stepEndSample = totalSampleCount;
+        stepTimings.push({
+          index: typeof step.index === "number" ? step.index : sIdx,
+          startSec: Number((stepStartSample / sr).toFixed(3)),
+          endSec: Number((stepEndSample / sr).toFixed(3)),
+        });
+
+        if (sIdx < steps.length - 1) {
+          const pauseMs = Math.max(
+            260,
+            Math.min(520, Number(step.pauseAfterMs) || 380),
+          );
+          const pauseSamples = Math.max(
+            1,
+            Math.round((pauseMs / 1000 / speedScaleFactor) * sr),
+          );
+          segments.push(new Float32Array(pauseSamples));
+          totalSampleCount += pauseSamples;
+        } else {
+          const endTail = new Float32Array(Math.round(sr * 0.06));
+          segments.push(endTail);
+          totalSampleCount += endTail.length;
+        }
+      }
+
+      if (cancelledIds.has(id)) {
+        cancelledIds.delete(id);
+        return;
+      }
+
+      const combined = new Float32Array(Math.max(1, totalSampleCount));
+      let writeOffset = 0;
+      for (const seg of segments) {
+        combined.set(seg, writeOffset);
+        writeOffset += seg.length;
+      }
+
+      const { wavBuffer, durationSeconds } = encodeWavFromFloat32(
+        combined,
+        sr,
+        { preNormalized: true },
+      );
+      const synthMs = Number(
+        ((self.performance ? self.performance.now() : Date.now()) - t0).toFixed(
+          2,
+        ),
+      );
+      self.postMessage(
+        {
+          type: "phonics_result",
+          id,
+          gender,
+          readyGenders,
+          sampleRate: sr,
+          durationSeconds,
+          synthMs,
+          stepTimings,
+          wavBuffer,
+        },
+        [wavBuffer],
+      );
+    } catch (err) {
+      if (cancelledIds.has(id)) {
+        cancelledIds.delete(id);
+        return;
+      }
       self.postMessage({
         type: "error",
         id,
@@ -855,7 +1144,8 @@ self.onmessage = async (event) => {
           ? speedRaw
           : 1.0;
 
-      const { piper, tts, gender } = await ensureTtsReadyForGender(msg.gender);
+      const { piper, tts, gender, readyGenders } =
+        await ensureTtsReadyForGender(msg.gender);
       if (cancelledIds.has(id)) {
         cancelledIds.delete(id);
         return;
@@ -871,11 +1161,12 @@ self.onmessage = async (event) => {
       }
 
       const t0 = self.performance ? self.performance.now() : Date.now();
-      const generated = tts.generateWithConfig("", {
+      const generated = generateSamplesWithCancel(
+        tts,
         phonemeCodepoints,
-        sid: 0,
         speed,
-      });
+        id,
+      );
       if (cancelledIds.has(id)) {
         cancelledIds.delete(id);
         return;
@@ -894,6 +1185,7 @@ self.onmessage = async (event) => {
           type: "result",
           id,
           gender,
+          readyGenders,
           sampleRate: generated.sampleRate || tts.sampleRate || 22050,
           durationSeconds,
           synthMs,

@@ -21,6 +21,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
@@ -37,6 +38,7 @@ import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay
 import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -47,7 +49,6 @@ import {
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -80,7 +81,10 @@ import {
 import {
   awaitSttReadyBeforeListening,
   awaitVoiceEnginesReadyBeforeListening,
+  getVoicePreloadState,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
+  subscribeVoicePreloadState,
   warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
@@ -1053,67 +1057,39 @@ function ReadingSessionScreen({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
-  const [wasmDownloadState, setWasmDownloadState] = useState<{
-    percent: number | null;
-    file?: string;
-  } | null>(null);
+  const voicePreloadState = useSyncExternalStore(
+    subscribeVoicePreloadState,
+    getVoicePreloadState,
+    getVoicePreloadState,
+  );
   const [lucBatModeEnabled, setLucBatModeEnabled] = useState(false);
 
-  useEffect(() => {
-    const wasmClient = getBrowserWasmSttClient();
-    const unsubscribe = wasmClient.subscribeProgress(
-      (event: WasmSttProgressEvent) => {
-        const normalizedStage = event.stage.toLowerCase();
-        if (
-          normalizedStage === "ready" ||
-          normalizedStage === "completed" ||
-          normalizedStage === "done" ||
-          wasmClient.isReady()
-        ) {
-          setWasmDownloadState(null);
-          return;
-        }
-        const computedPercent =
-          typeof event.index === "number" &&
-          typeof event.total === "number" &&
-          event.total > 0
-            ? Math.max(
-                5,
-                Math.min(
-                  95,
-                  Math.round(((event.index + 1) / event.total) * 85),
-                ),
-              )
-            : null;
-        setWasmDownloadState({
-          percent: computedPercent,
-          file: event.file,
-        });
-      },
-    );
-    return unsubscribe;
-  }, []);
-
-  const isWasmDownloading = wasmDownloadState !== null;
-  useEffect(() => {
-    if (!isWasmDownloading) return;
-    const wasmClient = getBrowserWasmSttClient();
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      if (wasmClient.isReady() || Date.now() - startedAt > 95_000) {
-        setWasmDownloadState(null);
-      }
-    }, 350);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isWasmDownloading]);
+  const isWasmDownloading = voicePreloadState.wasmDownloadActive;
 
   const isTtsSynthesizing = speechPlayer.state === "loading";
-  const isReadingAiWait =
+  const rawReadingAiWait =
     (isBusy && !speechPlayer.isPlaying) ||
     isRetryingReports ||
     isTtsSynthesizing;
+  const [aiWaitLongRunning, setAiWaitLongRunning] = useState(false);
+  useEffect(() => {
+    if (!rawReadingAiWait) {
+      const resetTimer = window.setTimeout(() => {
+        setAiWaitLongRunning(false);
+      }, 0);
+      return () => {
+        window.clearTimeout(resetTimer);
+      };
+    }
+    const showTimer = window.setTimeout(() => {
+      setAiWaitLongRunning(true);
+    }, 550);
+    return () => {
+      window.clearTimeout(showTimer);
+    };
+  }, [rawReadingAiWait]);
+  const isReadingAiWait =
+    rawReadingAiWait && (isRetryingReports || aiWaitLongRunning);
   const sessionLoadProgress = useAiProgress({
     active: loadState.status === "loading" || !page,
     stages: [
@@ -1125,10 +1101,10 @@ function ReadingSessionScreen({
   });
   const wasmModelProgress = useAiProgress({
     active: isWasmDownloading,
-    realPercent: wasmDownloadState?.percent ?? null,
+    realPercent: voicePreloadState.wasmDownloadPercent ?? null,
     progressMode:
-      wasmDownloadState?.percent !== null &&
-      wasmDownloadState?.percent !== undefined
+      voicePreloadState.wasmDownloadPercent !== null &&
+      voicePreloadState.wasmDownloadPercent !== undefined
         ? "measured"
         : "staged",
     stages: [
@@ -1450,7 +1426,41 @@ function ReadingSessionScreen({
     };
   }, [pageOptionsOpen]);
 
+  const isCompanionSpeaking =
+    speechPlayer.isPlaying &&
+    !isPlayingPageSample &&
+    !isPlayingPhonicsLesson &&
+    !isReadingWord &&
+    !isPlayingTutorAudio;
+
+  useEffect(() => {
+    if (!companionBubble || isCompanionSpeaking) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCompanionBubble(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [companionBubble, isCompanionSpeaking]);
+
+  useEffect(() => {
+    if (!latestTranscript || isMicRecording) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLatestTranscript(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isMicRecording, latestTranscript]);
+
   const finishStartedRef = useRef(false);
+  const lastFailedTtsActionRef = useRef<
+    "page_sample" | "word" | "phonics" | "tutor" | null
+  >(null);
   const retryReportSaveStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -1618,6 +1628,7 @@ function ReadingSessionScreen({
         () => speakGuarded(word.text, { wordSample: true }),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (err) {
       const isAbortError =
         typeof err === "object" &&
@@ -1625,6 +1636,7 @@ function ReadingSessionScreen({
         "name" in err &&
         (err as { name?: unknown }).name === "AbortError";
       if (!isAbortError) {
+        lastFailedTtsActionRef.current = "word";
         console.warn("Lỗi phát âm 1 từ:", err);
       }
     } finally {
@@ -2046,22 +2058,36 @@ function ReadingSessionScreen({
       }, 1000);
       return () => clearTimeout(timer);
     }
+    let cancelled = false;
     const finishDelayMs = getSessionStandbyRecognizer(sessionId) ? 0 : 400;
     const finishTimer = setTimeout(() => {
       if (assistantAudioPendingRef.current) {
-        setCountdown(null);
+        if (mountedRef.current) setCountdown(null);
         return;
       }
-      if (mountedRef.current) {
+      if (!mountedRef.current) return;
+      if (getSessionStandbyRecognizer(sessionId)) {
         setCountdown(null);
-        void startListeningRef.current().then((ok) => {
-          if (mountedRef.current && ok) {
-            setIsMicRecording(true);
-          }
-        });
       }
+      void Promise.race([
+        startListeningRef.current(),
+        new Promise<boolean>((resolve) =>
+          window.setTimeout(() => resolve(true), 450),
+        ),
+      ]).then((ok) => {
+        if (cancelled || !mountedRef.current) return;
+        setCountdown(null);
+        if (ok === true && isListeningActiveRef.current) {
+          setIsMicRecording(true);
+        } else if (ok === false) {
+          setIsMicRecording(false);
+        }
+      });
     }, finishDelayMs);
-    return () => clearTimeout(finishTimer);
+    return () => {
+      cancelled = true;
+      clearTimeout(finishTimer);
+    };
   }, [countdown, sessionId]);
 
   useEffect(() => {
@@ -3825,6 +3851,7 @@ function ReadingSessionScreen({
         wasListening,
       );
       if (!isCurrent()) return;
+      lastFailedTtsActionRef.current = null;
       clearPhonicsAutoHideTimer();
       setIsPhonicsAutoHiding(true);
       const expectedWordId = target.word_id;
@@ -3854,6 +3881,7 @@ function ReadingSessionScreen({
       }
     } catch {
       if (isCurrent()) {
+        lastFailedTtsActionRef.current = "phonics";
         setPhonicsStatusHint(t("session.phonicsLockedVoiceBusy"));
         if (shouldResumeRetry && retryModeRef.current) {
           retryProcessingRef.current = false;
@@ -5070,7 +5098,11 @@ function ReadingSessionScreen({
       ).slice(0, 40);
       if (
         (offlineSessionCtxRef.current !== null ||
-          (typeof navigator !== "undefined" && navigator.onLine === false)) &&
+          (typeof navigator !== "undefined" && navigator.onLine === false) ||
+          (isPermanentlyHostedLocalUnconfigured(
+            getVoiceEngineHealthForRouting(),
+          ) &&
+            shouldPreferWarmWasmBatchStt())) &&
         detectBrowserWasmSttSupport().supported
       ) {
         const wasmDecoded = await getBrowserWasmSttClient().transcribeBlob(
@@ -5082,6 +5114,15 @@ function ReadingSessionScreen({
         );
         if (!mountedRef.current || controller.signal.aborted) return null;
         const wasmText = wasmDecoded.text?.trim() ?? "";
+        if (wasmText) {
+          recordSttEngineUsage({
+            provider: "wasm",
+            fallbackUsed: !isPermanentlyHostedLocalUnconfigured(),
+            fallbackReason: isPermanentlyHostedLocalUnconfigured()
+              ? null
+              : "LOCAL_STT_UNAVAILABLE",
+          });
+        }
         return wasmText ? { text: wasmText, words: null } : null;
       }
 
@@ -5106,6 +5147,34 @@ function ReadingSessionScreen({
         words: transcript.words?.length ? transcript.words : null,
       };
     } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        try {
+          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+            recording,
+            {
+              signal: controller.signal,
+              timeoutMs: 12_000,
+              voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+            },
+          );
+          const wasmText = wasmRes.text.normalize("NFC").trim();
+          if (wasmText && mountedRef.current && !controller.signal.aborted) {
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: !isPermanentlyHostedLocalUnconfigured(),
+              fallbackReason: isPermanentlyHostedLocalUnconfigured()
+                ? null
+                : "LOCAL_STT_UNAVAILABLE",
+            });
+            return { text: wasmText, words: null };
+          }
+        } catch {
+          // Fall through cleanly to STT diagnostic handling below.
+        }
+      }
       if (!controller.signal.aborted) {
         if (isServiceError(error)) {
           if (isSttFallbackEligibleError(error)) {
@@ -5752,6 +5821,7 @@ function ReadingSessionScreen({
               text: fullText,
               onPlay: () => {
                 if (!isCurrentSample()) return;
+                lastFailedTtsActionRef.current = null;
                 setCurrentWordId(words[0].word_id);
               },
               onWordChange: (index) => {
@@ -5774,6 +5844,7 @@ function ReadingSessionScreen({
           ),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         if (mountedRef.current) {
@@ -5785,6 +5856,7 @@ function ReadingSessionScreen({
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
+        lastFailedTtsActionRef.current = "page_sample";
         setUiState("tts-error");
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
@@ -6690,6 +6762,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !isAbortErr
       ) {
+        lastFailedTtsActionRef.current = "tutor";
         setUiState("tts-error");
       }
     } finally {
@@ -6698,6 +6771,23 @@ function ReadingSessionScreen({
   }
 
   async function retryTutor() {
+    if (!tutorOpen && lastFailedTtsActionRef.current === "page_sample") {
+      lastFailedTtsActionRef.current = null;
+      await handleReadSample();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "phonics") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleSpellCurrentWord();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "word") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleReadCurrentWord();
+      return;
+    }
     if (!page || !currentWordId || isBusy) return;
     const word = page.words.find(
       (item) => item.word_id === currentWordId,
@@ -6784,6 +6874,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !isAbortErr
       ) {
+        lastFailedTtsActionRef.current = "tutor";
         setUiState("tts-error");
       }
     } finally {
@@ -7680,7 +7771,7 @@ function ReadingSessionScreen({
 
       let transcription;
       if (
-        localSttConfirmedDown &&
+        (localSttConfirmedDown || shouldPreferWarmWasmBatchStt()) &&
         detectBrowserWasmSttSupport().supported &&
         !skipColdWasmForCloudFallback
       ) {
@@ -7714,13 +7805,17 @@ function ReadingSessionScreen({
           if (serverErrText.includes("LOCAL_VOICE_UNCONFIGURED")) {
             markHostedLocalUnconfigured();
           }
+          const isWasmEligibleNetworkOrServerErr =
+            serverErr instanceof TypeError ||
+            (serverErr instanceof Error && serverErr.name === "TimeoutError") ||
+            (isServiceError(serverErr) &&
+              (serverErr.status >= 500 ||
+                serverErr.status === 0 ||
+                serverErr.status === 408 ||
+                serverErr.status === 429));
           if (
             detectBrowserWasmSttSupport().supported &&
-            isServiceError(serverErr) &&
-            (serverErr.status >= 500 ||
-              serverErr.status === 0 ||
-              serverErr.status === 408 ||
-              serverErr.status === 429)
+            isWasmEligibleNetworkOrServerErr
           ) {
             try {
               transcription = await tryWasmRetryTranscribe();
@@ -9480,18 +9575,8 @@ function ReadingSessionScreen({
   const hasUtilityTools = Boolean(
     showProsodyCuesBar || showCoReadingTrigger || canUseDuetMode,
   );
-  const hasTopBarContent = Boolean(
-    hasUtilityTools ||
-    isOfflinePackMode ||
-    pageProgress ||
-    canUseLucBatGuide ||
-    (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice ||
-    isWasmDownloading ||
-    isReadingAiWait,
-  );
 
-  const readingTopBar = hasTopBarContent ? (
+  const readingTopBar = (
     <div className="relative flex flex-col gap-1 border-b border-border/70 pb-1">
       {isOfflinePackMode ? (
         <div
@@ -9516,7 +9601,7 @@ function ReadingSessionScreen({
       ) : null}
 
       {pageProgress || hasUtilityTools ? (
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           {pageProgress ? (
             <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
               <Button
@@ -9753,8 +9838,13 @@ function ReadingSessionScreen({
               ) : null}
             </div>
           ) : null}
+          <VoiceEngineBadge className="shrink-0" compact />
         </div>
-      ) : null}
+      ) : (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <VoiceEngineBadge className="ms-auto shrink-0" compact />
+        </div>
+      )}
       {canUseLucBatGuide ? (
         <div className="flex flex-col gap-1.5 pt-0.5">
           <div className="flex flex-wrap items-center gap-2">
@@ -9895,7 +9985,7 @@ function ReadingSessionScreen({
       {isWasmDownloading ? (
         <AiProgressBar
           active
-          detail={wasmDownloadState?.file}
+          detail={voicePreloadState.wasmDownloadFile ?? undefined}
           label={
             wasmModelProgress.stageLabel ??
             tCommon("aiProgress.downloadingSpeechModel")
@@ -9920,7 +10010,7 @@ function ReadingSessionScreen({
         />
       ) : null}
     </div>
-  ) : null;
+  );
 
   return (
     <ReadingDynamicFallbackContext.Provider value={dynamicFallbackContextValue}>
@@ -10151,13 +10241,7 @@ function ReadingSessionScreen({
           assistedWordIds={assistedWordIds}
           companionBubble={companionBubble}
           onDismissCompanion={() => setCompanionBubble(null)}
-          isCompanionSpeaking={
-            speechPlayer.isPlaying &&
-            !isPlayingPageSample &&
-            !isPlayingPhonicsLesson &&
-            !isReadingWord &&
-            !isPlayingTutorAudio
-          }
+          isCompanionSpeaking={isCompanionSpeaking}
           comparisonResult={comparisonResult}
           sentenceReinforcementPanel={
             activeSentenceReinforcement ? (

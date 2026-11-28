@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getBrowserWasmTtsClient,
   normalizePhonicsSpeechTextForTts,
   resetBrowserWasmTtsForTests,
 } from "@/lib/reading/browser-wasm-tts";
@@ -71,6 +72,7 @@ class MockWasmTtsWorker {
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: ErrorEvent) => void) | null = null;
   activeGender = "female";
+  readyGenders = new Set<string>();
 
   constructor() {
     MockWasmTtsWorker.instances.push(this);
@@ -82,21 +84,25 @@ class MockWasmTtsWorker {
     gender?: string;
     text?: string;
     speed?: number;
+    steps?: Array<{ kind: string; spokenText: string }>;
   }) {
     queueMicrotask(() => {
       if (msg.type === "init") {
         this.activeGender = msg.gender ?? "female";
+        this.readyGenders.add(this.activeGender);
         this.onmessage?.({
           data: {
             type: "ready",
             id: msg.id,
             gender: this.activeGender,
+            readyGenders: Array.from(this.readyGenders),
             modelVersion: "test-wasm-v1",
           },
         } as MessageEvent);
       } else if (msg.type === "synthesize") {
         const text = msg.text ?? "";
         const gender = msg.gender ?? this.activeGender;
+        this.readyGenders.add(gender);
         MockWasmTtsWorker.synthesizedPayloads.push({
           text,
           gender,
@@ -111,7 +117,37 @@ class MockWasmTtsWorker {
             sampleRate: 22050,
             durationSeconds: 0.4,
             gender,
+            readyGenders: Array.from(this.readyGenders),
             synthMs: 18,
+          },
+        } as MessageEvent);
+      } else if (msg.type === "synthesize_phonics") {
+        const gender = msg.gender ?? this.activeGender;
+        this.readyGenders.add(gender);
+        const steps = msg.steps ?? [];
+        const perStep = steps.length > 0 ? 0.8 / steps.length : 0.8;
+        const stepTimings = steps.map((_, index) => ({
+          index,
+          start: Number((index * perStep).toFixed(3)),
+          end: Number(((index + 1) * perStep).toFixed(3)),
+        }));
+        MockWasmTtsWorker.synthesizedPayloads.push({
+          text: steps.map((s) => s.spokenText).join(" | "),
+          gender,
+          speed: msg.speed ?? 1,
+        });
+        const wav = buildFakeWavBuffer(22050, 0.8);
+        this.onmessage?.({
+          data: {
+            type: "phonics_result",
+            id: msg.id,
+            wavBuffer: wav,
+            sampleRate: 22050,
+            durationSeconds: 0.8,
+            gender,
+            readyGenders: Array.from(this.readyGenders),
+            synthMs: 22,
+            stepTimings,
           },
         } as MessageEvent);
       }
@@ -544,5 +580,255 @@ describe("Offline WASM Vietnamese TTS, sticky unconfigured latch & countdown sta
     ).resolves.toBe(true);
     expect(MockWasmTtsWorker.instances.length).toBeGreaterThanOrEqual(1);
     resetVoicePreloaderForTests();
+  });
+
+  it("produces expressive non-robotic compound onset blend for 'chuyện' while preserving checked codas like 'mốt'", () => {
+    const chuyenLesson = buildPhonicsLesson("chuyện");
+    expect(chuyenLesson.supported).toBe(true);
+    if (!chuyenLesson.supported) return;
+    expect(chuyenLesson.steps[1]).toMatchObject({
+      kind: "onset_blend",
+      displayText: "chờ + uyên → chuyên",
+      spokenText: "chờ, uyên, chuyên.",
+    });
+
+    const motLesson = buildPhonicsLesson("mốt");
+    expect(motLesson.supported).toBe(true);
+    if (!motLesson.supported) return;
+    expect(motLesson.steps.map((s) => s.spokenText)).toEqual([
+      "ô, tờ, ốt.",
+      "mờ, ốt.",
+      "sắc, mốt.",
+      "mốt.",
+    ]);
+  });
+
+  it("skips backend HTTP completely when warm WASM TTS is already ready for the locked gender", async () => {
+    vi.useFakeTimers({ now: 2_000_000 });
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      allowGoogleSttFallback: false,
+    });
+    setSpeechPreferences({ voiceId: "local_north_truc_ly", speed: 1.0 });
+    lockSessionVoice("warm-wasm-bypass", {
+      voiceId: "local_north_truc_ly",
+      forceUpdate: true,
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const backendWav = new Blob([buildFakeWavBuffer(22050, 0.2)], {
+      type: "audio/wav",
+    });
+    const speechMock: SpeechService = {
+      synthesize: vi.fn().mockResolvedValue(backendWav),
+      transcribe: vi.fn(),
+    };
+    const studioMock: VoiceStudioService = {
+      listVoices: vi.fn(),
+      synthesizeTimed: vi.fn().mockRejectedValue(new Error("offline")),
+    };
+
+    const player = new TtsPlayback(speechMock, studioMock);
+    player.setCacheContext({ bookId: "book-warm", pageId: "page-warm" });
+
+    // Uninitialized WASM still hits backend first
+    const coldPlay = player.play("Xin chào", { wordSample: true });
+    await vi.runAllTimersAsync();
+    await coldPlay;
+    expect(speechMock.synthesize).toHaveBeenCalledTimes(1);
+
+    // Warm up WASM female voice -> subsequent play must skip backend HTTP completely
+    await getBrowserWasmTtsClient().init({ gender: "female" });
+    (speechMock.synthesize as ReturnType<typeof vi.fn>).mockClear();
+    MockWasmTtsWorker.synthesizedPayloads = [];
+
+    const warmPlay = player.play("Xin chào", { wordSample: true });
+    await vi.runAllTimersAsync();
+    await warmPlay;
+
+    expect(speechMock.synthesize).not.toHaveBeenCalled();
+    expect(MockWasmTtsWorker.synthesizedPayloads).toHaveLength(1);
+    expect(MockWasmTtsWorker.synthesizedPayloads[0].gender).toBe("female");
+  });
+
+  it("streams 365-word playWithWordTimings across clauses with monotonic global indices", async () => {
+    vi.useFakeTimers({ now: 3_000_000 });
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      allowGoogleSttFallback: false,
+    });
+    setSpeechPreferences({ voiceId: "local_north_thien_minh", speed: 1.0 });
+    lockSessionVoice("stream-365-words", {
+      voiceId: "local_north_thien_minh",
+      forceUpdate: true,
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_thien_minh",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    await getBrowserWasmTtsClient().init({ gender: "male" });
+
+    const words: string[] = [];
+    for (let i = 0; i < 365; i += 1) {
+      words.push(i % 10 === 9 ? "nhé." : `từ${i + 1}`);
+    }
+
+    const speechMock: SpeechService = {
+      synthesize: vi.fn(),
+      transcribe: vi.fn(),
+    };
+    const studioMock: VoiceStudioService = {
+      listVoices: vi.fn(),
+      synthesizeTimed: vi.fn(),
+    };
+    const player = new TtsPlayback(speechMock, studioMock);
+
+    const emittedIndices: number[] = [];
+    const p = player.playWithWordTimings(words, {
+      onWordChange: (idx) => emittedIndices.push(idx),
+    });
+    await vi.runAllTimersAsync();
+    await p;
+
+    expect(speechMock.synthesize).not.toHaveBeenCalled();
+    expect(studioMock.synthesizeTimed).not.toHaveBeenCalled();
+    expect(MockWasmTtsWorker.synthesizedPayloads.length).toBeGreaterThan(20);
+    expect(
+      MockWasmTtsWorker.synthesizedPayloads.every(
+        (payload) => payload.text.trim().split(/\s+/u).length <= 20,
+      ),
+    ).toBe(true);
+    expect(emittedIndices.length).toBeGreaterThan(30);
+    expect(emittedIndices[0]).toBeGreaterThanOrEqual(0);
+    expect(emittedIndices[0]).toBeLessThanOrEqual(1);
+    expect(emittedIndices[emittedIndices.length - 1]).toBeGreaterThanOrEqual(
+      355,
+    );
+    expect(emittedIndices[emittedIndices.length - 1]).toBeLessThan(365);
+    for (let i = 1; i < emittedIndices.length; i += 1) {
+      expect(emittedIndices[i]).toBeGreaterThanOrEqual(emittedIndices[i - 1]);
+    }
+  });
+
+  it("protects standby noiseFloor during loud speech and promotes >= 3 voiced frames into active inSpeech on start()", async () => {
+    vi.stubGlobal(
+      "MediaStream",
+      class MockMediaStream2 {
+        constructor(public tracks: MediaStreamTrack[]) {}
+        getAudioTracks() {
+          return this.tracks;
+        }
+        getTracks() {
+          return this.tracks;
+        }
+      },
+    );
+    const mockTrack = {
+      readyState: "live",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const mockGain = { gain: { value: 0 }, connect: vi.fn() };
+    const mockProcessor = {
+      onaudioprocess: null as ((e: unknown) => void) | null,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    vi.stubGlobal(
+      "AudioContext",
+      class StandbyAudioCtx2 {
+        state = "running";
+        sampleRate = 16_000;
+        destination = {};
+        createMediaStreamSource = () => ({
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        });
+        createGain = () => mockGain;
+        createScriptProcessor = () => mockProcessor;
+        resume = vi.fn(async () => undefined);
+        close = vi.fn(async () => undefined);
+      },
+    );
+    vi.stubGlobal(
+      "WebSocket",
+      class StandbyWs2 {
+        static OPEN = 1;
+        static CONNECTING = 0;
+        readyState = 1;
+        onopen: (() => void) | null = null;
+        onmessage: ((e: { data: string }) => void) | null = null;
+        onerror: (() => void) | null = null;
+        onclose: (() => void) | null = null;
+        send() {}
+        close() {}
+      },
+    );
+
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe: vi.fn() } as unknown as SpeechService,
+      () => ({ sessionId: "s-preroll", pageId: "p-preroll" }),
+      async () => ({ wsUrl: "wss://api.test/voice/stt-stream", token: "tok" }),
+    );
+    await rec.armStandby(mockTrack);
+
+    const internal = rec as unknown as {
+      consumeSamples16k: (chunk: Float32Array) => void;
+      noiseFloor: number;
+      inSpeech: boolean;
+      speechChunks: Float32Array[];
+      speechSamples: number;
+    };
+
+    // Quiet baseline (~0.002) establishes low noiseFloor
+    internal.consumeSamples16k(new Float32Array(320).fill(0.002));
+    const quietFloor = internal.noiseFloor;
+    expect(quietFloor).toBeLessThan(0.006);
+
+    // 4 voiced 20ms frames at 0.08 RMS during countdown end must NOT inflate noiseFloor
+    for (let i = 0; i < 4; i += 1) {
+      internal.consumeSamples16k(new Float32Array(320).fill(0.08));
+    }
+    expect(internal.noiseFloor).toBe(quietFloor);
+    expect(internal.inSpeech).toBe(false);
+
+    // Clicking / countdown reaching 0 promotes sustained voiced pre-roll directly into active speech
+    rec.start(mockTrack);
+    expect(await rec.whenAudioGraphReady(0)).toBe(true);
+    expect(internal.inSpeech).toBe(true);
+    expect(internal.speechChunks.length).toBeGreaterThanOrEqual(1);
+    expect(internal.speechSamples).toBeGreaterThanOrEqual(320 * 4);
+    rec.abort();
   });
 });

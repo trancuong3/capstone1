@@ -1194,7 +1194,7 @@ export function ReadingVoiceSettings({
             >
               {t("settings.parentModeTitle")}
             </h3>
-            <VoiceEngineBadge />
+            <VoiceEngineBadge testIdPrefix="voice-modal-engine" />
             {voiceHealth ? (
               <div
                 data-testid="voice-health-status-pills"
